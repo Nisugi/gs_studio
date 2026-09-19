@@ -1,0 +1,11 @@
+[package]
+name = "rig_bake"
+version = "0.1.0"
+edition = "2021"
+description = "Silhouette + bones -> per-pixel body-part label map. No dependencies; no UI."
+
+[dependencies]
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

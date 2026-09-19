@@ -1,0 +1,3 @@
+target/
+*.ppm
+__pycache__/
