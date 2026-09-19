@@ -1,6 +1,7 @@
 //! gs-studio: art-authoring app for GemStone IV clients.
 //!
-//!   gs-studio [--data <dir>] [--pool <dir>] [--tab rigs|scenes|preview]
+//!   gs-studio [--data <dir>] [--pool <dir>]
+//!             [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 //!
 //! Two directories: the DATA ROOT (`--data` / GS_STUDIO_DATA: outlines.json
@@ -9,18 +10,20 @@
 //! stage). `GS_STUDIO_TAB` is the env form of `--tab`;
 //! `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs).
 //!
-//! Layering: `editor/`, `stage/`, `cli`, `data_root` and `pool_dir` are
-//! egui-free and unit-tested; `app` (the shell) and `tools/` only draw and
-//! forward input.
+//! Layering: `editor/`, `stage/`, `calib`, `status_log`, `cli`, `data_root`
+//! and `pool_dir` are egui-free and unit-tested; `app` (the shell) and
+//! `tools/` only draw and forward input.
 //!
 //! Licence: GPL-3.0-or-later (the stage is ported from VellumFE).
 
 mod app;
+mod calib;
 mod cli;
 mod data_root;
 mod editor;
 mod pool_dir;
 mod stage;
+mod status_log;
 mod tools;
 
 fn fail(message: &str) -> ! {

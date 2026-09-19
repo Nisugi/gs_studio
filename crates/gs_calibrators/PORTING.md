@@ -188,6 +188,10 @@ overlays, status/compass sets, mtime polling, manifests).
 `pub(crate)` / `pub(in super::super)` -> `pub` on the five state structs and
 their `open` / `ui`. All state fields stay private.
 
+New, not in VellumFE: `DollSetsEditorState::has_unsaved_changes()` (any entry's
+private `dirty` flag), so gs-studio's "Rescan pool" can ask before discarding.
+The other four calibrators keep no dirty flag at all.
+
 ### 2.6 Formatting and lints
 
 Not rustfmt'd (VellumFE rule: never `cargo fmt`; bodies keep their original

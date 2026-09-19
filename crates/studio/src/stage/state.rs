@@ -19,8 +19,9 @@ use super::cast::{build_cast, CastEntry};
 use super::naming::{NewSceneState, StudioRoomContext};
 use super::sparse;
 
-/// Oldest status lines drop past this.
-pub const STATUS_CAP: usize = 50;
+#[cfg(test)]
+use crate::status_log::STATUS_CAP;
+use crate::status_log::StatusLog;
 
 /// The class checkboxes of the simulator, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,8 +117,9 @@ pub struct StageState {
     /// re-points the Arc on every edit, so pointer identity is the dirty
     /// bit -- sidecars are only re-read when the scene actually changed).
     obstacle_scene: Option<Arc<StageScene>>,
-    /// Status lines, newest last, capped at [`STATUS_CAP`].
-    status: Vec<String>,
+    /// Status lines, newest last, capped (`status_log::STATUS_CAP`; the log type
+    /// every tool shares).
+    status: StatusLog,
     /// New-scene naming inputs (manual binding + name, room prefill).
     pub new_scene: NewSceneState,
 }
@@ -151,7 +153,7 @@ impl StageState {
             selected_prop: None,
             dragging_creature: None,
             obstacle_scene: None,
-            status: Vec::new(),
+            status: StatusLog::default(),
             new_scene: NewSceneState::new(context),
         };
         stage.push_status(format!("Stage ready: {} castable bases", stage.cast.len()));
@@ -162,14 +164,10 @@ impl StageState {
 
     pub fn push_status(&mut self, message: String) {
         self.status.push(message);
-        if self.status.len() > STATUS_CAP {
-            let excess = self.status.len() - STATUS_CAP;
-            self.status.drain(..excess);
-        }
     }
 
     pub fn status_lines(&self) -> &[String] {
-        &self.status
+        self.status.lines()
     }
 
     // ------------------------------------------------------------ roster

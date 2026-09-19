@@ -94,6 +94,21 @@ impl StageTool {
         self.stage.pool_changed();
     }
 
+    /// A calibrator saved: art and sidecars changed on disk. Reloads the
+    /// art store -- which also drops gs_field's geometry-calibration store,
+    /// as VellumFE's `skin_state.force_reload()` did -- and, after a SCENERY
+    /// save, the solver obstacles (exclusion spans read the prop sidecar).
+    pub fn art_changed(&mut self, invalidate_obstacles: bool) {
+        self.art.force_reload();
+        if invalidate_obstacles {
+            self.stage.invalidate_obstacles();
+        }
+        self.stage.push_status(
+            if invalidate_obstacles { "Art and prop obstacles reloaded (scenery calibration saved)" } else { "Art reloaded (calibration saved)" }
+                .to_string(),
+        );
+    }
+
     /// One line for the smoke-run log: what is on the stage right now.
     pub fn summary(&self) -> String {
         format!(
@@ -121,7 +136,10 @@ impl StageTool {
         ui.weak(format!("{} on stage", self.stage.creatures().len()));
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, panel: StagePanel) {
+    /// Returns true when the Scenes panel asked for the scenery calibrator
+    /// (the app switches to the Scenery tab).
+    pub fn ui(&mut self, ui: &mut egui::Ui, panel: StagePanel) -> bool {
+        let mut calibrate_scenery = false;
         let ctx = ui.ctx().clone();
         let stage = &mut self.stage;
         // Scene edits re-point the scene Arc; the solver's authored
@@ -145,7 +163,7 @@ impl StageTool {
         egui::Panel::right("stage_panel").default_size(300.0).min_size(240.0).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
                 StagePanel::Scenes => {
-                    scene_ui(stage, ui);
+                    calibrate_scenery = scene_ui(stage, ui);
                     ui.separator();
                     camera_ui(stage, ui);
                     ui.separator();
@@ -155,14 +173,16 @@ impl StageTool {
             });
         });
         egui::CentralPanel::default().show(ui, |ui| field_ui(stage, ui, &art, panel));
+        calibrate_scenery
     }
 }
 
 // ------------------------------------------------------------------ scene
 
 /// The Scene section: backdrop + scenery props, persisted whole-file to
-/// `global/scenes/<name>.toml`.
-fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+/// `global/scenes/<name>.toml`. Returns true when "Calibrate scenery..." was
+/// pressed.
+fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
     ui.heading("Scene");
     // The scene FILENAME is the binding: leading room uid binds that room,
     // otherwise the stem matches room title -> location -> "default".
@@ -248,14 +268,13 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
     ui.separator();
     ui.heading("Props");
-    // TODO(calibrators): VellumFE's Stage opened its scenery calibrator
-    // (SceneryCalibrationState) from here. The calibrators are being ported
-    // into crates/gs_calibrators; when that lands, enable this button, host
-    // the calibrator window from StageTool, and on its `reload_art` outcome
-    // call `self.art.force_reload()` + `self.stage.invalidate_obstacles()`
-    // (a changed sidecar makes both the art and the exclusion spans stale).
-    ui.add_enabled(false, egui::Button::new("Calibrate scenery..."))
-        .on_disabled_hover_text("Feet anchor, world size, exclusion edges -- per image. Not built yet: the calibrators are on their way.");
+    // VellumFE's Stage opened its scenery calibrator window from here; in
+    // this app the calibrator is the Scenery tab, so the button goes there.
+    // A save over there comes back through `StageTool::art_changed`.
+    let calibrate_scenery = ui
+        .button("Calibrate scenery...")
+        .on_hover_text("Feet anchor, world size, exclusion edges -- per image. Opens the Scenery tab; the stage is kept.")
+        .clicked();
     let pool = gs_field::pool::list_category("scenery");
     if backgrounds.is_empty() && pool.is_empty() {
         ui.weak(
@@ -320,6 +339,7 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
             stage.clamp_prop(k);
         }
     }
+    calibrate_scenery
 }
 
 /// New-scene naming: explicit binding + typed name, previewed and validated

@@ -1,3 +1,4 @@
+pub mod calibrators;
 pub mod preview;
 pub mod rigs;
 

@@ -16,6 +16,8 @@ rig_bake = { path = "../rig_bake" }
 gs_field = { path = "../gs_field" }
 # ... and the renderer + art cache the clients draw with.
 gs_field_egui = { path = "../gs_field_egui" }
+# The five art calibrators, hosted as tabs through `ui_contents`.
+gs_calibrators = { path = "../gs_calibrators" }
 egui = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }
 eframe = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 

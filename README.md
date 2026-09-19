@@ -4,13 +4,13 @@ Standalone art-authoring app for GemStone IV clients, plus the shared crate
 those clients draw with. Not part of VellumFE; VellumFE and other clients
 consume what this produces.
 
-Built: the creature-doll rig editor; the scene builder; and a preview stage
-where creatures and props are placed and given wounds, statuses and class
-flags -- drawn by the same renderer the clients use. Planned: calibrators for
-frames, injury dolls, creature frames, scenery and props.
+Built: the creature-doll rig editor; the scene builder; a preview stage where
+creatures and props are placed and given wounds, statuses and class flags --
+drawn by the same renderer the clients use; and the calibrators for frames,
+injury dolls, creature art and scenery.
 
-Licence: `gs_field`, `gs_field_egui` and `studio` are GPL-3.0-or-later (ported
-from VellumFE).
+Licence: `gs_field`, `gs_field_egui`, `gs_calibrators` and `studio` are
+GPL-3.0-or-later (ported from VellumFE).
 
 ## What is here today
 
@@ -20,7 +20,8 @@ from VellumFE).
 | `crates/rig/` | Library, no UI. The rig file format, body-type templates (as data), the `outlines.json` loader, and bake-to-files (`<family>.png` + `<family>.toml`) |
 | `crates/gs_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
-| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with three working tabs: **Rigs**, **Scenes**, **Preview** |
+| `crates/gs_calibrators/` | Library. The five art calibrators (frames, doll anchors, doll sets, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
+| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with seven tabs: **Rigs**, **Scenes**, **Frames**, **Dolls**, **Creatures**, **Scenery**, **Preview** |
 | `tools/extract_outlines.py` | `scale-chart.html` -> `data/outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped) |
 | `data/outlines.json` | Generated. `{key: {ref_ft, subpaths}}`; x centred, y up, ground at 0. Keys are `<family>` (side view) and `<family>-front` |
 | `data/rigs/` | Saved rigs and their baked output. `humanoid.*` is the test fixture |
@@ -45,24 +46,34 @@ top bar:
 | | Holds | Used by | Set with | Default |
 |---|---|---|---|---|
 | **Data** root | `outlines.json`, `rigs/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable |
-| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, ...) and `global/scenes/*.toml` -- VellumFE's data directory | Scenes, Preview | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | gs_field's base dir: `VELLUM_FE_DIR`, else `~/.vellum-fe` |
+| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...) and `global/scenes/*.toml` -- VellumFE's data directory | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | gs_field's base dir: `VELLUM_FE_DIR`, else `~/.vellum-fe` |
 
 Setting the pool calls `gs_field::data_dirs::set_base_dir`, drops the pool
-scan and calibration caches, resets the art store and re-scans the cast.
+scan and calibration caches, resets the art store, re-scans the cast and
+drops every open calibrator (each re-opens against the new pool when its tab
+is next shown -- unsaved calibration edits do not survive a pool change).
 
-    gs-studio [--data <dir>] [--pool <dir>] [--tab rigs|scenes|preview]
+    gs-studio [--data <dir>] [--pool <dir>]
+              [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
               [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 
-`--tab` (or `GS_STUDIO_TAB`) picks the starting tab. The three `--room-*`
-options only PREFILL the new-scene naming inputs (what a client passes when
-it launches the studio from a room). For smoke runs,
-`GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself and
-`GS_STUDIO_SMOKE=1` pre-populates the stage.
+`--tab` (or `GS_STUDIO_TAB`) picks the starting tab, by its label in any
+case. The three `--room-*` options only PREFILL the new-scene naming inputs
+(what a client passes when it launches the studio from a room). For smoke
+runs, `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (and prints
+what the stage and the calibrators hold), `GS_STUDIO_SMOKE=1` pre-populates
+the stage and `GS_STUDIO_DOLL_VIEW=sets` starts the Dolls tab on its Sets
+view.
 
-The top bar holds the tool tabs. **Rigs**, **Scenes** and **Preview** are
-built; Frames, Dolls, Creatures and Scenery are disabled placeholders. A new
-tool is a new `ToolId` + entry in `TOOLS` (`crates/studio/src/app.rs`) and a
-module under `crates/studio/src/tools/`.
+The top bar holds the tool tabs and the two directory boxes. It is one row
+when the window is wide enough (about 1310 px) and otherwise two -- tabs
+above, boxes below, the boxes sized to share the row -- so nothing clips at
+the 900 px minimum width. Three tools sit behind the seven tabs: the rig
+editor, the stage (Scenes + Preview) and the calibrators (Frames, Dolls,
+Creatures, Scenery). Each is built lazily and kept while the app runs;
+switching tabs never loses work. A new tool is a new `ToolId` + entry in
+`TOOLS` (`crates/studio/src/app.rs`) and a module under
+`crates/studio/src/tools/`.
 
 egui/eframe come from the `Nisugi/egui` fork, branch `numpad-support`
 (egui 0.35, wgpu backend) -- the same one the game client uses, so a renderer
@@ -149,16 +160,69 @@ for a room/location scene, the built-ins for the default scene), so unpinned
 keys keep inheriting. Loading a scene adopts its effective camera, default
 layer included.
 
-Skin `when` conditions are evaluated by a small sandbox evaluator: `all`,
-`any` and `crtr_status` work; every condition that reads the player's game
-state is false, since there is no player. No creature has a derived-effect
-severity. "Calibrate scenery..." is a disabled placeholder until the
-calibrators land.
+Skin `when` conditions are evaluated by a small sandbox evaluator
+(`stage/eval.rs`) that answers exactly as VellumFE's real evaluator does for
+a freshly constructed, EMPTY game state -- which is what VellumFE's Studio
+evaluated against. `all`, `any` and `crtr_status` work on the creature in
+scope. Of the leaves that read the player, some are therefore TRUE:
+`effect_inactive`, `hand_empty` (every slot), `indicator` with
+`active = false`, `injury` / percent `vital` when the comparison holds for a
+healthy player with full (100%) bars, and `time_of_day` by the wall clock
+(US Eastern, `stage/elanthian_time.rs`). The rest are false. One known
+difference: `spell_affordable` is always false, because the spell table is
+not part of this workspace (VellumFE answers true for a known spell with no
+static cost). The table of answers, each with the line of VellumFE's
+`conditions.rs` it was derived from, heads `eval.rs`; there is one test per
+leaf. No creature has a derived-effect severity.
+
+"Calibrate scenery..." in the Scenes panel switches to the Scenery tab; the
+stage is kept.
 
 All stage logic -- roster and simulator edits, mount pairing, scene naming,
-the sparse-save maths, the cast scan, the evaluator -- lives in
-`crates/studio/src/stage/`, which may not mention egui (a test enforces it).
-`tools/preview.rs` only draws and forwards input.
+the sparse-save maths, the cast scan, the evaluator, the Elanthian clock --
+lives in `crates/studio/src/stage/`, which may not mention egui (a test
+enforces it). `tools/preview.rs` only draws and forwards input.
+
+### Frames, Dolls, Creatures, Scenery (the calibrators)
+
+VellumFE's art calibrators (`crates/gs_calibrators`), each hosted as a full
+tab through its `ui_contents(ui)` body -- never as a floating window. They
+read and write the POOL: a save writes the image's sidecar `.toml` (and
+embeds the metadata in the PNG).
+
+| Tab | Calibrator | Pool category |
+|---|---|---|
+| **Frames** | `FrameCalibrationState` -- nine-slice geometry | `global/images/frames/` |
+| **Dolls** > Anchors | `DollCalibrationState` -- wound-dot anchors and dot style for ONE doll, chosen in the *Doll* picker (non-layer files of the dolls category) | `global/images/dolls/` |
+| **Dolls** > Sets | `DollSetsEditorState` -- every doll: layers, dots, variants and the condition that selects each | `global/images/dolls/` |
+| **Creatures** | `CreatureCalibrationState` -- feet, size, anchors | `global/images/creatures/` |
+| **Scenery** | `SceneryCalibrationState` -- feet anchor, world size, exclusion edges | `global/images/scenery/` |
+
+- A calibrator opens the first time its tab (or Dolls view) is shown and is
+  then kept: switching tabs or Dolls views does not lose unsaved work.
+- **Rescan pool** (every tab) flushes the pool listing and re-opens that
+  calibrator, picking up added or removed images. Only Doll Sets can tell
+  the host it has unsaved edits, so only there does Rescan ask first
+  (*Discard and rescan* / *Cancel*); in the others, save before rescanning.
+  Picking another doll in the Anchors picker re-opens that calibrator on it.
+- With nothing in a category the tab says so and what to do; the tab is
+  never blank.
+- The status line shows the calibrators' messages (hover for the log, capped
+  at 50 lines like the stage's).
+- After a save the stage reloads its art and gs_field's calibration store is
+  re-seeded; after a SCENERY save the stage's solver obstacles are rebuilt
+  too (prop exclusion spans come from the sidecar). Placed creatures do not
+  move.
+- If the doll being anchored loses its image file, that calibrator closes
+  itself and the tab shows why; Rescan pool brings it back.
+
+`gs_field::pool::read_sidecar` is unchanged pool behaviour: opening a
+calibrator on a PNG that has embedded metadata but no `.toml` beside it
+EXTRACTS that sidecar. That is not a calibrator save.
+
+The rules -- what an outcome asks of the app, the doll pick surviving a
+rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
+(egui-free, tested); `tools/calibrators.rs` hosts the states.
 
 ### Templates
 

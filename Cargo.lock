@@ -2613,6 +2613,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "gs_calibrators",
  "gs_field",
  "gs_field_egui",
  "rig",

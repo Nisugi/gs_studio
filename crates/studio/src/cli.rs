@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use crate::stage::StudioRoomContext;
 
-pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--tab rigs|scenes|preview]\n\
+pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>]\n\
+    \x20                [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]\n\
     \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]";
 
 /// Environment fallback for `--tab`.

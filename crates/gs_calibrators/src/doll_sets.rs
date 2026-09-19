@@ -319,6 +319,13 @@ impl DollSetsEditorState {
         }
     }
 
+    /// NEW (not in VellumFE): true while any doll has edits its Save button
+    /// has not written. For a host that is about to drop or re-open the
+    /// state (gs-studio's "Rescan pool").
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.entries.iter().any(|e| e.dirty)
+    }
+
     /// Render the calibrator as VellumFE's floating pop-out: the ORIGINAL
     /// `egui::Window` (same title, id, order, sizes, X button) around
     /// [`Self::ui_contents`]. `closed` is set here and only here.

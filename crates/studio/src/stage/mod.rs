@@ -10,6 +10,7 @@
 
 pub mod cast;
 pub mod color;
+pub mod elanthian_time;
 pub mod eval;
 pub mod naming;
 pub mod sparse;
