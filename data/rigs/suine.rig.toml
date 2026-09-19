@@ -1,0 +1,138 @@
+version = 2
+family = "suine"
+body_type = "quadruped"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+belly = [-0.55, 1.3]
+chest_front = [1.35, 1.65]
+croup = [-1.55, 2.5]
+elbow_l = [0.05, 0.75]
+elbow_r = [0.39, 0.75]
+eye_r = [1.68, 2.25]
+forepaw_l = [0.15, 0.06]
+forepaw_r = [0.7, 0.06]
+groin = [-1.45, 1.25]
+hindpaw_l = [-2.27, 0.06]
+hindpaw_r = [-1.32, 0.06]
+hip_l = [-2.0, 2.15]
+hip_r = [-1.82, 2.15]
+hock_l = [-2.38, 0.5]
+hock_r = [-1.72, 0.76]
+mid_back = [-0.5, 2.75]
+nose = [2.52, 1.5]
+poll = [1.2, 2.65]
+shoulder_l = [0.12, 2.25]
+shoulder_r = [0.44, 2.25]
+sternum = [0.7, 1.4]
+stifle_l = [-2.05, 1.2]
+stifle_r = [-1.35, 1.25]
+tail_base = [-2.25, 1.98]
+tail_tip = [-2.44, 1.12]
+withers = [0.68, 2.78]
+wrist_l = [0.02, 0.3]
+wrist_r = [0.5, 0.3]
+
+[depth]
+elbow_l = 0.64
+elbow_r = -0.64
+eye_r = -0.3
+forepaw_l = 0.76
+forepaw_r = -0.76
+hindpaw_l = 0.49
+hindpaw_r = -0.49
+hip_l = 0.3
+hip_r = -0.3
+hock_l = 0.43
+hock_r = -0.43
+shoulder_l = 0.7
+shoulder_r = -0.7
+stifle_l = 0.45
+stifle_r = -0.45
+wrist_l = 0.7
+wrist_r = -0.7
+
+[radius_depth_ft]
+underline = 0.32
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]

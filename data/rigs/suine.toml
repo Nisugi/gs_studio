@@ -1,0 +1,142 @@
+family = "suine"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+px_per_ft = 100.9862
+aspect = 1.657
+span = 0.6465
+ground_frac = 1.0102
+eye_radius_ft = 0.0225
+parts = ["head", "rightEye", "neck", "chest", "abdomen", "back", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
+
+[map]
+width = 512
+height = 309
+
+[anchors]
+feet = [0.5, 1.0102]
+head = [0.7367, 0.1441]
+mouth = [0.997, 0.52]
+saddle = [0.4014, 0.1114]
+
+[eyes]
+rightEye = [0.8314, 0.2749]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "neck"
+pivot = [0.7367, 0.1441]
+tip = [0.997, 0.52]
+joints = [[0.997, 0.52], [0.7367, 0.1441]]
+pixels = 8586
+
+[[bones]]
+index = 2
+name = "neck"
+part = "neck"
+parent = "spine"
+pivot = [0.6341, 0.1016]
+tip = [0.7367, 0.1441]
+joints = [[0.7367, 0.1441], [0.6341, 0.1016]]
+pixels = 2606
+
+[[bones]]
+index = 3
+name = "spine"
+part = "back"
+pivot = [0.6341, 0.1016]
+tip = [0.0562, 0.3631]
+joints = [[0.6341, 0.1016], [0.4014, 0.1114], [0.1943, 0.1931], [0.0562, 0.3631]]
+pixels = 21609
+
+[[bones]]
+index = 4
+name = "tail"
+part = "back"
+parent = "spine"
+pivot = [0.0562, 0.3631]
+tip = [0.0187, 0.6442]
+joints = [[0.0562, 0.3631], [0.0187, 0.6442]]
+pixels = 1512
+
+[[bones]]
+index = 5
+name = "brisket"
+part = "chest"
+parent = "spine"
+pivot = [0.6381, 0.5526]
+tip = [0.7663, 0.4709]
+joints = [[0.7663, 0.4709], [0.6381, 0.5526]]
+pixels = 8325
+
+[[bones]]
+index = 6
+name = "underline"
+part = "abdomen"
+parent = "spine"
+pivot = [0.6381, 0.5526]
+tip = [0.214, 0.6017]
+joints = [[0.6381, 0.5526], [0.3915, 0.5853], [0.214, 0.6017]]
+pixels = 13615
+
+[[bones]]
+index = 7
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+pivot = [0.5868, 0.2749]
+tip = [0.5986, 0.9121]
+joints = [[0.5868, 0.2749], [0.5769, 0.7651], [0.5986, 0.9121]]
+pixels = 9610
+
+[[bones]]
+index = 8
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+pivot = [0.5986, 0.9121]
+tip = [0.6381, 0.9906]
+joints = [[0.5986, 0.9121], [0.6381, 0.9906]]
+pixels = 798
+
+[[bones]]
+index = 9
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+pivot = [0.141, 0.3075]
+tip = [0.2396, 0.9906]
+joints = [[0.141, 0.3075], [0.2337, 0.6017], [0.1607, 0.7618], [0.2396, 0.9906]]
+pixels = 9132
+
+[[bones]]
+index = 10
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+pivot = [0.5237, 0.2749]
+tip = [0.5039, 0.9121]
+joints = [[0.5237, 0.2749], [0.5099, 0.7651], [0.5039, 0.9121]]
+pixels = 5960
+
+[[bones]]
+index = 11
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+pivot = [0.5039, 0.9121]
+tip = [0.5296, 0.9906]
+joints = [[0.5039, 0.9121], [0.5296, 0.9906]]
+pixels = 676
+
+[[bones]]
+index = 12
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+pivot = [0.1055, 0.3075]
+tip = [0.0523, 0.9906]
+joints = [[0.1055, 0.3075], [0.0957, 0.618], [0.0306, 0.8468], [0.0523, 0.9906]]
+pixels = 8069

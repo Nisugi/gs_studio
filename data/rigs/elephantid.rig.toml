@@ -1,0 +1,158 @@
+version = 2
+family = "elephantid"
+body_type = "quadruped"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "trunk_1", "trunk_2", "trunk_3", "trunk_4", "trunk_tip", "tusk_base_r", "tusk_bend_r", "tusk_curl_r", "tusk_tip_r", "tusk_base_l", "tusk_bend_l", "tusk_curl_l", "tusk_tip_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+belly = [-1.0, 1.08]
+chest_front = [0.45, 2.1]
+croup = [-2.0, 2.3]
+elbow_l = [-0.2, 1.5]
+elbow_r = [0.34, 1.6]
+eye_r = [1.02, 2.52]
+forepaw_l = [-0.19, 0.08]
+forepaw_r = [0.6, 0.08]
+groin = [-2.0, 1.0]
+hindpaw_l = [-2.57, 0.08]
+hindpaw_r = [-1.42, 0.08]
+hip_l = [-2.22, 2.15]
+hip_r = [-1.55, 1.8]
+hock_l = [-2.46, 0.75]
+hock_r = [-1.58, 0.75]
+mid_back = [-1.15, 2.5]
+nose = [1.28, 2.0]
+poll = [0.48, 2.85]
+shoulder_l = [-0.18, 2.05]
+shoulder_r = [0.25, 2.55]
+sternum = [0.0, 1.35]
+stifle_l = [-2.36, 1.5]
+stifle_r = [-1.61, 1.4]
+tail_base = [-2.42, 1.95]
+tail_tip = [-2.57, 1.44]
+trunk_1 = [1.44, 1.86]
+trunk_2 = [1.48, 1.45]
+trunk_3 = [1.53, 1.05]
+trunk_4 = [1.58, 0.66]
+trunk_tip = [1.44, 0.41]
+tusk_base_l = [1.56, 1.63]
+tusk_base_r = [1.61, 1.9]
+tusk_bend_l = [1.95, 1.47]
+tusk_bend_r = [2.03, 1.64]
+tusk_curl_l = [2.47, 1.58]
+tusk_curl_r = [2.43, 1.83]
+tusk_tip_l = [2.87, 2.14]
+tusk_tip_r = [2.65, 2.18]
+withers = [-0.18, 2.72]
+wrist_l = [-0.2, 0.6]
+wrist_r = [0.44, 0.6]
+
+[depth]
+tusk_base_l = 0.52
+tusk_base_r = -0.52
+tusk_bend_l = 1.0
+tusk_bend_r = -1.0
+tusk_curl_l = 1.0
+tusk_curl_r = -1.0
+tusk_tip_l = 0.74
+tusk_tip_r = -0.74
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[[bones]]
+name = "trunk"
+part = "head"
+parent = "skull"
+joints = ["trunk_1", "trunk_2", "trunk_3", "trunk_4", "trunk_tip"]
+radius_ft = 0.1
+
+[[bones]]
+name = "tusk_r"
+part = "head"
+parent = "skull"
+joints = ["tusk_base_r", "tusk_bend_r", "tusk_curl_r", "tusk_tip_r"]
+
+[[bones]]
+name = "tusk_l"
+part = "head"
+parent = "skull"
+joints = ["tusk_base_l", "tusk_bend_l", "tusk_curl_l", "tusk_tip_l"]
