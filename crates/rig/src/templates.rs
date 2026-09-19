@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Anchors, Eyes, Rig, RigBone, View};
+use crate::model::{Anchors, Eyes, Rig, RigBone, View, RIG_VERSION};
 
 /// What `ref_ft` can measure.
 pub const AXES: [&str; 4] = ["crown", "withers", "diameter", "carapace"];
@@ -17,6 +17,10 @@ pub struct BoneDef {
     pub name: String,
     pub part: &'static str,
     pub joints: Vec<String>,
+    /// The bone this one hangs off; None = the root.
+    pub parent: Option<String>,
+    /// The joint the piece rotates about when that is not the chain's first.
+    pub pivot: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,6 +67,9 @@ impl Template {
     /// A fresh rig: every bone, no joints placed.
     pub fn new_rig(&self, family: &str, view: View, ref_ft: f32, axis: &str) -> Rig {
         Rig {
+            version: RIG_VERSION,
+            eye_radius_ft: None,
+            joint_order: self.joints.clone(),
             family: family.to_owned(),
             body_type: self.name.to_owned(),
             view,
@@ -81,7 +88,9 @@ impl Template {
                 .map(|b| RigBone {
                     name: b.name.clone(),
                     part: Some(b.part.to_owned()),
+                    parent: b.parent.clone(),
                     joints: b.joints.clone(),
+                    pivot: b.pivot.clone(),
                     radius_ft: None,
                 })
                 .collect(),
@@ -94,7 +103,34 @@ fn names(list: &[&str]) -> Vec<String> {
 }
 
 fn bone(name: &str, part: &'static str, joints: &[&str]) -> BoneDef {
-    BoneDef { name: name.to_owned(), part, joints: names(joints) }
+    BoneDef { name: name.to_owned(), part, joints: names(joints), parent: None, pivot: None }
+}
+
+/// Hang `child` off `parent`, optionally pivoting at `pivot`. A name with no
+/// bone of its own is a sided pair: `arm` means `arm_r` and `arm_l`, each
+/// taking the same-side parent (`clavicle` stays `clavicle`, `arm` becomes
+/// `arm_r` / `arm_l`) and the same-side pivot.
+fn link(bones: &mut [BoneDef], child: &str, parent: &str, pivot: Option<&str>) {
+    let has = |bones: &[BoneDef], n: &str| bones.iter().any(|b| b.name == n);
+    let sides: &[&str] = if has(bones, child) { &[""] } else { &["_r", "_l"] };
+    for side in sides {
+        let name = format!("{child}{side}");
+        let sided_parent = format!("{parent}{side}");
+        let parent = if has(bones, &sided_parent) { sided_parent } else { parent.to_owned() };
+        assert!(has(bones, &parent), "no bone {parent}");
+        let bone = bones.iter_mut().find(|b| b.name == name).unwrap_or_else(|| panic!("no bone {name}"));
+        bone.parent = Some(parent);
+        bone.pivot = pivot.map(|p| {
+            let sided = format!("{p}{side}");
+            if bone.joints.contains(&sided) { sided } else { p.to_owned() }
+        });
+    }
+}
+
+/// Pivot for a root bone (it has no parent to be linked to).
+fn root_pivot(bones: &mut [BoneDef], root: &str, pivot: &str) {
+    let bone = bones.iter_mut().find(|b| b.name == root).unwrap_or_else(|| panic!("no bone {root}"));
+    bone.pivot = Some(pivot.to_owned());
 }
 
 /// The same bone on the `_r` and `_l` side: joints get the suffix, the part
@@ -104,6 +140,8 @@ fn sided(name: &str, part: &str, joints: &[&str]) -> [BoneDef; 2] {
         name: format!("{name}_{suffix}"),
         part,
         joints: joints.iter().map(|j| format!("{j}_{suffix}")).collect(),
+        parent: None,
+        pivot: None,
     };
     match part {
         "Arm" => [make("r", "rightArm"), make("l", "leftArm")],
@@ -133,6 +171,17 @@ fn biped() -> Template {
     bones.extend(sided("arm", "Arm", &["shoulder", "elbow", "wrist"]));
     bones.extend(sided("hand", "Hand", &["wrist", "fingertip"]));
     bones.extend(sided("leg", "Leg", &["hip", "knee", "ankle", "toe"]));
+    // The pelvis end of the belly is the root; everything hangs off the
+    // trunk. Trunk chains were clicked top-down, so they pivot at their
+    // LOWER (parent-side) joint; the clavicle is a crossbar about the neck.
+    root_pivot(&mut bones, "torso_lower", "pelvis");
+    link(&mut bones, "torso_upper", "torso_lower", Some("sternum"));
+    link(&mut bones, "neck", "torso_upper", Some("neck_base"));
+    link(&mut bones, "skull", "neck", Some("chin"));
+    link(&mut bones, "clavicle", "torso_upper", Some("neck_base"));
+    link(&mut bones, "arm", "clavicle", None);
+    link(&mut bones, "hand", "arm", None);
+    link(&mut bones, "leg", "torso_lower", None);
     Template {
         name: "biped",
         blurb: "Upright two-legged body, front view",
@@ -158,6 +207,16 @@ fn quadruped() -> Template {
     bones.extend(sided("foreleg", "Arm", &["shoulder", "elbow", "wrist"]));
     bones.extend(sided("forepaw", "Hand", &["wrist", "forepaw"]));
     bones.extend(sided("hindleg", "Leg", &["hip", "stifle", "hock", "hindpaw"]));
+    // The spine is the root and carries the whole trunk; head and neck were
+    // clicked nose-first, so they pivot at their rear joint.
+    link(&mut bones, "neck", "spine", Some("withers"));
+    link(&mut bones, "skull", "neck", Some("poll"));
+    link(&mut bones, "tail", "spine", None);
+    link(&mut bones, "brisket", "spine", Some("sternum"));
+    link(&mut bones, "underline", "spine", None);
+    link(&mut bones, "foreleg", "spine", None);
+    link(&mut bones, "forepaw", "foreleg", None);
+    link(&mut bones, "hindleg", "spine", None);
     let mut joints = names(&[
         "nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front",
         "sternum", "belly", "groin", "eye_r",
@@ -189,6 +248,14 @@ fn avian() -> Template {
     bones.extend(sided("wing", "Arm", &["wing_root", "wing_elbow", "wing_wrist"]));
     bones.extend(sided("wing_hand", "Hand", &["wing_wrist", "wing_tip"]));
     bones.extend(sided("leg", "Leg", &["hip", "knee", "ankle", "toe"]));
+    link(&mut bones, "neck", "spine", Some("nape"));
+    link(&mut bones, "skull", "neck", Some("crown"));
+    link(&mut bones, "tail", "spine", None);
+    link(&mut bones, "breast", "spine", Some("breast"));
+    link(&mut bones, "underline", "spine", None);
+    link(&mut bones, "wing", "spine", None);
+    link(&mut bones, "wing_hand", "wing", None);
+    link(&mut bones, "leg", "spine", None);
     let mut joints = names(&[
         "beak_tip", "crown", "nape", "mid_back", "rump", "tail_tip", "throat", "breast", "belly",
         "vent", "eye_r",
@@ -209,6 +276,21 @@ fn avian() -> Template {
 }
 
 fn serpentine() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["snout", "skull_base"]),
+        bone("neck", "neck", &["skull_base", "neck_end"]),
+        bone("fore_body", "chest", &["neck_end", "chest_end"]),
+        bone("mid_body", "abdomen", &["chest_end", "belly_mid", "belly_end"]),
+        bone("hind_body", "back", &["belly_end", "back_1", "back_2", "tail_mid", "tail_tip"]),
+    ];
+    // The middle of the body is the root; the front half hangs off it
+    // towards the head (pivoting at each piece's REAR joint), the tail half
+    // off its other end.
+    root_pivot(&mut bones, "mid_body", "belly_mid");
+    link(&mut bones, "fore_body", "mid_body", Some("chest_end"));
+    link(&mut bones, "neck", "fore_body", Some("neck_end"));
+    link(&mut bones, "skull", "neck", Some("skull_base"));
+    link(&mut bones, "hind_body", "mid_body", None);
     Template {
         name: "serpentine",
         blurb: "One long chain from head tip to tail tip (serpent, worm)",
@@ -217,13 +299,7 @@ fn serpentine() -> Template {
             "snout", "skull_base", "neck_end", "chest_end", "belly_mid", "belly_end", "back_1",
             "back_2", "tail_mid", "tail_tip", "eye_r",
         ]),
-        bones: vec![
-            bone("skull", "head", &["snout", "skull_base"]),
-            bone("neck", "neck", &["skull_base", "neck_end"]),
-            bone("fore_body", "chest", &["neck_end", "chest_end"]),
-            bone("mid_body", "abdomen", &["chest_end", "belly_mid", "belly_end"]),
-            bone("hind_body", "back", &["belly_end", "back_1", "back_2", "tail_mid", "tail_tip"]),
-        ],
+        bones,
         anchors: AnchorDef { head: "skull_base", mouth: "snout", saddle: "chest_end" },
     }
 }
@@ -254,6 +330,15 @@ fn multileg() -> Template {
             bones.extend(sided(&format!("leg{n}_tip"), "Hand", &[knee.as_str(), tip.as_str()]));
         } else {
             bones.extend(sided(&format!("leg{n}"), "Leg", &[base.as_str(), knee.as_str(), tip.as_str()]));
+        }
+    }
+    // The thorax is the root: head, abdomen and every leg hang off it.
+    link(&mut bones, "skull", "thorax", Some("mouth"));
+    link(&mut bones, "abdomen", "thorax", None);
+    for n in 1..=MULTILEG_PAIRS {
+        link(&mut bones, &format!("leg{n}"), "thorax", None);
+        if n <= 2 {
+            link(&mut bones, &format!("leg{n}_tip"), &format!("leg{n}"), None);
         }
     }
     Template {
@@ -350,6 +435,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn every_template_is_one_tree() {
+        for t in templates() {
+            let rig = t.new_rig("x", t.view, 1.0, "crown");
+            assert_eq!(rig.hierarchy_issues(), [], "{}", t.name);
+            assert_eq!(rig.bones.iter().filter(|b| b.parent.is_none()).count(), 1, "{}", t.name);
+            assert_eq!(rig.hierarchy_order().len(), rig.bones.len(), "{}", t.name);
+            for b in &t.bones {
+                if let Some(p) = &b.pivot {
+                    assert!(b.joints.contains(p), "{}: {} pivots at {p}, not in its chain", t.name, b.name);
+                }
+            }
+        }
+        let t = biped();
+        let parent = |n: &str| t.bones.iter().find(|b| b.name == n).unwrap().parent.clone();
+        assert_eq!(parent("torso_lower"), None);
+        assert_eq!(parent("hand_l").as_deref(), Some("arm_l"));
+        assert_eq!(parent("arm_r").as_deref(), Some("clavicle"));
+        assert_eq!(parent("leg_r").as_deref(), Some("torso_lower"));
+        let leg = multileg();
+        let tip = leg.bones.iter().find(|b| b.name == "leg2_tip_l").unwrap();
+        assert_eq!(tip.parent.as_deref(), Some("leg2_l"));
     }
 
     #[test]

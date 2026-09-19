@@ -18,6 +18,19 @@ use super::warnings::warnings;
 pub const DRAG_PX: usize = 256;
 pub const FULL_PX: usize = 512;
 
+/// Environment override for where baked rigs are published.
+pub const PUBLISH_ENV_VAR: &str = "GS_STUDIO_PUBLISH";
+
+/// Where baked rigs go for game clients to embed: `override_dir` if given,
+/// else the workspace's `crates/gs_field/data/rigs`, found relative to the
+/// data root (`<data>/../crates/gs_field/data/rigs`).
+pub fn resolve_publish_dir(data_root: &Path, override_dir: Option<&str>) -> PathBuf {
+    match override_dir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => data_root.join("..").join("crates").join("gs_field").join("data").join("rigs"),
+    }
+}
+
 /// Something that would throw away the current rig.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocAction {
@@ -61,6 +74,10 @@ pub struct Session {
     /// The canvas should re-fit (a new silhouette was opened).
     pub fit_requested: bool,
     pub status: String,
+    /// Where Publish copies `<family>.png` + `<family>.toml`.
+    pub publish_dir: PathBuf,
+    /// Save also publishes (when the publish directory is usable).
+    pub publish_on_save: bool,
     masks: HashMap<usize, Mask>,
     bake: Option<BakeResult>,
     bake_serial: u64,
@@ -86,6 +103,8 @@ impl Session {
             quit_approved: false,
             fit_requested: true,
             status: String::new(),
+            publish_dir: resolve_publish_dir(data_root, std::env::var(PUBLISH_ENV_VAR).ok().as_deref()),
+            publish_on_save: true,
             masks: HashMap::new(),
             bake: None,
             bake_serial: 0,
@@ -157,12 +176,21 @@ impl Session {
     fn open_family(&mut self, family: &str) {
         let path = self.rig_path(family);
         if path.is_file() {
-            match Rig::load(&path) {
-                Ok(rig) => {
+            let loaded = std::fs::read_to_string(&path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| Rig::from_toml(&text).map_err(|e| e.to_string()));
+            match loaded {
+                Ok(mut rig) => {
                     let tpl = template(&rig.body_type)
                         .or_else(|| family_default(family).and_then(|d| template(d.template)))
                         .unwrap_or_else(|| templates().remove(0));
+                    // An older file gains its hierarchy here; say so. It is
+                    // not "unsaved": the file on disk still says the same rig.
+                    let notes = rig.migrate(Some(&tpl));
                     self.status = format!("Loaded {}", path.display());
+                    if !notes.is_empty() {
+                        self.status += &format!(" ({})", notes.join("; "));
+                    }
                     self.set_editor(rig, tpl);
                     return;
                 }
@@ -206,7 +234,7 @@ impl Session {
             let start = Instant::now();
             let baked = bake_mask(self.editor.rig(), mask);
             let ms = start.elapsed().as_secs_f32() * 1e3;
-            let warnings = warnings(self.editor.rig(), self.editor.template(), &baked, mask);
+            let warnings = warnings(self.editor.rig(), &baked, mask);
             self.bake_serial += 1;
             self.bake =
                 Some(BakeResult { baked, long_side_px: px, revision, ms, warnings, serial: self.bake_serial });
@@ -219,8 +247,51 @@ impl Session {
         self.bake.as_ref()
     }
 
+    /// Ok(the directory) when publishing can work: the directory exists, or
+    /// its parent does (it is then created on first publish). Err says why
+    /// not, for the disabled button's hover text.
+    pub fn publish_target(&self) -> Result<PathBuf, String> {
+        let dir = &self.publish_dir;
+        let parent_ok = dir.parent().is_some_and(|p| p.as_os_str().is_empty() || p.is_dir());
+        if dir.is_dir() || parent_ok {
+            Ok(dir.clone())
+        } else {
+            Err(format!(
+                "Nowhere to publish: {} does not exist (and neither does its parent). Set {PUBLISH_ENV_VAR} to a \
+                 directory, or run from the gs_studio workspace.",
+                dir.display()
+            ))
+        }
+    }
+
+    /// True when `<data>/rigs/` holds a saved bake of this family to publish.
+    pub fn has_saved_bake(&self, family: &str) -> bool {
+        let dir = self.rigs_dir();
+        dir.join(format!("{family}.png")).is_file() && dir.join(format!("{family}.toml")).is_file()
+    }
+
+    /// Copy the SAVED `<family>.png` + `<family>.toml` (never the
+    /// `.rig.toml` source) into the publish directory. Publishes what is on
+    /// disk: unsaved edits are not in it.
+    pub fn publish(&mut self) -> Result<PathBuf, String> {
+        let dir = self.publish_target()?;
+        let family = self.editor.rig().family.clone();
+        if !self.has_saved_bake(&family) {
+            return Err(format!("{family} has no saved bake yet: save first"));
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for name in [format!("{family}.png"), format!("{family}.toml")] {
+            let (from, to) = (self.rigs_dir().join(&name), dir.join(&name));
+            std::fs::copy(&from, &to).map_err(|e| format!("{} -> {}: {e}", from.display(), to.display()))?;
+        }
+        self.status = format!("Published {family}.png + {family}.toml to {}", dir.display());
+        Ok(dir)
+    }
+
     /// Write `<family>.rig.toml`, `<family>.png` and `<family>.toml` into
-    /// `<data>/rigs/`.
+    /// `<data>/rigs/`; then, with "publish on save" on and somewhere to
+    /// publish to, copy the two baked files there as well. A publish that
+    /// fails does not fail the save: the status line says what happened.
     pub fn save(&mut self) -> Result<(), String> {
         let family = self.editor.rig().family.clone();
         let path = self.rig_path(&family);
@@ -230,7 +301,15 @@ impl Session {
         rig.save(&path).map_err(|e| e.to_string())?;
         write_baked(rig, &baked, &dir).map_err(|e| e.to_string())?;
         self.editor.mark_saved();
-        self.status = format!("Saved {} (+ {family}.png, {family}.toml)", path.display());
+        let saved = format!("Saved {} (+ {family}.png, {family}.toml)", path.display());
+        self.status = match self.publish_on_save.then(|| self.publish_target()) {
+            Some(Ok(_)) => match self.publish() {
+                Ok(dir) => format!("{saved}; published to {}", dir.display()),
+                Err(e) => format!("{saved}; PUBLISH FAILED: {e}"),
+            },
+            Some(Err(_)) => format!("{saved}; not published (no publish directory)"),
+            None => saved,
+        };
         Ok(())
     }
 }
@@ -306,6 +385,73 @@ mod tests {
         again.request(DocAction::NewFromTemplate { template: "biped".into(), view: View::Front });
         assert!(again.editor.rig().joints.is_empty());
         assert!(again.has_saved_rig("humanoid"));
+    }
+
+    #[test]
+    fn the_publish_dir_is_the_workspace_crate_unless_overridden() {
+        let default = resolve_publish_dir(Path::new("ws/data"), None);
+        assert!(default.ends_with("crates/gs_field/data/rigs") && default.starts_with("ws/data/.."), "{default:?}");
+        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some("  ")), default);
+        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(" out/rigs ")), PathBuf::from("out/rigs"));
+    }
+
+    #[test]
+    fn save_publishes_the_baked_pair_but_never_the_source() {
+        let data = TempData::new("pub");
+        let mut s = Session::open(&data.0).unwrap();
+        // Default location: <data>/../crates/... is not there -> unavailable,
+        // and saving still works.
+        s.publish_dir = resolve_publish_dir(&data.0.join("nested/data"), None);
+        assert!(s.publish_target().unwrap_err().contains("GS_STUDIO_PUBLISH"));
+        assert!(s.publish().is_err());
+        s.editor.place_current([0.0, 5.8]);
+        s.save().unwrap();
+        assert!(s.status.contains("not published"), "{}", s.status);
+
+        // A directory whose parent exists is created on demand.
+        let out = data.0.join("published");
+        s.publish_dir = out.clone();
+        assert_eq!(s.publish_target(), Ok(out.clone()));
+        s.editor.place_current([0.0, 5.0]);
+        s.save().unwrap();
+        assert!(s.status.contains("published to"), "{}", s.status);
+        let mut names: Vec<String> =
+            std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["humanoid.png", "humanoid.toml"]);
+        assert_eq!(std::fs::read(out.join("humanoid.png")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.png")).unwrap());
+
+        // With the box unticked Save leaves the published copy alone; the
+        // button still publishes the last SAVED bake.
+        s.publish_on_save = false;
+        s.editor.place_current([0.0, 4.9]);
+        s.save().unwrap();
+        assert!(!s.status.contains("ublish"), "{}", s.status);
+        assert_ne!(std::fs::read(out.join("humanoid.toml")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.toml")).unwrap());
+        s.publish().unwrap();
+        assert_eq!(std::fs::read(out.join("humanoid.toml")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.toml")).unwrap());
+
+        // A family never saved has nothing to publish.
+        s.request(DocAction::OpenFamily("worm".into()));
+        assert!(s.publish().unwrap_err().contains("save first"));
+    }
+
+    #[test]
+    fn an_old_rig_file_loads_with_its_hierarchy_filled_in_and_is_not_dirty() {
+        let data = TempData::new("migrate");
+        let mut old = template("biped").unwrap().new_rig("humanoid", View::Front, 6.0, "crown");
+        old.version = 0;
+        old.joint_order.clear();
+        for b in &mut old.bones {
+            (b.parent, b.pivot) = (None, None);
+        }
+        std::fs::create_dir_all(data.0.join("rigs")).unwrap();
+        std::fs::write(data.0.join("rigs/humanoid.rig.toml"), old.to_toml().unwrap()).unwrap();
+        let s = Session::open(&data.0).unwrap();
+        assert!(s.status.contains("filled 10 bone parent(s)"), "{}", s.status);
+        assert!(!s.editor.is_dirty());
+        assert_eq!(s.editor.rig().hierarchy_issues(), []);
+        assert_eq!(s.editor.current(), Some("crown"));
     }
 
     #[test]

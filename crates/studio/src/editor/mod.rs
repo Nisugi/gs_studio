@@ -1,11 +1,14 @@
 //! Rig-editor logic. NOTHING in this module tree may import egui or eframe
 //! (`tests::editor_is_egui_free` enforces it): state, hit-testing, placement
-//! and mirror rules, undo, the world<->screen transform, warnings, and the
+//! and mirror rules, structure edits (joints, bones, hierarchy, anchors,
+//! eyes), undo, the world<->screen transform, warnings, publishing, and the
 //! document session all work -- and are tested -- without a window.
 
 pub mod palette;
+pub mod prompt;
 pub mod session;
 pub mod state;
+pub mod structure;
 pub mod undo;
 pub mod view;
 pub mod warnings;

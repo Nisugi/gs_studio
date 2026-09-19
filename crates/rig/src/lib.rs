@@ -11,8 +11,11 @@ mod model;
 mod outlines;
 mod templates;
 
-pub use bake::{bake, bake_mask, decode_png, encode_png, write_baked, Baked, BakedMeta, MapSize};
-pub use model::{Anchors, Eyes, Rig, RigBone, RigError, View};
+pub use bake::{
+    bake, bake_mask, decode_png, encode_png, write_baked, Baked, BakedBone, BakedMeta, BoneMeta,
+    DecodedMap, MapSize, EYE_MIN_PX_AT_512, EYE_RADIUS_SHARE,
+};
+pub use model::{Anchors, Eyes, HierarchyIssue, Rig, RigBone, RigError, View, RIG_VERSION};
 pub use outlines::{OutlineEntry, Outlines};
 pub use templates::{
     family_default, mirror_name, template, templates, AnchorDef, BoneDef, FamilyDefault, Template,

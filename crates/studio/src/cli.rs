@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::stage::StudioRoomContext;
 
-pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>]\n\
+pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>]\n\
     \x20                [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]\n\
     \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]";
 
@@ -18,6 +18,8 @@ pub struct Cli {
     pub data: Option<PathBuf>,
     /// `--pool`: the art pool / scenes directory (gs_field's base dir).
     pub pool: Option<PathBuf>,
+    /// Where Save publishes baked rigs for clients to embed.
+    pub publish: Option<PathBuf>,
     /// `--tab`: the tool to start on.
     pub tab: Option<String>,
     /// `--room-uid`, `--room-title`, `--room-location`: new-scene prefill,
@@ -27,7 +29,7 @@ pub struct Cli {
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 6] = ["--data", "--pool", "--tab", "--room-uid", "--room-title", "--room-location"];
+    const OPTIONS: [&str; 7] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location"];
     let mut cli = Cli::default();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -45,6 +47,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
         match name {
             "--data" => cli.data = Some(PathBuf::from(value)),
             "--pool" => cli.pool = Some(PathBuf::from(value)),
+            "--publish" => cli.publish = Some(PathBuf::from(value)),
             "--tab" => cli.tab = Some(value),
             "--room-uid" => {
                 cli.room.uid = Some(value.parse().map_err(|_| format!("--room-uid needs a number, got '{value}'"))?);

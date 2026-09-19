@@ -1,8 +1,10 @@
+version = 2
 family = "humanoid"
 body_type = "biped"
 view = "front"
 ref_ft = 6.0
 axis = "crown"
+joint_order = ["crown", "chin", "neck_base", "sternum", "pelvis", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "hip_r", "knee_r", "ankle_r", "toe_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l", "hip_l", "knee_l", "ankle_l", "toe_l"]
 
 [anchors]
 head = "crown"
@@ -37,54 +39,69 @@ wrist_r = [-0.95, 3.05]
 [[bones]]
 name = "skull"
 part = "head"
+parent = "neck"
 joints = ["crown", "chin"]
+pivot = "chin"
 
 [[bones]]
 name = "neck"
 part = "neck"
+parent = "torso_upper"
 joints = ["chin", "neck_base"]
+pivot = "neck_base"
 
 [[bones]]
 name = "clavicle"
 part = "chest"
+parent = "torso_upper"
 joints = ["shoulder_r", "neck_base", "shoulder_l"]
+pivot = "neck_base"
 
 [[bones]]
 name = "torso_upper"
 part = "chest"
+parent = "torso_lower"
 joints = ["neck_base", "sternum"]
+pivot = "sternum"
 
 [[bones]]
 name = "torso_lower"
 part = "abdomen"
 joints = ["sternum", "pelvis"]
+pivot = "pelvis"
 
 [[bones]]
 name = "arm_r"
 part = "rightArm"
+parent = "clavicle"
 joints = ["shoulder_r", "elbow_r", "wrist_r"]
 
 [[bones]]
 name = "hand_r"
 part = "rightHand"
+parent = "arm_r"
 joints = ["wrist_r", "fingertip_r"]
 
 [[bones]]
 name = "arm_l"
 part = "leftArm"
+parent = "clavicle"
 joints = ["shoulder_l", "elbow_l", "wrist_l"]
 
 [[bones]]
 name = "hand_l"
 part = "leftHand"
+parent = "arm_l"
 joints = ["wrist_l", "fingertip_l"]
 
 [[bones]]
 name = "leg_r"
 part = "rightLeg"
+parent = "torso_lower"
 joints = ["hip_r", "knee_r", "ankle_r", "toe_r"]
 
 [[bones]]
 name = "leg_l"
 part = "leftLeg"
+parent = "torso_lower"
 joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]

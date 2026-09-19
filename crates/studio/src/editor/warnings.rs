@@ -1,6 +1,6 @@
 //! What is wrong (or not finished) with a rig, in words.
 
-use rig::{Baked, Pt, Rig, Template, PARTS};
+use rig::{Baked, Pt, Rig, PARTS};
 use rig_bake::Mask;
 
 /// A part smaller than this share of the silhouette is suspicious.
@@ -28,26 +28,53 @@ pub fn joints_outside(rig: &Rig, mask: &Mask) -> Vec<String> {
     rig.joints.iter().filter(|(_, p)| !inside_silhouette(mask, **p)).map(|(n, _)| n.clone()).collect()
 }
 
-pub fn warnings(rig: &Rig, template: &Template, baked: &Baked, mask: &Mask) -> Vec<String> {
+/// Joints no bone's chain uses. Eye joints are not expected on a bone.
+pub fn unused_joints(rig: &Rig) -> Vec<String> {
+    rig.joint_order
+        .iter()
+        .filter(|j| *j != rig.eyes.joint(true) && *j != rig.eyes.joint(false))
+        .filter(|j| !rig.bones.iter().any(|b| b.joints.contains(j)))
+        .cloned()
+        .collect()
+}
+
+pub fn warnings(rig: &Rig, baked: &Baked, mask: &Mask) -> Vec<String> {
     let mut out = Vec::new();
 
     let mut unplaced = Vec::new();
-    for def in &template.bones {
-        let Some(i) = rig.bones.iter().position(|b| b.name == def.name) else {
-            out.push(format!("template bone '{}' is missing from the rig", def.name));
-            continue;
-        };
-        let bone = &rig.bones[i];
-        if rig.bone_points(bone).len() < 2 {
-            unplaced.push(def.name.as_str());
+    for (i, bone) in rig.bones.iter().enumerate() {
+        if bone.joints.len() < 2 {
+            out.push(format!(
+                "bone '{}' has {} joint(s) in its chain; it needs at least two",
+                bone.name,
+                bone.joints.len()
+            ));
+        } else if rig.bone_points(bone).len() < 2 {
+            unplaced.push(bone.name.as_str());
         } else if bone.part.is_none() {
-            out.push(format!("bone '{}' has no part, so it labels no pixels", def.name));
-        } else if !baked.bone_has_pixels.get(i).copied().unwrap_or(false) {
-            out.push(format!("bone '{}' has no pixels (is it on the silhouette?)", def.name));
+            out.push(format!("bone '{}' has no part, so it labels no pixels", bone.name));
+        } else if baked.bone_pixels.get(i).copied().unwrap_or(0) == 0 {
+            out.push(format!("bone '{}' owns no pixels (is it on the silhouette?)", bone.name));
         }
     }
     if !unplaced.is_empty() {
         out.push(format!("{} bone(s) not placed yet: {}", unplaced.len(), unplaced.join(", ")));
+    }
+    out.extend(rig.hierarchy_issues().iter().map(ToString::to_string));
+
+    let unused = unused_joints(rig);
+    if !unused.is_empty() {
+        out.push(format!("joint(s) used by no bone: {}", unused.join(", ")));
+    }
+    for (slot, joint) in [("head", &rig.anchors.head), ("mouth", &rig.anchors.mouth), ("saddle", &rig.anchors.saddle)] {
+        if !rig.joint_order.contains(joint) {
+            out.push(format!("anchor '{slot}' names no joint"));
+        }
+    }
+    for (eye, pixels) in &baked.eye_pixels {
+        if *pixels == 0 {
+            out.push(format!("eye '{eye}' covers no head pixels (is it on the head?)"));
+        }
     }
 
     for part in PARTS {
@@ -76,7 +103,7 @@ pub fn warnings(rig: &Rig, template: &Template, baked: &Baked, mask: &Mask) -> V
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rig::{bake_mask, template, View};
+    use rig::{bake_mask, template, Template, View};
     use rig_bake::{rasterize, Outline};
 
     /// A 2 x 6 ft block standing on the ground, centred on x = 0.
@@ -100,9 +127,9 @@ mod tests {
 
     #[test]
     fn a_fresh_rig_only_reports_unplaced_bones() {
-        let (rig, t) = serpent();
+        let (rig, _) = serpent();
         let mask = block();
-        let w = warnings(&rig, &t, &bake_mask(&rig, &mask), &mask);
+        let w = warnings(&rig, &bake_mask(&rig, &mask), &mask);
         assert_eq!(w.len(), 1, "{w:?}");
         assert!(w[0].starts_with("5 bone(s) not placed yet: skull, neck"), "{w:?}");
     }
@@ -112,8 +139,12 @@ mod tests {
         let (mut rig, t) = serpent();
         place_chain(&mut rig, &t);
         let mask = block();
-        let w = warnings(&rig, &t, &bake_mask(&rig, &mask), &mask);
+        let baked = bake_mask(&rig, &mask);
+        let w = warnings(&rig, &baked, &mask);
         assert!(w.is_empty(), "{w:?}");
+        // The real per-bone counts: every bone owns something, nothing is shared.
+        assert!(baked.bone_pixels.iter().all(|&n| n > 0), "{:?}", baked.bone_pixels);
+        assert_eq!(baked.bone_pixels.iter().sum::<usize>(), baked.filled());
     }
 
     #[test]
@@ -124,8 +155,8 @@ mod tests {
         rig.joints.insert("snout".into(), [3.0, 5.8]);
         rig.joints.insert("skull_base".into(), [2.0, 5.5]);
         let mask = block();
-        let w = warnings(&rig, &t, &bake_mask(&rig, &mask), &mask);
-        assert!(w.iter().any(|m| m.starts_with("bone 'skull' has no pixels")), "{w:?}");
+        let w = warnings(&rig, &bake_mask(&rig, &mask), &mask);
+        assert!(w.iter().any(|m| m.starts_with("bone 'skull' owns no pixels")), "{w:?}");
         assert!(w.iter().any(|m| m == "joint(s) outside the silhouette: skull_base, snout"), "{w:?}");
     }
 
@@ -139,13 +170,40 @@ mod tests {
         let neck = rig.bones.iter().position(|b| b.name == "neck").unwrap();
         rig.bones[neck].radius_ft = Some(0.01);
         let mask = block();
-        let w = warnings(&rig, &t, &bake_mask(&rig, &mask), &mask);
+        let w = warnings(&rig, &bake_mask(&rig, &mask), &mask);
         assert!(w.iter().any(|m| m.starts_with("part 'neck' covers only")), "{w:?}");
 
         let chest = rig.bones.iter().position(|b| b.name == "fore_body").unwrap();
         rig.bones[chest].part = None;
-        let w = warnings(&rig, &t, &bake_mask(&rig, &mask), &mask);
+        let w = warnings(&rig, &bake_mask(&rig, &mask), &mask);
         assert!(w.iter().any(|m| m.starts_with("bone 'fore_body' has no part")), "{w:?}");
+    }
+
+    #[test]
+    fn structure_problems_are_reported() {
+        let (mut rig, t) = serpent();
+        place_chain(&mut rig, &t);
+        rig.joints.insert("eye_r".into(), [3.0, 3.0]); // off the block, off the head
+        rig.joint_order.push("spare".into());
+        rig.anchors.saddle = String::new();
+        let neck = rig.bone_index("neck").unwrap();
+        rig.bones[neck].parent = Some("ghost".into());
+        let skull = rig.bone_index("skull").unwrap();
+        rig.bones[skull].parent = None;
+        let hind = rig.bone_index("hind_body").unwrap();
+        rig.bones[hind].joints.truncate(1);
+        let mask = block();
+        let w = warnings(&rig, &bake_mask(&rig, &mask), &mask);
+        for expected in [
+            "bone 'hind_body' has 1 joint(s) in its chain; it needs at least two",
+            "bone 'neck' has a parent 'ghost' that does not exist",
+            "2 root bones (no parent): skull, mid_body",
+            "joint(s) used by no bone: back_1, back_2, tail_mid, tail_tip, spare",
+            "anchor 'saddle' names no joint",
+            "eye 'rightEye' covers no head pixels (is it on the head?)",
+        ] {
+            assert!(w.iter().any(|m| m == expected), "missing {expected:?} in {w:#?}");
+        }
     }
 
     #[test]

@@ -1,11 +1,18 @@
 //! The rig file: `<family>.rig.toml`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use rig_bake::{part_index, Bone, Pt};
 use serde::{Deserialize, Serialize, Serializer};
+
+use crate::templates::Template;
+
+/// Written into every rig file this code saves. Files without it (0) are
+/// from before bones had parents: loading one fills `joint_order`, and each
+/// bone's `parent` / `pivot`, from its template by name ([`Rig::migrate`]).
+pub const RIG_VERSION: u32 = 2;
 
 /// Which silhouette the rig was clicked onto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,7 +38,16 @@ pub struct RigBone {
     /// A `rig_bake::PARTS` key. None = the bone is kept but labels nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<String>,
+    /// Name of the bone this one hangs off; None = a root. For cutout
+    /// posing a child follows its parent's rotation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub joints: Vec<String>,
+    /// The joint (one of `joints`) the bone's piece rotates about. None =
+    /// the chain's first placed joint. Set when the chain does not START at
+    /// the parent end (a skull clicked crown -> chin pivots at the chin).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<String>,
     /// None = let `rig_bake` measure the silhouette's half-thickness.
     #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_f32")]
     pub radius_ft: Option<f32>,
@@ -45,11 +61,25 @@ pub struct Eyes {
     pub left_eye: Option<Pt>,
     #[serde(rename = "rightEye", default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_pt")]
     pub right_eye: Option<Pt>,
+    /// Which joint is the left / right eye. None = `eye_l` / `eye_r`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_joint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right_joint: Option<String>,
 }
 
 impl Eyes {
     pub fn is_empty(&self) -> bool {
-        self.left_eye.is_none() && self.right_eye.is_none()
+        self.left_eye.is_none()
+            && self.right_eye.is_none()
+            && self.left_joint.is_none()
+            && self.right_joint.is_none()
+    }
+
+    /// The joint naming the left (`true`) or right eye.
+    pub fn joint(&self, left: bool) -> &str {
+        let (named, default) = if left { (&self.left_joint, "eye_l") } else { (&self.right_joint, "eye_r") };
+        named.as_deref().unwrap_or(default)
     }
 }
 
@@ -64,6 +94,9 @@ pub struct Anchors {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Rig {
+    /// [`RIG_VERSION`] of the code that wrote the file; 0 = before versions.
+    #[serde(default)]
+    pub version: u32,
     pub family: String,
     /// Name of the template this rig started from.
     pub body_type: String,
@@ -72,6 +105,14 @@ pub struct Rig {
     pub ref_ft: f32,
     /// What `ref_ft` measures: "crown", "withers", "diameter", "carapace".
     pub axis: String,
+    /// Radius of the painted eye discs, in feet. None = Auto: a share of
+    /// the head bone's measured radius (see `bake`).
+    #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_f32")]
+    pub eye_radius_ft: Option<f32>,
+    /// Every joint the rig has, placed or not, in click-through order.
+    /// Empty in files from before joints were editable ([`Rig::migrate`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub joint_order: Vec<String>,
     pub anchors: Anchors,
     #[serde(default, skip_serializing_if = "Eyes::is_empty")]
     pub eyes: Eyes,
@@ -81,6 +122,40 @@ pub struct Rig {
     pub joints: BTreeMap<String, Pt>,
     #[serde(default)]
     pub bones: Vec<RigBone>,
+}
+
+/// Something wrong with the bone hierarchy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HierarchyIssue {
+    DuplicateBone(String),
+    MissingParent { bone: String, parent: String },
+    /// The bones of one parent loop, in rig order.
+    Cycle(Vec<String>),
+    /// More than one bone has no parent. Allowed, but a puppet usually
+    /// hangs off one.
+    MultipleRoots(Vec<String>),
+}
+
+impl HierarchyIssue {
+    /// Multiple roots are only worth a warning; the rest are errors.
+    pub fn is_error(&self) -> bool {
+        !matches!(self, HierarchyIssue::MultipleRoots(_))
+    }
+}
+
+impl fmt::Display for HierarchyIssue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HierarchyIssue::DuplicateBone(b) => write!(f, "more than one bone is named '{b}'"),
+            HierarchyIssue::MissingParent { bone, parent } => {
+                write!(f, "bone '{bone}' has a parent '{parent}' that does not exist")
+            }
+            HierarchyIssue::Cycle(bones) => write!(f, "bones form a parent loop: {}", bones.join(", ")),
+            HierarchyIssue::MultipleRoots(bones) => {
+                write!(f, "{} root bones (no parent): {}", bones.len(), bones.join(", "))
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,13 +192,76 @@ impl Rig {
         toml::to_string(self).map_err(|e| RigError::Encode(e.to_string()))
     }
 
+    /// Parse only. Callers that are about to edit or bake should follow
+    /// with [`Rig::migrate`].
     pub fn from_toml(text: &str) -> Result<Rig, RigError> {
         toml::from_str(text).map_err(|e| RigError::Parse(e.to_string()))
     }
 
+    /// Bring a loaded rig up to [`RIG_VERSION`] and make it self-consistent:
+    ///  - a pre-version file gets each bone's `parent` and `pivot` from
+    ///    `template`, by bone name, where the template has that bone (and
+    ///    the parent it names exists in the rig);
+    ///  - `joint_order` gains every joint it lacks: the template's (only for
+    ///    a pre-version file), then any a bone or the joint table mentions;
+    ///  - a parent loop is broken by making its first bone a root.
+    ///
+    /// Returns what it changed, in words (empty = nothing worth saying).
+    pub fn migrate(&mut self, template: Option<&Template>) -> Vec<String> {
+        let mut notes = Vec::new();
+        if self.version < RIG_VERSION {
+            if let Some(t) = template {
+                let names: BTreeSet<String> = self.bones.iter().map(|b| b.name.clone()).collect();
+                let mut filled = 0;
+                for bone in &mut self.bones {
+                    let Some(def) = t.bones.iter().find(|d| d.name == bone.name) else {
+                        continue;
+                    };
+                    if bone.parent.is_none() {
+                        bone.parent = def.parent.clone().filter(|p| names.contains(p));
+                        filled += usize::from(bone.parent.is_some());
+                    }
+                    if bone.pivot.is_none() {
+                        bone.pivot = def.pivot.clone().filter(|p| bone.joints.contains(p));
+                    }
+                }
+                if filled > 0 {
+                    notes.push(format!("filled {filled} bone parent(s) from the {} template", t.name));
+                }
+                if self.joint_order.is_empty() {
+                    self.joint_order = t.joints.clone();
+                }
+            }
+            self.version = RIG_VERSION;
+        }
+        let mentioned: Vec<String> =
+            self.bones.iter().flat_map(|b| b.joints.iter()).chain(self.joints.keys()).cloned().collect();
+        for j in mentioned {
+            if !self.joint_order.contains(&j) {
+                self.joint_order.push(j);
+            }
+        }
+        let mut seen = BTreeSet::new();
+        self.joint_order.retain(|j| seen.insert(j.clone()));
+
+        while let Some(HierarchyIssue::Cycle(bones)) =
+            self.hierarchy_issues().into_iter().find(|i| matches!(i, HierarchyIssue::Cycle(_)))
+        {
+            if let Some(b) = self.bones.iter_mut().find(|b| b.name == bones[0]) {
+                b.parent = None;
+            }
+            notes.push(format!("broke a parent loop at bone '{}'", bones[0]));
+        }
+        notes
+    }
+
+    /// Read and [`Rig::migrate`] (against the template `body_type` names).
     pub fn load(path: &Path) -> Result<Rig, RigError> {
         let text = std::fs::read_to_string(path).map_err(|e| RigError::Io(path.to_owned(), e))?;
-        Rig::from_toml(&text)
+        let mut rig = Rig::from_toml(&text)?;
+        let template = crate::templates::template(&rig.body_type);
+        rig.migrate(template.as_ref());
+        Ok(rig)
     }
 
     pub fn save(&self, path: &Path) -> Result<(), RigError> {
@@ -132,6 +270,126 @@ impl Rig {
             std::fs::create_dir_all(dir).map_err(|e| RigError::Io(dir.to_owned(), e))?;
         }
         std::fs::write(path, text).map_err(|e| RigError::Io(path.to_owned(), e))
+    }
+
+    pub fn bone_index(&self, name: &str) -> Option<usize> {
+        self.bones.iter().position(|b| b.name == name)
+    }
+
+    /// Index of a bone's parent; None for a root or a missing parent.
+    pub fn parent_index(&self, bone: usize) -> Option<usize> {
+        self.bone_index(self.bones.get(bone)?.parent.as_deref()?)
+    }
+
+    /// Every bone below `bone` (children, their children...), never `bone`
+    /// itself -- even if the file has a loop through it.
+    pub fn descendants(&self, bone: usize) -> Vec<usize> {
+        let mut out: Vec<usize> = Vec::new();
+        let mut frontier = vec![bone];
+        while let Some(at) = frontier.pop() {
+            for k in 0..self.bones.len() {
+                if k != bone && !out.contains(&k) && self.parent_index(k) == Some(at) {
+                    out.push(k);
+                    frontier.push(k);
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Bones a bone may take as its parent without making a loop: everyone
+    /// but itself and its descendants.
+    pub fn parent_candidates(&self, bone: usize) -> Vec<usize> {
+        let below = self.descendants(bone);
+        (0..self.bones.len()).filter(|k| *k != bone && !below.contains(k)).collect()
+    }
+
+    /// Every bone once, parents before their children, as (index, depth).
+    /// Roots -- and bones whose parent is missing or loops -- sit at depth 0,
+    /// in rig order; so do siblings.
+    pub fn hierarchy_order(&self) -> Vec<(usize, usize)> {
+        fn visit(rig: &Rig, at: usize, depth: usize, out: &mut Vec<(usize, usize)>) {
+            out.push((at, depth));
+            for k in 0..rig.bones.len() {
+                if rig.parent_index(k) == Some(at) && !out.iter().any(|(i, _)| *i == k) {
+                    visit(rig, k, depth + 1, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for i in 0..self.bones.len() {
+            if self.parent_index(i).is_none() {
+                visit(self, i, 0, &mut out);
+            }
+        }
+        // Anything left is on a loop.
+        for i in 0..self.bones.len() {
+            if !out.iter().any(|(k, _)| *k == i) {
+                visit(self, i, 0, &mut out);
+            }
+        }
+        out
+    }
+
+    pub fn hierarchy_issues(&self) -> Vec<HierarchyIssue> {
+        let mut out = Vec::new();
+        let mut seen = BTreeSet::new();
+        for b in &self.bones {
+            if !seen.insert(b.name.as_str()) {
+                out.push(HierarchyIssue::DuplicateBone(b.name.clone()));
+            }
+        }
+        for b in &self.bones {
+            if let Some(p) = b.parent.as_deref().filter(|p| self.bone_index(p).is_none()) {
+                out.push(HierarchyIssue::MissingParent { bone: b.name.clone(), parent: p.to_owned() });
+            }
+        }
+        let mut on_a_loop: Vec<usize> = Vec::new();
+        for start in 0..self.bones.len() {
+            if on_a_loop.contains(&start) {
+                continue;
+            }
+            let mut walk = vec![start];
+            let mut at = start;
+            while let Some(p) = self.parent_index(at) {
+                if p == start {
+                    walk.sort_unstable();
+                    out.push(HierarchyIssue::Cycle(walk.iter().map(|i| self.bones[*i].name.clone()).collect()));
+                    on_a_loop.extend(walk);
+                    break;
+                }
+                if walk.contains(&p) {
+                    break; // leads INTO a loop it is not part of
+                }
+                walk.push(p);
+                at = p;
+            }
+        }
+        let roots: Vec<String> =
+            self.bones.iter().filter(|b| b.parent.is_none()).map(|b| b.name.clone()).collect();
+        if roots.len() > 1 {
+            out.push(HierarchyIssue::MultipleRoots(roots));
+        }
+        out
+    }
+
+    /// Where a bone's piece rotates: its `pivot` joint if that is placed,
+    /// else the chain's first placed joint.
+    pub fn bone_pivot(&self, bone: &RigBone) -> Option<Pt> {
+        bone.pivot
+            .as_deref()
+            .filter(|p| bone.joints.iter().any(|j| j == p))
+            .and_then(|p| self.joints.get(p).copied())
+            .or_else(|| self.bone_points(bone).first().copied())
+    }
+
+    /// The chain end away from the pivot: the last placed joint, or the
+    /// first when the pivot IS the last.
+    pub fn bone_tip(&self, bone: &RigBone) -> Option<Pt> {
+        let points = self.bone_points(bone);
+        let (first, last) = (*points.first()?, *points.last()?);
+        Some(if points.len() > 1 && self.bone_pivot(bone) == Some(last) { first } else { last })
     }
 
     /// The placed joints of one bone, in chain order.
@@ -160,8 +418,8 @@ impl Rig {
     /// joint. (left, right)
     pub fn eye_points(&self) -> (Option<Pt>, Option<Pt>) {
         (
-            self.eyes.left_eye.or_else(|| self.joints.get("eye_l").copied()),
-            self.eyes.right_eye.or_else(|| self.joints.get("eye_r").copied()),
+            self.eyes.left_eye.or_else(|| self.joints.get(self.eyes.joint(true)).copied()),
+            self.eyes.right_eye.or_else(|| self.joints.get(self.eyes.joint(false)).copied()),
         )
     }
 }

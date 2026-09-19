@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn toml_is_parsed_tolerantly() {
         let grown = format!(
-            "{HUMANOID_TOML}\nbone_count = 9\n\n[bones]\nnames = [\"spine\"]\n\n[[bone]]\nname = \"arm_r\"\nindex = 3\n"
+            "{HUMANOID_TOML}\nfuture_count = 9\n\n[future_table]\nnames = [\"spine\"]\n\n[[future_list]]\nname = \"arm_r\"\nindex = 3\n"
         );
         let meta = DollMeta::from_toml(&grown).expect("unknown keys ignored");
         assert_eq!(meta.family, "humanoid");

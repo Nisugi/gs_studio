@@ -1,4 +1,7 @@
-//! The rig being edited and every rule about editing it.
+//! The rig being edited and the rules for placing and moving joints. The
+//! rules for changing the rig's STRUCTURE (adding, renaming, deleting and
+//! re-ordering joints and bones, the hierarchy, anchors, eyes) are in
+//! `structure.rs`.
 
 use rig::{mirror_name, Pt, Rig, Template, View};
 
@@ -9,7 +12,7 @@ use super::view::{Canvas, ViewTransform};
 pub const HIT_RADIUS_PX: f32 = 9.0;
 
 #[derive(Debug, Clone)]
-struct Drag {
+pub(super) struct Drag {
     joint: String,
     /// Pointer-to-joint offset at grab time, in feet, so the joint does not
     /// jump to the cursor.
@@ -20,30 +23,38 @@ struct Drag {
 
 #[derive(Debug, Clone)]
 pub struct Editor {
-    rig: Rig,
-    template: Template,
+    pub(super) rig: Rig,
     /// Joint the next canvas click places.
-    current: Option<String>,
+    pub(super) current: Option<String>,
     /// Joint Delete acts on.
-    selected: Option<String>,
+    pub(super) selected: Option<String>,
+    /// Bone whose details (parent, pivot, chain) are open. UI state: not
+    /// part of the rig, not undone.
+    pub(super) selected_bone: Option<usize>,
+    /// Bone whose chain canvas clicks on joints are appending to.
+    pub(super) chain_pick: Option<usize>,
     pub mirror: bool,
     /// The rig as last saved / loaded / created: dirty = differs from this.
     baseline: Rig,
     history: UndoStack<Rig>,
-    drag: Option<Drag>,
+    pub(super) drag: Option<Drag>,
     /// Bumped on every rig change; the baker re-runs when it moves.
     revision: u64,
 }
 
 impl Editor {
-    /// Edit an existing rig. `template` supplies click order and warnings.
-    pub fn new(rig: Rig, template: Template) -> Editor {
+    /// Edit an existing rig. The rig is migrated first (`Rig::migrate`), so
+    /// its `joint_order` lists every joint it mentions; `template` fills the
+    /// gaps of a file from before joints and parents were stored.
+    pub fn new(mut rig: Rig, template: Template) -> Editor {
+        rig.migrate(Some(&template));
         let mut e = Editor {
             baseline: rig.clone(),
             rig,
-            template,
             current: None,
             selected: None,
+            selected_bone: None,
+            chain_pick: None,
             mirror: true,
             history: UndoStack::default(),
             drag: None,
@@ -55,10 +66,6 @@ impl Editor {
 
     pub fn rig(&self) -> &Rig {
         &self.rig
-    }
-
-    pub fn template(&self) -> &Template {
-        &self.template
     }
 
     pub fn current(&self) -> Option<&str> {
@@ -99,24 +106,17 @@ impl Editor {
         self.mirror && self.rig.view == View::Front
     }
 
-    /// Click-through order: the template's joints, then anything else the
-    /// rig mentions (a hand-edited file, or a rig from an older template).
+    /// Click-through order: the rig's own joint list. (`Rig::migrate` seeds
+    /// it from the template and appends anything else the rig mentions.)
     pub fn joint_order(&self) -> Vec<String> {
-        let mut order = self.template.joints.clone();
-        let extra = self.rig.bones.iter().flat_map(|b| b.joints.iter()).chain(self.rig.joints.keys());
-        for j in extra {
-            if !order.contains(j) {
-                order.push(j.clone());
-            }
-        }
-        order
+        self.rig.joint_order.clone()
     }
 
     pub fn is_placed(&self, joint: &str) -> bool {
         self.rig.joints.contains_key(joint)
     }
 
-    fn first_unplaced(&self) -> Option<String> {
+    pub(super) fn first_unplaced(&self) -> Option<String> {
         self.joint_order().into_iter().find(|j| !self.is_placed(j))
     }
 
@@ -134,7 +134,7 @@ impl Editor {
         self.selected = self.is_placed(joint).then(|| joint.to_owned());
     }
 
-    fn edit(&mut self, tag: Option<u64>) -> &mut Rig {
+    pub(super) fn edit(&mut self, tag: Option<u64>) -> &mut Rig {
         self.history.record(self.rig.clone(), tag);
         self.revision += 1;
         &mut self.rig
@@ -285,6 +285,10 @@ impl Editor {
             if self.selected.as_deref().is_some_and(|j| !self.is_placed(j)) {
                 self.selected = None;
             }
+            // Bone indices may have shifted under the UI's feet.
+            let bones = self.rig.bones.len();
+            self.selected_bone = self.selected_bone.filter(|b| *b < bones);
+            self.chain_pick = None;
             // Keep clicking through: never leave "current" on a placed joint
             // when something earlier has just become unplaced.
             self.current = self.first_unplaced();
@@ -498,7 +502,9 @@ mod tests {
         rig.bones.push(rig::RigBone {
             name: "club".into(),
             part: None,
+            parent: None,
             joints: vec!["wrist_r".into(), "club_tip".into()],
+            pivot: None,
             radius_ft: None,
         });
         let order = Editor::new(rig, t.clone()).joint_order();

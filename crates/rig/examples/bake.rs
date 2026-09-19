@@ -46,6 +46,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("  {part:10} {:5.1}%", baked.share(part) * 100.0);
         }
     }
+    for (i, b) in baked.bones.iter().enumerate() {
+        println!("  bone {:2} {:12} <- {:12} {:6} px", i + 1, b.name, b.parent.as_deref().unwrap_or("(root)"), b.pixels);
+    }
+    for issue in rig.hierarchy_issues() {
+        println!("  ! {issue}");
+    }
     rig.save(&rig_path)?;
     let (png, meta) = write_baked(&rig, &baked, &data.join("rigs"))?;
     println!("wrote {} and {}", png.display(), meta.display());

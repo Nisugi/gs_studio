@@ -16,8 +16,8 @@ GPL-3.0-or-later (ported from VellumFE).
 
 | Path | What |
 |---|---|
-| `crates/rig_bake/` | Library, no dependencies, no UI. Silhouette + bones -> per-pixel body-part label map: `rasterize` -> `label` -> `metrics` |
-| `crates/rig/` | Library, no UI. The rig file format, body-type templates (as data), the `outlines.json` loader, and bake-to-files (`<family>.png` + `<family>.toml`) |
+| `crates/rig_bake/` | Library, no dependencies, no UI. Silhouette + bones -> per-pixel body-part label map AND which bone owns each pixel: `rasterize` -> `label` -> `metrics` |
+| `crates/rig/` | Library, no UI. The rig file format (joints, bones, the bone hierarchy), body-type templates (as data), the `outlines.json` loader, eye discs, and bake-to-files (`<family>.png` + `<family>.toml`) |
 | `crates/gs_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_calibrators/` | Library. The five art calibrators (frames, doll anchors, doll sets, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
@@ -82,18 +82,31 @@ crate can later be shared between them.
 ### Rig editor
 
 A rig = a family silhouette + named joints clicked onto it + bones (chains of
-joints), each bone carrying one body part.
+joints), each bone carrying one body part and hanging off a parent bone. A
+template only SEEDS a rig: joints, bones, the hierarchy, anchors and eyes are
+all editable afterwards.
 
 - **Left**: family, view (front/side), template, what `ref_ft` measures;
-  Save / New from template / Undo / Redo. Below that the joint list and the
-  bone list share the remaining height, each in its own scroll area, with a
-  draggable divider between them. Joints are in click-through order (filled
-  dot = placed, hollow = not yet, bold = the joint the next click places),
-  with Mirror; bones have a part dropdown and radius (Auto = measured by
-  `rig_bake`; the radius actually used is always shown).
-- **Centre**: silhouette, live label map (one colour per part), bones, joints.
-- **Right**: legend with per-part pixel share, map size / aspect / span,
-  orphan count, warnings.
+  Save / New from template / Publish (+ *publish on save*) / Undo / Redo.
+  Below that the joint list and the bone list share the remaining height,
+  each in its own scroll area, with a draggable divider between them.
+  - **Joints** are in click-through order (filled dot = placed, hollow = not
+    yet, bold = the joint the next click places), with Mirror. *Add*,
+    *Rename*, *Delete*, *Up*, *Down* act on the current joint.
+  - **Bones** are listed as a tree (children indented under their parent),
+    each with a part dropdown and radius (Auto = measured by `rig_bake`; the
+    radius actually used is always shown). *Add*, *Rename*, *Delete* act on
+    the selected bone. Clicking a bone's name selects it and opens its
+    details under the list: **Parent**, **Pivot**, its pixel count, and its
+    joint **Chain** (Up / Down / Remove per joint, *Append joint...*, *Pick on
+    canvas*).
+- **Centre**: silhouette, live label map (one colour per part, eye discs
+  included), bones, joints, a faint link from each parent's pivot to its
+  child's, eye-disc outlines; the selected bone is highlighted and its pivot
+  boxed.
+- **Right**: legend with per-part pixel share; **Anchors and eyes** (which
+  joint is head / mouth / saddle / left eye / right eye, and the eye radius:
+  Auto or a value); map size / aspect / span, orphan count; warnings.
 
 | Input | Does |
 |---|---|
@@ -102,28 +115,81 @@ joints), each bone carrying one body part.
 | drag a joint | move it |
 | right-click a joint, or Delete with one selected | un-place it (it becomes current again) |
 | click a joint in the list | make it current (right-click there un-places) |
+| click a bone's name | select it / deselect it |
+| with *Pick on canvas* on: click a joint | append it to the selected bone's chain (empty-canvas clicks do nothing; Esc ends) |
 | wheel / pinch | zoom about the cursor |
 | middle-drag or Space+drag | pan |
-| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo (joint and bone edits) |
+| Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo (every rig edit; one gesture = one step) |
 | Ctrl+S | save |
 
 With **Mirror** on, in a front view, placing `X_r` (or `X_l`) also places its
 twin reflected across x = 0 -- but only if the twin is not placed yet.
 
+**Editing the structure.** Names are lower snake_case (`[a-z][a-z0-9_]*`),
+unique, checked as you type; an `_r` / `_l` ending makes a mirror pair, and
+the Add / Rename prompt offers to add or rename the twin in the same step.
+
+- *Un-placing* a joint (right-click, Delete key) only takes it off the
+  canvas. *Deleting* it (the Delete button) removes it from the rig: from the
+  click order, every bone chain and pivot, and any anchor or eye that named
+  it. A bone left with fewer than two joints stays, with a warning.
+- Renaming a joint renames it in every bone, anchor and eye; renaming a bone
+  re-points its children.
+- A new bone hangs off the selected bone (a root if none is selected), has no
+  part and an empty chain, and starts in *Pick on canvas*.
+- Deleting a bone hands its children to ITS parent. Its joints stay.
+- The Parent dropdown never offers the bone itself or any of its descendants,
+  so a loop cannot be made. Any number of roots is allowed; more than one
+  warns.
+- **Building a chain.** The list (*Append joint...* plus Up / Down / Remove) is
+  the primary way: it works for joints that are not placed yet -- a new
+  joint never is -- it cannot mis-hit when joints sit on top of each other
+  (wrist / hand, chin / neck), and order is fixed after the fact instead of
+  by click accuracy. *Pick on canvas* is the shortcut for the common case
+  (placed joints, picked in order); while it is on, a click that misses every
+  joint does nothing rather than dropping the current joint somewhere.
+- **Pivot** is the joint the bone's piece will rotate about when posed; the
+  default is the chain's first joint. Set it when the chain does not start at
+  the parent end (the biped skull is clicked crown -> chin but turns about
+  the chin).
+- **Eyes** are small discs, not just points: each placed eye joint is painted
+  as `leftEye` / `rightEye` over the pixels labelled `head` (never over
+  anything else). The radius is per rig, in feet: Auto = 18% of the head
+  bone's measured radius, never less than 2 px on a 512 px map. Front views
+  have two eyes; side-view templates have only `eye_r`.
+
+Warnings cover: bones not placed yet, a bone with fewer than two joints in its
+chain, no part, a bone that owns no pixels (the real per-bone count), a
+missing parent, a parent loop, several roots, joints no bone uses (eye joints
+excepted), an anchor naming no joint, an eye disc that covered no head pixels,
+tiny parts, joints off the silhouette, orphan pixels.
+
 The map is re-baked on every change: 256 px long side while a drag is in
-progress, 512 px on release. (humanoid, release build: ~4 ms at 256, ~18 ms at
-512. `rig_bake` is compiled optimized in dev builds too; unoptimized it is
-~27 / ~115 ms.)
+progress, 512 px on release. (humanoid, release build: ~3 ms at 256, ~13 ms at
+512, bone channel and eyes included -- about 6% over the part-only labeller.
+`rig_bake` is compiled optimized in dev builds too.)
 
 **Save** writes three files into `<data>/rigs/`. Opening a family that has a
 saved rig loads it; otherwise it starts from the family's default template.
 Anything that would discard unsaved changes (another family, another view or
-template, closing the window) asks first.
+template, closing the window) asks first. A rig file from before bones had
+parents loads with its hierarchy, pivots and joint order filled in from its
+template by name (the status line says so); it is rewritten in the new form
+the next time it is saved.
 
-All editor logic -- state, hit-testing, placement and mirror rules, undo, the
-world<->screen transform, warnings, open/save/discard -- lives in
-`crates/studio/src/editor/`, which may not mention egui (a test enforces it).
-`tools/rigs.rs` only draws and forwards input.
+**Publish** copies the SAVED `<family>.png` + `<family>.toml` -- never the
+`.rig.toml` source -- into the publish directory, the folder of baked rigs
+that game clients embed. Default `<data>/../crates/gs_field/data/rigs` (the
+workspace's `gs_field` crate); `GS_STUDIO_PUBLISH=<dir>` overrides it. With
+*publish on save* ticked (the default) Save publishes too. The directory is
+created if its parent exists; if not even the parent exists, the button and
+the checkbox are disabled and their hover text says why -- Save still works.
+
+All editor logic -- state, hit-testing, placement and mirror rules, structure
+edits, the name prompt, undo, the world<->screen transform, warnings,
+open/save/publish/discard -- lives in `crates/studio/src/editor/`, which may
+not mention egui (a test enforces it). `tools/rigs.rs` only draws and forwards
+input.
 
 ### Scenes and Preview (the stage)
 
@@ -235,7 +301,18 @@ rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
 | `multileg` | front | arachnid crustacean |
 
 Templates are data (`crates/rig/src/templates.rs`): the ordered joint list,
-the bones with default parts, the anchor joints. `_r`/`_l` suffixes are mirror
+the bones with default parts, parents and pivots, the anchor joints. Each is
+ONE tree:
+
+| Template | Root | Hierarchy (child <- parent; *pivot* where it is not the chain's first joint) |
+|---|---|---|
+| `biped` | `torso_lower` (*pelvis*) | `torso_upper` (*sternum*) <- `torso_lower`; `neck` (*neck_base*), `clavicle` (*neck_base*) <- `torso_upper`; `skull` (*chin*) <- `neck`; `arm_*` <- `clavicle`; `hand_*` <- `arm_*`; `leg_*` <- `torso_lower` |
+| `quadruped` | `spine` | `neck` (*withers*), `tail`, `brisket` (*sternum*), `underline`, `foreleg_*`, `hindleg_*` <- `spine`; `skull` (*poll*) <- `neck`; `forepaw_*` <- `foreleg_*` |
+| `avian` | `spine` | `neck` (*nape*), `tail`, `breast` (*breast*), `underline`, `wing_*`, `leg_*` <- `spine`; `skull` (*crown*) <- `neck`; `wing_hand_*` <- `wing_*` |
+| `serpentine` | `mid_body` (*belly_mid*) | `fore_body` (*chest_end*), `hind_body` <- `mid_body`; `neck` (*neck_end*) <- `fore_body`; `skull` (*skull_base*) <- `neck` |
+| `multileg` | `thorax` | `skull` (*mouth*), `abdomen`, `leg1_*` .. `leg5_*` <- `thorax`; `leg1_tip_*`, `leg2_tip_*` <- their leg |
+
+ `_r`/`_l` suffixes are mirror
 pairs; in a side view `_r` is the near limb. Quadruped forelegs are
 `rightArm`/`leftArm` with the paw segment as the hand; spine + tail are
 `back`. `multileg` has 5 leg pairs (pairs 1-2 arms with the tip segment as
@@ -245,11 +322,14 @@ hand, 3-5 legs); leave unused pairs unplaced.
 
 ### `<family>.rig.toml` -- the rig (source of truth)
 
+    version = 2                  # absent in files from before bones had parents
     family = "humanoid"
     body_type = "biped"          # template it started from
     view = "front"               # or "side"
     ref_ft = 6.0
     axis = "crown"               # what ref_ft measures: crown | withers | diameter | carapace
+    eye_radius_ft = 0.05         # omit for Auto
+    joint_order = ["crown", "chin", "neck_base"]   # EVERY joint, placed or not, in click order
 
     [anchors]                    # each names a joint; "feet" is computed (ground centre)
     head = "crown"
@@ -263,20 +343,41 @@ hand, 3-5 legs); leave unused pairs unplaced.
     # ...
 
     [[bones]]
-    name = "arm_r"
-    part = "rightArm"            # omit for "(none)": the bone labels nothing
-    joints = ["shoulder_r", "elbow_r", "wrist_r"]
+    name = "skull"
+    part = "head"                # omit for "(none)": the bone labels nothing
+    parent = "neck"              # omit for a root
+    joints = ["crown", "chin"]
+    pivot = "chin"               # omit for "the chain's first joint"
     radius_ft = 0.2              # omit for Auto
 
 A bone uses whichever of its joints are placed and is skipped with fewer than
-two. Eyes are the `eye_l` / `eye_r` joints; an optional `[eyes]` table with
-`leftEye` / `rightEye` points overrides them.
+two. `parent` must name another bone and may not loop (a loop in a hand-edited
+file is broken on load, at its first bone). Eyes are the `eye_l` / `eye_r`
+joints; an optional `[eyes]` table can name other joints (`left_joint`,
+`right_joint`; `""` = no such eye) or give explicit `leftEye` / `rightEye`
+points that override the joint.
+
+A file with no `version` is an old one: on load (`Rig::migrate`) every bone
+the template also has takes the template's `parent` and `pivot`, and
+`joint_order` becomes the template's joints plus anything else the file
+mentions. Nothing else about old files changes meaning.
+
+**Chains and posing.** A multi-joint bone (arm = shoulder -> elbow -> wrist)
+stays ONE bone in the rig and ONE index in the bone channel; the bake does
+not split it. So that a later step CAN split chains into segments that bend,
+the baked `[[bones]]` table lists every joint of the chain (`joints`).
 
 ### `<family>.png` -- the baked label map
 
-8-bit RGBA. R = label (1-based index into the 14 `PARTS`), G = B = 0,
-A = 255 inside the silhouette and 0 outside. Cropped to the silhouette's
-bounds, 512 px on the long side. `rig::decode_png` reads it back.
+8-bit RGBA, cropped to the silhouette's bounds, 512 px on the long side.
+`rig::decode_png` reads both channels back.
+
+| Channel | Meaning |
+|---|---|
+| R | part label: 1-based index into the 14 `PARTS`. Eye discs are painted here (`leftEye` = 2, `rightEye` = 3) over `head` pixels |
+| G | owning bone: 1-based index into the rig's bone list AS WRITTEN in the rig file = the `index` of the baked `[[bones]]` entry. A skipped bone (no part, or fewer than two placed joints) keeps its slot and owns nothing, so indices never shift. 0 in maps baked before this existed. At most 255 bones. Eye pixels keep the head bone's index, so eyes move with the skull |
+| B | 0 |
+| A | 255 inside the silhouette, 0 outside (R and G read as 0 there) |
 
 ### `<family>.toml` -- baked metadata
 
@@ -288,7 +389,8 @@ bounds, 512 px on the long side. `rig::decode_png` reads it back.
     aspect = 0.3633              # content width / height
     span = 0.828                 # ground-contact width / content width
     ground_frac = 0.9995         # ground line, as a fraction down the map
-    parts = ["head", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
+    eye_radius_ft = 0.0424       # radius of the painted eye discs; absent when none were painted
+    parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
 
     [map]
     width = 186
@@ -303,3 +405,20 @@ bounds, 512 px on the long side. `rig::decode_png` reads it back.
     [eyes]
     leftEye = [0.5538, 0.0631]
     rightEye = [0.4443, 0.0631]
+
+    [[bones]]                    # one per rig bone, IN RIG ORDER (skipped bones included)
+    index = 1                    # the value this bone's pixels carry in the PNG's G channel
+    name = "skull"
+    part = "head"                # absent: the bone labels nothing
+    parent = "neck"              # absent: a root
+    pivot = [0.4991, 0.1377]     # where the piece rotates: the bone's pivot joint, else its first placed joint
+    tip = [0.4991, 0.0085]       # the chain end away from the pivot
+    joints = [[0.4991, 0.0085], [0.4991, 0.1377]]   # every placed joint of the chain, in order
+    pixels = 3020                # pixels in G that name this bone (0 = skipped, or it won nothing)
+
+`pivot`, `tip` and `joints` are `[x, y]` map fractions, y down, like the
+anchors; `pivot` / `tip` are absent for a bone with no placed joint.
+Everything that existed before (`[map]`, `[anchors]`, `[eyes]`, the top-level
+keys, the R channel) means what it always did; `eye_radius_ft`, `[[bones]]`
+and the G channel are additions. The one visible change to old content:
+`parts` and R now include the two eye parts when eyes are placed.

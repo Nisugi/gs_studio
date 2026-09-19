@@ -88,6 +88,13 @@ pub struct LabelMap {
     pub grid: Grid,
     /// 0 outside, else 1-based part.
     pub labels: Vec<u8>,
+    /// Which bone owns each pixel: 0 outside (or no bone at all), else the
+    /// 1-based index into the `bones` slice given to [`label`]. Same length
+    /// as `labels`. Only the first [`MAX_BONES`] bones can own pixels.
+    pub bones: Vec<u8>,
+    /// Pixels owned per bone, parallel to the `bones` slice given to
+    /// [`label`] (0 for a bone that was ignored or won nothing).
+    pub bone_pixels: Vec<usize>,
     /// Radius actually used per bone, in feet (measured or overridden).
     pub radii_ft: Vec<f32>,
     /// Filled pixels no bone could reach through the shape (detached
@@ -252,16 +259,23 @@ fn line_of_sight(mask: &Mask, a: Pt, b: Pt) -> bool {
     })
 }
 
-/// Label every filled pixel. Bones with fewer than two joints are ignored.
+/// The owner channel is a byte, so at most this many bones take part; any
+/// past it are ignored like a bone with fewer than two joints.
+pub const MAX_BONES: usize = 255;
+
+/// Label every filled pixel with its part AND the bone that won it. Bones
+/// with fewer than two joints are ignored.
 pub fn label(mask: &Mask, bones: &[Bone]) -> LabelMap {
     let (w, h) = (mask.grid.w, mask.grid.h);
     let ppf = mask.grid.px_per_ft;
     let edge = edge_distance(mask);
 
-    let live: Vec<usize> = (0..bones.len()).filter(|&b| bones[b].joints.len() >= 2).collect();
+    let live: Vec<usize> =
+        (0..bones.len().min(MAX_BONES)).filter(|&b| bones[b].joints.len() >= 2).collect();
     let cells: Vec<Vec<usize>> = bones
         .iter()
-        .map(|b| if b.joints.len() >= 2 { bone_cells(mask, b) } else { Vec::new() })
+        .enumerate()
+        .map(|(k, b)| if k < MAX_BONES && b.joints.len() >= 2 { bone_cells(mask, b) } else { Vec::new() })
         .collect();
     let radii_ft: Vec<f32> = bones
         .iter()
@@ -279,6 +293,7 @@ pub fn label(mask: &Mask, bones: &[Bone]) -> LabelMap {
     // Claims: beside a bone, within its radius, in line of sight, not past
     // its ends. Overlapping claims go to the smaller distance/radius.
     let mut labels = vec![0u8; w * h];
+    let mut owner = vec![0u8; w * h];
     for i in 0..w * h {
         if !mask.inside[i] {
             continue;
@@ -296,12 +311,14 @@ pub fn label(mask: &Mask, bones: &[Bone]) -> LabelMap {
             }
             best = d / r;
             labels[i] = bones[b].part;
+            owner[i] = b as u8 + 1;
         }
     }
     // A bone always owns the pixels it runs through.
     for &b in &live {
         for &i in &cells[b] {
             labels[i] = bones[b].part;
+            owner[i] = b as u8 + 1;
         }
     }
 
@@ -337,6 +354,7 @@ pub fn label(mask: &Mask, bones: &[Bone]) -> LabelMap {
             if mask.inside[n] && next < cost[n] && (next as usize) < buckets.len() {
                 cost[n] = next;
                 labels[n] = labels[i];
+                owner[n] = owner[i];
                 buckets[next as usize].push(n as u32);
             }
         }
@@ -353,19 +371,29 @@ pub fn label(mask: &Mask, bones: &[Bone]) -> LabelMap {
             mask.grid.min_x + ((i % w) as f32 + 0.5) / ppf,
             mask.grid.max_y - ((i / w) as f32 + 0.5) / ppf,
         ];
-        let mut best = (f32::MAX, 0u8);
+        let mut best = (f32::MAX, 0u8, 0u8);
         for &b in &live {
             let d = chain_nearest(p, &bones[b].joints).0 - radii_ft[b];
             if d < best.0 {
-                best = (d, bones[b].part);
+                best = (d, bones[b].part, b as u8 + 1);
             }
         }
         labels[i] = best.1;
+        owner[i] = best.2;
+    }
+
+    let mut bone_pixels = vec![0usize; bones.len()];
+    for &o in &owner {
+        if o != 0 {
+            bone_pixels[o as usize - 1] += 1;
+        }
     }
 
     LabelMap {
         grid: mask.grid,
         labels,
+        bones: owner,
+        bone_pixels,
         radii_ft,
         orphans,
     }
@@ -493,5 +521,206 @@ mod tests {
         let m = metrics(&rasterize(&Outline { subpaths: vec![shape] }, 400));
         assert!((m.aspect - 4.0 / 3.0).abs() < 0.02, "{m:?}");
         assert!(m.span > 0.97, "{m:?}");
+    }
+
+    /// `label` as it was before the bone channel existed, verbatim, labels
+    /// only. The part channel must never change because of the bone channel.
+    #[allow(clippy::needless_range_loop)]
+    fn label_reference(mask: &Mask, bones: &[Bone]) -> Vec<u8> {
+        let (w, h) = (mask.grid.w, mask.grid.h);
+        let ppf = mask.grid.px_per_ft;
+        let edge = edge_distance(mask);
+
+        let live: Vec<usize> = (0..bones.len()).filter(|&b| bones[b].joints.len() >= 2).collect();
+        let cells: Vec<Vec<usize>> = bones
+            .iter()
+            .map(|b| if b.joints.len() >= 2 { bone_cells(mask, b) } else { Vec::new() })
+            .collect();
+        let radii_ft: Vec<f32> = bones
+            .iter()
+            .zip(&cells)
+            .map(|(bone, cells)| match bone.radius_ft {
+                Some(r) => r.max(0.0),
+                None => {
+                    let mut along: Vec<u32> = cells.iter().map(|&i| edge[i]).collect();
+                    along.sort_unstable();
+                    along.get(along.len() / 2).copied().unwrap_or(0) as f32 / (ORTHO as f32 * ppf)
+                }
+            })
+            .collect();
+
+        // Claims: beside a bone, within its radius, in line of sight, not past
+        // its ends. Overlapping claims go to the smaller distance/radius.
+        let mut labels = vec![0u8; w * h];
+        for i in 0..w * h {
+            if !mask.inside[i] {
+                continue;
+            }
+            let p = [
+                mask.grid.min_x + ((i % w) as f32 + 0.5) / ppf,
+                mask.grid.max_y - ((i / w) as f32 + 0.5) / ppf,
+            ];
+            let mut best = f32::MAX;
+            for &b in &live {
+                let r = radii_ft[b];
+                let (d, terminal, q) = chain_nearest(p, &bones[b].joints);
+                if terminal || d > r || d / r >= best || !line_of_sight(mask, p, q) {
+                    continue;
+                }
+                best = d / r;
+                labels[i] = bones[b].part;
+            }
+        }
+        // A bone always owns the pixels it runs through.
+        for &b in &live {
+            for &i in &cells[b] {
+                labels[i] = bones[b].part;
+            }
+        }
+
+        // Grow the claims through the shape. Dial's algorithm: integer chamfer
+        // costs, one bucket per cost.
+        const UNSET: u32 = u32::MAX;
+        let mut cost = vec![UNSET; w * h];
+        let mut buckets: Vec<Vec<u32>> = vec![Vec::new(); (w + h) * DIAG as usize + 2];
+        for i in 0..w * h {
+            if labels[i] != 0 {
+                cost[i] = 0;
+                buckets[0].push(i as u32);
+            }
+        }
+        let mut c = 0;
+        while c < buckets.len() {
+            let Some(i) = buckets[c].pop() else {
+                c += 1;
+                continue;
+            };
+            let i = i as usize;
+            if cost[i] != c as u32 {
+                continue;
+            }
+            let (x, y) = ((i % w) as i32, (i / w) as i32);
+            for (dx, dy, step) in NEIGHBOURS {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let n = ny as usize * w + nx as usize;
+                let next = c as u32 + step;
+                if mask.inside[n] && next < cost[n] && (next as usize) < buckets.len() {
+                    cost[n] = next;
+                    labels[n] = labels[i];
+                    buckets[next as usize].push(n as u32);
+                }
+            }
+        }
+
+        // Detached islands no claim could reach: straight-line nearest bone.
+        let mut orphans = 0;
+        for i in 0..w * h {
+            if !mask.inside[i] || labels[i] != 0 || live.is_empty() {
+                continue;
+            }
+            orphans += 1;
+            let p = [
+                mask.grid.min_x + ((i % w) as f32 + 0.5) / ppf,
+                mask.grid.max_y - ((i / w) as f32 + 0.5) / ppf,
+            ];
+            let mut best = (f32::MAX, 0u8);
+            for &b in &live {
+                let d = chain_nearest(p, &bones[b].joints).0 - radii_ft[b];
+                if d < best.0 {
+                    best = (d, bones[b].part);
+                }
+            }
+            labels[i] = best.1;
+        }
+
+        let _ = orphans;
+        labels
+    }
+
+    fn fixtures() -> Vec<(Mask, Vec<Bone>)> {
+        let gap = vec![
+            [0.0, 0.0], [2.0, 0.0], [2.0, 5.0], [2.2, 5.0], [2.2, 0.0], [2.6, 0.0], [2.6, 6.0],
+            [0.0, 6.0],
+        ];
+        let islands = Outline {
+            subpaths: vec![rect(0.0, 0.0, 1.0, 4.0), rect(3.0, 0.0, 4.0, 4.0), rect(1.6, 3.0, 1.9, 3.5)],
+        };
+        vec![
+            (
+                rasterize(&Outline { subpaths: vec![gap] }, 300),
+                vec![
+                    bone("spine", "chest", &[[1.0, 5.5], [1.0, 0.3]]),
+                    bone("arm", "rightArm", &[[2.4, 5.5], [2.4, 0.3]]),
+                ],
+            ),
+            (
+                rasterize(&islands, 200),
+                vec![
+                    bone("left", "leftLeg", &[[0.5, 3.8], [0.5, 0.2]]),
+                    bone("right", "rightLeg", &[[3.5, 3.8], [3.5, 0.2]]),
+                ],
+            ),
+            // Two bones of the SAME part, a one-joint bone in the middle, and
+            // an explicit radius.
+            (
+                rasterize(&Outline { subpaths: vec![rect(0.0, 0.0, 2.0, 6.0)] }, 240),
+                vec![
+                    bone("upper", "chest", &[[1.0, 5.8], [1.0, 4.0]]),
+                    bone("stub", "neck", &[[1.0, 3.0]]),
+                    Bone { radius_ft: Some(0.3), ..bone("lower", "chest", &[[1.0, 4.0], [1.0, 2.0]]) },
+                    bone("legs", "leftLeg", &[[1.0, 2.0], [0.5, 1.0], [1.0, 0.2]]),
+                ],
+            ),
+        ]
+    }
+
+    #[test]
+    fn the_part_channel_is_byte_identical_to_the_pre_bone_labeller() {
+        for (n, (mask, bones)) in fixtures().iter().enumerate() {
+            assert_eq!(label(mask, bones).labels, label_reference(mask, bones), "fixture {n}");
+        }
+        let empty = rasterize(&Outline { subpaths: vec![rect(0.0, 0.0, 1.0, 1.0)] }, 32);
+        assert_eq!(label(&empty, &[]).labels, label_reference(&empty, &[]));
+    }
+
+    #[test]
+    fn every_filled_pixel_has_an_owner_whose_part_is_its_label() {
+        for (n, (mask, bones)) in fixtures().iter().enumerate() {
+            let map = label(mask, bones);
+            assert_eq!(map.bones.len(), map.labels.len());
+            let mut counted = vec![0usize; bones.len()];
+            for (i, (&l, &o)) in map.labels.iter().zip(&map.bones).enumerate() {
+                assert_eq!(o != 0, mask.inside[i], "fixture {n} pixel {i}");
+                if o != 0 {
+                    assert_eq!(bones[o as usize - 1].part, l, "fixture {n} pixel {i}");
+                    counted[o as usize - 1] += 1;
+                }
+            }
+            assert_eq!(counted, map.bone_pixels, "fixture {n}");
+            assert_eq!(counted.iter().sum::<usize>(), mask.inside.iter().filter(|&&b| b).count());
+        }
+    }
+
+    #[test]
+    fn same_part_bones_still_split_the_pixels_between_them() {
+        let (mask, bones) = fixtures().remove(2);
+        let map = label(&mask, &bones);
+        let owner_at = |p: Pt| map.bones[map.grid.cell(p).unwrap()];
+        assert_eq!(owner_at([1.0, 5.0]), 1);
+        assert_eq!(owner_at([1.0, 3.0]), 3);
+        assert_eq!(owner_at([1.0, 0.5]), 4);
+        // The one-joint bone keeps its slot (indices do not shift) but owns nothing.
+        assert_eq!(map.bone_pixels[1], 0);
+        assert!(map.bone_pixels[0] > 0 && map.bone_pixels[2] > 0 && map.bone_pixels[3] > 0);
+    }
+
+    #[test]
+    fn orphans_get_an_owner_too() {
+        let (mask, bones) = fixtures().remove(1);
+        let map = label(&mask, &bones);
+        assert_eq!(map.bones[map.grid.cell([1.75, 3.25]).unwrap()], 1);
     }
 }

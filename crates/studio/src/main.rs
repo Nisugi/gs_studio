@@ -40,6 +40,10 @@ fn main() -> eframe::Result {
         None => app::ToolId::Rigs,
     };
 
+    // The rig session reads this each time it opens, so the flag rides the env.
+    if let Some(dir) = &cli.publish {
+        std::env::set_var("GS_STUDIO_PUBLISH", dir);
+    }
     let data = data_root::from_environment(cli.data);
     eprintln!("gs-studio: data root {} ({})", data.path.display(), data.source);
     let pool = pool_dir::from_environment(cli.pool);

@@ -603,7 +603,12 @@ mod tests {
         for part in &map.meta.parts {
             assert!(map.has_part(part), "{part} has pixels");
         }
-        for part in ["leftEye", "rightEye", "back", "nsys"] {
+        // Eye discs are baked onto the head; a front view has no back, and
+        // nsys never has a region.
+        for part in ["leftEye", "rightEye"] {
+            assert!(map.has_part(part), "{part} is baked onto the head");
+        }
+        for part in ["back", "nsys"] {
             assert!(!map.has_part(part), "{part} has no region on this rig");
         }
         assert!(!map.has_part("tail"));
