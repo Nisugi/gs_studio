@@ -1,0 +1,21 @@
+# Poses for every family rigged from the "serpentine" template.
+#
+# ANGLES ONLY, in degrees, so a pose transfers to any family of this body
+# type. Keys are BONE names. A key with no _l / _r that names no bone is a
+# PAIR: "leg" poses leg_l as written and leg_r mirrored (y, z negated).
+#
+#   rot  = [x, y, z]  Euler, for the bone's FIRST segment about its pivot, in
+#                     its parent's frame (x = left, y = up, z = front), applied
+#                     Rx * Rz * Ry: twist (y), then spread (z), then swing (x).
+#                     A limb hanging down: +x swings it BACK, -x forward;
+#                     +z lifts a LEFT limb out to the side.
+#   bend = [deg, ..]  one per INNER segment of the chain (elbow; knee, ankle;
+#                     stifle, hock), about its natural hinge. + swings the far
+#                     end BACK for a hanging limb: knees +, elbows -.
+#   root = [x, y, z]  turns the whole figure about the root bone's pivot.
+#
+# No translations: after FK the figure is rested on the ground.
+
+body_type = "serpentine"
+
+[pose.stand]

@@ -30,6 +30,9 @@ pub mod creature_art;
 /// Addition since the port (not in VellumFE): the no-art creature doll.
 pub mod creature_doll;
 pub mod creature_field;
+/// Addition since the port (not in VellumFE): the no-art creature puppet,
+/// preferred over the flat doll whenever a baked puppet resolves.
+pub mod creature_puppet;
 pub mod image_store;
 
 pub use creature_art::{

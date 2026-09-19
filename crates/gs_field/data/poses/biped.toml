@@ -1,0 +1,82 @@
+# Poses for every family rigged from the "biped" template.
+#
+# ANGLES ONLY, in degrees, so a pose transfers to any family of this body
+# type. Keys are BONE names. A key with no _l / _r that names no bone is a
+# PAIR: "leg" poses leg_l as written and leg_r mirrored (y, z negated).
+#
+#   rot  = [x, y, z]  Euler, for the bone's FIRST segment about its pivot, in
+#                     its parent's frame (x = left, y = up, z = front), applied
+#                     Rx * Rz * Ry: twist (y), then spread (z), then swing (x).
+#                     A limb hanging down: +x swings it BACK, -x forward;
+#                     +z lifts a LEFT limb out to the side.
+#   bend = [deg, ..]  one per INNER segment of the chain (elbow; knee, ankle;
+#                     stifle, hock), about its natural hinge. + swings the far
+#                     end BACK for a hanging limb: knees +, elbows -.
+#   root = [x, y, z]  turns the whole figure about the root bone's pivot.
+#
+# No translations: after FK the figure is rested on the ground.
+
+body_type = "biped"
+
+[pose.stand]
+
+[pose.arms_up]
+arm = { rot = [0.0, 0.0, 152.0], bend = [-14.0] }
+
+[pose.kneel]
+leg = { bend = [92.0, 62.0] }
+arm = { rot = [-6.0, 0.0, 0.0], bend = [-16.0] }
+
+[pose.sit]
+torso_lower = { rot = [-12.0, 0.0, 0.0] }
+torso_upper = { rot = [10.0, 0.0, 0.0] }
+leg = { rot = [-98.0, 0.0, 6.0], bend = [38.0, -14.0] }
+arm = { rot = [32.0, 0.0, 8.0], bend = [-10.0] }
+
+[pose.prone]
+root = [90.0, 0.0, 0.0]
+neck = { rot = [-18.0, 0.0, 0.0] }
+arm = { rot = [0.0, 0.0, 28.0] }
+leg = { rot = [0.0, 0.0, 5.0], bend = [0.0, 58.0] }
+
+[pose.supine]
+root = [-90.0, 0.0, 0.0]
+arm = { rot = [0.0, 0.0, 30.0] }
+leg = { rot = [0.0, 0.0, 6.0] }
+
+[pose.fallen_side]
+root = [0.0, 0.0, 90.0]
+torso_upper = { rot = [14.0, 0.0, 0.0] }
+neck = { rot = [10.0, 0.0, 0.0] }
+leg_l = { rot = [-62.0, 0.0, 0.0], bend = [80.0] }
+leg_r = { rot = [-28.0, 0.0, 0.0], bend = [48.0] }
+arm_l = { rot = [-55.0, 0.0, 0.0], bend = [-50.0] }
+arm_r = { rot = [-30.0, 0.0, 0.0], bend = [-70.0] }
+
+# Slumped on its feet: head down, arms hanging forward, knees soft.
+[pose.stunned]
+torso_lower = { rot = [8.0, 0.0, 0.0] }
+torso_upper = { rot = [24.0, 0.0, 0.0] }
+neck = { rot = [26.0, 0.0, 0.0] }
+skull = { rot = [22.0, 0.0, 0.0] }
+arm = { rot = [-44.0, 0.0, 3.0], bend = [-10.0] }
+leg = { rot = [-16.0, 0.0, 2.0], bend = [30.0, -12.0] }
+
+# Two ways to lie dead; a client picks one per creature by a stable hash
+# (PoseSet::dead_name).
+[pose.dead]
+root = [0.0, 0.0, 90.0]
+torso_upper = { rot = [10.0, 0.0, 0.0] }
+neck = { rot = [24.0, 0.0, 0.0] }
+leg_l = { rot = [-50.0, 0.0, 0.0], bend = [70.0] }
+leg_r = { rot = [-16.0, 0.0, 0.0], bend = [30.0] }
+arm_l = { rot = [-70.0, 0.0, 0.0], bend = [-30.0] }
+arm_r = { rot = [-20.0, 0.0, 0.0], bend = [-40.0] }
+
+[pose.dead_2]
+root = [-90.0, 0.0, 0.0]
+skull = { rot = [0.0, 40.0, 0.0] }
+arm_l = { rot = [0.0, 0.0, 62.0], bend = [-35.0] }
+arm_r = { rot = [0.0, 0.0, -18.0] }
+leg_l = { rot = [0.0, 0.0, 14.0] }
+leg_r = { rot = [-12.0, 0.0, -4.0], bend = [24.0] }

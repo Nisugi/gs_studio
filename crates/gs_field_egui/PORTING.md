@@ -314,3 +314,59 @@ and exits. `STAGE_DEMO_EXIT_AFTER_SECS` kept.
 
 Tests: +13 (12 in `creature_doll::tests`, 1 in `creature_art::tests`),
 13 -> 26. No new dependencies.
+
+### 7.5 `src/creature_puppet.rs` (new file) -- puppets, with the doll kept as fallback
+
+The no-art draw path is now three tiers, none of them lost:
+**puppet -> flat doll -> placeholder standee.**
+
+| Item | What |
+|---|---|
+| `PoseChoice` (`of`, `names`, `resolve`, `is_prone_box`) | creature state -> pose, body-type independent: prone / kneeling / sitting / stunned / dead / standing. `names()` is a fallback chain ending at `stand` (which `PoseSet::from_toml` guarantees), so a body type missing a pose degrades instead of failing -- a quadruped's "kneel" lands on `lie`. Dead picks among `dead`, `dead_2`, ... by `PoseSet::dead_name` |
+| `PuppetKey` (`new`, `wounds`, `yaw`) | the cache key: pose, wound ranks[14], dead, boss, body colour, mirror, and the quantized drawn height. `wounds()` hands `gs_puppet::Look` plain `(part, rank)` pairs -- rank 3 on a limb is a severance the puppet already handles (subtree dropped, red stump) |
+| `SIZE_STEPS`, `size_step` | the drawn heights a list is built for. LOD and contour thickness are measured in REAL pixels, so a 40 px creature must not be handed a 400 px one's station count or hairline outline -- that is what turns a small figure into speckle. A figure takes the step at or above its height and scales DOWN, so it is never upsampled, and a room of same-sized creatures shares one entry |
+| `pose_puppet`, `unit_camera`, `yawed_bounds` | FK + grounding + `draw_list` + `ground_shadow` through a camera at the key's pixels-per-foot, origin at the figure's ground point. `outline_px` / `min_station_px` scale with the step. `yawed_bounds` reports the box the VIEWER sees (rest bounds turned by the look's yaw) |
+| `PosedPuppet` (`aspect`, `content_ratio`, `span`) | the display list, the shadow, the world box in feet, the family's standing height, and the build scale. The three accessors are the geometry contract's shape terms, measured from what was drawn |
+| `PuppetPlacement` (`fit`, `paint`) | the figure's ground point on the card's foot point, its STANDING height covering `standing_px` -- so a kneeling or prone figure shrinks by exactly as much as the pose really does. Placement is a uniform scale about the foot point; nothing is re-projected per frame |
+| `PuppetCache`, `SharedPuppetCache` | per-`egui::Context` (in `ctx.data`, so `CreatureFieldView` did not change): parsed puppets, pose sets, `parts`, cached cascade results, and an LRU (`POSE_CACHE_CAP` = 96) of posed display lists keyed by (family, `PuppetKey`). Built only on a key miss; everything drops when `gs_field::puppets::puppets().generation()` changes |
+| `calibration_for`, `CALIBRATION_HEIGHT_PX` | the SHAPE calibration (aspect, span, and the prone pose's content ratio) from the REAL posed boxes, standing and prone -- so a solver box is the box that is drawn. Shape only, exactly as the doll's is: `size` is never set |
+
+### 7.6 `src/creature_field.rs` -- still exactly two marked regions
+
+Both additions stayed INSIDE the existing `>>>doll` / `<<<doll` markers, so
+`creature_field_is_the_port_plus_marked_additions_only` still pins the rest
+of the file byte-identical:
+
+* the inline region gained one arm AHEAD of the doll's:
+  `if let Some(puppet_body) = paint_creature_puppet(..) { .. } else if let Some(doll_body) = paint_creature_doll(..) { .. } else { standee }`
+* the block region gained `fn paint_creature_puppet` (and `fn blank_texture`,
+  a 1x1 transparent texture the overlay pass borrows -- it reads a
+  `CreatureArt`'s texture SIZE for anchored layers but never draws it, and a
+  puppet has no texture of its own). Placement mirrors `paint_creature_doll`;
+  skin status overlays go through the UNCHANGED `paint_card_overlays`; wounds
+  on parts the family's puppet has no segment for reuse the UNCHANGED
+  `paint_placeholder_wounds`.
+
+### 7.7 `src/creature_art.rs` -- the no-art feed prefers the puppet
+
+`feed_doll_calibration` became `feed_no_art_calibration(ctx, token, want)`:
+the PUPPET's posed boxes when one resolves, the doll's flat shape otherwise.
+Its generation guard now mixes both published sets. Sprite calibration still
+always wins -- this runs only on the `bases` miss, exactly as before.
+
+### 7.8 `examples/` -- looking at it
+
+* `stage_demo.rs`: the showcase roster now covers both published body types
+  and every pose the state machine can ask for. `STAGE_DEMO_NO_ART=1` (implied
+  by `STAGE_DEMO_SHOT`) points the data dir at an empty directory so the
+  no-art path draws even on a machine with a full image pool.
+* `puppet_tune.rs` (new): a contact sheet of the puppet at the sizes and poses
+  the field draws it at, with prim counts. `PUPPET_TUNE_SHOT=<path.png>`.
+
+Cost (release): `from_baked_toml` 2-3 ms once per family; pose + draw_list
+0.3-0.7 ms once per cache key (182-337 prims, near-constant across sizes --
+the LOD working); a settled frame of 24 creatures over 6 keys, 0.0017 ms
+total, rebuilding nothing.
+
+Tests: +10 in `creature_puppet::tests`, +1 in `creature_art::tests`;
+26 -> 36. New dependency: `gs_puppet` (path).

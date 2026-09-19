@@ -275,3 +275,31 @@ wgpu / winit; `cargo check -p gs_field --target aarch64-linux-android` passes.
 
 Tests: +11 (`dolls::tests`), 134 -> 145. The coverage test prints per-tier /
 per-family counts with `-- --nocapture`.
+
+### 6.9 `src/puppets.rs` -- creature PUPPETS (the doll's replacement, doll kept)
+
+A published puppet is one file, `<family>.puppet.toml`: the BAKED 3D puppet
+(`gs_puppet::Puppet::to_baked_toml` -- segments, measured stations, the bone
+tree, eyes, `body_type`, `height` in feet). Beside them ride the pose sets,
+`<body_type>.toml` -- angle-only bone rotations shared by every family of a
+shape. This crate never PARSES either: as with the doll's label-map PNG, it
+hands the TEXT to the frontend, which owns `gs_puppet`. That keeps `gs_field`
+free of the puppet/rig/egui dependency chain and Android-safe.
+
+Clients never rasterise a silhouette at run time; the bake is the only input.
+
+| Item | What |
+|---|---|
+| `data/puppets/<family>.puppet.toml` | the published bakes, embedded with `include_dir`. **Generated output: copied in, never hand-edited.** Refresh = `cp <bake dir>/<family>.puppet.toml crates/gs_field/data/puppets/`. Nothing here reads a field of the file (only its NAME and the one `body_type` line), so a refresh is a drop-in; the only contract is `gs_puppet::BAKED_VERSION`, checked by the frontend when it parses |
+| `data/poses/<body_type>.toml` | READ-ONLY copies of the repo's `data/poses/`, embedded the same way |
+| `PuppetRig`, `PoseFile`, `PuppetSource` | one published artefact: the unparsed text plus, for a puppet, the `body_type` scanned off it (`scan_body_type` -- a top-level-key scan, not a parse) |
+| `embedded()`, `embedded_poses()` | iterators of the compiled-in `(family, toml)` / `(body type, toml)` |
+| `puppets_dir()`, `load_dir(dir)` | the runtime override layer, `<base dir>/global/puppets/`, holding both kinds: `<family>.puppet.toml` is a puppet, any other `<name>.toml` a pose set |
+| `PuppetRigs` | the merged set (an override replaces/adds); `get`, `has`, `pose_file`, `families`, `body_types`, `generation`, `puppet_for`, `from_rigs` |
+| `puppets()`, `invalidate_cache()` | cached merged set, reloading by itself when `data_dirs::base_dir()` moves. Each rebuild gets a new `generation` |
+| `puppet_for(name, noun)` | the cascade: `dolls::resolve_doll` with "has a PUPPET" as the test, so the SAME tiers (family -> body-type default -> generic biped) pick a puppet, and a family with none falls through to the doll |
+
+Mirrors `dolls.rs` deliberately, line for line where it can: same layering,
+same override design, same cache and generation discipline, same cascade.
+
+Tests: +5 in `puppets::tests`. No new dependencies (`include_dir` already).

@@ -5,6 +5,7 @@
 
 use rig::{mirror_name, Pt, Rig, Template, View};
 
+use super::depth::{DepthDrag, EditView};
 use super::undo::UndoStack;
 use super::view::{Canvas, ViewTransform};
 
@@ -33,11 +34,16 @@ pub struct Editor {
     pub(super) selected_bone: Option<usize>,
     /// Bone whose chain canvas clicks on joints are appending to.
     pub(super) chain_pick: Option<usize>,
+    /// Which silhouette is being worked on: the rig's own, or the other one
+    /// with each joint at its depth. UI state: not part of the rig, not undone.
+    pub(super) edit_view: EditView,
     pub mirror: bool,
     /// The rig as last saved / loaded / created: dirty = differs from this.
     baseline: Rig,
     history: UndoStack<Rig>,
     pub(super) drag: Option<Drag>,
+    /// A DEPTH-view drag: it moves the off-plane coordinate only.
+    pub(super) depth_drag: Option<DepthDrag>,
     /// Bumped on every rig change; the baker re-runs when it moves.
     revision: u64,
 }
@@ -55,9 +61,11 @@ impl Editor {
             selected: None,
             selected_bone: None,
             chain_pick: None,
+            edit_view: EditView::Primary,
             mirror: true,
             history: UndoStack::default(),
             drag: None,
+            depth_drag: None,
             revision: 0,
         };
         e.current = e.first_unplaced();
@@ -224,7 +232,7 @@ impl Editor {
         if !self.is_placed(joint) {
             return false;
         }
-        self.drag = None;
+        (self.drag, self.depth_drag) = (None, None);
         self.edit(None).joints.remove(joint);
         self.selected = None;
         self.current = Some(joint.to_owned());
@@ -261,6 +269,12 @@ impl Editor {
         self.revision += 1;
     }
 
+    /// End the current undo step without claiming anything changed (so no
+    /// re-bake): the next edit starts a new step even with the same tag.
+    pub(super) fn seal_history(&mut self) {
+        self.history.seal();
+    }
+
     pub fn set_axis(&mut self, axis: &str) {
         if self.rig.axis != axis {
             self.edit(None).axis = axis.to_owned();
@@ -268,13 +282,13 @@ impl Editor {
     }
 
     pub fn undo(&mut self) -> bool {
-        self.drag = None;
+        (self.drag, self.depth_drag) = (None, None);
         let done = self.history.undo(&mut self.rig);
         self.after_history_jump(done)
     }
 
     pub fn redo(&mut self) -> bool {
-        self.drag = None;
+        (self.drag, self.depth_drag) = (None, None);
         let done = self.history.redo(&mut self.rig);
         self.after_history_jump(done)
     }

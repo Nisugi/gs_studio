@@ -709,7 +709,23 @@ fn paint_creature_card(
                 paint_wound_overlays(painter, cache, resolved, art, dest, &f.injuries);
             }
         }
-    } else /* >>>doll */ if let Some(doll_body) = paint_creature_doll(
+    } else /* >>>doll */ if let Some(puppet_body) = paint_creature_puppet(
+        painter,
+        card,
+        unit,
+        creature,
+        now_ms,
+        view,
+        art_cache,
+        resolved.as_ref(),
+        &mut animated,
+    ) {
+        // ---- creature puppet (addition; not in VellumFE) -------------
+        // The family's BAKED 3D puppet, posed from the creature's state and
+        // shaded, replaces the flat doll whenever one resolves. The doll
+        // below stays as the fallback. See creature_puppet.rs.
+        body = puppet_body;
+    } else if let Some(doll_body) = paint_creature_doll(
         painter,
         card,
         unit,
@@ -1180,6 +1196,146 @@ fn paint_wound_marker(painter: &egui::Painter, pt: egui::Pos2, card_w: f32, rank
 }
 
 // >>>doll
+/// A 1x1 transparent texture, created once per context. The overlay pass
+/// takes a `CreatureArt` and reads its texture's SIZE for anchored layers
+/// but never draws it; the puppet has no texture of its own, so it lends
+/// this one. Square, so an anchored overlay keeps its authored aspect.
+fn blank_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_insert_with::<egui::TextureHandle>(
+            egui::Id::new("gs_field_egui::puppet_blank"),
+            || {
+                ctx.load_texture(
+                    "puppet:blank",
+                    egui::ColorImage::from_rgba_unmultiplied([1, 1], &[0, 0, 0, 0]),
+                    egui::TextureOptions::NEAREST,
+                )
+            },
+        )
+        .clone()
+    })
+}
+
+/// The creature PUPPET for a card with no sprite art (ADDITION, not in
+/// VellumFE): resolve the family (`gs_field::puppets`, the doll cascade with
+/// "has a baked puppet" as the test), pose the baked 3D figure for this
+/// creature's state, and draw it. Returns the screen rect the figure fills —
+/// the caller's `body` — or None when no puppet resolves or the bake does
+/// not load, in which case the flat doll draws, and failing that the old
+/// placeholder standee: three tiers, none of them lost.
+///
+/// Placement mirrors `paint_creature_doll`: the figure's ground point on the
+/// card's foot line at the card's centre x, its STANDING height covering the
+/// unit's standing height at the card's pixel scale — so a kneeling or
+/// prone figure shrinks by exactly as much as the pose really does.
+#[allow(clippy::too_many_arguments)]
+fn paint_creature_puppet(
+    painter: &egui::Painter,
+    card: egui::Rect,
+    unit: &Unit,
+    creature: &gs_field::Creature,
+    now_ms: f64,
+    view: &CreatureFieldView<'_>,
+    art_cache: Option<&crate::creature_art::CreatureArtCache>,
+    resolved: Option<&gs_field::cards::ResolvedCard<'_>>,
+    animated: &mut bool,
+) -> Option<egui::Rect> {
+    use crate::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
+    let flags = creature.flags.as_ref();
+    let dead = creature.is_dead();
+    let noun = creature.noun.as_deref().unwrap_or("creature");
+    let injuries: &[(String, u8)] = flags.map(|f| f.injuries.as_slice()).unwrap_or_default();
+
+    let ctx = painter.ctx();
+    let shared = PuppetCache::shared(ctx);
+    let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
+    puppets.begin_frame(ctx.cumulative_frame_nr());
+    let family = puppets.family_for(&creature.name, creature.noun.as_deref())?;
+
+    // Stable per-creature variety, the doll's own bits: which way the
+    // figure faces, and which way it falls (fallen-side vs supine, and
+    // which of a body type's dead poses it takes).
+    let (mirror, on_side) = crate::creature_doll::variety(&creature.id);
+    let has = |name: &str| flags.is_some_and(|f| f.has_flag(name));
+    let pose = PoseChoice::of(dead, &has, on_side, u8::from(on_side));
+    // The card's pixel scale, exactly as the sprite and doll branches take
+    // it: the reserved standing height in card pixels. Flying / hovering
+    // already moved `card`, so the foot line follows the lift.
+    let px_per_unit = card.height() / unit.size.h.max(0.01);
+    let standing_px = unit.standing.h * px_per_unit;
+    let foot = egui::pos2(card.center().x, card.bottom());
+    let color = body_color(noun, dead);
+    let key = PuppetKey::new(
+        pose,
+        injuries,
+        dead,
+        flags.is_some_and(|f| f.is_boss()),
+        [color.r(), color.g(), color.b()],
+        mirror,
+        standing_px,
+    );
+    let posed = puppets.posed(&family, &key)?;
+    // The parts this family's puppet actually carries, taken while the lock
+    // is already held (the wound pass below needs it, and re-locking once
+    // per creature per frame would be the one avoidable cost here).
+    let drawn = puppets.parts(&family);
+    drop(puppets);
+    let place = PuppetPlacement::fit(&posed, foot, standing_px);
+    // The figure's own contact shadow, under it: the card's generic ellipse
+    // is already down, and this one is shaped like the pose.
+    place.paint(painter, &posed.shadow);
+    place.paint(painter, &posed.prims);
+
+    // Skin status overlays ride the same code as sprite cards, over the
+    // posed body rect. The puppet has no texture, so anchors come from the
+    // drawn box: head at the top centre, feet at the ground point.
+    if let (Some(cache), Some(resolved)) = (art_cache, resolved) {
+        if !resolved.overlays.is_empty() {
+            let body = place.body;
+            let frac = |p: egui::Pos2| {
+                [
+                    (p.x - body.left()) / body.width().max(1e-3),
+                    (p.y - body.top()) / body.height().max(1e-3),
+                ]
+            };
+            let art = crate::creature_art::CreatureArt {
+                texture: blank_texture(ctx),
+                head: frac(egui::pos2(body.center().x, body.top())),
+                feet: frac(foot),
+                bbox: [0.0, 0.0, 1.0, 1.0],
+                anchors: Default::default(),
+                footprint: None,
+                size: None,
+                lift: None,
+                alpha_px: 0,
+                extras: Default::default(),
+            };
+            *animated |= paint_card_overlays(
+                painter,
+                cache,
+                resolved,
+                &art,
+                body,
+                now_ms,
+                &|name| (view.effect_severity)(&creature.id, name),
+            );
+        }
+    }
+
+    // Wounds the puppet has no segment for (eyes, back and nsys on families
+    // that do not carry them): the placeholder standee's treatment over the
+    // posed body rect, so nothing a creature is carrying goes unshown.
+    let unplaced: Vec<(String, u8)> = injuries
+        .iter()
+        .filter(|(part, rank)| *rank > 0 && !drawn.iter().any(|p| p.eq_ignore_ascii_case(part)))
+        .cloned()
+        .collect();
+    if !unplaced.is_empty() {
+        paint_placeholder_wounds(painter, place.body, &unplaced);
+    }
+    Some(place.body)
+}
+
 /// The creature doll for a card with no sprite art (ADDITION, not in
 /// VellumFE): resolve the rig (`gs_field::dolls` cascade, cached), fetch the
 /// composed texture for this creature's look (built only when the look

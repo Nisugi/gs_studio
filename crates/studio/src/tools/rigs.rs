@@ -6,11 +6,13 @@ use std::path::Path;
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use rig::{templates, View, AXES, PARTS};
 
+use crate::editor::depth::{axis_label, other_view};
 use crate::editor::palette::{label_rgba, LABEL_RGB};
 use crate::editor::prompt::{NamePrompt, PromptKind};
+use crate::editor::state::Editor;
 use crate::editor::structure::{AnchorSlot, MAX_NAME_LEN};
 use crate::editor::warnings::MIN_SHARE;
-use crate::editor::{Canvas, DocAction, Session, ViewTransform};
+use crate::editor::{Canvas, DepthModel, DocAction, EditView, Session, ViewTransform};
 
 const PREVIEW_ALPHA: u8 = 215;
 const FIT_MARGIN_PX: f32 = 36.0;
@@ -23,11 +25,18 @@ const BONES_SHARE: f32 = 0.5;
 pub struct RigTool {
     session: Session,
     view: ViewTransform,
+    /// DEPTH mode's own pan / zoom: it looks at the OTHER silhouette, which
+    /// is a different shape, so it keeps its own camera and Fit.
+    depth_view: ViewTransform,
+    /// DEPTH mode has not been framed on the other silhouette yet.
+    depth_fit: bool,
     texture: Option<(u64, egui::TextureHandle)>,
     /// A radius drag-value is being dragged: bake small, like a joint drag.
     radius_drag: bool,
     /// Likewise the eye-radius drag-value.
     eye_drag: bool,
+    /// A depth DragValue in the joint list is being dragged.
+    depth_value_drag: bool,
     /// The open Add / Rename prompt, and whether its text box still needs focus.
     prompt: Option<(NamePrompt, bool)>,
 }
@@ -46,9 +55,12 @@ impl RigTool {
         Ok(RigTool {
             session: Session::open(data_root)?,
             view: ViewTransform::default(),
+            depth_view: ViewTransform::default(),
+            depth_fit: true,
             texture: None,
             radius_drag: false,
             eye_drag: false,
+            depth_value_drag: false,
             prompt: None,
         })
     }
@@ -80,6 +92,12 @@ impl RigTool {
         }
         ui.separator();
         ui.label(format!("{} / {} / {}", rig.family, rig.view.as_str(), rig.body_type));
+        ui.separator();
+        let mode = s.editor.edit_view();
+        ui.label(mode.label());
+        if mode == EditView::Depth {
+            ui.weak(format!("{} of {} overridden", s.editor.depth_override_count(), rig.joints.len()));
+        }
         if let Some(b) = s.last_bake() {
             ui.separator();
             ui.weak(format!("bake {} px: {:.1} ms", b.long_side_px, b.ms));
@@ -91,8 +109,18 @@ impl RigTool {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.shortcuts(ui);
         // Bake before drawing so every panel shows the same, current map.
-        let interactive = self.session.editor.is_dragging() || self.radius_drag || self.eye_drag;
+        let interactive = self.session.editor.is_dragging()
+            || self.session.editor.is_depth_dragging()
+            || self.radius_drag
+            || self.eye_drag
+            || self.depth_value_drag;
         self.session.baked(interactive);
+        // The depth guesses move with the joints, so re-read them the same way.
+        self.session.refresh_depth();
+        // A family with no second silhouette cannot be edited in DEPTH.
+        if !self.session.depth_available() {
+            self.session.editor.set_edit_view(EditView::Primary);
+        }
 
         egui::Panel::left("rig_left").default_size(330.0).min_size(260.0).show(ui, |ui| self.left_panel(ui));
         egui::Panel::right("rig_right").default_size(270.0).min_size(200.0).show(ui, |ui| {
@@ -124,8 +152,19 @@ impl RigTool {
             self.save();
         }
         let typing = ui.ctx().egui_wants_keyboard_input();
+        let depth_mode = self.session.editor.edit_view() == EditView::Depth;
         if !typing && ui.input(|i| i.key_pressed(Key::Delete)) {
-            self.session.editor.unplace_selected();
+            // In DEPTH, Delete resets the joint to its guess: un-placing is a
+            // primary-view act and must not happen behind the artist's back.
+            match (depth_mode, self.session.editor.selected().map(str::to_owned)) {
+                (true, Some(joint)) => {
+                    self.session.editor.reset_joint_depth(&joint);
+                }
+                (true, None) => {}
+                (false, _) => {
+                    self.session.editor.unplace_selected();
+                }
+            }
         }
         if !typing && ui.input(|i| i.key_pressed(Key::Escape)) {
             self.session.editor.set_chain_pick(None);
@@ -191,6 +230,34 @@ impl RigTool {
                         .on_hover_text("Switching view starts a new rig: joints belong to one silhouette");
                     if button.clicked() && v != view {
                         s.request(DocAction::NewFromTemplate { template: body_type.clone(), view: v });
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Editing").on_hover_text(
+                "PRIMARY: the rig's own silhouette -- place and move joints.\n\
+                 DEPTH: the family's OTHER silhouette, each joint at its off-plane coordinate.",
+            );
+            ui.horizontal(|ui| {
+                let now = s.editor.edit_view();
+                let available = s.depth_available();
+                let why = s.depth().unavailable_reason(s.editor.rig());
+                for choice in EditView::ALL {
+                    let enabled = available || choice == EditView::Primary;
+                    let button = ui
+                        .add_enabled(enabled, egui::Button::selectable(choice == now, choice.label()))
+                        .on_disabled_hover_text(&why);
+                    let button = match choice {
+                        EditView::Primary => button.on_hover_text("Place and move joints on this rig's silhouette"),
+                        EditView::Depth => button.on_hover_text(format!(
+                            "Correct each joint's {}, against the {} silhouette. Dragging changes depth only.",
+                            axis_label(s.editor.rig().view),
+                            other_view(s.editor.rig().view).as_str(),
+                        )),
+                    };
+                    if button.clicked() {
+                        s.editor.set_edit_view(choice);
                     }
                 }
             });
@@ -313,6 +380,10 @@ impl RigTool {
             Some(j) => ui.weak(format!("Next click places: {j}")),
             None => ui.weak("All joints placed. Click a joint in the list to re-place it."),
         };
+        let model = self.session.depth().clone();
+        let editor = &mut self.session.editor;
+        let depth_available = model.available();
+        let mut reset = None;
         egui::ScrollArea::vertical().id_salt("joints").auto_shrink([false, false]).show(ui, |ui| {
             for joint in &order {
                 let is_current = current.as_deref() == Some(joint);
@@ -329,7 +400,13 @@ impl RigTool {
                 let item = ui
                     .horizontal(|ui| {
                         placed_marker(ui, placed);
-                        ui.selectable_label(is_current, text)
+                        let item = ui.selectable_label(is_current, text);
+                        if depth_available {
+                            if let Some(j) = depth_cell(ui, editor, &model, joint) {
+                                reset = Some(j);
+                            }
+                        }
+                        item
                     })
                     .inner;
                 if item.clicked() {
@@ -340,6 +417,9 @@ impl RigTool {
                 }
             }
         });
+        if let Some(joint) = reset {
+            editor.reset_joint_depth(&joint);
+        }
         if let Some(kind) = ask {
             self.ask(kind);
         }
@@ -568,6 +648,10 @@ impl RigTool {
         ui.separator();
         let eye_used = baked.eye_radius_ft;
         self.anchors_and_eyes(ui, eye_used);
+
+        ui.separator();
+        self.depth_panel(ui);
+
         let Some(bake) = self.session.last_bake() else {
             return;
         };
@@ -581,14 +665,108 @@ impl RigTool {
         ui.label(format!("ground at {:.1}% down", baked.ground_frac * 100.0));
         ui.label(format!("orphan pixels: {}", baked.map.orphans));
 
+        // Depth warnings sit with the rest rather than in their own corner.
+        let mut all = bake.warnings.clone();
+        all.extend(self.session.depth().warnings(self.session.editor.rig()));
         ui.separator();
-        ui.strong(format!("Warnings ({})", bake.warnings.len()));
-        if bake.warnings.is_empty() {
+        ui.strong(format!("Warnings ({})", all.len()));
+        if all.is_empty() {
             ui.weak("none");
         }
-        for w in &bake.warnings {
+        for w in &all {
             ui.horizontal_wrapped(|ui| ui.colored_label(ui.visuals().warn_fg_color, format!("\u{26A0} {w}")));
         }
+    }
+
+    /// Depth: how many joints are corrected, the resets, and the selected
+    /// joint's own value.
+    fn depth_panel(&mut self, ui: &mut egui::Ui) {
+        let model = self.session.depth().clone();
+        let editor = &mut self.session.editor;
+        let rig_view = editor.rig().view;
+        ui.strong("Depth");
+        if !model.available() {
+            ui.weak("Not available for this family.");
+            ui.horizontal_wrapped(|ui| ui.weak(model.unavailable_reason(editor.rig())));
+            return;
+        }
+        ui.weak(format!("off-plane axis: {}", axis_label(rig_view)));
+        let (over, placed) = model.override_counts(editor.rig());
+        let text = format!("{over} of {placed} overridden");
+        if over > 0 {
+            ui.strong(text);
+        } else {
+            ui.weak(format!("{text} (all guessed)"));
+        }
+        ui.horizontal(|ui| {
+            let reset = ui
+                .add_enabled(over > 0, egui::Button::new("Reset all to guess"))
+                .on_hover_text("Drop every override; the guesses apply again")
+                .on_disabled_hover_text("Nothing is overridden");
+            if reset.clicked() {
+                editor.reset_all_depths();
+            }
+            if editor.edit_view() != EditView::Depth
+                && ui.button("Edit in DEPTH").on_hover_text("Switch the canvas to the other silhouette").clicked()
+            {
+                editor.set_edit_view(EditView::Depth);
+            }
+        });
+
+        // The selected joint, so a value can be typed instead of dragged.
+        let Some(joint) = editor.selected().map(str::to_owned) else {
+            ui.weak("Select a joint to set its depth by hand.");
+            return;
+        };
+        let d = model.joint(editor.rig(), &joint);
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.strong(&joint);
+            match (d.overridden, d.matches_guess()) {
+                (true, true) => {
+                    ui.label("overridden").on_hover_text(
+                        "It is set by hand, but it sits on the guess: resetting it changes nothing on screen \
+                         and lets a better guess apply later.",
+                    );
+                }
+                (true, false) => {
+                    ui.label("overridden");
+                }
+                (false, _) => {
+                    ui.weak("guessed");
+                }
+            }
+        });
+        let mut dragging = false;
+        let mut released = false;
+        ui.horizontal(|ui| {
+            let mut value = d.value;
+            let drag = ui.add(
+                egui::DragValue::new(&mut value).speed(0.005).range(-40.0..=40.0).fixed_decimals(3).suffix(" ft"),
+            );
+            if drag.changed() {
+                editor.set_joint_depth(&joint, value);
+            }
+            dragging |= drag.dragged();
+            released |= drag.drag_stopped() || drag.lost_focus();
+            let reset = ui
+                .add_enabled(d.overridden, egui::Button::new("Reset to guess"))
+                .on_disabled_hover_text("This joint is already at its guess");
+            if reset.clicked() {
+                editor.reset_joint_depth(&joint);
+            }
+        });
+        match model.guess(&joint) {
+            Some(g) => {
+                let how = model.guess_source(&joint).unwrap_or("");
+                ui.weak(format!("guess {g:+.3} ft -- {how}"))
+            }
+            None => ui.weak("no guess for this joint"),
+        };
+        if released {
+            editor.end_continuous_edit();
+        }
+        self.depth_value_drag = dragging;
     }
 
     fn anchors_and_eyes(&mut self, ui: &mut egui::Ui, eye_used: Option<f32>) {
@@ -675,7 +853,13 @@ impl RigTool {
     // -------------------------------------------------------------- centre
 
     fn centre(&mut self, ui: &mut egui::Ui) {
+        if self.session.editor.edit_view() == EditView::Depth {
+            self.centre_depth(ui);
+            return;
+        }
         let mut fit = std::mem::take(&mut self.session.fit_requested);
+        // A new document reframes DEPTH too, next time it is shown.
+        self.depth_fit |= fit;
         ui.horizontal(|ui| {
             fit |= ui.button("Fit").clicked();
             ui.weak(format!("{:.0} px/ft", self.view.zoom));
@@ -704,6 +888,173 @@ impl RigTool {
         self.canvas_input(ui, &response, &canvas);
         self.upload_texture(ui.ctx());
         self.paint(ui, &painter, &response, &canvas);
+    }
+
+    /// DEPTH view: the OTHER silhouette, each placed joint plotted at
+    /// (its depth, the height it was authored at). Dragging moves a joint
+    /// horizontally only.
+    fn centre_depth(&mut self, ui: &mut egui::Ui) {
+        let mut fit = std::mem::take(&mut self.depth_fit);
+        // A fit asked for by the document (a new family) reframes both views.
+        fit |= std::mem::replace(&mut self.session.fit_requested, false);
+        let rig_view = self.session.editor.rig().view;
+        ui.horizontal(|ui| {
+            fit |= ui.button("Fit").clicked();
+            ui.weak(format!("{:.0} px/ft", self.depth_view.zoom));
+            ui.separator();
+            ui.weak(format!(
+                "DEPTH on the {} silhouette: across = {}   drag: depth only, y is locked   wheel: zoom   middle or Space+drag: pan",
+                other_view(rig_view).as_str(),
+                axis_label(rig_view),
+            ));
+        });
+
+        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+        let rect = response.rect;
+        let canvas = Canvas { min: [rect.min.x, rect.min.y], size: [rect.width(), rect.height()] };
+        if fit {
+            if let Some(bounds) = self.session.other_outline().and_then(|o| o.bounds()) {
+                self.depth_view.fit(&canvas, bounds, FIT_MARGIN_PX);
+            }
+        }
+        self.depth_input(ui, &response, &canvas);
+        self.paint_depth(ui, &painter, &response, &canvas);
+    }
+
+    fn depth_input(&mut self, ui: &egui::Ui, response: &egui::Response, canvas: &Canvas) {
+        use egui::PointerButton::{Middle, Primary};
+        let view = &mut self.depth_view;
+        let model = self.session.depth().clone();
+        let editor = &mut self.session.editor;
+
+        if response.contains_pointer() {
+            let (scroll, pinch, at) = ui.input(|i| (i.smooth_scroll_delta().y, i.zoom_delta(), i.pointer.hover_pos()));
+            let factor = (scroll * 0.0025).exp() * pinch;
+            if let (Some(at), true) = (at, factor != 1.0) {
+                view.zoom_at(canvas, [at.x, at.y], factor);
+            }
+        }
+
+        let space = ui.input(|i| i.key_down(egui::Key::Space));
+        if response.dragged_by(Middle) || (space && response.dragged_by(Primary) && !editor.is_depth_dragging()) {
+            let d = response.drag_delta();
+            view.pan([d.x, d.y]);
+            return;
+        }
+
+        let world = |p: Pos2| view.screen_to_world(canvas, [p.x, p.y]);
+        if response.drag_started_by(Primary) && !space {
+            let origin = ui.input(|i| i.pointer.press_origin()).or(response.interact_pointer_pos());
+            if let Some(origin) = origin {
+                if let Some(joint) = editor.hit_joint_depth(&model, view, canvas, [origin.x, origin.y]) {
+                    editor.begin_depth_drag(&model, &joint, world(origin));
+                }
+            }
+        }
+        if editor.is_depth_dragging() {
+            if let Some(p) = response.interact_pointer_pos() {
+                editor.depth_drag_to(world(p));
+            }
+            if response.drag_stopped() || !ui.input(|i| i.pointer.primary_down()) {
+                editor.end_depth_drag();
+            }
+        }
+
+        // A click selects; an empty click places nothing (joints belong to
+        // the primary view). Right-click resets that joint to its guess.
+        if response.clicked_by(Primary) && !space {
+            if let Some(p) = response.interact_pointer_pos() {
+                if let Some(joint) = editor.hit_joint_depth(&model, view, canvas, [p.x, p.y]) {
+                    editor.select(&joint);
+                }
+            }
+        }
+        if response.secondary_clicked() {
+            if let Some(p) = response.interact_pointer_pos() {
+                if let Some(joint) = editor.hit_joint_depth(&model, view, canvas, [p.x, p.y]) {
+                    editor.reset_joint_depth(&joint);
+                }
+            }
+        }
+    }
+
+    fn paint_depth(&self, ui: &egui::Ui, painter: &egui::Painter, response: &egui::Response, canvas: &Canvas) {
+        let view = &self.depth_view;
+        let editor = &self.session.editor;
+        let model = self.session.depth();
+        let rig = editor.rig();
+        let rect = response.rect;
+        let to_screen = |p: [f32; 2]| pos(view.world_to_screen(canvas, p));
+        let visuals = ui.visuals();
+        let dark = visuals.dark_mode;
+        let ink = if dark { Color32::from_gray(235) } else { Color32::from_gray(20) };
+        let guide = if dark { Color32::from_gray(70) } else { Color32::from_gray(170) };
+
+        painter.rect_filled(rect, 0.0, visuals.extreme_bg_color);
+
+        // The ground, and the zero line of the off-plane axis.
+        let ground_y = to_screen([0.0, 0.0]).y;
+        painter.line_segment([Pos2::new(rect.left(), ground_y), Pos2::new(rect.right(), ground_y)], Stroke::new(1.0, guide));
+        let zero_x = to_screen([0.0, 0.0]).x;
+        painter.line_segment([Pos2::new(zero_x, rect.top()), Pos2::new(zero_x, rect.bottom())], Stroke::new(1.0, guide));
+
+        // The OTHER silhouette, drawn as it is.
+        if let Some(outline) = self.session.other_outline() {
+            for sub in &outline.subpaths {
+                let points: Vec<Pos2> = sub.iter().map(|p| to_screen(*p)).collect();
+                painter.add(egui::Shape::closed_line(points, Stroke::new(1.0, ink)));
+            }
+        }
+
+        // Bones, so a limb's depths can be read as a chain.
+        let bone_ink = if dark { Color32::from_white_alpha(90) } else { Color32::from_black_alpha(100) };
+        for bone in &rig.bones {
+            let points: Vec<Pos2> =
+                bone.joints.iter().filter_map(|j| model.plot(rig, j)).map(to_screen).collect();
+            if points.len() >= 2 {
+                painter.line(points, Stroke::new(2.0, bone_ink));
+            }
+        }
+
+        // Joints: guessed hollow and dim, overridden filled and bright.
+        let bright = Color32::from_rgb(255, 210, 0);
+        let dim = if dark { Color32::from_gray(150) } else { Color32::from_gray(110) };
+        let hover = response.hover_pos().and_then(|p| editor.hit_joint_depth(model, view, canvas, [p.x, p.y]));
+        for name in rig.joints.keys() {
+            let Some(p) = model.plot(rig, name) else { continue };
+            let c = to_screen(p);
+            let d = model.joint(rig, name);
+            let is_selected = editor.selected() == Some(name.as_str());
+            let is_hover = hover.as_deref() == Some(name.as_str());
+            let radius = if is_selected || is_hover { 6.0 } else { 4.5 };
+            if d.overridden {
+                painter.circle(c, radius, bright, Stroke::new(1.5, Color32::BLACK));
+            } else {
+                painter.circle_stroke(c, radius, Stroke::new(1.5, dim));
+            }
+            // A guessed joint keeps a faint tick at the guess when it is
+            // overridden, so the correction can be judged against it.
+            if let (true, Some(g)) = (d.overridden, d.guess) {
+                let at = to_screen([g, p[1]]);
+                painter.circle_stroke(at, 3.0, Stroke::new(1.0, dim));
+                painter.line_segment([at, c], Stroke::new(1.0, dim));
+            }
+            if is_selected {
+                painter.circle_stroke(c, radius + 3.5, Stroke::new(2.0, bright));
+            }
+        }
+
+        // Hover readout: the joint, its depth, and whether it is a guess.
+        if let (Some(p), Some(name)) = (response.hover_pos(), &hover) {
+            let d = model.joint(rig, name);
+            let tag = if d.overridden { "override" } else { "guess" };
+            let text = format!("{name}  {:+.3} ft  ({tag})", d.value);
+            let at = p + Vec2::new(14.0, 14.0);
+            let galley = painter.layout_no_wrap(text, egui::FontId::proportional(13.0), ink);
+            let bg = Rect::from_min_size(at, galley.size()).expand(3.0);
+            painter.rect_filled(bg, 3.0, visuals.extreme_bg_color.gamma_multiply(0.85));
+            painter.galley(at, galley, ink);
+        }
     }
 
     fn canvas_input(&mut self, ui: &egui::Ui, response: &egui::Response, canvas: &Canvas) {
@@ -1014,6 +1365,33 @@ fn placed_marker(ui: &mut egui::Ui, placed: bool) {
     } else {
         ui.painter().circle_stroke(rect.center(), radius - 0.5, Stroke::new(1.0, ui.visuals().weak_text_color()));
     }
+}
+
+/// The joint list's depth column: the value, a marker saying whether it is a
+/// guess or an override, and (for an override) a reset button. Returns the
+/// joint whose "reset to guess" was clicked.
+fn depth_cell(ui: &mut egui::Ui, editor: &Editor, model: &DepthModel, joint: &str) -> Option<String> {
+    if !editor.is_placed(joint) {
+        ui.weak("--").on_hover_text("Not placed yet, so it has no depth");
+        return None;
+    }
+    let d = model.joint(editor.rig(), joint);
+    let text = format!("{:+.2}", d.value);
+    let hover = match (d.overridden, model.guess_source(joint)) {
+        (true, Some(how)) => format!("Set by hand. The guess would be {:+.2} ft ({how}).", d.guess.unwrap_or(0.0)),
+        (true, None) => "Set by hand. There is nothing to guess from.".to_owned(),
+        (false, Some(how)) => format!("A guess: {how}. Drag it in DEPTH view to correct it."),
+        (false, None) => "No override and nothing to guess from: it falls back to 0.".to_owned(),
+    };
+    if d.overridden {
+        ui.strong(text).on_hover_text(hover);
+        let reset = ui
+            .add(egui::Button::new("x").small())
+            .on_hover_text(format!("Reset '{joint}' to the guess, so a better guess later still applies"));
+        return reset.clicked().then(|| joint.to_owned());
+    }
+    ui.weak(text).on_hover_text(hover);
+    None
 }
 
 fn guide_text(dark: bool) -> Color32 {

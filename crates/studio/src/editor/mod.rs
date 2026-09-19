@@ -4,6 +4,7 @@
 //! eyes), undo, the world<->screen transform, warnings, publishing, and the
 //! document session all work -- and are tested -- without a window.
 
+pub mod depth;
 pub mod palette;
 pub mod prompt;
 pub mod session;
@@ -13,6 +14,7 @@ pub mod undo;
 pub mod view;
 pub mod warnings;
 
+pub use depth::{DepthModel, EditView};
 pub use session::{DocAction, Session};
 pub use view::{Canvas, ViewTransform};
 

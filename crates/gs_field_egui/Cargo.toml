@@ -10,6 +10,9 @@ doctest = false
 
 [dependencies]
 gs_field = { path = "../gs_field" }
+# ADDITION (not in VellumFE): the baked 3D creature puppets the no-art draw
+# path prefers over the flat doll.
+gs_puppet = { path = "../gs_puppet" }
 # MUST be the same egui the host apps link (VellumFE, gs-studio): textures,
 # painters and contexts cross the crate boundary.
 egui = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }

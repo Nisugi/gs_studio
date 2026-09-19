@@ -1,0 +1,63 @@
+# Poses for every family rigged from the "quadruped" template.
+#
+# ANGLES ONLY, in degrees, so a pose transfers to any family of this body
+# type. Keys are BONE names. A key with no _l / _r that names no bone is a
+# PAIR: "leg" poses leg_l as written and leg_r mirrored (y, z negated).
+#
+#   rot  = [x, y, z]  Euler, for the bone's FIRST segment about its pivot, in
+#                     its parent's frame (x = left, y = up, z = front), applied
+#                     Rx * Rz * Ry: twist (y), then spread (z), then swing (x).
+#                     A limb hanging down: +x swings it BACK, -x forward;
+#                     +z lifts a LEFT limb out to the side.
+#   bend = [deg, ..]  one per INNER segment of the chain (elbow; knee, ankle;
+#                     stifle, hock), about its natural hinge. + swings the far
+#                     end BACK for a hanging limb: knees +, elbows -.
+#   root = [x, y, z]  turns the whole figure about the root bone's pivot.
+#
+# No translations: after FK the figure is rested on the ground.
+
+body_type = "quadruped"
+
+[pose.stand]
+
+[pose.sit]
+root = [-38.0, 0.0, 0.0]
+neck = { rot = [20.0, 0.0, 0.0] }
+skull = { rot = [20.0, 0.0, 0.0] }
+tail = { rot = [58.0, 0.0, 0.0] }
+foreleg = { rot = [34.0, 0.0, 0.0], bend = [6.0] }
+hindleg = { rot = [-42.0, 0.0, 0.0], bend = [118.0, -122.0] }
+
+# Sternal: on its chest, legs folded under.
+[pose.lie]
+neck = { rot = [-12.0, 0.0, 0.0] }
+skull = { rot = [14.0, 0.0, 0.0] }
+tail = { rot = [25.0, 0.0, 0.0] }
+foreleg = { rot = [42.0, 0.0, 0.0], bend = [-128.0] }
+forepaw = { rot = [-8.0, 0.0, 0.0] }
+hindleg = { rot = [-55.0, 0.0, 0.0], bend = [128.0, -130.0] }
+
+[pose.fallen_side]
+root = [0.0, 0.0, 90.0]
+neck = { rot = [14.0, 0.0, 0.0] }
+tail = { rot = [20.0, 0.0, 0.0] }
+foreleg = { rot = [-22.0, 0.0, 0.0], bend = [-30.0] }
+hindleg = { rot = [16.0, 0.0, 0.0], bend = [22.0, -24.0] }
+
+# Head hanging, legs splayed, tail tucked.
+[pose.stunned]
+neck = { rot = [38.0, 0.0, 0.0] }
+skull = { rot = [16.0, 0.0, 0.0] }
+tail = { rot = [-28.0, 0.0, 0.0] }
+foreleg = { rot = [-6.0, 0.0, 9.0] }
+hindleg = { rot = [6.0, 0.0, 9.0] }
+
+[pose.dead]
+root = [0.0, 0.0, 90.0]
+neck = { rot = [30.0, 0.0, 0.0] }
+skull = { rot = [10.0, 0.0, 0.0] }
+tail = { rot = [34.0, 0.0, 0.0] }
+foreleg_l = { rot = [-34.0, 0.0, 0.0], bend = [-18.0] }
+foreleg_r = { rot = [-8.0, 0.0, 0.0], bend = [-44.0] }
+hindleg_l = { rot = [28.0, 0.0, 0.0], bend = [14.0, -10.0] }
+hindleg_r = { rot = [4.0, 0.0, 0.0], bend = [36.0, -30.0] }

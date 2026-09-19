@@ -20,22 +20,30 @@ body_type = "quadruped"
 
 [pose.stand]
 
+# Rump on the ground, forelegs a vertical prop, hindlegs folded alongside.
+# The hindleg is ALREADY a zigzag at rest (thigh +30, shank -30, pastern +29
+# from vertical), so bends compose onto an existing fold: near equal-and-
+# opposite values cancel into an accordion instead of swinging the hock back.
 [pose.sit]
 root = [-38.0, 0.0, 0.0]
 neck = { rot = [20.0, 0.0, 0.0] }
 skull = { rot = [20.0, 0.0, 0.0] }
 tail = { rot = [58.0, 0.0, 0.0] }
-foreleg = { rot = [34.0, 0.0, 0.0], bend = [6.0] }
-hindleg = { rot = [-42.0, 0.0, 0.0], bend = [118.0, -122.0] }
+foreleg = { rot = [38.0, 0.0, 0.0], bend = [-4.0] }
+hindleg = { rot = [-34.0, 0.0, 0.0], bend = [85.0, -52.0] }
 
-# Sternal: on its chest, legs folded under.
+# Sternal: chest down, forelegs stretched out in front, hindlegs folded
+# tight alongside. Grounding rests the LOWEST surface on y = 0, so whatever
+# hangs lowest sets the body's height: a fold that leaves the paws dangling
+# props the trunk up at standing height instead of lowering it. The forelegs
+# therefore reach forward along the ground rather than tucking under.
 [pose.lie]
-neck = { rot = [-12.0, 0.0, 0.0] }
-skull = { rot = [14.0, 0.0, 0.0] }
+neck = { rot = [16.0, 0.0, 0.0] }
+skull = { rot = [-10.0, 0.0, 0.0] }
 tail = { rot = [25.0, 0.0, 0.0] }
-foreleg = { rot = [42.0, 0.0, 0.0], bend = [-128.0] }
-forepaw = { rot = [-8.0, 0.0, 0.0] }
-hindleg = { rot = [-55.0, 0.0, 0.0], bend = [128.0, -130.0] }
+foreleg = { rot = [-72.0, 0.0, 0.0], bend = [4.0] }
+forepaw = { rot = [66.0, 0.0, 0.0] }
+hindleg = { rot = [44.0, 0.0, 0.0], bend = [128.0, -86.0] }
 
 [pose.fallen_side]
 root = [0.0, 0.0, 90.0]

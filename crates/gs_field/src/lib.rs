@@ -39,6 +39,7 @@ pub mod geometry;
 pub mod naming;
 pub mod png_meta;
 pub mod pool;
+pub mod puppets;
 pub mod scenes;
 pub mod skins;
 pub mod solver;

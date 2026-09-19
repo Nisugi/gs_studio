@@ -86,13 +86,16 @@ joints), each bone carrying one body part and hanging off a parent bone. A
 template only SEEDS a rig: joints, bones, the hierarchy, anchors and eyes are
 all editable afterwards.
 
-- **Left**: family, view (front/side), template, what `ref_ft` measures;
+- **Left**: family, view (front/side), **Editing** (PRIMARY / DEPTH, below),
+  template, what `ref_ft` measures;
   Save / New from template / Publish (+ *publish on save*) / Undo / Redo.
   Below that the joint list and the bone list share the remaining height,
   each in its own scroll area, with a draggable divider between them.
   - **Joints** are in click-through order (filled dot = placed, hollow = not
     yet, bold = the joint the next click places), with Mirror. *Add*,
-    *Rename*, *Delete*, *Up*, *Down* act on the current joint.
+    *Rename*, *Delete*, *Up*, *Down* act on the current joint. A **depth**
+    column shows each placed joint's off-plane coordinate -- weak = a guess,
+    bold with an *x* to reset = set by hand.
   - **Bones** are listed as a tree (children indented under their parent),
     each with a part dropdown and radius (Auto = measured by `rig_bake`; the
     radius actually used is always shown). *Add*, *Rename*, *Delete* act on
@@ -106,7 +109,8 @@ all editable afterwards.
   boxed.
 - **Right**: legend with per-part pixel share; **Anchors and eyes** (which
   joint is head / mouth / saddle / left eye / right eye, and the eye radius:
-  Auto or a value); map size / aspect / span, orphan count; warnings.
+  Auto or a value); **Depth** (below); map size / aspect / span, orphan
+  count; warnings.
 
 | Input | Does |
 |---|---|
@@ -122,8 +126,47 @@ all editable afterwards.
 | Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo (every rig edit; one gesture = one step) |
 | Ctrl+S | save |
 
+In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
+bindings change:
+
+| Input | Does |
+|---|---|
+| drag a joint | change its DEPTH only; its height is locked to the primary view |
+| click a joint | select it (empty clicks place nothing: joints belong to PRIMARY) |
+| right-click a joint, or Delete with one selected | reset it to the guess |
+| wheel / pinch, middle or Space+drag | zoom / pan (DEPTH keeps its own camera and Fit) |
+
 With **Mirror** on, in a front view, placing `X_r` (or `X_l`) also places its
 twin reflected across x = 0 -- but only if the twin is not placed yet.
+
+**Depth.** A rig is clicked onto ONE silhouette, so every joint is missing
+its third coordinate: `z` (front-back, + = the creature's front) for a front
+rig, `x` (left-right, + = the creature's left) for a side rig. `gs_puppet`
+guesses every one of them off the family's OTHER silhouette; the **Editing**
+toggle switches the canvas to a DEPTH pass where those guesses are corrected.
+
+- The canvas draws the other silhouette as it is, with each placed joint at
+  **(its depth, the height it was authored at)** -- the off-plane axis
+  across, y up -- and the bone chains between them. Dragging moves a joint
+  along the off-plane axis ONLY; y belongs to the primary view and never
+  changes here.
+- **Guessed** joints are hollow and dim; **overridden** ones are filled and
+  bright, with a faint tick and leader back to where the guess was, so the
+  correction can be judged against it. The right panel says "*n* of *m*
+  overridden", and has *Reset all to guess* plus, for the selected joint, a
+  typed value and *Reset to guess*.
+- **Only the overrides are saved**, into the rig file's `[depth]` table. A
+  joint left at its guess is not written, so a later, better guess still
+  applies to it. Resetting a joint drops it from the table; clearing every
+  override drops the table.
+- An override follows its joint through a rename and goes with it on delete.
+  Un-placing a joint keeps the override: re-placing it brings it back.
+- Every depth edit is undoable and **one gesture is one undo step** -- a drag
+  coalesces, a reset is its own step, *Reset all* is a single step.
+- **Warnings**: a joint whose depth puts it outside the other silhouette is
+  named in the rig's own warning list. A family with only one silhouette has
+  nothing to edit against: the DEPTH button is disabled and its hover text
+  says which outline key is missing.
 
 **Editing the structure.** Names are lower snake_case (`[a-z][a-z0-9_]*`),
 unique, checked as you type; an `_r` / `_l` ending makes a mirror pair, and
@@ -186,8 +229,9 @@ created if its parent exists; if not even the parent exists, the button and
 the checkbox are disabled and their hover text says why -- Save still works.
 
 All editor logic -- state, hit-testing, placement and mirror rules, structure
-edits, the name prompt, undo, the world<->screen transform, warnings,
-open/save/publish/discard -- lives in `crates/studio/src/editor/`, which may
+edits, the depth pass (`editor/depth.rs`: guesses, overrides, the DEPTH-view
+plot and its drag), the name prompt, undo, the world<->screen transform,
+warnings, open/save/publish/discard -- lives in `crates/studio/src/editor/`, which may
 not mention egui (a test enforces it). `tools/rigs.rs` only draws and forwards
 input.
 

@@ -82,6 +82,10 @@ fn rename_joint_in(rig: &mut Rig, old: &str, new: &str) {
     if let Some(p) = rig.joints.remove(old) {
         rig.joints.insert(new.to_owned(), p);
     }
+    // The depth override belongs to the joint, so it follows the rename.
+    if let Some(d) = rig.depth.remove(old) {
+        rig.depth.insert(new.to_owned(), d);
+    }
     for bone in &mut rig.bones {
         for j in bone.joints.iter_mut().filter(|j| *j == old) {
             *j = new.to_owned();
@@ -213,10 +217,12 @@ impl Editor {
         let Some(at) = self.rig.joint_order.iter().position(|j| j == joint) else {
             return false;
         };
-        self.drag = None;
+        (self.drag, self.depth_drag) = (None, None);
         let rig = self.edit(None);
         rig.joint_order.remove(at);
         rig.joints.remove(joint);
+        // No joint, no depth override for it.
+        rig.depth.remove(joint);
         for bone in &mut rig.bones {
             bone.joints.retain(|j| j != joint);
             if bone.pivot.as_deref() == Some(joint) {

@@ -103,9 +103,10 @@ pub struct CreatureArtCache {
     /// Resolve root: the image pool.
     root: PathBuf,
     skin_name: String,
-    /// ADDITION (not in VellumFE): token -> the creature doll's shape
-    /// calibration for creatures with no sprite art (None = no rig
-    /// resolves), valid for `doll_generation` of the published rig set.
+    /// ADDITION (not in VellumFE): token -> the shape calibration of what a
+    /// creature with no sprite art draws as — its puppet, else its doll
+    /// (None = neither resolves). Valid for `doll_generation`, which mixes
+    /// the published puppet and rig set generations.
     doll_calibrations: HashMap<String, Option<gs_field::geometry::ArtCalibration>>,
     doll_generation: u64,
 }
@@ -174,13 +175,24 @@ impl CreatureArtCache {
     }
 
     /// ADDITION (not in VellumFE). Refine the core geometry store with the
-    /// creature doll's shape for a token that has NO sprite art. The
-    /// cascade runs once per token (and again when the published rig set
-    /// changes); after that a settled frame is a hash lookup plus
-    /// `refine`'s no-change compare — and because it re-refines every
-    /// frame, the entry comes back by itself after the store is invalidated.
-    fn feed_doll_calibration(&mut self, token: &str, want: &WantedCreature) {
-        let generation = gs_field::dolls::rigs().generation();
+    /// shape of whatever a token with NO sprite art actually draws as: its
+    /// family's PUPPET when one resolves (the real posed boxes, standing and
+    /// prone), else its doll. Sprite calibration always wins — this runs
+    /// only on the `bases` miss.
+    ///
+    /// The cascade and the pose both run once per token (and again when the
+    /// published sets change generation); after that a settled frame is a
+    /// hash lookup plus `refine`'s no-change compare — and because it
+    /// re-refines every frame, the entry comes back by itself after the
+    /// store is invalidated.
+    fn feed_no_art_calibration(
+        &mut self,
+        ctx: &egui::Context,
+        token: &str,
+        want: &WantedCreature,
+    ) {
+        let generation = gs_field::dolls::rigs().generation()
+            ^ gs_field::puppets::puppets().generation().rotate_left(32);
         if self.doll_generation != generation {
             self.doll_generation = generation;
             self.doll_calibrations.clear();
@@ -188,7 +200,21 @@ impl CreatureArtCache {
         let cal = match self.doll_calibrations.get(token) {
             Some(cal) => *cal,
             None => {
-                let cal = gs_field::dolls::calibration_for(&want.name, want.noun.as_deref());
+                // The puppet's real posed boxes first; the doll's flat
+                // aspect/span when no puppet resolves.
+                let shared = crate::creature_puppet::PuppetCache::shared(ctx);
+                let cal = {
+                    let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
+                    puppets.begin_frame(ctx.cumulative_frame_nr());
+                    crate::creature_puppet::calibration_for(
+                        &mut puppets,
+                        &want.name,
+                        want.noun.as_deref(),
+                    )
+                }
+                .or_else(|| {
+                    gs_field::dolls::calibration_for(&want.name, want.noun.as_deref())
+                });
                 self.doll_calibrations.insert(token.to_string(), cal);
                 cal
             }
@@ -391,11 +417,12 @@ impl CreatureArtStore {
             // state. Both keyed by absolute path so re-loads are lookups.
             let Some(Some(art)) = cache.bases.get(token.as_str()) else {
                 // ADDITION (not in VellumFE): no sprite art, so the card
-                // draws as its family's creature doll — feed the doll's
-                // SHAPE to the geometry store so the solver's boxes match
-                // what is drawn. Sprite calibration owns the token as soon
-                // as `bases` holds art for it (the refine further down).
-                cache.feed_doll_calibration(&token, want);
+                // draws as its family's creature PUPPET, or failing that
+                // its doll — feed whichever one's SHAPE to the geometry
+                // store so the solver's boxes match what is drawn. Sprite
+                // calibration owns the token as soon as `bases` holds art
+                // for it (the refine further down).
+                cache.feed_no_art_calibration(ctx, &token, want);
                 continue;
             };
             let prone = art.extra("prone").cloned();
@@ -812,13 +839,15 @@ mod tests {
         assert!(cache.bases.get("gryphon").is_some_and(|art| art.is_none()));
     }
 
-    /// ADDITION (not in VellumFE). A creature with no sprite art feeds its
-    /// creature doll's SHAPE to the geometry store; sprite calibration wins
-    /// whenever art exists, and replaces the doll entry when art appears.
+    /// ADDITION (not in VellumFE). A creature with no sprite art feeds the
+    /// SHAPE of whatever it actually draws as -- its family's PUPPET when
+    /// one resolves, the flat doll otherwise. Sprite calibration wins
+    /// whenever art exists, and replaces the entry when art appears.
     #[test]
-    fn doll_calibration_feeds_only_without_art_and_yields_to_sprite_art() {
+    fn no_art_calibration_prefers_the_puppet_and_yields_to_sprite_art() {
         let env = test_env();
         gs_field::dolls::invalidate_cache();
+        gs_field::puppets::invalidate_cache();
         write_png(&pool_dir().join("creatures/coyote.png"), 2);
         let wanted = |name: &str| WantedCreature {
             name: name.to_string(),
@@ -835,13 +864,26 @@ mod tests {
         let doll = gs_field::dolls::calibration_for("hill troll", Some("troll"))
             .expect("humanoid rig is embedded");
         assert_eq!(doll.standing.size, None, "shape only");
+        let puppet = {
+            let shared = crate::creature_puppet::PuppetCache::shared(&env.ctx);
+            let mut cache = shared.lock().unwrap();
+            cache.begin_frame(0);
+            crate::creature_puppet::calibration_for(&mut cache, "hill troll", Some("troll"))
+                .expect("the humanoid puppet is embedded")
+        };
+        assert_eq!(puppet.standing.size, None, "shape only");
+        assert_ne!(puppet, doll, "the posed puppet is not the flat doll");
 
         let mut state = CreatureArtStore::default();
         state.reset();
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
-        assert_eq!(resolve("hill troll"), Some(doll), "no art: the doll's shape");
+        assert_eq!(
+            resolve("hill troll"),
+            Some(puppet),
+            "no art: the PUPPET's shape, not the doll's"
+        );
         let coyote = resolve("coyote").expect("sprite calibration");
-        assert_ne!(coyote, doll, "art present: the sprite's calibration, never the doll's");
+        assert_ne!(coyote, puppet, "art present: the sprite calibration wins");
         assert_eq!(coyote.standing.aspect, Some(1.0));
         assert_eq!(coyote.prone, None);
 
@@ -850,11 +892,11 @@ mod tests {
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
         assert_eq!(gs_field::geometry::calibrations().lock().unwrap().revision(), rev);
 
-        // The store is dropped behind the cache's back: the doll re-feeds.
+        // The store is dropped behind the cache's back: it re-feeds.
         gs_field::geometry::invalidate_calibrations();
         assert_eq!(resolve("hill troll"), None);
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
-        assert_eq!(resolve("hill troll"), Some(doll));
+        assert_eq!(resolve("hill troll"), Some(puppet));
 
         // Art appears (the host reloads art): the sprite takes the token.
         write_png(&pool_dir().join("creatures/hill_troll.png"), 2);
@@ -863,11 +905,30 @@ mod tests {
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         let sprite = resolve("hill troll").expect("sprite calibration");
         assert_eq!(sprite.standing.aspect, Some(1.0));
-        assert_eq!(sprite.prone, None, "the doll's derived prone pose is gone");
-        // Even with no reset in between, a sprite refine replaces a doll entry.
-        gs_field::geometry::calibrations().lock().unwrap().refine("hill_troll", doll);
+        assert_eq!(sprite.prone, None, "the puppet's posed prone box is gone");
+        // Even with no reset in between, a sprite refine replaces the entry.
+        gs_field::geometry::calibrations().lock().unwrap().refine("hill_troll", puppet);
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         assert_eq!(resolve("hill troll"), Some(sprite));
+    }
+
+    /// The flat doll is still the fallback, intact: a family that resolves
+    /// to NO puppet falls through to the doll's shape, which is what the
+    /// renderer will draw for it too.
+    #[test]
+    fn the_doll_is_still_the_fallback_when_no_puppet_resolves() {
+        let _env = test_env();
+        gs_field::dolls::invalidate_cache();
+        gs_field::puppets::invalidate_cache();
+        // A set with nothing published resolves to nothing at all, which is
+        // exactly the condition `feed_no_art_calibration` falls through on.
+        let empty = gs_field::puppets::PuppetRigs::default();
+        assert_eq!(empty.puppet_for("hill troll", Some("troll")), None);
+        // And the doll's own calibration is still there to fall through to.
+        let doll = gs_field::dolls::calibration_for("hill troll", Some("troll"))
+            .expect("humanoid rig is embedded");
+        assert_eq!(doll.standing.size, None, "shape only");
+        assert!(doll.prone.is_some(), "the doll's derived prone pose");
     }
 
     #[test]

@@ -27,6 +27,13 @@ const MIN_HALF_FT: f32 = 0.02;
 /// A limb station wider than this many times its chain's median is merged
 /// with a neighbour (an arm at the shoulder, a thigh inside the body).
 const LIMB_MERGED: f32 = 1.7;
+/// A limb segment buried in the trunk in the view it is measured in (a side
+/// view's upper foreleg, inside the chest) reads the TORSO at every station,
+/// so nothing about its own readings can catch it -- the median it would be
+/// judged against is the torso too. It is bounded instead by what the rest
+/// of its chain measures out in the open, times this: a limb does thicken
+/// toward its root, but not into a sphere.
+const BURIED_CALIBRE: f32 = 1.45;
 /// Half-thickness may change by at most this much per foot along the bone.
 const MAX_TAPER: f32 = 2.5;
 /// A mitten is this deep, as a share of its width.
@@ -306,6 +313,10 @@ struct Measured {
     off: Vec<f32>,
     w: Vec<f32>,
     unsplit: Vec<f32>,
+    /// For a limb buried in the trunk in the view it was measured in: the
+    /// calibre its chain reads where it is out in the open. The other view
+    /// is buried there too, so the depth needs the same bound.
+    buried_calibre: Option<f32>,
 }
 
 impl Puppet {
@@ -378,7 +389,11 @@ impl Puppet {
                 }
                 let m = measure_segment(rig, &raws, &kinds, &limb_r, i, &mask_of);
                 let mut ws = m.w.clone();
-                limb_r[i] = median(&mut ws);
+                // What the trunk stops at. Clamped to a plausible limb
+                // radius so one badly-measured limb can never eat the trunk
+                // back by more than its own length allows.
+                let reach = 0.5 * len(sub(raws[i].tail, raws[i].head)).max(0.2);
+                limb_r[i] = median(&mut ws).min(reach);
                 measured[i] = Some(m);
             }
         }
@@ -401,13 +416,19 @@ impl Puppet {
             let centre = |k: usize| add(lerp(r.head, r.tail, k as f32 / (n - 1) as f32), scale(m.axis_w, m.off[k]));
             let mut depth: Vec<Option<f32>> = Vec::with_capacity(n);
             let mut shift: Vec<f32> = Vec::with_capacity(n);
+            // Judge a limb's depth against the segment's MEDIAN width, not
+            // the width at this station: a per-station window is circular
+            // (the one reading that could contradict a bad width is thrown
+            // out because that width is bad), and a median survives a few
+            // buried stations.
+            let ref_w = median(&mut m.w.clone()).max(MIN_HALF_FT);
             for k in 0..n {
                 let c = centre(k);
                 let run = other.and_then(|mask| run_along(mask, [c[oa], c[1]], [1.0, 0.0], MERGE_GAP_FT, 0.12));
                 let (half, mid) = run.map(|(lo, hi)| ((hi - lo) * 0.5, (lo + hi) * 0.5)).unwrap_or((0.0, 0.0));
                 let ok = match kind {
                     Kind::Trunk => run.is_some(),
-                    Kind::Limb => run.is_some() && half <= 2.0 * m.w[k] && half >= 0.5 * m.w[k],
+                    Kind::Limb => run.is_some() && half <= 4.0 * ref_w && half >= 0.25 * ref_w,
                     Kind::Hand => false,
                 };
                 depth.push(ok.then_some(half));
@@ -415,9 +436,18 @@ impl Puppet {
             }
             let mut d: Vec<f32> = match kind {
                 Kind::Hand => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
-                Kind::Limb => (0..n).map(|k| depth[k].unwrap_or(m.w[k])).collect(),
+                // A limb with SOME believable depth interpolates from it;
+                // only one with none anywhere falls back to its width.
+                Kind::Limb => fill_gaps(&depth, ds, 0.8).unwrap_or_else(|| m.w.clone()),
                 Kind::Trunk => fill_gaps(&depth, ds, 0.0).unwrap_or_else(|| m.w.clone()),
             };
+            // A segment buried in the trunk is buried in BOTH views: the
+            // other view's run crosses the same chest. Without this the bad
+            // width is merely traded for an equally bad depth, and the
+            // balloon stays a balloon instead of becoming a leg.
+            if let Some(c) = m.buried_calibre {
+                d.iter_mut().for_each(|x| *x = x.min(BURIED_CALIBRE * c));
+            }
             if kind == Kind::Trunk {
                 // The other view stacks everything in front of and behind
                 // this slice on one row; do not let it run away.
@@ -558,7 +588,16 @@ impl Puppet {
                     })
                 })
             };
-            let bare = segments[i].stations.iter().take_while(|st| inside(st.c)).count();
+            // A station counts as buried only if its whole ELLIPSE is inside
+            // the trunk. Testing the centre alone lets a station that pokes
+            // far out of the body still be drawn filled but un-outlined --
+            // a contourless slab instead of a visibly fat limb.
+            let buried = |st: &Station| {
+                let (w, d) = (scale(segments[i].axis_w, st.w), scale(segments[i].axis_d, st.d));
+                inside(st.c)
+                    && [add(st.c, w), sub(st.c, w), add(st.c, d), sub(st.c, d)].into_iter().all(inside)
+            };
+            let bare = segments[i].stations.iter().take_while(|st| buried(st)).count();
             segments[i].bare = bare.min(segments[i].stations.len().saturating_sub(CAP_RINGS + 2));
         }
 
@@ -702,18 +741,52 @@ fn measure_segment<'m>(
     // Which stations to believe.
     let mut known: Vec<f32> = half.iter().flatten().copied().collect();
     let med = median(&mut known);
-    let chain_len: f32 = raws.iter().filter(|o| o.bone == r.bone && o.chain == r.chain).map(|o| len(sub(o.tail, o.head))).sum();
+    let chain: Vec<&Raw> = raws.iter().filter(|o| o.bone == r.bone && o.chain == r.chain).collect();
+    let chain_len: f32 = chain.iter().map(|o| len(sub(o.tail, o.head))).sum();
+    // The chain's true calibre. A segment buried in the trunk along its
+    // WHOLE length (a side view's upper foreleg, inside the chest) reads the
+    // torso at every station, so its own median is no help -- but its
+    // siblings out in the open read the real limb, and the thinnest reading
+    // along the chain is the one no trunk inflated.
+    let calibre = (kind != Kind::Trunk)
+        .then(|| {
+            chain
+                .iter()
+                .filter(|o| o.k != r.k)
+                .filter_map(|o| {
+                    let dir = flat(view, sub(o.tail, o.head));
+                    let dl = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt().max(1e-4);
+                    let across = [-dir[1] / dl, dir[0] / dl];
+                    // The midpoint: far enough from either joint that a
+                    // neighbouring bone's mass is not what gets measured.
+                    let p = flat(view, lerp(o.head, o.tail, 0.5));
+                    run_along(mask, p, across, MERGE_GAP_FT, 0.12).map(|(lo, hi)| (hi - lo) * 0.5)
+                })
+                .fold(f32::INFINITY, f32::min)
+        })
+        .filter(|c| c.is_finite() && *c > MIN_HALF_FT);
     for k in 0..n {
         let bad = match (kind, half[k]) {
             (_, None) => true,
             (Kind::Trunk, Some(h)) => h > 1.5 * chain_len.max(0.5),
-            (_, Some(h)) => h > LIMB_MERGED * med,
+            // Absolute, not relative: a limb is never half as thick as the
+            // chain it belongs to is long, nor much thicker than the
+            // thinnest point along that same chain.
+            (_, Some(h)) => {
+                let cap = (LIMB_MERGED * med).min(0.5 * chain_len.max(0.2));
+                h > cap.min(calibre.map_or(f32::INFINITY, |c| 2.5 * c))
+            }
         };
         if bad {
             half[k] = None;
             off[k] = None;
         }
     }
+    // How much of this segment was thrown out as trunk. A segment buried
+    // along its whole length loses (nearly) every station, and then BOTH the
+    // survivors and anything extrapolated from them are torso too.
+    let rejected = (0..n).filter(|&k| half[k].is_none()).count();
+    let buried = kind != Kind::Trunk && rejected * 2 >= n;
     let edge = |k: usize| edge_distance(mask, flat(view, lerp(r.head, r.tail, k as f32 / (n - 1) as f32)));
     let grow = if kind == Kind::Trunk { 0.0 } else { 0.8 };
     let mut w = fill_gaps(&half, ds, grow).unwrap_or_else(|| {
@@ -724,11 +797,18 @@ fn measure_segment<'m>(
         e.iter_mut().for_each(|x| *x = x.max(m * 0.6).min(m * 1.4));
         e
     });
+    // A limb thickens toward its root, but only so far. For a segment that
+    // lost most of its stations to the trunk, bound the result by what the
+    // chain measures where it IS out in the open -- otherwise the leg simply
+    // inherits the torso's width and balloons.
+    if let (true, Some(c)) = (buried, calibre) {
+        w.iter_mut().for_each(|x| *x = x.min(BURIED_CALIBRE * c));
+    }
     let mut off: Vec<f32> = off.iter().map(|o| o.unwrap_or(0.0)).collect();
     median3(&mut w);
     box3(&mut w);
     box3(&mut off);
-    Measured { view, axis_w, axis_d, off, w, unsplit }
+    Measured { view, axis_w, axis_d, off, w, unsplit, buried_calibre: buried.then_some(calibre).flatten() }
 }
 
 fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) -> Vec<Eye> {

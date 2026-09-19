@@ -11,6 +11,7 @@ use rig::{
 };
 use rig_bake::{rasterize, Mask};
 
+use super::depth::DepthModel;
 use super::state::Editor;
 use super::warnings::warnings;
 
@@ -81,6 +82,11 @@ pub struct Session {
     masks: HashMap<usize, Mask>,
     bake: Option<BakeResult>,
     bake_serial: u64,
+    /// The OTHER view's silhouette, rasterized once per open document.
+    /// `Some(None)` = looked, and this family has no second view.
+    other_mask: Option<Option<Mask>>,
+    /// The depth guesses, re-read whenever the rig changes.
+    depth: Option<(u64, DepthModel)>,
 }
 
 impl Session {
@@ -108,6 +114,8 @@ impl Session {
             masks: HashMap::new(),
             bake: None,
             bake_serial: 0,
+            other_mask: None,
+            depth: None,
         };
         session.open_family(&first);
         Ok(session)
@@ -168,6 +176,8 @@ impl Session {
         self.editor.mirror = mirror;
         self.masks.clear();
         self.bake = None;
+        self.other_mask = None;
+        self.depth = None;
         self.fit_requested = true;
     }
 
@@ -245,6 +255,46 @@ impl Session {
     /// The most recent bake, without re-running it.
     pub fn last_bake(&self) -> Option<&BakeResult> {
         self.bake.as_ref()
+    }
+
+    /// The OTHER view's silhouette, for DEPTH mode to draw joints against.
+    /// None = this family has only the one the rig is clicked onto.
+    pub fn other_outline(&self) -> Option<&OutlineEntry> {
+        let rig = self.editor.rig();
+        self.outlines.get(&rig.family, other_view(rig.view))
+    }
+
+    /// Re-read the depth guesses if the rig has changed since they were
+    /// taken. The other view's mask behind them is rasterized once per open
+    /// document. Call this before drawing; then read [`Session::depth`],
+    /// which borrows immutably and so can be used beside `self.editor`.
+    pub fn refresh_depth(&mut self) {
+        let revision = self.editor.revision();
+        if self.depth.as_ref().is_some_and(|(at, _)| *at == revision) {
+            return;
+        }
+        if self.other_mask.is_none() {
+            let outline = self.other_outline().map(|o| o.outline());
+            self.other_mask = Some(outline.map(|o| rasterize(&o, FULL_PX)));
+        }
+        let mask = self.other_mask.as_ref().and_then(Clone::clone);
+        self.depth = Some((revision, DepthModel::new(self.editor.rig(), mask)));
+    }
+
+    /// The depth guesses as [`Session::refresh_depth`] last took them. An
+    /// empty model (no guesses, no mask) until the first refresh.
+    pub fn depth(&self) -> &DepthModel {
+        static EMPTY: std::sync::OnceLock<DepthModel> = std::sync::OnceLock::new();
+        match &self.depth {
+            Some((_, model)) => model,
+            None => EMPTY.get_or_init(DepthModel::default),
+        }
+    }
+
+
+    /// True when this family has a second silhouette, so depths can be edited.
+    pub fn depth_available(&self) -> bool {
+        self.other_outline().is_some()
     }
 
     /// Ok(the directory) when publishing can work: the directory exists, or
@@ -509,6 +559,56 @@ mod tests {
         let dragging = s.editor.is_dragging();
         assert_eq!(s.baked(dragging).unwrap().baked.map.grid.h, FULL_PX);
         assert!(!s.baked(false).unwrap().warnings.is_empty());
+    }
+
+    #[test]
+    fn depth_guesses_follow_the_rig_and_need_a_second_silhouette() {
+        let data = TempData::new("depth");
+        let mut s = Session::open(&data.0).unwrap();
+        assert!(s.depth_available(), "humanoid has both views in the fixture");
+        s.editor.place_current([0.0, 5.8]);
+        s.refresh_depth();
+        assert!(s.depth().joint(s.editor.rig(), "crown").value.is_finite());
+        // Move the joint: the guess is re-read, not stale.
+        s.editor.set_current("crown");
+        s.editor.place_current([0.0, 1.0]);
+        s.refresh_depth();
+        assert!(s.depth().guess("crown").is_some());
+        assert!(s.depth().available());
+
+        // 'worm' has only a side outline: depth mode is unavailable, not a panic.
+        s.request(DocAction::OpenFamily("worm".into()));
+        s.confirm_pending(); // the edits above made it dirty
+        assert_eq!(s.editor.rig().family, "worm");
+        assert!(!s.depth_available());
+        s.refresh_depth();
+        assert!(!s.depth().available());
+        let rig = s.editor.rig().clone();
+        assert!(s.depth().unavailable_reason(&rig).contains("front"));
+    }
+
+    #[test]
+    fn saving_writes_overrides_and_leaves_guesses_out() {
+        let data = TempData::new("depthsave");
+        let mut s = Session::open(&data.0).unwrap();
+        s.editor.place_current([0.0, 5.8]);
+        s.editor.place_current([0.0, 5.0]);
+        s.editor.set_joint_depth("crown", 0.31);
+        s.editor.end_continuous_edit();
+        s.save().unwrap();
+        let text = std::fs::read_to_string(data.0.join("rigs/humanoid.rig.toml")).unwrap();
+        let depth_table = text.split("[depth]").nth(1).unwrap_or_default();
+        let depth_table = depth_table.split("\n[").next().unwrap();
+        assert!(depth_table.contains("crown = 0.31"), "{text}");
+        assert_eq!(
+            depth_table.lines().filter(|l| l.contains('=')).count(),
+            1,
+            "only the override is written; the guesses are not: {depth_table}"
+        );
+
+        let again = Session::open(&data.0).unwrap();
+        assert_eq!(again.editor.rig().depth.len(), 1);
+        assert!((again.editor.rig().depth["crown"] - 0.31).abs() < 1e-4);
     }
 
     #[test]

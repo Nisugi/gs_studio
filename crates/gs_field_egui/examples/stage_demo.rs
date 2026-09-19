@@ -8,12 +8,19 @@
 //! -> prepare scene art -> render. Clicking a creature makes it the target.
 //!
 //! No art is needed: with nothing in `<data>/global/images/creatures` every
-//! creature draws as its family's creature doll (`gs_field::dolls`; today
-//! only `humanoid` is published, so the wolf is a humanoid too -- tier 3 --
-//! until a canine rig exists). If pool art exists it is used.
+//! creature draws as its family's baked 3D PUPPET (`gs_field::puppets` ->
+//! `gs_puppet`) -- humanoid and canine are published, so the wolf is a real
+//! quadruped. A family with no puppet falls back to the flat doll
+//! (`gs_field::dolls`), and a family with neither to the placeholder
+//! standee. If pool art exists it is used instead of all three.
 //!
 //! The second bar edits the TARGETED creature: wound rank 0-3 per body part
 //! and prone / kneeling / sitting / dead / boss.
+//!
+//! `STAGE_DEMO_NO_ART=1` points the art root at an empty directory, so every
+//! creature takes the no-art path (puppet, then doll, then standee) even on a
+//! machine with a full image pool -- which is what the showcase shot wants.
+//! `STAGE_DEMO_SHOT` turns it on by itself.
 //!
 //! `STAGE_DEMO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs).
 //! `STAGE_DEMO_SHOT=<path.png>` swaps in a showcase roster (healthy, arm
@@ -92,7 +99,9 @@ fn roster() -> Vec<Creature> {
     ]
 }
 
-/// `STAGE_DEMO_SHOT`: one doll per state worth looking at.
+/// `STAGE_DEMO_SHOT`: one puppet per state worth looking at -- the two
+/// published body types, every pose the state machine can ask for, and the
+/// wound ranks including a severance.
 fn showcase_roster() -> Vec<Creature> {
     let hostile = || CreatureFlags {
         hostile: true,
@@ -104,21 +113,25 @@ fn showcase_roster() -> Vec<Creature> {
         injuries: list.iter().map(|(p, r)| (p.to_string(), *r)).collect(),
         ..hostile()
     };
+    let posed = |id: &str, name: &str, status: &str, w: &[(&str, u8)]| {
+        creature(
+            id,
+            name,
+            CreatureFlags {
+                statuses: vec![status.to_string()],
+                ..wounds(w)
+            },
+        )
+    };
     vec![
         creature("#2001", "healthy bandit", hostile()),
-        creature("#2002", "arm1 bandit", wounds(&[("rightArm", 1)])),
-        creature("#2003", "chest2 bandit", wounds(&[("chest", 2)])),
-        creature("#2004", "leg3 bandit", wounds(&[("leftLeg", 3)])),
+        creature("#2002", "chest2 bandit", wounds(&[("chest", 2)])),
+        creature("#2003", "leg3 bandit", wounds(&[("leftLeg", 3)])),
+        posed("#2004", "kneeling bandit", "kneeling", &[("rightArm", 1)]),
+        posed("#2005", "stunned bandit", "stunned", &[("head", 2)]),
+        posed("#2006", "prone bandit", "prone", &[("head", 2), ("nsys", 1)]),
         creature(
-            "#2005",
-            "prone bandit",
-            CreatureFlags {
-                statuses: vec!["prone".into()],
-                ..wounds(&[("head", 2), ("nsys", 1)])
-            },
-        ),
-        creature(
-            "#2006",
+            "#2007",
             "dead bandit",
             CreatureFlags {
                 dead: true,
@@ -127,11 +140,25 @@ fn showcase_roster() -> Vec<Creature> {
             },
         ),
         creature(
-            "#2007",
+            "#2008",
             "boss bandit",
             CreatureFlags {
                 ascension_boss: true,
                 ..wounds(&[("leftEye", 2), ("rightArm", 3)])
+            },
+        ),
+        // The other published body type: a quadruped puppet, standing,
+        // lying and dead.
+        creature("#2009", "timber wolf", wounds(&[("rightLeg", 1)])),
+        posed("#2010", "sitting wolf", "sitting", &[]),
+        posed("#2011", "prone wolf", "prone", &[("chest", 2)]),
+        creature(
+            "#2012",
+            "dead wolf",
+            CreatureFlags {
+                dead: true,
+                health: Some(0),
+                ..hostile()
             },
         ),
     ]
@@ -172,16 +199,33 @@ impl Demo {
         let mut art = CreatureArtStore::default();
         // What SkinState::apply_if_changed did on first apply.
         art.reset();
-        eprintln!("stage_demo: art root {}", art.root().display());
         let shot = std::env::var_os("STAGE_DEMO_SHOT").map(std::path::PathBuf::from);
+        // The showcase shot is about the no-art path, so it must not find a
+        // sprite: re-point the resolve root at an empty directory.
+        if shot.is_some() || std::env::var_os("STAGE_DEMO_NO_ART").is_some() {
+            // The whole data dir, not just the resolve root: the pool
+            // cascade and its caches key on the base dir.
+            let empty = std::env::temp_dir().join("stage_demo_no_art");
+            let _ = std::fs::create_dir_all(empty.join("global").join("images"));
+            std::env::set_var("VELLUM_FE_DIR", &empty);
+            gs_field::data_dirs::clear_base_dir();
+            gs_field::pool::invalidate_cache();
+            art.reset_with_root(&empty.join("global").join("images"));
+            eprintln!("stage_demo: art forced empty ({})", empty.display());
+        }
+        eprintln!("stage_demo: art root {}", art.root().display());
         let creatures = if shot.is_some() {
             showcase_roster()
         } else {
             roster()
         };
         for c in &creatures {
+            let puppet = gs_field::puppets::puppet_for(&c.name, c.noun.as_deref());
             let doll = gs_field::dolls::doll_for(&c.name, c.noun.as_deref());
-            eprintln!("stage_demo: {} -> doll {:?}", c.name, doll);
+            eprintln!(
+                "stage_demo: {} -> puppet {:?}, doll {:?}",
+                c.name, puppet, doll
+            );
         }
         Self {
             field: CreatureField::default(),
@@ -190,7 +234,7 @@ impl Demo {
             creatures,
             // Non-zero so the first sync_field sees a change.
             creatures_generation: 1,
-            current_target: if shot.is_some() { "#2003" } else { "#1002" }.to_string(),
+            current_target: if shot.is_some() { "#2002" } else { "#1002" }.to_string(),
             art,
             show_grid: true,
             show_order: true,
@@ -365,6 +409,12 @@ impl eframe::App for Demo {
                 }
                 ui.separator();
                 ui.label(format!("target: {}", self.current_target));
+                ui.separator();
+                let puppets = gs_field::puppets::puppets();
+                ui.label(format!(
+                    "puppets: {}",
+                    puppets.families().collect::<Vec<_>>().join(", ")
+                ));
                 if let Some((x, y)) = self.last_stage_pos {
                     ui.label(format!("last click, stage: ({x:.0}, {y:.0})"));
                 }

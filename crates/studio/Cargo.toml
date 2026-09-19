@@ -12,6 +12,8 @@ path = "src/main.rs"
 [dependencies]
 rig = { path = "../rig" }
 rig_bake = { path = "../rig_bake" }
+# Depth guessing for the rig editor's DEPTH pass (`editor/depth.rs`).
+gs_puppet = { path = "../gs_puppet" }
 # The creature field: solver, scenes, pool, bestiary (no egui) ...
 gs_field = { path = "../gs_field" }
 # ... and the renderer + art cache the clients draw with.

@@ -824,21 +824,17 @@ mod tests {
     /// everything they call are provably untouched.
     #[test]
     fn creature_field_is_the_port_plus_marked_additions_only() {
-        let src = include_str!("creature_field.rs").replace("
-", "
-");
+        let src = include_str!("creature_field.rs").replace("\r\n", "\n");
         let mut stripped = String::with_capacity(src.len());
         let mut rest = src.as_str();
         let mut regions = 0;
         loop {
             let inline = rest.find("/* >>>doll */");
-            let block = rest.find("// >>>doll
-");
+            let block = rest.find("// >>>doll\n");
             let (start, end_marker) = match (inline, block) {
                 (Some(a), Some(b)) if a < b => (a, "/* <<<doll */ "),
                 (Some(a), None) => (a, "/* <<<doll */ "),
-                (_, Some(b)) => (b, "// <<<doll
-"),
+                (_, Some(b)) => (b, "// <<<doll\n"),
                 (None, None) => break,
             };
             stripped.push_str(&rest[..start]);
@@ -848,6 +844,9 @@ mod tests {
             regions += 1;
         }
         stripped.push_str(rest);
+        // Two regions: the draw-branch arms (puppet, then doll, then the
+        // untouched standee), and the block holding both
+        // paint_creature_puppet and paint_creature_doll.
         assert_eq!(regions, 2, "exactly the two documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
