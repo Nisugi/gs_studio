@@ -1,0 +1,720 @@
+//! The Preview stage's egui layer: VellumFE's Studio "Stage", drawn by the
+//! renderer the clients use (`gs_field_egui`). It draws `stage::StageState`
+//! and forwards input to it; every rule lives in `crate::stage`.
+//!
+//! One tool, two tabs. **Scenes** and **Preview** share this one
+//! `StageTool` (one sandbox, one stage in the middle); the tab only picks
+//! which side panel is showing -- scene authoring (scene, props, camera,
+//! solver) or the cast (cast, roster, per-creature simulator).
+//!
+//! Ported from VellumFE (GPL-3.0-or-later) `src/frontend/gui/studio.rs` at
+//! commit 60c84a79.
+
+use gs_field::condition::INJURY_AREAS;
+use gs_field::creature::CRTR_STATUS_FLAGS;
+use gs_field::scenes::{self, SceneBinding};
+use gs_field::solver::{camera_limits, SeparationBasis};
+use gs_field::{Creature, CreatureFlags};
+use gs_field_egui::{
+    creature_field_stage_pos, render_creature_field_content, CreatureArtStore, CreatureFieldView, SharedCreatureArt,
+    WantedCreature,
+};
+
+use crate::stage::color::{hex_rgb, parse_hex_rgb, NEUTRAL_SLATE};
+use crate::stage::eval::eval_condition;
+use crate::stage::{cast, ClassFlag, StageState, StudioRoomContext};
+
+/// Which side panel the shared stage shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagePanel {
+    /// Scene, props, camera, solver.
+    Scenes,
+    /// Cast, roster, the per-creature simulator.
+    Preview,
+}
+
+pub struct StageTool {
+    stage: StageState,
+    art: CreatureArtStore,
+}
+
+/// Art wanted for the current roster -- same recipe as the game's update
+/// loop (family from the bestiary, wounds from flags; prone art always
+/// loads so envelopes are known up front).
+fn wanted_art(creatures: &[Creature]) -> Vec<WantedCreature> {
+    creatures
+        .iter()
+        .map(|c| WantedCreature {
+            name: c.name.clone(),
+            noun: c.noun.clone(),
+            family: c.noun.as_deref().and_then(gs_field::cards::family_for_noun),
+            injuries: c.flags.as_ref().map(|f| f.injuries.clone()).unwrap_or_default(),
+        })
+        .collect()
+}
+
+impl StageTool {
+    /// Scans the pool for the cast. Call after the pool directory is set.
+    pub fn new(context: StudioRoomContext) -> StageTool {
+        let mut art = CreatureArtStore::default();
+        // What VellumFE's SkinState::apply_if_changed did on first apply.
+        art.reset();
+        let mut stage = StageState::new(context);
+        // Smoke runs (no human at the window): GS_STUDIO_SMOKE=1 puts the
+        // first few cast entries, a placeholder, a wounded/stunned/targeted
+        // creature and the first saved scene on the stage, so the real art
+        // and render paths run.
+        if std::env::var_os("GS_STUDIO_SMOKE").is_some() {
+            let picks: Vec<_> = stage.cast.iter().take(3).map(|e| (e.display.clone(), e.noun.clone())).collect();
+            for (display, noun) in picks {
+                stage.spawn(&display, Some(noun));
+            }
+            stage.spawn("training dummy", Some("dummy".to_string()));
+            stage.set_status("studio-1", "stunned", true);
+            stage.set_wound("studio-1", "head", 2);
+            stage.set_health_bar("studio-1", true);
+            stage.set_target("studio-1", true);
+            if let Some(name) = scenes::list_scenes().first() {
+                stage.load_scene_by_name(name);
+            }
+            eprintln!(
+                "gs-studio: smoke stage: {} cast, {} spawned, scene '{}'",
+                stage.cast.len(),
+                stage.creatures().len(),
+                stage.scene_name
+            );
+        }
+        StageTool { stage, art }
+    }
+
+    /// The pool directory moved: re-root the art, re-scan the cast.
+    pub fn pool_changed(&mut self) {
+        let root = gs_field::data_dirs::global_images_dir().unwrap_or_default();
+        self.art.reset_with_root(&root);
+        self.stage.pool_changed();
+    }
+
+    /// One line for the smoke-run log: what is on the stage right now.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} creatures in {} units, {} props, {} status lines (last: {:?})",
+            self.stage.creatures().len(),
+            self.stage.field.units().len(),
+            self.stage.scene().props.len(),
+            self.stage.status_lines().len(),
+            self.stage.status_lines().last()
+        )
+    }
+
+    pub fn status(&self, ui: &mut egui::Ui) {
+        let lines = self.stage.status_lines();
+        match lines.last() {
+            Some(message) => ui.label(message),
+            None => ui.weak("Ready"),
+        }
+        .on_hover_ui(|ui| {
+            for message in lines {
+                ui.label(message);
+            }
+        });
+        ui.separator();
+        ui.weak(format!("{} on stage", self.stage.creatures().len()));
+    }
+
+    pub fn ui(&mut self, ui: &mut egui::Ui, panel: StagePanel) {
+        let ctx = ui.ctx().clone();
+        let stage = &mut self.stage;
+        // Scene edits re-point the scene Arc; the solver's authored
+        // exclusion metadata is rebuilt only then.
+        stage.refresh_obstacles();
+        // Art prep FIRST, roster sync second (finding 8): preparing the
+        // roster's art feeds standing + prone calibration into the core
+        // geometry store, so the sync's initial placements reserve true
+        // envelopes instead of fallback guesses that recalibrate would
+        // have to reconcile a frame later. Both are cached/generation-
+        // gated, so a settled stage costs a few hash lookups.
+        let wanted = wanted_art(stage.creatures());
+        if !wanted.is_empty() {
+            self.art.prepare_creature_art(&ctx, &wanted);
+        }
+        stage.sync_field();
+        stage.refresh_mounts();
+        self.art.prepare_scene_art(&ctx, stage.scene());
+        let art = self.art.creature_art();
+
+        egui::Panel::right("stage_panel").default_size(300.0).min_size(240.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
+                StagePanel::Scenes => {
+                    scene_ui(stage, ui);
+                    ui.separator();
+                    camera_ui(stage, ui);
+                    ui.separator();
+                    solver_ui(stage, ui);
+                }
+                StagePanel::Preview => cast_ui(stage, ui),
+            });
+        });
+        egui::CentralPanel::default().show(ui, |ui| field_ui(stage, ui, &art, panel));
+    }
+}
+
+// ------------------------------------------------------------------ scene
+
+/// The Scene section: backdrop + scenery props, persisted whole-file to
+/// `global/scenes/<name>.toml`.
+fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    ui.heading("Scene");
+    // The scene FILENAME is the binding: leading room uid binds that room,
+    // otherwise the stem matches room title -> location -> "default".
+    // There is no separate bindings store to manage.
+    ui.label(if stage.scene_name.trim().is_empty() {
+        "Editing: (unsaved scene)".to_string()
+    } else {
+        format!("Editing: {}", scenes::display_name(stage.scene_name.trim()))
+    });
+    ui.horizontal_wrapped(|ui| {
+        if !stage.scene_name.trim().is_empty() && ui.button("Save").clicked() {
+            stage.save_current_scene();
+        }
+        if ui.button("Clear stage scene").clicked() {
+            stage.clear_scene();
+        }
+    });
+    new_scene_ui(stage, ui);
+
+    let saved = scenes::list_scenes();
+    if !saved.is_empty() {
+        ui.horizontal(|ui| {
+            ui.label("Load");
+            ui.add(
+                egui::TextEdit::singleline(&mut stage.scene_filter)
+                    .hint_text("filter (number, title, location)")
+                    .desired_width(160.0),
+            );
+        });
+        let filter = stage.scene_filter.to_ascii_lowercase();
+        let mut load_request: Option<String> = None;
+        egui::ScrollArea::vertical().id_salt("scene_load_list").max_height(110.0).show(ui, |ui| {
+            for name in &saved {
+                // Menus render `_` as spaces; filter against the rendered
+                // form so users type what they see.
+                let display = scenes::display_name(name);
+                if !filter.is_empty() && !display.to_ascii_lowercase().contains(&filter) {
+                    continue;
+                }
+                if ui.selectable_label(stage.scene_name == *name, display).clicked() {
+                    load_request = Some(name.clone());
+                }
+            }
+        });
+        if let Some(name) = load_request {
+            stage.load_scene_by_name(&name);
+        }
+    }
+
+    let backgrounds = gs_field::pool::list_category("scenes");
+    ui.horizontal(|ui| {
+        ui.label("Backdrop");
+        let current = stage.scene().background.clone();
+        let text = current
+            .as_deref()
+            .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
+            .unwrap_or_else(|| "(none)".to_string());
+        egui::ComboBox::from_id_salt("scene_bg").selected_text(text).show_ui(ui, |ui| {
+            if ui.selectable_label(current.is_none(), "(none)").clicked() {
+                stage.scene_mut().background = None;
+            }
+            for image in &backgrounds {
+                let on = current.as_deref() == Some(image.pool_path.as_str());
+                if ui.selectable_label(on, image.display_label()).clicked() {
+                    stage.scene_mut().background = Some(image.pool_path.clone());
+                }
+            }
+        });
+    });
+    ui.horizontal(|ui| {
+        ui.label("Color");
+        // The picker needs a concrete color; an unset scene edits a neutral
+        // slate and only stores once touched (None keeps the default panel
+        // fill).
+        let mut rgb = stage.scene().background_color.as_deref().and_then(parse_hex_rgb).unwrap_or(NEUTRAL_SLATE);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            stage.scene_mut().background_color = Some(hex_rgb(rgb));
+        }
+        if stage.scene().background_color.is_some() && ui.small_button("x").on_hover_text("Clear color").clicked() {
+            stage.scene_mut().background_color = None;
+        }
+    });
+
+    ui.separator();
+    ui.heading("Props");
+    // TODO(calibrators): VellumFE's Stage opened its scenery calibrator
+    // (SceneryCalibrationState) from here. The calibrators are being ported
+    // into crates/gs_calibrators; when that lands, enable this button, host
+    // the calibrator window from StageTool, and on its `reload_art` outcome
+    // call `self.art.force_reload()` + `self.stage.invalidate_obstacles()`
+    // (a changed sidecar makes both the art and the exclusion spans stale).
+    ui.add_enabled(false, egui::Button::new("Calibrate scenery..."))
+        .on_disabled_hover_text("Feet anchor, world size, exclusion edges -- per image. Not built yet: the calibrators are on their way.");
+    let pool = gs_field::pool::list_category("scenery");
+    if backgrounds.is_empty() && pool.is_empty() {
+        ui.weak(
+            "Drop PNGs into global/images/scenes (backgrounds, author at 880x470) \
+             or global/images/scenery (props)",
+        );
+    }
+    ui.add(egui::TextEdit::singleline(&mut stage.prop_filter).hint_text("filter").desired_width(140.0));
+    let filter = stage.prop_filter.to_ascii_lowercase();
+    let mut add_request: Option<String> = None;
+    egui::ScrollArea::vertical().id_salt("scene_pool").max_height(110.0).show(ui, |ui| {
+        for image in &pool {
+            if !filter.is_empty() && !image.pool_path.to_ascii_lowercase().contains(&filter) {
+                continue;
+            }
+            ui.horizontal(|ui| {
+                if ui.small_button("Add").clicked() {
+                    add_request = Some(image.pool_path.clone());
+                }
+                ui.label(image.display_label());
+            });
+        }
+    });
+    if let Some(image) = add_request {
+        stage.add_prop(image);
+    }
+
+    let placed: Vec<String> =
+        stage.scene().props.iter().map(|p| p.image.rsplit('/').next().unwrap_or(&p.image).to_string()).collect();
+    let mut remove_request: Option<usize> = None;
+    for (k, name) in placed.iter().enumerate() {
+        ui.horizontal(|ui| {
+            if ui.small_button("x").on_hover_text("Remove").clicked() {
+                remove_request = Some(k);
+            }
+            let selected = stage.selected_prop == Some(k);
+            if ui.selectable_label(selected, name).on_hover_text("Click again to deselect").clicked() {
+                stage.selected_prop = (!selected).then_some(k);
+            }
+        });
+    }
+    if let Some(k) = remove_request {
+        stage.remove_prop(k);
+    }
+    if let Some(k) = stage.selected_prop {
+        if let Some(prop) = stage.scene().props.get(k).cloned() {
+            // Edit copies; only a real change re-points the scene Arc.
+            let mut edited = prop.clone();
+            ui.horizontal(|ui| {
+                ui.label("x");
+                ui.add(egui::DragValue::new(&mut edited.x).speed(2.0));
+                ui.label("z");
+                ui.add(egui::DragValue::new(&mut edited.z).speed(0.02));
+            });
+            ui.add(egui::Slider::new(&mut edited.scale, 0.1..=5.0).text("scale"));
+            ui.checkbox(&mut edited.shadow, "Contact shadow")
+                .on_hover_text("Off by default -- most scenery paints its own grounding");
+            ui.weak("Drag on the stage to move the selected prop");
+            if edited != prop {
+                stage.scene_mut().props[k] = edited;
+            }
+            stage.clamp_prop(k);
+        }
+    }
+}
+
+/// New-scene naming: explicit binding + typed name, previewed and validated
+/// before it becomes the save target. Room facts (from the command line)
+/// only PREFILL the inputs.
+fn new_scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new("New scene...").default_open(false).show(ui, |ui| {
+        let ns = &mut stage.new_scene;
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Bind by");
+            for (binding, label) in [
+                (SceneBinding::RoomUid, "Room uid"),
+                (SceneBinding::RoomTitle, "Room title"),
+                (SceneBinding::Location, "Location"),
+                (SceneBinding::Default, "Default"),
+            ] {
+                if ui.selectable_label(ns.binding == binding, label).clicked() {
+                    ns.set_binding(binding);
+                }
+            }
+        });
+        match ns.binding {
+            SceneBinding::RoomUid => {
+                ui.horizontal(|ui| {
+                    ui.label("Room uid");
+                    ui.add(egui::TextEdit::singleline(&mut ns.uid_text).hint_text("e.g. 47009").desired_width(80.0));
+                    ui.label("garnish");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ns.text).hint_text("optional room name").desired_width(160.0),
+                    );
+                });
+            }
+            SceneBinding::RoomTitle | SceneBinding::Location => {
+                ui.horizontal(|ui| {
+                    ui.label(if ns.binding == SceneBinding::RoomTitle { "Room title" } else { "Location" });
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ns.text).hint_text("exact in-game text").desired_width(220.0),
+                    );
+                });
+            }
+            SceneBinding::Default => {
+                ui.weak("The fallback scene every unbound room uses.");
+            }
+        }
+        match ns.preview() {
+            Ok(stem) => {
+                ui.label(format!("File: global/scenes/{stem}.toml"));
+                let exists = scenes::scene_exists(&stem);
+                let mut adopt = false;
+                let mut load_existing = false;
+                if exists {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        format!("Scene '{}' already exists -- Save will REPLACE it.", scenes::display_name(&stem)),
+                    );
+                    ui.horizontal(|ui| {
+                        adopt = ui
+                            .button("Use name (replace on save)")
+                            .on_hover_text("The stage carries over; the next Save overwrites the existing scene file")
+                            .clicked();
+                        load_existing = ui.button("Load existing instead").clicked();
+                    });
+                } else {
+                    adopt = ui
+                        .button("Use name (save-as)")
+                        .on_hover_text("The stage carries over; Save writes a new scene file")
+                        .clicked();
+                }
+                if adopt {
+                    stage.adopt_scene_name(stem);
+                } else if load_existing {
+                    stage.load_scene_by_name(&stem);
+                }
+            }
+            Err(err) => {
+                ui.colored_label(ui.visuals().error_fg_color, err);
+            }
+        }
+    });
+}
+
+// ----------------------------------------------------------------- camera
+
+fn camera_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    use camera_limits::*;
+    ui.heading("Camera");
+    // Studio-only tuning; the game never mutates live params. Edits share
+    // the loader's bounds (`camera_limits`): the drags are ranged AND the
+    // whole camera re-sanitizes after every frame's edits, so a value that
+    // would reload differently (or a typed NaN) never reaches the renderer
+    // or a saved scene.
+    {
+        let params = &mut stage.field.params;
+        let before = params.clone();
+        egui::Grid::new("stage_camera").num_columns(2).show(ui, |ui| {
+            let row = |ui: &mut egui::Ui, label: &str, value: &mut f32, speed: f64, range: (f32, f32)| {
+                ui.label(label);
+                ui.add(egui::DragValue::new(value).speed(speed).range(range.0..=range.1));
+                ui.end_row();
+            };
+            row(ui, "focal", &mut params.focal, 2.0, FOCAL);
+            row(ui, "cam_h", &mut params.cam_h, 0.02, EYE_HEIGHT);
+            row(ui, "z0", &mut params.z0, 0.02, NEAR_DEPTH);
+            row(ui, "dz", &mut params.dz, 0.02, ROW_DEPTH);
+            row(ui, "horizon", &mut params.horizon, 1.0, HORIZON);
+            row(ui, "cell_w", &mut params.cell_w, 0.01, CELL_WIDTH);
+        });
+        params.sanitize_camera(&before);
+    }
+    ui.horizontal_wrapped(|ui| {
+        // Reset semantics are explicit: built-in solver defaults, or the
+        // values this scene would INHERIT from the default scene layer
+        // (only offered for a non-default scene).
+        if ui.button("Reset camera (built-in)").on_hover_text("The solver's built-in default camera").clicked() {
+            stage.reset_camera_builtin();
+        }
+        if stage.has_inherited_camera()
+            && ui
+                .button("Reset camera (inherited)")
+                .on_hover_text(
+                    "The camera this scene inherits from the default scene layer -- what unpinned keys resolve to",
+                )
+                .clicked()
+        {
+            stage.reset_camera_inherited();
+        }
+    });
+}
+
+fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    ui.checkbox(&mut stage.show_solver_tuning, "Show solver tuning (testing)");
+    if !stage.show_solver_tuning {
+        return;
+    }
+    ui.heading("Solver");
+    ui.weak("Placement tunables. Only future arrivals move -- permanence.");
+    let solver = &mut stage.field.params.solver;
+    ui.checkbox(&mut solver.zone_on, "Spawn ellipse (off = grid)");
+    egui::Grid::new("stage_solver").num_columns(2).show(ui, |ui| {
+        let float = |ui: &mut egui::Ui, label: &str, value: &mut f32, speed: f64, lo: f32, hi: f32| {
+            ui.label(label);
+            ui.add(egui::DragValue::new(value).speed(speed).range(lo..=hi));
+            ui.end_row();
+        };
+        float(ui, "zone_inset", &mut solver.zone_inset, 0.005, 0.0, 0.45);
+        float(ui, "centre_pull", &mut solver.centre_pull, 0.01, 0.0, 5.0);
+        ui.label("depth_samples");
+        ui.add(egui::DragValue::new(&mut solver.depth_samples).range(1..=41));
+        ui.end_row();
+        float(ui, "depth_jitter", &mut solver.depth_jitter, 0.01, 0.0, 1.0);
+        float(ui, "lateral_jitter", &mut solver.lateral_jitter, 0.01, 0.0, 1.0);
+        float(ui, "depth_spread", &mut solver.depth_spread, 0.01, 0.0, 5.0);
+        float(ui, "row_band_push", &mut solver.row_band_push, 0.02, 0.0, 10.0);
+        float(ui, "row_band_px", &mut solver.row_band_px, 0.5, 1.0, 200.0);
+        float(ui, "occlusion_cap", &mut solver.occlusion_cap, 0.005, 0.0, 0.95);
+        float(ui, "variation", &mut solver.variation, 0.01, 0.0, 2.0);
+        float(ui, "fall_reserve", &mut solver.fall_reserve, 0.01, 0.0, 5.0);
+        ui.label("relax_steps");
+        ui.add(egui::DragValue::new(&mut solver.relax_steps).range(0..=10));
+        ui.end_row();
+    });
+    ui.checkbox(&mut solver.seed_front, "First arrival front + centre");
+    ui.checkbox(&mut solver.fall_reserve_hard, "Fall envelope is a hard bound");
+    ui.checkbox(&mut solver.shuffle_ties, "Shuffle tie candidates");
+    ui.horizontal(|ui| {
+        ui.label("separation");
+        ui.selectable_value(&mut solver.separation_basis, SeparationBasis::Contact, "contact");
+        ui.selectable_value(&mut solver.separation_basis, SeparationBasis::Card, "card");
+    });
+    if ui.button("Reset solver").clicked() {
+        *solver = Default::default();
+    }
+}
+
+// ------------------------------------------------------------------- cast
+
+fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    ui.heading("Cast");
+    ui.horizontal(|ui| {
+        ui.add(egui::TextEdit::singleline(&mut stage.filter).hint_text("filter").desired_width(140.0));
+        if ui.button("Add generic").clicked() {
+            stage.spawn("training dummy", Some("dummy".to_string()));
+        }
+    });
+    if stage.cast.is_empty() {
+        ui.weak("No creature art in the pool (global/images/creatures). \"Add generic\" still works: it draws as a placeholder standee.");
+    }
+    let filter = stage.filter.to_ascii_lowercase();
+    let mut spawn_request: Option<(String, String)> = None;
+    let mut cast_row = |ui: &mut egui::Ui, entry: &cast::CastEntry| {
+        ui.horizontal(|ui| {
+            if ui.small_button("Spawn").clicked() {
+                spawn_request = Some((entry.display.clone(), entry.noun.clone()));
+            }
+            ui.label(&entry.display);
+        });
+    };
+    egui::ScrollArea::vertical().id_salt("stage_cast").max_height(160.0).show(ui, |ui| {
+        if filter.is_empty() {
+            // Grouped by bestiary area (multi-area creatures list under
+            // each; unknowns under "Other").
+            for (area, entries) in cast::by_area(&stage.cast) {
+                egui::CollapsingHeader::new(format!("{area} ({})", entries.len())).id_salt(("cast_area", area)).show(
+                    ui,
+                    |ui| {
+                        for entry in entries {
+                            cast_row(ui, entry);
+                        }
+                    },
+                );
+            }
+        } else {
+            // Filter flattens the groups to matches.
+            for entry in &stage.cast {
+                if entry.display.to_ascii_lowercase().contains(&filter) {
+                    cast_row(ui, entry);
+                }
+            }
+        }
+    });
+    if let Some((display, noun)) = spawn_request {
+        stage.spawn(&display, Some(noun));
+    }
+
+    ui.separator();
+    ui.heading("Roster");
+    ui.horizontal(|ui| {
+        if ui.button("Clear stage").clicked() {
+            stage.clear();
+        }
+    });
+    let roster: Vec<(String, String)> = stage.creatures().iter().map(|c| (c.id.clone(), c.name.clone())).collect();
+    let mut remove_request: Option<String> = None;
+    for (id, name) in &roster {
+        ui.horizontal(|ui| {
+            if ui.small_button("x").on_hover_text("Remove").clicked() {
+                remove_request = Some(id.clone());
+            }
+            if ui.selectable_label(stage.selected.as_deref() == Some(id), name).clicked() {
+                stage.selected = Some(id.clone());
+            }
+        });
+    }
+    if let Some(id) = remove_request {
+        stage.remove(&id);
+    }
+
+    if let Some(id) = stage.selected.clone() {
+        ui.separator();
+        simulator_ui(stage, ui, &id);
+    }
+}
+
+/// State editor for one spawned creature: crtrStatus flags, class bools,
+/// wounds, health, targeting, mounting.
+fn simulator_ui(stage: &mut StageState, ui: &mut egui::Ui, id: &str) {
+    let Some(creature) = stage.creature(id) else {
+        return;
+    };
+    ui.heading(&creature.name);
+    // A snapshot to draw from; every edit goes through StageState.
+    let flags = creature.flags.clone().unwrap_or_else(|| CreatureFlags { hostile: true, ..Default::default() });
+
+    let mut want_target = stage.is_target(id);
+    if ui.checkbox(&mut want_target, "Target").changed() {
+        stage.set_target(id, want_target);
+    }
+
+    ui.label("Status");
+    ui.horizontal_wrapped(|ui| {
+        for (_, canonical) in CRTR_STATUS_FLAGS.iter() {
+            let mut on = flags.statuses.iter().any(|s| s == canonical);
+            if ui.checkbox(&mut on, *canonical).changed() {
+                stage.set_status(id, canonical, on);
+            }
+        }
+    });
+
+    ui.label("Class");
+    ui.horizontal_wrapped(|ui| {
+        for class in ClassFlag::ALL {
+            let mut on = class.get(&flags);
+            if ui.checkbox(&mut on, class.label()).changed() {
+                stage.set_class(id, class, on);
+            }
+        }
+    });
+    if let Some((rider, mount)) = stage.pair() {
+        if rider == id || mount == id {
+            ui.weak(if rider == id { "Riding the first flagged mount" } else { "Carrying the first flagged rider" });
+        }
+    }
+
+    let mut has_health = flags.health.is_some();
+    if ui.checkbox(&mut has_health, "Health bar").changed() {
+        stage.set_health_bar(id, has_health);
+    }
+    if let Some(mut hp) = flags.health.filter(|_| has_health) {
+        if ui.add(egui::Slider::new(&mut hp, 0..=100).text("health")).changed() {
+            stage.set_health(id, hp);
+        }
+    }
+
+    ui.label("Wounds (rank 0-3)");
+    egui::Grid::new("stage_wounds").num_columns(2).show(ui, |ui| {
+        for part in INJURY_AREAS.iter() {
+            let rank = stage.wound_rank(id, part);
+            ui.label(*part);
+            ui.horizontal(|ui| {
+                for r in 0u8..=3 {
+                    if ui.selectable_label(rank == r, format!("{r}")).clicked() {
+                        stage.set_wound(id, part, r);
+                    }
+                }
+            });
+            ui.end_row();
+        }
+    });
+}
+
+// ------------------------------------------------------------------ stage
+
+fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, panel: StagePanel) {
+    // On the Scenes tab a selected prop owns the drag (as in VellumFE); on
+    // the Preview tab drags always move creatures.
+    let dragging_prop = panel == StagePanel::Scenes && stage.selected_prop.is_some();
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut stage.show_grid, "Grid");
+        ui.checkbox(&mut stage.show_order, "Draw order");
+        ui.separator();
+        ui.weak(if dragging_prop {
+            "drag: move the selected prop   (click it in the list again to drag creatures)"
+        } else {
+            "click a card: target it   drag a card: move it"
+        });
+    });
+    // The renderer allocates the remaining region; remember it for the drag
+    // interact below (same origin + size).
+    let rect = egui::Rect::from_min_size(ui.next_widget_position(), ui.available_size());
+    // The Stage feeds the renderer its own toggles and scene directly;
+    // creature state comes from the fabricated roster. There is no game
+    // state: conditions go through the sandbox evaluator and no creature
+    // has a derived-effect severity.
+    let click = {
+        let view = CreatureFieldView {
+            field: &stage.field,
+            creatures: stage.creatures(),
+            current_target: stage.current_target(),
+            eval_condition: Box::new(eval_condition),
+            effect_severity: Box::new(|_, _| None),
+            show_grid: stage.show_grid,
+            show_order: stage.show_order,
+            creature_art: Some(art),
+            scene: Some(stage.scene().as_ref()),
+        };
+        render_creature_field_content(&view, ui)
+    };
+    let stage_pos = |pos: egui::Pos2| creature_field_stage_pos(rect, pos);
+    if dragging_prop {
+        // Drag-to-place: while a prop is selected, dragging the field view
+        // moves it on the ground plane (screen -> stage -> ground, through
+        // the renderer's own mapping and the solver's inverse projection).
+        let response = ui.interact(rect, ui.id().with("scene_prop_drag"), egui::Sense::drag());
+        if response.dragged() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let (sx, sy) = stage_pos(pos);
+                stage.drag_selected_prop_to(sx, sy);
+            }
+        }
+    } else {
+        // Creature drag-to-place: grab a card (topmost = nearest under the
+        // pointer) and drag its ground point around the floor.
+        let response = ui.interact(rect, ui.id().with("stage_creature_drag"), egui::Sense::drag());
+        if response.drag_started() {
+            match response.interact_pointer_pos() {
+                Some(pos) => {
+                    let (sx, sy) = stage_pos(pos);
+                    stage.begin_creature_drag(sx, sy);
+                }
+                None => stage.end_creature_drag(),
+            }
+        }
+        if response.dragged() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let (sx, sy) = stage_pos(pos);
+                stage.drag_creature_to(sx, sy);
+            }
+        }
+        if response.drag_stopped() {
+            stage.end_creature_drag();
+        }
+    }
+    // The renderer reports which card was clicked; the Stage targets it
+    // locally instead of sending a command anywhere.
+    if let Some(click) = click {
+        stage.target_clicked(click.exist_id);
+    }
+}

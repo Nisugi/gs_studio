@@ -1,6 +1,7 @@
 //! Where the `data/` directory is. Precedence: `--data <dir>`, then the
 //! `GS_STUDIO_DATA` environment variable, then a `data/outlines.json` found
 //! by walking up from the working directory, then from the executable.
+//! (`--data` itself is parsed in `cli.rs`.)
 
 use std::path::{Path, PathBuf};
 
@@ -11,23 +12,6 @@ pub struct DataRoot {
     pub path: PathBuf,
     /// Where the path came from, for the status line.
     pub source: &'static str,
-}
-
-/// `--data <dir>` or `--data=<dir>` from the command line (program name
-/// already stripped). Err carries a usage message.
-pub fn parse_args(args: &[String]) -> Result<Option<PathBuf>, String> {
-    let mut data = None;
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-        if arg == "--data" {
-            data = Some(PathBuf::from(it.next().ok_or("--data needs a directory")?));
-        } else if let Some(dir) = arg.strip_prefix("--data=") {
-            data = Some(PathBuf::from(dir));
-        } else {
-            return Err(format!("unknown argument '{arg}'\nusage: gs-studio [--data <dir>]"));
-        }
-    }
-    Ok(data)
 }
 
 /// `is_data_dir` answers "does this directory hold outlines.json?" -- a
@@ -70,19 +54,6 @@ pub fn from_environment(cli: Option<PathBuf>) -> DataRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn args(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| (*s).to_owned()).collect()
-    }
-
-    #[test]
-    fn parses_both_spellings_and_rejects_junk() {
-        assert_eq!(parse_args(&args(&[])), Ok(None));
-        assert_eq!(parse_args(&args(&["--data", "x/y"])), Ok(Some("x/y".into())));
-        assert_eq!(parse_args(&args(&["--data=z"])), Ok(Some("z".into())));
-        assert!(parse_args(&args(&["--data"])).is_err());
-        assert!(parse_args(&args(&["--wat"])).is_err());
-    }
 
     #[test]
     fn cli_beats_env_beats_search() {

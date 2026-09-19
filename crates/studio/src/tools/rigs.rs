@@ -12,6 +12,11 @@ use crate::editor::{Canvas, DocAction, Session, ViewTransform};
 
 const PREVIEW_ALPHA: u8 = 215;
 const FIT_MARGIN_PX: f32 = 36.0;
+/// The joint and bone lists split the left panel's spare height; neither
+/// may be squeezed below this.
+const MIN_LIST_HEIGHT: f32 = 110.0;
+/// Bones get this share of the split by default (the divider is draggable).
+const BONES_SHARE: f32 = 0.5;
 
 pub struct RigTool {
     session: Session,
@@ -81,9 +86,7 @@ impl RigTool {
         let interactive = self.session.editor.is_dragging() || self.radius_drag;
         self.session.baked(interactive);
 
-        egui::Panel::left("rig_left").default_size(330.0).min_size(260.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.left_panel(ui));
-        });
+        egui::Panel::left("rig_left").default_size(330.0).min_size(260.0).show(ui, |ui| self.left_panel(ui));
         egui::Panel::right("rig_right").default_size(270.0).min_size(200.0).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.right_panel(ui));
         });
@@ -121,12 +124,22 @@ impl RigTool {
 
     // ---------------------------------------------------------------- left
 
+    /// Document controls on top at their natural height; below them the
+    /// joint list and the bone list share ALL the remaining height, each in
+    /// its own scroll area, with a draggable divider between them. Nothing
+    /// is clipped: a list that does not fit scrolls.
     fn left_panel(&mut self, ui: &mut egui::Ui) {
         self.document_controls(ui);
         ui.separator();
-        self.joint_list(ui);
-        ui.separator();
-        self.bone_list(ui);
+        let spare = ui.available_height();
+        let most = (spare - MIN_LIST_HEIGHT).max(MIN_LIST_HEIGHT);
+        egui::Panel::bottom("rig_bones_split")
+            .resizable(true)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 6, ..Default::default() }))
+            .default_size((spare * BONES_SHARE).clamp(MIN_LIST_HEIGHT, most))
+            .size_range(MIN_LIST_HEIGHT..=most)
+            .show(ui, |ui| self.bone_list(ui));
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.joint_list(ui));
     }
 
     fn document_controls(&mut self, ui: &mut egui::Ui) {
@@ -230,20 +243,30 @@ impl RigTool {
         });
         let current = editor.current().map(str::to_owned);
         let selected = editor.selected().map(str::to_owned);
-        egui::ScrollArea::vertical().id_salt("joints").max_height(260.0).auto_shrink([false, true]).show(ui, |ui| {
+        // Above the list, so the list can take every pixel that is left.
+        match &current {
+            Some(j) => ui.weak(format!("Next click places: {j}")),
+            None => ui.weak("All joints placed. Click a joint in the list to re-place it."),
+        };
+        egui::ScrollArea::vertical().id_salt("joints").auto_shrink([false, false]).show(ui, |ui| {
             for joint in &order {
                 let is_current = current.as_deref() == Some(joint);
-                let marker = if editor.is_placed(joint) { "\u{25CF}" } else { "\u{25CB}" };
-                let mut text = egui::RichText::new(format!("{marker} {joint}"));
+                let placed = editor.is_placed(joint);
+                let mut text = egui::RichText::new(joint);
                 if is_current {
                     text = text.strong();
-                } else if !editor.is_placed(joint) {
+                } else if !placed {
                     text = text.weak();
                 }
                 if selected.as_deref() == Some(joint) {
                     text = text.underline();
                 }
-                let item = ui.selectable_label(is_current, text);
+                let item = ui
+                    .horizontal(|ui| {
+                        placed_marker(ui, placed);
+                        ui.selectable_label(is_current, text)
+                    })
+                    .inner;
                 if item.clicked() {
                     editor.set_current(joint);
                 }
@@ -252,14 +275,15 @@ impl RigTool {
                 }
             }
         });
-        match &current {
-            Some(j) => ui.weak(format!("Next click places: {j}")),
-            None => ui.weak("All joints placed. Click a joint in the list to re-place it."),
-        };
     }
 
     fn bone_list(&mut self, ui: &mut egui::Ui) {
         ui.strong("Bones");
+        // Both ways: the grid is as wide as its widest row wants to be.
+        egui::ScrollArea::both().id_salt("bones").auto_shrink([false, false]).show(ui, |ui| self.bone_grid(ui));
+    }
+
+    fn bone_grid(&mut self, ui: &mut egui::Ui) {
         let radii: Vec<Option<f32>> =
             self.session.last_bake().map(|b| b.baked.bone_radii_ft.clone()).unwrap_or_default();
         let editor = &mut self.session.editor;
@@ -269,7 +293,7 @@ impl RigTool {
         egui::Grid::new("rig_bones").num_columns(4).striped(true).show(ui, |ui| {
             for i in 0..editor.rig().bones.len() {
                 let bone = editor.rig().bones[i].clone();
-                let chain = bone.joints.join(" \u{2192} ");
+                let chain = bone.joints.join(" -> ");
                 ui.label(&bone.name).on_hover_text(chain);
 
                 let shown = bone.part.as_deref().unwrap_or("(none)");
@@ -601,6 +625,20 @@ impl RigTool {
         if modal.should_close() {
             self.session.cancel_pending();
         }
+    }
+}
+
+/// The joint list's placed / unplaced marker: a filled or a hollow dot,
+/// PAINTED. (U+25CF / U+25CB are not in egui's default fonts; as text they
+/// drew as empty boxes.)
+fn placed_marker(ui: &mut egui::Ui, placed: bool) {
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, height), Sense::hover());
+    let radius = 3.5;
+    if placed {
+        ui.painter().circle_filled(rect.center(), radius, ui.visuals().text_color());
+    } else {
+        ui.painter().circle_stroke(rect.center(), radius - 0.5, Stroke::new(1.0, ui.visuals().weak_text_color()));
     }
 }
 

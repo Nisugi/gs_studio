@@ -1012,6 +1012,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs_calibrators"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "egui",
+ "gs_field",
+ "gs_field_egui",
+ "image",
+ "tempfile",
+ "tracing",
+]
+
+[[package]]
 name = "gs_field"
 version = "0.1.0"
 dependencies = [
@@ -2599,8 +2613,11 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "gs_field",
+ "gs_field_egui",
  "rig",
  "rig_bake",
+ "tempfile",
 ]
 
 [[package]]

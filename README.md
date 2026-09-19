@@ -4,10 +4,13 @@ Standalone art-authoring app for GemStone IV clients, plus the shared crate
 those clients draw with. Not part of VellumFE; VellumFE and other clients
 consume what this produces.
 
-Planned: scene builder; calibrators for frames, injury dolls, creature frames,
-scenery and props; the creature-doll rig editor; and a preview stage where
-creatures and props are placed and given wounds, statuses and postures --
-drawn by the same renderer the clients use.
+Built: the creature-doll rig editor; the scene builder; and a preview stage
+where creatures and props are placed and given wounds, statuses and class
+flags -- drawn by the same renderer the clients use. Planned: calibrators for
+frames, injury dolls, creature frames, scenery and props.
+
+Licence: `gs_field`, `gs_field_egui` and `studio` are GPL-3.0-or-later (ported
+from VellumFE).
 
 ## What is here today
 
@@ -15,7 +18,9 @@ drawn by the same renderer the clients use.
 |---|---|
 | `crates/rig_bake/` | Library, no dependencies, no UI. Silhouette + bones -> per-pixel body-part label map: `rasterize` -> `label` -> `metrics` |
 | `crates/rig/` | Library, no UI. The rig file format, body-type templates (as data), the `outlines.json` loader, and bake-to-files (`<family>.png` + `<family>.toml`) |
-| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with one working tool: the **rig editor** |
+| `crates/gs_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
+| `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
+| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with three working tabs: **Rigs**, **Scenes**, **Preview** |
 | `tools/extract_outlines.py` | `scale-chart.html` -> `data/outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped) |
 | `data/outlines.json` | Generated. `{key: {ref_ft, subpaths}}`; x centred, y up, ground at 0. Keys are `<family>` (side view) and `<family>-front` |
 | `data/rigs/` | Saved rigs and their baked output. `humanoid.*` is the test fixture |
@@ -25,6 +30,7 @@ drawn by the same renderer the clients use.
     cargo test --workspace
     cargo run -p studio                      # the app
     cargo run -p studio -- --data some/dir   # or set GS_STUDIO_DATA
+    cargo run -p studio -- --pool some/dir --tab preview   # or GS_STUDIO_POOL / GS_STUDIO_TAB
     cargo run --release -p rig --example bake -- data humanoid   # bake + time one saved rig, no UI
 
 Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.
@@ -33,15 +39,30 @@ at negative x.
 
 ## The app
 
-`gs-studio` finds its data root (the directory holding `outlines.json` and
-`rigs/`) from, in order: `--data <dir>`, the `GS_STUDIO_DATA` environment
-variable, a `data/outlines.json` found walking up from the working directory,
-then walking up from the executable. It can also be changed in the top bar.
+`gs-studio` works out of two directories, both shown (and changeable) in the
+top bar:
 
-The top bar holds the tool tabs. Only **Rigs** is built; Scenes, Frames,
-Dolls, Creatures, Scenery and Preview are disabled placeholders. A new tool is
-a new `ToolId` + entry in `TOOLS` (`crates/studio/src/app.rs`) and a module
-under `crates/studio/src/tools/`.
+| | Holds | Used by | Set with | Default |
+|---|---|---|---|---|
+| **Data** root | `outlines.json`, `rigs/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable |
+| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, ...) and `global/scenes/*.toml` -- VellumFE's data directory | Scenes, Preview | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | gs_field's base dir: `VELLUM_FE_DIR`, else `~/.vellum-fe` |
+
+Setting the pool calls `gs_field::data_dirs::set_base_dir`, drops the pool
+scan and calibration caches, resets the art store and re-scans the cast.
+
+    gs-studio [--data <dir>] [--pool <dir>] [--tab rigs|scenes|preview]
+              [--room-uid <n>] [--room-title <text>] [--room-location <text>]
+
+`--tab` (or `GS_STUDIO_TAB`) picks the starting tab. The three `--room-*`
+options only PREFILL the new-scene naming inputs (what a client passes when
+it launches the studio from a room). For smoke runs,
+`GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself and
+`GS_STUDIO_SMOKE=1` pre-populates the stage.
+
+The top bar holds the tool tabs. **Rigs**, **Scenes** and **Preview** are
+built; Frames, Dolls, Creatures and Scenery are disabled placeholders. A new
+tool is a new `ToolId` + entry in `TOOLS` (`crates/studio/src/app.rs`) and a
+module under `crates/studio/src/tools/`.
 
 egui/eframe come from the `Nisugi/egui` fork, branch `numpad-support`
 (egui 0.35, wgpu backend) -- the same one the game client uses, so a renderer
@@ -53,9 +74,11 @@ A rig = a family silhouette + named joints clicked onto it + bones (chains of
 joints), each bone carrying one body part.
 
 - **Left**: family, view (front/side), template, what `ref_ft` measures;
-  Save / New from template / Undo / Redo; the joint list in click-through
-  order (filled dot = placed, bold = the joint the next click places); Mirror;
-  the bone list with a part dropdown and radius (Auto = measured by
+  Save / New from template / Undo / Redo. Below that the joint list and the
+  bone list share the remaining height, each in its own scroll area, with a
+  draggable divider between them. Joints are in click-through order (filled
+  dot = placed, hollow = not yet, bold = the joint the next click places),
+  with Mirror; bones have a part dropdown and radius (Auto = measured by
   `rig_bake`; the radius actually used is always shown).
 - **Centre**: silhouette, live label map (one colour per part), bones, joints.
 - **Right**: legend with per-part pixel share, map size / aspect / span,
@@ -90,6 +113,52 @@ All editor logic -- state, hit-testing, placement and mirror rules, undo, the
 world<->screen transform, warnings, open/save/discard -- lives in
 `crates/studio/src/editor/`, which may not mention egui (a test enforces it).
 `tools/rigs.rs` only draws and forwards input.
+
+### Scenes and Preview (the stage)
+
+VellumFE's Studio "Stage", ported: a sandbox room drawn by the production
+renderer (`gs_field_egui::render_creature_field_content`). The two tabs are
+ONE tool sharing one stage -- roster, scene, camera and selection all carry
+across -- and differ only in the right-hand panel:
+
+- **Scenes**: the scene being edited and Save; *New scene...* (bind by Room
+  uid / Room title / Location / Default, with the filename stem previewed and
+  an existing file flagged before anything is written); the load list with a
+  filter; backdrop image and colour; props from the `scenery` pool (Add,
+  select, remove, x / z / scale / contact shadow); Camera (focal, cam_h, z0,
+  dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
+  (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
+  and, behind a checkbox, the Solver tunables.
+- **Preview**: the Cast (creature-pool base art grouped by bestiary area,
+  filter, *Add generic*), the Roster, and for the selected creature the
+  simulator: Target, the crtrStatus flags, dead / boss / mini boss /
+  sympathetic / rider / mount, a health bar, and wound rank 0-3 per body part.
+  The first creature flagged rider mounts the first flagged mount.
+
+| Input | Does |
+|---|---|
+| click a card | target it (local only; nothing is sent anywhere) |
+| drag a card | move that creature on the floor (separation is bypassed) |
+| drag, on Scenes, with a prop selected | move that prop on the ground plane |
+| click the selected prop in the list | deselect it (drags move creatures again) |
+| Grid / Draw order | the floor grid / the target-order strip |
+
+Save writes `global/scenes/<stem>.toml` with the camera and solver embedded
+SPARSELY: only keys that differ from the layer underneath (the default scene
+for a room/location scene, the built-ins for the default scene), so unpinned
+keys keep inheriting. Loading a scene adopts its effective camera, default
+layer included.
+
+Skin `when` conditions are evaluated by a small sandbox evaluator: `all`,
+`any` and `crtr_status` work; every condition that reads the player's game
+state is false, since there is no player. No creature has a derived-effect
+severity. "Calibrate scenery..." is a disabled placeholder until the
+calibrators land.
+
+All stage logic -- roster and simulator edits, mount pairing, scene naming,
+the sparse-save maths, the cast scan, the evaluator -- lives in
+`crates/studio/src/stage/`, which may not mention egui (a test enforces it).
+`tools/preview.rs` only draws and forwards input.
 
 ### Templates
 
