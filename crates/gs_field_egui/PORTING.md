@@ -252,3 +252,65 @@ evaluation and derived-effect severity); both stay the host's job, tied to
 VellumFE's `core::conditions` evaluator and `GameState.creature_effects`.
 `from_app_core` stays in VellumFE (tied to `AppCore`, `WidgetRenderSettings`,
 `WindowDef::CreatureField`, the server clock offset, gameobj data).
+
+## 7. Additions since the port (not in VellumFE)
+
+Everything below is NEW with no VellumFE counterpart @60c84a79. It replaces
+exactly one thing: the placeholder standee drawn when a creature has no
+sprite art. Creatures WITH art take the unchanged sprite branch.
+
+### 7.1 `src/creature_doll.rs` (new file)
+
+| Item | What |
+|---|---|
+| `DollMap` (`decode`, `from_labels`, `has_part`) | one rig's label map, decoded once per rig generation with `image`; reads ONLY R (label) and A (inside) |
+| `DollLook { body, ranks[14], dead, boss }` | everything that decides a texture's pixels; `removed()` = the severed set (a function of `ranks`) |
+| `compose_rgba(map, look)` | pure CPU. Body colour = `body_color(noun, dead)`; a wounded part blends `TINT_STRENGTH` (0.85) toward `gs_field::dolls::injury_rank_rgb(rank)` (the player doll's palette 1-3); a rank-3 arm/leg goes transparent (arm + hand) and a band of the adjoining part (chest / abdomen, else any neighbour) takes the rank-3 colour; the alpha edge AFTER removal is darkened (boss: `BOSS_GOLD`, twice as thick) |
+| `DollPose`, `DollLayout` (`fit`, `frac`, `pt`, `mesh`) | rigid posing: standing; squashed x0.55 toward the ground (kneeling/sitting -- the old standee's 0.45 rule); lying (prone/dead -- the picture turned 90 degrees, resting on the foot line, centred on the card). Optional mirror. One transform for the quad, the anchors and the eye markers |
+| `variety(id)` | stable per-creature (mirror, falls-head-left) bits |
+| `DollCache`, `SharedDollCache`, `DollTexture` | per-`egui::Context` (kept in `ctx.data`, so `CreatureFieldView` did not change): decoded maps, cached cascade results, and an LRU (`TEXTURE_CACHE_CAP` = 64) of composed textures keyed by (family, `DollLook`). A texture is built only on a key miss; everything drops when `gs_field::dolls::rigs().generation()` changes |
+
+### 7.2 `src/creature_field.rs` (ported file) -- two marked regions, nothing else
+
+* `} else /* >>>doll */ if let Some(doll_body) = paint_creature_doll(..) { body = doll_body; } else /* <<<doll */ {`
+  -- one extra arm between the sprite branch and the placeholder standee. The
+  standee is kept verbatim as the final fallback (no rig resolves / decodes).
+* `// >>>doll .. // <<<doll` -- `fn paint_creature_doll`: resolves + draws the
+  doll (placement mirrors the sprite branch: ground row on the foot line,
+  content height = `unit.standing.h` at the card's pixel scale, feet anchor on
+  the card centre), routes skin status overlays through the UNCHANGED
+  `paint_card_overlays` by handing it a `CreatureArt` whose anchors are the
+  rig's head/mouth/feet/saddle carried through the pose, draws
+  `paint_wound_marker` at the TOML `[eyes]` point for eye wounds when the map
+  has no eye pixels, and reuses the UNCHANGED `paint_placeholder_wounds` for
+  exactly the wounded parts with no labelled pixels (`back`, `nsys`, ...).
+
+`creature_doll::tests::creature_field_is_the_port_plus_marked_additions_only`
+strips the two regions and asserts the rest is byte-identical (FNV-1a 64 +
+length, CRLF-normalised) to the ported file. Adopting in VellumFE = take the
+two regions; shadow, click rect, draw order, dead cross, HP bar, badges, stun
+swirl and reticule are untouched (they now receive the doll's rect as `body`).
+
+### 7.3 `src/creature_art.rs` (ported file)
+
+* `CreatureArtCache` gains two private fields (`doll_calibrations`,
+  `doll_generation`) and `fn feed_doll_calibration`.
+* `prepare_creature_art`: the `let Some(Some(art)) = .. else { continue; }`
+  guard now calls `cache.feed_doll_calibration(&token, want)` before
+  `continue`. So ONLY a token whose base art is a (cached) miss gets the
+  doll's shape refined into `gs_field::geometry::calibrations()`; a token with
+  art never reaches that line and is refined with the sprite's calibration as
+  before. If art appears (host `reset()`s -> store invalidated -> the base now
+  resolves) the sprite refine replaces the doll entry under the same token.
+  The doll feed re-refines each frame (hash lookup + no-change compare), so it
+  also survives `invalidate_calibrations()`.
+
+### 7.4 `examples/stage_demo.rs`
+
+Second control bar for the targeted creature (wound rank 0-3 x 14 parts,
+prone / kneeling / sitting / dead / boss); `STAGE_DEMO_SHOT=<path.png>` swaps
+in a showcase roster, saves one window frame (`ViewportCommand::Screenshot`)
+and exits. `STAGE_DEMO_EXIT_AFTER_SECS` kept.
+
+Tests: +13 (12 in `creature_doll::tests`, 1 in `creature_art::tests`),
+13 -> 26. No new dependencies.

@@ -228,3 +228,50 @@ Not ported because their subject was not ported: `core/state.rs`
 Versions match VellumFE's `Cargo.toml` majors. `cargo tree -p gs_field`
 contains no egui / eframe / image / wgpu / winit (checked for normal and dev
 edges). `cargo check -p gs_field --target aarch64-linux-android` passes.
+
+## 6. Additions since the port (not in VellumFE)
+
+Everything below is NEW code with no VellumFE counterpart @60c84a79. No ported
+file changed behaviour; the only edits to ported files are `pub mod dolls;`
+in `lib.rs` and the `include_dir` line in `Cargo.toml`.
+
+### 6.1 `src/dolls.rs` -- creature dolls (the no-art standee's replacement)
+
+A doll rig is `<family>.png` (RGBA label map; R = 1-based index into
+`skins::DOLL_PARTS`, A = inside; G/B reserved -- newer bakes put a bone index
+in G -- and never read) plus `<family>.toml` (`DollMeta`). Written by
+gs-studio's rig editor. This crate never decodes the PNG.
+
+| Item | What |
+|---|---|
+| `data/rigs/humanoid.{png,toml}` | the published rigs, embedded with `include_dir` (a copy of `<repo>/data/rigs/` -- re-copy after a re-bake) |
+| `DollMeta`, `DollMapSize`, `DollAnchors`, `DollEyes` | the baked TOML, parsed TOLERANTLY: unknown keys/tables ignored, only `family` required. `feet()`, `anchor(name)`, `eye(part)`, `content_aspect()`, `calibration()` |
+| `embedded()` | iterator of `(family, png bytes, DollMeta)` compiled in (`*.rig.toml` sources and png-less tomls skipped) |
+| `rigs_dir()`, `load_dir(dir)` | the runtime override layer: `<base dir>/global/rigs/` |
+| `DollRigs`, `DollRig`, `DollSource` | the merged set (an override replaces/adds to embedded); `get`, `has`, `families`, `generation`, `doll_for`, `from_rigs` |
+| `rigs()`, `invalidate_cache()` | cached merged set; also reloads by itself when `data_dirs::base_dir()` moves (so `set_base_dir` needs no extra call). Each rebuild gets a new `generation` |
+| `resolve_doll(family, body_type, has_rig)` | the PURE cascade: (1) bestiary family via `FAMILY_ALIASES`, only if the body type agrees with `RIG_FAMILIES`; (2) `BODY_TYPE_DEFAULTS`; (3) `GENERIC_FAMILY` = humanoid. A tier matches only when its rig exists |
+| `DollRef { family, tier }`, `DollTier` | what resolved and which tier |
+| `bestiary_facts(name, noun)`, `DollFacts` | family + body type, exact-name-then-agreeing-noun discipline |
+| `doll_for(name, noun)`, `calibration_for(name, noun)` | the cascade / its geometry calibration, against `rigs()` |
+| `FAMILY_ALIASES`, `RIG_FAMILIES`, `BODY_TYPE_DEFAULTS`, `rig_family_for` | the tables (22 rig families = gs-studio's templates) |
+| `DEFAULT_INJURY_PALETTE`, `injury_rank_rgb(rank)` | COPIED from VellumFE `src/config/widgets.rs` `DEFAULT_INJURY_PALETTE` -- the one item here VellumFE already has; on adoption VellumFE should re-export this one rather than keep two |
+| `part_label`, `label_part`, `SEVERABLE_LIMBS`, `severed_parts(part, rank)` | label <-> part key; rank 3 on an arm/leg is a severance, and an arm takes its hand |
+
+Geometry: a doll is shared family art, so `DollMeta::calibration()` is SHAPE
+only (no `size`, per `geometry.rs`'s header policy). Standing = baked aspect +
+span. Prone is derived from the renderer's rigid pose (the same picture turned
+90 degrees): `aspect = 1/a`, `content_ratio = a`, `span = 1.0`, so the prone
+box is exactly the standing box on its side. `geometry.rs` itself is
+untouched; the frontend's art pass feeds the store (gs_field_egui PORTING.md
+section 7.3).
+
+No per-frame work here: `rigs()` is one base-dir lookup + an `Arc` clone; the
+cascade does bestiary lookups and is meant to be cached by the caller.
+
+Dependency added: `include_dir = "0.7"` (pure Rust; what VellumFE embeds its
+defaults with). `cargo tree -p gs_field` is still free of egui / image /
+wgpu / winit; `cargo check -p gs_field --target aarch64-linux-android` passes.
+
+Tests: +11 (`dolls::tests`), 134 -> 145. The coverage test prints per-tier /
+per-family counts with `-- --nocapture`.

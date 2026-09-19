@@ -103,6 +103,11 @@ pub struct CreatureArtCache {
     /// Resolve root: the image pool.
     root: PathBuf,
     skin_name: String,
+    /// ADDITION (not in VellumFE): token -> the creature doll's shape
+    /// calibration for creatures with no sprite art (None = no rig
+    /// resolves), valid for `doll_generation` of the published rig set.
+    doll_calibrations: HashMap<String, Option<gs_field::geometry::ArtCalibration>>,
+    doll_generation: u64,
 }
 
 // TextureHandle has no Debug; summarize (WidgetRenderSettings derives it).
@@ -166,6 +171,34 @@ impl CreatureArtCache {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .invalidate();
+    }
+
+    /// ADDITION (not in VellumFE). Refine the core geometry store with the
+    /// creature doll's shape for a token that has NO sprite art. The
+    /// cascade runs once per token (and again when the published rig set
+    /// changes); after that a settled frame is a hash lookup plus
+    /// `refine`'s no-change compare — and because it re-refines every
+    /// frame, the entry comes back by itself after the store is invalidated.
+    fn feed_doll_calibration(&mut self, token: &str, want: &WantedCreature) {
+        let generation = gs_field::dolls::rigs().generation();
+        if self.doll_generation != generation {
+            self.doll_generation = generation;
+            self.doll_calibrations.clear();
+        }
+        let cal = match self.doll_calibrations.get(token) {
+            Some(cal) => *cal,
+            None => {
+                let cal = gs_field::dolls::calibration_for(&want.name, want.noun.as_deref());
+                self.doll_calibrations.insert(token.to_string(), cal);
+                cal
+            }
+        };
+        if let Some(cal) = cal {
+            gs_field::geometry::calibrations()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .refine(token, cal);
+        }
     }
 
     /// Base art for one creature, if prepared. Key mirrors `prepare`.
@@ -357,6 +390,12 @@ impl CreatureArtStore {
             // 8). Wound overlays stay demand-loaded from the CURRENT
             // state. Both keyed by absolute path so re-loads are lookups.
             let Some(Some(art)) = cache.bases.get(token.as_str()) else {
+                // ADDITION (not in VellumFE): no sprite art, so the card
+                // draws as its family's creature doll — feed the doll's
+                // SHAPE to the geometry store so the solver's boxes match
+                // what is drawn. Sprite calibration owns the token as soon
+                // as `bases` holds art for it (the refine further down).
+                cache.feed_doll_calibration(&token, want);
                 continue;
             };
             let prone = art.extra("prone").cloned();
@@ -771,6 +810,64 @@ mod tests {
         state.prepare_creature_art(&env.ctx, &[wanted("gryphon")]);
         let cache = state.shared.lock().unwrap();
         assert!(cache.bases.get("gryphon").is_some_and(|art| art.is_none()));
+    }
+
+    /// ADDITION (not in VellumFE). A creature with no sprite art feeds its
+    /// creature doll's SHAPE to the geometry store; sprite calibration wins
+    /// whenever art exists, and replaces the doll entry when art appears.
+    #[test]
+    fn doll_calibration_feeds_only_without_art_and_yields_to_sprite_art() {
+        let env = test_env();
+        gs_field::dolls::invalidate_cache();
+        write_png(&pool_dir().join("creatures/coyote.png"), 2);
+        let wanted = |name: &str| WantedCreature {
+            name: name.to_string(),
+            noun: Some(name.split(' ').next_back().unwrap_or(name).to_string()),
+            family: None,
+            injuries: Vec::new(),
+        };
+        let resolve = |name: &str| {
+            gs_field::geometry::calibrations()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .resolve(&gs_field::naming::name_token(name))
+        };
+        let doll = gs_field::dolls::calibration_for("hill troll", Some("troll"))
+            .expect("humanoid rig is embedded");
+        assert_eq!(doll.standing.size, None, "shape only");
+
+        let mut state = CreatureArtStore::default();
+        state.reset();
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
+        assert_eq!(resolve("hill troll"), Some(doll), "no art: the doll's shape");
+        let coyote = resolve("coyote").expect("sprite calibration");
+        assert_ne!(coyote, doll, "art present: the sprite's calibration, never the doll's");
+        assert_eq!(coyote.standing.aspect, Some(1.0));
+        assert_eq!(coyote.prone, None);
+
+        // Settled frames do not churn the store.
+        let rev = gs_field::geometry::calibrations().lock().unwrap().revision();
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
+        assert_eq!(gs_field::geometry::calibrations().lock().unwrap().revision(), rev);
+
+        // The store is dropped behind the cache's back: the doll re-feeds.
+        gs_field::geometry::invalidate_calibrations();
+        assert_eq!(resolve("hill troll"), None);
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
+        assert_eq!(resolve("hill troll"), Some(doll));
+
+        // Art appears (the host reloads art): the sprite takes the token.
+        write_png(&pool_dir().join("creatures/hill_troll.png"), 2);
+        gs_field::pool::invalidate_cache();
+        state.reset();
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
+        let sprite = resolve("hill troll").expect("sprite calibration");
+        assert_eq!(sprite.standing.aspect, Some(1.0));
+        assert_eq!(sprite.prone, None, "the doll's derived prone pose is gone");
+        // Even with no reset in between, a sprite refine replaces a doll entry.
+        gs_field::geometry::calibrations().lock().unwrap().refine("hill_troll", doll);
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
+        assert_eq!(resolve("hill troll"), Some(sprite));
     }
 
     #[test]

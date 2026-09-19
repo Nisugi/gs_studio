@@ -709,7 +709,22 @@ fn paint_creature_card(
                 paint_wound_overlays(painter, cache, resolved, art, dest, &f.injuries);
             }
         }
-    } else {
+    } else /* >>>doll */ if let Some(doll_body) = paint_creature_doll(
+        painter,
+        card,
+        unit,
+        creature,
+        now_ms,
+        view,
+        art_cache,
+        resolved.as_ref(),
+        &mut animated,
+    ) {
+        // ---- creature doll (addition; not in VellumFE) ---------------
+        // The family's baked label map, tinted by wound rank, replaces the
+        // placeholder standee whenever a rig resolves. See creature_doll.rs.
+        body = doll_body;
+    } else /* <<<doll */ {
         // ---- placeholder standee -----------------------------------
         // Posture: prone/kneeling/sitting squash toward the ground
         // until real variant art exists.
@@ -1164,6 +1179,130 @@ fn paint_wound_marker(painter: &egui::Painter, pt: egui::Pos2, card_w: f32, rank
     painter.circle_stroke(pt, r, Stroke::new(1.0, Color32::from_black_alpha(160)));
 }
 
+// >>>doll
+/// The creature doll for a card with no sprite art (ADDITION, not in
+/// VellumFE): resolve the rig (`gs_field::dolls` cascade, cached), fetch the
+/// composed texture for this creature's look (built only when the look
+/// changes), and draw it posed. Returns the screen rect the doll fills — the
+/// caller's `body` — or None when no rig resolves / decodes, in which case
+/// the old placeholder standee draws.
+///
+/// Placement mirrors the sprite branch: ground row on the card's foot line,
+/// content height = the unit's STANDING height at the card's pixel scale,
+/// feet anchor on the card's centre x.
+#[allow(clippy::too_many_arguments)]
+fn paint_creature_doll(
+    painter: &egui::Painter,
+    card: egui::Rect,
+    unit: &Unit,
+    creature: &gs_field::Creature,
+    now_ms: f64,
+    view: &CreatureFieldView<'_>,
+    art_cache: Option<&crate::creature_art::CreatureArtCache>,
+    resolved: Option<&gs_field::cards::ResolvedCard<'_>>,
+    animated: &mut bool,
+) -> Option<egui::Rect> {
+    use crate::creature_doll::{DollCache, DollLayout, DollLook, DollPose};
+    let flags = creature.flags.as_ref();
+    let dead = creature.is_dead();
+    let noun = creature.noun.as_deref().unwrap_or("creature");
+    let injuries: &[(String, u8)] = flags.map(|f| f.injuries.as_slice()).unwrap_or_default();
+
+    let ctx = painter.ctx();
+    let shared = DollCache::shared(ctx);
+    let mut dolls = shared.lock().unwrap_or_else(|e| e.into_inner());
+    dolls.begin_frame(ctx.cumulative_frame_nr());
+    let family = dolls.family_for(&creature.name, creature.noun.as_deref())?;
+    let color = body_color(noun, dead);
+    let look = DollLook::new(
+        [color.r(), color.g(), color.b()],
+        injuries,
+        dead,
+        flags.is_some_and(|f| f.is_boss()),
+    );
+    let doll = dolls.texture(ctx, &family, &look)?;
+    drop(dolls);
+    let map = &doll.map;
+
+    // Rigid poses: prone / dead lie down (turned 90°, to a side picked by
+    // the creature's id); kneeling / sitting squash toward the ground like
+    // the old standee's 0.45 rule. Flying / hovering already moved `card`.
+    let (mirror, head_left) = crate::creature_doll::variety(&creature.id);
+    let pose = if dead || flags.is_some_and(|f| f.has_flag("prone")) {
+        DollPose::Lying { head_left }
+    } else if flags.is_some_and(|f| f.has_flag("kneeling") || f.has_flag("sitting")) {
+        DollPose::Squashed(0.55)
+    } else {
+        DollPose::Standing
+    };
+    let px_per_unit = card.height() / unit.size.h.max(0.01);
+    let layout = DollLayout::fit(
+        &map.meta,
+        (map.width, map.height),
+        card,
+        unit.standing.h * px_per_unit,
+        pose,
+        mirror,
+    );
+    painter.add(egui::Shape::mesh(
+        layout.mesh(doll.texture.id(), Color32::WHITE),
+    ));
+
+    // Skin status overlays ride the same code as sprite cards: the doll is
+    // handed over as art whose anchors are the rig's, already carried
+    // through the pose (mirror / turn), over the posed body rect.
+    if let (Some(cache), Some(resolved)) = (art_cache, resolved) {
+        if !resolved.overlays.is_empty() {
+            let anchor = |name: &str| map.meta.anchor(name).map(|a| layout.frac(a));
+            let head = anchor("head").unwrap_or([0.5, 0.0]);
+            let feet = anchor("feet").unwrap_or([0.5, 1.0]);
+            let art = crate::creature_art::CreatureArt {
+                texture: doll.texture.clone(),
+                head,
+                feet,
+                bbox: [0.0, 0.0, 1.0, 1.0],
+                anchors: ["head", "feet", "mouth", "saddle"]
+                    .into_iter()
+                    .filter_map(|n| Some((n.to_string(), anchor(n)?)))
+                    .collect(),
+                footprint: None,
+                size: None,
+                lift: None,
+                alpha_px: 0,
+                extras: Default::default(),
+            };
+            *animated |= paint_card_overlays(
+                painter,
+                cache,
+                resolved,
+                &art,
+                layout.body,
+                now_ms,
+                &|name| (view.effect_severity)(&creature.id, name),
+            );
+        }
+    }
+
+    // Wounds on parts this rig has no pixels for. Eyes: a marker dot at the
+    // rig's [eyes] point. Everything else (back and nsys on a front view, or
+    // any part a rig leaves out): the placeholder standee's treatment.
+    let mut unplaced: Vec<(String, u8)> = Vec::new();
+    for (part, rank) in injuries {
+        if *rank == 0 || map.has_part(part) {
+            continue;
+        }
+        match map.meta.eye(part) {
+            Some(eye) => paint_wound_marker(painter, layout.pt(eye), layout.body.width(), *rank),
+            None => unplaced.push((part.clone(), *rank)),
+        }
+    }
+    if !unplaced.is_empty() {
+        paint_placeholder_wounds(painter, layout.body, &unplaced);
+    }
+    Some(layout.body)
+}
+
+// <<<doll
 /// Wound markers for the placeholder standee: no skin, no manifest —
 /// parts place by their built-in default anchors over the body rect.
 fn paint_placeholder_wounds(

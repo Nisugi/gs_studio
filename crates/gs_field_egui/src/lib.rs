@@ -27,6 +27,8 @@
 )]
 
 pub mod creature_art;
+/// Addition since the port (not in VellumFE): the no-art creature doll.
+pub mod creature_doll;
 pub mod creature_field;
 pub mod image_store;
 

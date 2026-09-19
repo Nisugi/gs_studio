@@ -24,6 +24,9 @@ dirs = "5"
 tracing = "0.1"
 # Creature::is_body_part (Lich's appendage-noun pattern).
 regex = "1"
+# dolls.rs: the published creature-doll rigs (data/rigs/) compiled in.
+# Same crate and major VellumFE embeds its defaults with.
+include_dir = "0.7"
 
 [dev-dependencies]
 tempfile = "3"
