@@ -1,0 +1,32 @@
+[package]
+name = "gs_field"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The GemStone IV creature field without the drawing: card resolution, the placement solver, shared geometry, and the asset formats (skins, scenes, image pool, sidecars). Ported from VellumFE."
+
+[lib]
+doctest = false
+
+[dependencies]
+# Asset formats: skin.toml, scene files, creature_field.toml, image sidecars.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Comment-preserving sidecar / skin.toml edits (pool sidecar writers, skins).
+toml_edit = "0.22"
+# The bundled bestiary (data/bestiary.json).
+serde_json = "1"
+# Result/Context in data_dirs, skins, scenes, field_config, bestiary.
+anyhow = "1"
+# `~` for the default data dir (~/.vellum-fe).
+dirs = "5"
+# debug!/warn! on ignored pool files, open-vocabulary crtrStatus flags, etc.
+tracing = "0.1"
+# Creature::is_body_part (Lich's appendage-noun pattern).
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"
+# Test-only: build and re-decode real PNGs for png_meta / sidecar tests
+# (VellumFE used the `image` crate for this; not allowed here).
+png = "0.17"
