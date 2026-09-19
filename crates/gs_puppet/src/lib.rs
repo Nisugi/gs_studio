@@ -1,30 +1,64 @@
-//! gs_puppet -- PROTOTYPE.
+//! gs_puppet: a poseable 3D figure from a rig and two silhouettes, drawn
+//! with plain 2D shapes. No modelling, no GPU 3D, no engine.
 //!
 //! A creature family has two silhouettes of the same figure at the same
-//! scale (feet, ground at y = 0): a FRONT view and a SIDE view. An artist
-//! clicks named joints onto one of them (`rig::Rig`). From that this crate
-//! builds a genuinely 3D, poseable figure: every joint gets (x, y, z), every
-//! bone segment becomes a rounded capsule whose width comes from the front
-//! silhouette and depth from the side one, poses are 3D joint rotations, and
-//! the figure is drawn with flat circles and quads through a perspective
-//! camera. No GPU 3D.
+//! scale (feet, ground at y = 0): `<family>-front` and `<family>` (side).
+//! An artist clicks named joints onto ONE of them (`rig::Rig`). From the rig
+//! alone comes the skeleton (bones -> segments, `parent` -> the tree); from
+//! the two silhouettes comes the body: along every segment a run of measured
+//! elliptical cross-sections ("stations"), so a belly, a chest, a tapering
+//! limb or a muzzle is whatever the family's own art says it is.
 //!
-//! Axes: x = the creature's left (screen right in a front view), y = up,
-//! z = the creature's front. Everything but `paint` is egui-free.
+//! # World convention (the only one)
+//!
+//! * `x` = the creature's LEFT-right, + toward its left;
+//! * `y` = up, the ground is y = 0;
+//! * `z` = front-back, the creature FACES +z.
+//!
+//! Units are feet. A FRONT rig authors `(x, y)` -- the creature faces the
+//! viewer, so its left is screen-right and `_r` joints have negative x --
+//! and needs z, read from the side silhouette (`z` = that silhouette's x:
+//! side views face screen-right). A SIDE rig authors `(z, y)` and needs x,
+//! read from the front silhouette; `_r` is the near limb, at negative x.
+//! Silhouette coordinates are used as they are (both views are centred on
+//! x = 0), so a `[depth]` value in a rig file is a position an editor can
+//! draw straight onto the other silhouette.
+//!
+//! # The pieces
+//!
+//! ```text
+//! Puppet::build(&rig, &outlines)?      rasterise + measure, once (editor / bake time)
+//! puppet.to_baked_toml()?              -> <family>.puppet.toml for a game client
+//! Puppet::from_baked_toml(text)?       the client's way in: no silhouettes, no rig
+//! PoseSet::load(dir, body_type)?       data/poses/<body_type>.toml (or PoseSet::shipped)
+//! let posed = puppet.pose(&pose);      FK + rest the lowest surface on y = 0
+//! posed.bounds()                       world AABB, for placement
+//! posed.draw_list(&project, &look)     egui-free primitives, in paint order
+//! paint(&painter, offset, &prims)      the only egui in the crate
+//! ```
+//!
+//! Plain data and functions throughout; everything but `paint` is egui-free.
 
+pub mod baked;
 pub mod camera;
+pub mod depth;
 pub mod draw;
+pub mod fit;
 pub mod math;
 pub mod measure;
 pub mod paint;
 pub mod pose;
+pub mod puppet;
 pub mod raster;
-pub mod skeleton;
 
+pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};
 pub use camera::Camera;
-pub use draw::{build_draw_list, ground_grid, ground_shadow, Prim, Shape, Style};
-pub use pose::{solve, Pose, Posed, PRESETS};
-pub use skeleton::{guess_depths, joints3, BoneRule, DepthGuess, GuessSource, Segment, Skeleton, BIPED};
+pub use depth::{depth_of, guess_depths, guess_depths_mask, joints3, snap_limb_joints, DepthGuess, GuessSource};
+pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WOUND_COLORS};
+pub use fit::{rest_iou, rest_prims};
+pub use paint::paint;
+pub use pose::{BonePose, Pose, PoseSet, Posed, SHIPPED_POSES};
+pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]
 mod tests;

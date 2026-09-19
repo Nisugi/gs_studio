@@ -1063,6 +1063,8 @@ dependencies = [
  "png 0.17.16",
  "rig",
  "rig_bake",
+ "serde",
+ "toml",
 ]
 
 [[package]]

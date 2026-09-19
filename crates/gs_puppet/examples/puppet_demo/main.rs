@@ -1,162 +1,111 @@
-//! puppet_demo: the capsule puppet in a bare eframe window.
+//! puppet_demo: the station puppet in a bare eframe window.
 //!
 //!   cargo run -p gs_puppet --example puppet_demo
 //!
 //! `PUPPET_DEMO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs).
 //! `PUPPET_DEMO_SHOTS=<dir>` opens NO window: it renders a fixed set of views
-//! with the crate's software rasteriser and writes them as PNGs.
+//! with the crate's software rasteriser, writes them as PNGs (plus the baked
+//! puppets), and prints fit and cost numbers.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use gs_puppet::draw::{BODY_ALIVE, BODY_DEAD};
-use gs_puppet::raster::Canvas;
-use gs_puppet::{build_draw_list, ground_grid, ground_shadow, solve, Camera, Pose, Prim, Skeleton, Style, PRESETS};
+use gs_puppet::math::V3;
+use gs_puppet::{
+    guess_depths_mask, ground_grid, rest_iou, rest_prims, Camera, DepthGuess, Look, Pose, PoseSet, Prim, Puppet,
+    MASK_PX,
+};
 use rig::{OutlineEntry, Outlines, Rig, View};
+use rig_bake::Mask;
 
-mod canine;
+mod shots;
 
 const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
 const GRID: [u8; 4] = [0x4a, 0x52, 0x5c, 255];
 const SHADOW: [u8; 4] = [0x1d, 0x21, 0x26, 255];
 const WOUND_PARTS: [&str; 11] = [
-    "head", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg",
-    "back",
+    "head", "neck", "chest", "abdomen", "back", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg",
+    "rightLeg",
 ];
+const FAMILIES: [&str; 2] = ["humanoid", "canine"];
 
 fn data_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data")
 }
 
 pub struct Figure {
-    pub label: &'static str,
-    pub skel: Skeleton,
-    pub presets: Vec<(&'static str, Pose)>,
-    pub front: OutlineEntry,
-    pub side: OutlineEntry,
+    pub label: String,
+    pub rig: Rig,
+    pub front: Option<(OutlineEntry, Mask)>,
+    pub side: Option<(OutlineEntry, Mask)>,
+    pub guesses: BTreeMap<String, DepthGuess>,
+    pub puppet: Puppet,
+    pub poses: PoseSet,
 }
 
-fn load_figures() -> Vec<Figure> {
-    let dir = data_dir();
-    let outlines = Outlines::load(&dir.join("outlines.json")).expect("data/outlines.json");
-    let rig = Rig::load(&dir.join("rigs/humanoid.rig.toml")).expect("humanoid rig");
-    let front = outlines.get("humanoid", View::Front).expect("humanoid-front").clone();
-    let side = outlines.get("humanoid", View::Side).expect("humanoid").clone();
-    let skel = Skeleton::from_rig(&rig, &front.outline(), &side.outline());
-    let presets = PRESETS.iter().map(|n| (*n, Pose::preset(n).unwrap())).collect();
-    let mut out = vec![Figure { label: "humanoid", skel, presets, front, side }];
-    if let Some(dog) = canine::figure(&outlines) {
-        out.push(dog);
+impl Figure {
+    fn load(outlines: &Outlines, family: &str) -> Result<Figure, String> {
+        let dir = data_dir();
+        let rig = Rig::load(&dir.join("rigs").join(Rig::file_name(family))).map_err(|e| e.to_string())?;
+        let view = |v: View| outlines.get(family, v).map(|e| (e.clone(), rig_bake::rasterize(&e.outline(), MASK_PX)));
+        let (front, side) = (view(View::Front), view(View::Side));
+        let poses = PoseSet::load(&dir.join("poses"), &rig.body_type)?;
+        let mut fig = Figure {
+            label: family.to_owned(),
+            puppet: Puppet::build_masks(&rig, front.as_ref().map(|f| &f.1), side.as_ref().map(|s| &s.1))
+                .map_err(|e| e.to_string())?,
+            guesses: BTreeMap::new(),
+            rig,
+            front,
+            side,
+            poses,
+        };
+        fig.guesses = guess_depths_mask(&fig.rig, fig.mask(other(fig.rig.view)));
+        Ok(fig)
     }
-    out
+
+    pub fn mask(&self, view: View) -> Option<&Mask> {
+        match view {
+            View::Front => self.front.as_ref().map(|f| &f.1),
+            View::Side => self.side.as_ref().map(|s| &s.1),
+        }
+    }
+
+    /// After `rig.depth` changed.
+    fn rebuild(&mut self) {
+        if let Ok(p) = Puppet::build_masks(&self.rig, self.mask(View::Front), self.mask(View::Side)) {
+            self.puppet = p;
+        }
+    }
+}
+
+fn other(v: View) -> View {
+    if v == View::Front {
+        View::Side
+    } else {
+        View::Front
+    }
+}
+
+pub fn load_figures() -> Vec<Figure> {
+    let outlines = Outlines::load(&data_dir().join("outlines.json")).expect("data/outlines.json");
+    FAMILIES
+        .iter()
+        .filter_map(|f| Figure::load(&outlines, f).map_err(|e| eprintln!("puppet_demo: {f}: {e}")).ok())
+        .collect()
 }
 
 /// Everything for one view, back to front: shadow, grid, puppet.
-fn scene(skel: &Skeleton, pose: &Pose, style: &Style, cam: &Camera) -> Vec<Prim> {
-    let posed = solve(skel, pose);
-    let project = cam.projector();
-    let mut prims = ground_shadow(skel, &posed, style, &project, SHADOW);
-    prims.extend(ground_grid(&project, 5, GRID, 1.0));
-    prims.extend(build_draw_list(skel, &posed, style, &project));
+pub fn scene(puppet: &Puppet, pose: &Pose, look: &Look, cam: &Camera, grid: bool) -> Vec<Prim> {
+    let posed = puppet.pose(pose);
+    let project = |p: V3| cam.project(p);
+    let mut prims = posed.ground_shadow(&project, look, SHADOW);
+    if grid {
+        prims.extend(ground_grid(&project, 5, GRID, 1.0));
+    }
+    prims.extend(posed.draw_list(&project, look));
     prims
-}
-
-// ---------------------------------------------------------------- shots
-
-fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) {
-    let file = std::fs::File::create(path).expect("create png");
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
-    enc.set_color(png::ColorType::Rgba);
-    enc.set_depth(png::BitDepth::Eight);
-    enc.write_header().and_then(|mut w| w.write_image_data(rgba)).expect("write png");
-}
-
-fn shots(dir: &Path) {
-    const SIZE: usize = 440;
-    std::fs::create_dir_all(dir).expect("shots dir");
-    let figures = load_figures();
-    let human = &figures[0];
-    let wounded = Style {
-        injuries: vec![("leftArm".into(), 1), ("chest".into(), 2), ("rightLeg".into(), 3)],
-        ..Style::default()
-    };
-    let mut list: Vec<(String, &Figure, &str, f32, Style)> = vec![
-        ("stand_front".into(), human, "stand", 0.0, Style::default()),
-        ("stand_34".into(), human, "stand", 35.0, Style::default()),
-        ("stand_side".into(), human, "stand", 90.0, Style::default()),
-        ("kneel_34".into(), human, "kneel", 35.0, Style::default()),
-        ("sit_34".into(), human, "sit", 35.0, Style::default()),
-        ("prone_34".into(), human, "prone", 35.0, Style::default()),
-        ("fallen_side_34".into(), human, "fallen_side", 35.0, Style::default()),
-        ("arms_up_front".into(), human, "arms_up", 0.0, Style::default()),
-        ("wounded_34".into(), human, "stand", 35.0, wounded),
-        ("supine_34".into(), human, "supine", 35.0, Style::default()),
-        ("kneel_side".into(), human, "kneel", 90.0, Style::default()),
-        ("sit_side".into(), human, "sit", 90.0, Style::default()),
-    ];
-    if let Some(dog) = figures.get(1) {
-        for (name, _) in &dog.presets {
-            list.push((format!("canine_{name}_34"), dog, name, 50.0, Style::default()));
-        }
-        list.push(("canine_stand_side".into(), dog, "stand", 90.0, Style::default()));
-    }
-
-    let cols = 4;
-    let rows = list.len().div_ceil(cols);
-    let mut sheet = vec![0u8; cols * SIZE * rows * SIZE * 4];
-    for (i, (name, fig, preset, yaw, style)) in list.iter().enumerate() {
-        let pose = &fig.presets.iter().find(|(n, _)| n == preset).expect("preset").1;
-        let mut cam = Camera::framing(fig.skel.height.max(5.0), [SIZE as f32, SIZE as f32]);
-        cam.yaw_deg = *yaw;
-        let started = Instant::now();
-        let prims = scene(&fig.skel, pose, style, &cam);
-        let built = started.elapsed();
-        let mut canvas = Canvas::new(SIZE, SIZE, 2, BACKGROUND);
-        canvas.draw(&prims);
-        let rgba = canvas.to_rgba8();
-        write_png(&dir.join(format!("{name}.png")), SIZE, SIZE, &rgba);
-        let (cx, cy) = (i % cols * SIZE, i / cols * SIZE);
-        for y in 0..SIZE {
-            let dst = ((cy + y) * cols * SIZE + cx) * 4;
-            sheet[dst..dst + SIZE * 4].copy_from_slice(&rgba[y * SIZE * 4..(y + 1) * SIZE * 4]);
-        }
-        eprintln!("puppet_demo: {name}.png  {} prims, scene built in {built:?}", prims.len());
-    }
-    write_png(&dir.join("sheet.png"), cols * SIZE, rows * SIZE, &sheet);
-
-    // Per-frame cost, puppet only (FK + grounding + draw list).
-    let pose = &human.presets.iter().find(|(n, _)| *n == "kneel").unwrap().1;
-    let cam = Camera::framing(human.skel.height, [SIZE as f32, SIZE as f32]);
-    let project = cam.projector();
-    let n = 2000;
-    let started = Instant::now();
-    let mut prims = 0;
-    for _ in 0..n {
-        let posed = solve(&human.skel, pose);
-        prims = build_draw_list(&human.skel, &posed, &Style::default(), &project).len();
-    }
-    eprintln!(
-        "puppet_demo: {} segments -> {prims} prims; solve + draw list = {:?} per frame",
-        human.skel.segments.len(),
-        started.elapsed() / n
-    );
-    report_depths();
-}
-
-/// Print the automatic z guesses so the report can judge them.
-fn report_depths() {
-    let dir = data_dir();
-    let outlines = Outlines::load(&dir.join("outlines.json")).unwrap();
-    let rig = Rig::load(&dir.join("rigs/humanoid.rig.toml")).unwrap();
-    let side = rig_bake::rasterize(&outlines.get("humanoid", View::Side).unwrap().outline(), gs_puppet::skeleton::MASK_PX);
-    for (name, g) in gs_puppet::guess_depths(&rig, &side, gs_puppet::BIPED) {
-        eprintln!("  z {name:<12} {:+.3}  {:?}", g.value, g.source);
-    }
-    let figs = load_figures();
-    for s in &figs[0].skel.segments {
-        eprintln!("  seg {:<14} r0 {:.2}/{:.2}  r1 {:.2}/{:.2}  parent {:?}", s.name, s.r0[0], s.r0[1], s.r1[0], s.r1[1], s.parent);
-    }
 }
 
 // ------------------------------------------------------------------ app
@@ -167,7 +116,6 @@ struct Demo {
     yaw: f32,
     pitch: f32,
     zoom: f32,
-    distance: f32,
     auto_rotate: bool,
     pose: Pose,
     from: Pose,
@@ -175,11 +123,13 @@ struct Demo {
     blend_ms: f32,
     blend_started: Option<Instant>,
     blend_t: f32,
-    selected: String,
+    bone: String,
+    bone_euler: [f32; 3],
     wounds: BTreeMap<&'static str, u8>,
     dead: bool,
-    outline: bool,
-    highlight: bool,
+    boss: bool,
+    body: [u8; 3],
+    outline_px: f32,
     silhouettes: bool,
     started: Instant,
     last_frame: Instant,
@@ -192,14 +142,14 @@ struct Demo {
 impl Demo {
     fn new() -> Self {
         let figures = load_figures();
-        let selected = figures[0].skel.segments[0].name.clone();
+        assert!(!figures.is_empty(), "no figure could be loaded");
+        let bone = figures[0].puppet.segments[0].bone.clone();
         Demo {
             figures,
             figure: 0,
             yaw: 35.0,
             pitch: 12.0,
             zoom: 1.0,
-            distance: 16.0,
             auto_rotate: false,
             pose: Pose::default(),
             from: Pose::default(),
@@ -207,12 +157,14 @@ impl Demo {
             blend_ms: 300.0,
             blend_started: None,
             blend_t: 1.0,
-            selected,
+            bone,
+            bone_euler: [0.0; 3],
             wounds: BTreeMap::new(),
             dead: false,
-            outline: true,
-            highlight: true,
-            silhouettes: false,
+            boss: false,
+            body: gs_puppet::BODY_DEFAULT,
+            outline_px: 1.5,
+            silhouettes: true,
             started: Instant::now(),
             last_frame: Instant::now(),
             frames: 0,
@@ -229,43 +181,30 @@ impl Demo {
         self.blend_t = 0.0;
     }
 
-    fn style(&self) -> Style {
-        let base = Style::default();
-        Style {
-            body: if self.dead { BODY_DEAD } else { BODY_ALIVE },
-            outline: self.outline.then_some(base.outline).flatten(),
-            highlight: self.highlight,
-            injuries: self.wounds.iter().filter(|(_, r)| **r > 0).map(|(p, r)| ((*p).to_owned(), *r)).collect(),
-            ..base
-        }
-    }
-
     fn panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("gs_puppet");
-        if self.figures.len() > 1 {
-            ui.horizontal(|ui| {
-                for i in 0..self.figures.len() {
-                    if ui.selectable_label(self.figure == i, self.figures[i].label).clicked() && self.figure != i {
-                        self.figure = i;
-                        self.pose = Pose::default();
-                        self.to = Pose::default();
-                        self.blend_started = None;
-                        self.selected = self.figures[i].skel.segments[0].name.clone();
-                    }
+        ui.horizontal(|ui| {
+            for i in 0..self.figures.len() {
+                if ui.selectable_label(self.figure == i, self.figures[i].label.clone()).clicked() && self.figure != i {
+                    self.figure = i;
+                    self.pose = Pose::default();
+                    self.to = Pose::default();
+                    self.blend_started = None;
+                    self.bone = self.figures[i].puppet.segments[0].bone.clone();
                 }
-            });
-        }
+            }
+        });
         ui.separator();
-        ui.add(egui::Slider::new(&mut self.yaw, -180.0..=180.0).text("yaw"));
+        ui.add(egui::Slider::new(&mut self.yaw, -180.0..=180.0).text("yaw (or drag the view)"));
         ui.checkbox(&mut self.auto_rotate, "auto-rotate");
         ui.add(egui::Slider::new(&mut self.pitch, -10.0..=60.0).text("camera pitch"));
-        ui.add(egui::Slider::new(&mut self.zoom, 0.4..=2.5).text("zoom"));
-        ui.add(egui::Slider::new(&mut self.distance, 6.0..=40.0).text("distance (ft)"));
+        ui.add(egui::Slider::new(&mut self.zoom, 0.1..=2.5).text("zoom"));
         ui.separator();
-        ui.label("Pose");
-        let presets: Vec<(&'static str, Pose)> = self.figures[self.figure].presets.clone();
+        ui.label("Pose (from data/poses)");
+        let poses: Vec<(String, Pose)> =
+            self.figures[self.figure].poses.poses.iter().map(|(n, p)| (n.clone(), p.clone())).collect();
         ui.horizontal_wrapped(|ui| {
-            for (name, pose) in presets {
+            for (name, pose) in poses {
                 if ui.button(name).clicked() {
                     self.go_to(pose);
                 }
@@ -274,27 +213,28 @@ impl Demo {
         ui.add(egui::Slider::new(&mut self.blend_ms, 0.0..=1500.0).text("blend ms"));
         if ui.add(egui::Slider::new(&mut self.blend_t, 0.0..=1.0).text("blend")).changed() {
             self.blend_started = None;
-            self.pose = self.from.lerp(&self.to, self.blend_t);
+            self.pose = self.from.blend(&self.to, self.blend_t);
         }
         ui.separator();
-        let names: Vec<String> = self.figures[self.figure].skel.segments.iter().map(|s| s.name.clone()).collect();
-        egui::ComboBox::from_label("segment").selected_text(self.selected.clone()).show_ui(ui, |ui| {
-            for n in names {
-                ui.selectable_value(&mut self.selected, n.clone(), n);
+        let bones: Vec<String> = self.figures[self.figure].puppet.bones().iter().map(|b| (*b).to_owned()).collect();
+        egui::ComboBox::from_label("bone").selected_text(self.bone.clone()).show_ui(ui, |ui| {
+            for b in bones {
+                if ui.selectable_value(&mut self.bone, b.clone(), b).clicked() {
+                    self.bone_euler = [0.0; 3];
+                }
             }
         });
-        let mut rot = self.pose.get(&self.selected);
         let mut changed = false;
         for (k, label) in ["x (fore/aft)", "y (twist)", "z (sideways)"].into_iter().enumerate() {
-            changed |= ui.add(egui::Slider::new(&mut rot[k], -180.0..=180.0).text(label)).changed();
+            changed |= ui.add(egui::Slider::new(&mut self.bone_euler[k], -180.0..=180.0).text(label)).changed();
         }
         if changed {
             self.blend_started = None;
-            self.pose.rot.insert(self.selected.clone(), rot);
+            self.pose.set_euler(&self.bone.clone(), self.bone_euler);
             self.to = self.pose.clone();
         }
         ui.separator();
-        ui.label("Wounds (3 on a limb severs it)");
+        ui.label("Wounds (3 on an arm / leg severs it)");
         egui::Grid::new("wounds").show(ui, |ui| {
             for part in WOUND_PARTS {
                 ui.label(part);
@@ -306,18 +246,51 @@ impl Demo {
             }
         });
         ui.separator();
-        ui.checkbox(&mut self.dead, "dead (grey body)");
-        ui.checkbox(&mut self.outline, "capsules + outline");
-        ui.checkbox(&mut self.highlight, "highlight");
-        ui.checkbox(&mut self.silhouettes, "show front/side silhouettes");
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.dead, "dead");
+            ui.checkbox(&mut self.boss, "boss");
+            ui.color_edit_button_srgb(&mut self.body);
+            ui.label("body");
+        });
+        ui.add(egui::Slider::new(&mut self.outline_px, 0.0..=3.0).text("outline px"));
+        ui.checkbox(&mut self.silhouettes, "silhouette inset");
         ui.separator();
-        ui.label(format!("{} prims, solve + list {:?}", self.last_prims, self.last_cost));
+        ui.collapsing("Joint depth: guess vs override", |ui| {
+            let fig = &mut self.figures[self.figure];
+            let axis = if fig.rig.view == View::Front { "z" } else { "x" };
+            let mut dirty = false;
+            let names: Vec<String> = fig.rig.joints.keys().cloned().collect();
+            for name in names {
+                let guess = fig.guesses.get(&name).map(|g| g.value).unwrap_or(0.0);
+                let mut on = fig.rig.depth.contains_key(&name);
+                let mut value = fig.rig.depth.get(&name).copied().unwrap_or(guess);
+                ui.horizontal(|ui| {
+                    if ui.checkbox(&mut on, "").changed() {
+                        dirty = true;
+                    }
+                    if ui.add_enabled(on, egui::Slider::new(&mut value, -2.0..=2.0).text(format!("{name} {axis} (guess {guess:+.2})"))).changed() {
+                        dirty = true;
+                    }
+                });
+                if on {
+                    fig.rig.depth.insert(name, value);
+                } else {
+                    fig.rig.depth.remove(&name);
+                }
+            }
+            if dirty {
+                fig.rebuild();
+            }
+        });
+        ui.separator();
+        ui.label(format!("{} prims, pose + list {:?}", self.last_prims, self.last_cost));
     }
 
     fn silhouette_inset(&self, painter: &egui::Painter, rect: egui::Rect) {
         let fig = &self.figures[self.figure];
         let mut left = rect.left() + 12.0;
         for (entry, label) in [(&fig.front, "front"), (&fig.side, "side")] {
+            let Some((entry, _)) = entry else { continue };
             let Some(b) = entry.bounds() else { continue };
             let scale = 150.0 / (b[3] - b[1]).max(0.1);
             let width = (b[2] - b[0]) * scale;
@@ -352,7 +325,7 @@ impl eframe::App for Demo {
             let t = if self.blend_ms <= 1.0 { 1.0 } else { (t0.elapsed().as_secs_f32() * 1000.0 / self.blend_ms).min(1.0) };
             // Smoothstep, so the motion eases in and out.
             self.blend_t = t;
-            self.pose = self.from.lerp(&self.to, t * t * (3.0 - 2.0 * t));
+            self.pose = self.from.blend(&self.to, t * t * (3.0 - 2.0 * t));
             if t >= 1.0 {
                 self.blend_started = None;
             }
@@ -372,23 +345,30 @@ impl eframe::App for Demo {
             }
             painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]));
             let fig = &self.figures[self.figure];
-            let mut cam = Camera::framing(fig.skel.height.max(5.0), [rect.width(), rect.height()]);
+            let mut cam = Camera::framing(fig.puppet.height.max(5.0), [rect.width(), rect.height()]);
             cam.center = [rect.center().x, rect.center().y];
-            cam.focal *= self.zoom * self.distance / cam.distance;
-            cam.distance = self.distance;
-            cam.yaw_deg = self.yaw;
+            cam.focal *= self.zoom;
             cam.pitch_deg = self.pitch;
-            let style = self.style();
+            let wounds: Vec<(&str, u8)> = self.wounds.iter().filter(|(_, r)| **r > 0).map(|(p, r)| (*p, *r)).collect();
+            let look = Look {
+                body: self.body,
+                wounds: &wounds,
+                dead: self.dead,
+                boss_outline: self.boss,
+                yaw: self.yaw,
+                outline_px: self.outline_px,
+                ..Look::default()
+            };
             let started = Instant::now();
-            let posed = solve(&fig.skel, &self.pose);
-            let project = cam.projector();
-            let puppet = build_draw_list(&fig.skel, &posed, &style, &project);
+            let posed = fig.puppet.pose(&self.pose);
+            let project = |p: V3| cam.project(p);
+            let puppet = posed.draw_list(&project, &look);
             self.last_cost = started.elapsed();
             self.last_prims = puppet.len();
             let painter = painter.with_clip_rect(rect);
-            gs_puppet::paint::paint(&painter, egui::Vec2::ZERO, &ground_shadow(&fig.skel, &posed, &style, &project, SHADOW));
-            gs_puppet::paint::paint(&painter, egui::Vec2::ZERO, &ground_grid(&project, 5, GRID, 1.0));
-            gs_puppet::paint::paint(&painter, egui::Vec2::ZERO, &puppet);
+            gs_puppet::paint(&painter, egui::Vec2::ZERO, &posed.ground_shadow(&project, &look, SHADOW));
+            gs_puppet::paint(&painter, egui::Vec2::ZERO, &ground_grid(&project, 5, GRID, 1.0));
+            gs_puppet::paint(&painter, egui::Vec2::ZERO, &puppet);
             if self.silhouettes {
                 self.silhouette_inset(&painter, rect);
             }
@@ -398,10 +378,17 @@ impl eframe::App for Demo {
             eprintln!("puppet_demo: frame {} ok, {} prims, {:?}", self.frames, self.last_prims, self.last_cost);
         }
         if let Some(secs) = self.exit_after {
-            // Exercise the blend while unattended.
-            if self.blend_started.is_none() && self.frames.is_multiple_of(45) {
-                let presets = &self.figures[self.figure].presets;
-                let next = presets[(self.frames / 45) as usize % presets.len()].1.clone();
+            // Exercise the blend, both families and the looks while unattended.
+            if self.blend_started.is_none() && self.frames.is_multiple_of(40) {
+                let step = (self.frames / 40) as usize;
+                if step.is_multiple_of(4) {
+                    self.figure = (self.figure + 1) % self.figures.len();
+                    self.pose = Pose::default();
+                }
+                self.boss = step % 3 == 0;
+                self.dead = step % 5 == 0;
+                let poses = &self.figures[self.figure].poses.poses;
+                let next = poses.values().nth(step % poses.len()).cloned().unwrap_or_default();
                 self.go_to(next);
             }
             if self.started.elapsed().as_secs_f32() >= secs {
@@ -415,7 +402,7 @@ impl eframe::App for Demo {
 
 fn main() -> eframe::Result {
     if let Ok(dir) = std::env::var("PUPPET_DEMO_SHOTS") {
-        shots(Path::new(&dir));
+        shots::run(Path::new(&dir));
         return Ok(());
     }
     let options = eframe::NativeOptions {
@@ -423,4 +410,16 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native("gs_puppet_demo", options, Box::new(|_cc| Ok(Box::new(Demo::new()))))
+}
+
+// Shared with `shots`.
+pub fn iou_report(fig: &Figure) -> Vec<(View, f32)> {
+    [View::Front, View::Side]
+        .into_iter()
+        .filter_map(|v| Some((v, rest_iou(&fig.puppet, v, fig.mask(v)?))))
+        .collect()
+}
+
+pub fn overlay_prims(fig: &Figure, view: View) -> Option<Vec<Prim>> {
+    Some(rest_prims(&fig.puppet, view, fig.mask(view)?, &Look::default()))
 }

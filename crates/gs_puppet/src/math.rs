@@ -91,3 +91,77 @@ impl Xf {
         Xf { r: mul_mm(&self.r, &inner.r), t: add(mul_mv(&self.r, inner.t), self.t) }
     }
 }
+
+/// Rotation of `deg` degrees about the unit vector `axis` (Rodrigues).
+pub fn axis_angle(axis: V3, deg: f32) -> M3 {
+    let (s, c) = deg.to_radians().sin_cos();
+    let [x, y, z] = axis;
+    let t = 1.0 - c;
+    [
+        [t * x * x + c, t * x * y - s * z, t * x * z + s * y],
+        [t * x * y + s * z, t * y * y + c, t * y * z - s * x],
+        [t * x * z - s * y, t * y * z + s * x, t * z * z + c],
+    ]
+}
+
+/// Unit quaternion `[w, x, y, z]`.
+pub type Quat = [f32; 4];
+
+pub const QUAT_IDENTITY: Quat = [1.0, 0.0, 0.0, 0.0];
+
+pub fn quat_from_m3(m: &M3) -> Quat {
+    let tr = m[0][0] + m[1][1] + m[2][2];
+    let q = if tr > 0.0 {
+        let s = (tr + 1.0).sqrt() * 2.0;
+        [0.25 * s, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [(m[2][1] - m[1][2]) / s, 0.25 * s, (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s]
+    } else if m[1][1] > m[2][2] {
+        let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [(m[0][2] - m[2][0]) / s, (m[0][1] + m[1][0]) / s, 0.25 * s, (m[1][2] + m[2][1]) / s]
+    } else {
+        let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [(m[1][0] - m[0][1]) / s, (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, 0.25 * s]
+    };
+    quat_norm(q)
+}
+
+pub fn quat_norm(q: Quat) -> Quat {
+    let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    if l > 1e-9 && l.is_finite() {
+        [q[0] / l, q[1] / l, q[2] / l, q[3] / l]
+    } else {
+        QUAT_IDENTITY
+    }
+}
+
+pub fn quat_to_m3(q: Quat) -> M3 {
+    let [w, x, y, z] = q;
+    [
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y)],
+        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x)],
+        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y)],
+    ]
+}
+
+/// Shortest-arc spherical interpolation.
+pub fn slerp(a: Quat, b: Quat, t: f32) -> Quat {
+    let mut d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    let mut b = b;
+    if d < 0.0 {
+        b = [-b[0], -b[1], -b[2], -b[3]];
+        d = -d;
+    }
+    if d > 0.9995 {
+        return quat_norm([0, 1, 2, 3].map(|i| a[i] + (b[i] - a[i]) * t));
+    }
+    let th = d.clamp(-1.0, 1.0).acos();
+    let (sa, sb) = (((1.0 - t) * th).sin() / th.sin(), (t * th).sin() / th.sin());
+    quat_norm([0, 1, 2, 3].map(|i| a[i] * sa + b[i] * sb))
+}
+
+/// The same rotation on the other side of the body (reflected in x = 0).
+pub fn quat_mirror(q: Quat) -> Quat {
+    [q[0], q[1], -q[2], -q[3]]
+}

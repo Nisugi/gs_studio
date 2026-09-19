@@ -120,6 +120,20 @@ pub struct Rig {
     /// is simply "not placed yet".
     #[serde(serialize_with = "ser_joints")]
     pub joints: BTreeMap<String, Pt>,
+    /// Joint -> the coordinate the rig's own view cannot see, in FEET, in
+    /// the OTHER silhouette's x: front-back (z, + = the creature's front)
+    /// for a front-view rig, left-right (x, + = the creature's left) for a
+    /// side-view rig. Absent = a puppet builder guesses it from the other
+    /// silhouette. Where a left and a right joint share one clicked point
+    /// (near and far legs in a side view) this is what separates them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", serialize_with = "ser_f32_map")]
+    pub depth: BTreeMap<String, f32>,
+    /// Bone -> off-plane half-thickness in feet, beside the bone's in-plane
+    /// `radius_ft`. Absent = measured from the other silhouette. (Keyed by
+    /// bone name here rather than a `RigBone` field so code that builds a
+    /// `RigBone` literal keeps compiling.)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", serialize_with = "ser_f32_map")]
+    pub radius_depth_ft: BTreeMap<String, f32>,
     #[serde(default)]
     pub bones: Vec<RigBone>,
 }
@@ -243,6 +257,11 @@ impl Rig {
         }
         let mut seen = BTreeSet::new();
         self.joint_order.retain(|j| seen.insert(j.clone()));
+        // Depth overrides follow their joint / bone out of the rig.
+        let order = &self.joint_order;
+        self.depth.retain(|j, v| v.is_finite() && order.contains(j));
+        let bones = &self.bones;
+        self.radius_depth_ft.retain(|b, v| v.is_finite() && bones.iter().any(|x| &x.name == b));
 
         while let Some(HierarchyIssue::Cycle(bones)) =
             self.hierarchy_issues().into_iter().find(|i| matches!(i, HierarchyIssue::Cycle(_)))
@@ -457,6 +476,10 @@ fn ser_opt_pt<S: Serializer>(v: &Option<Pt>, s: S) -> Result<S::Ok, S::Error> {
         Some(p) => tidy_pt(*p).serialize(s),
         None => s.serialize_none(),
     }
+}
+
+fn ser_f32_map<S: Serializer>(v: &BTreeMap<String, f32>, s: S) -> Result<S::Ok, S::Error> {
+    s.collect_map(v.iter().map(|(k, x)| (k, tidy(*x))))
 }
 
 fn ser_joints<S: Serializer>(v: &BTreeMap<String, Pt>, s: S) -> Result<S::Ok, S::Error> {

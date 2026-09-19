@@ -82,6 +82,8 @@ impl Template {
             },
             eyes: Eyes::default(),
             joints: BTreeMap::new(),
+            depth: BTreeMap::new(),
+            radius_depth_ft: BTreeMap::new(),
             bones: self
                 .bones
                 .iter()
