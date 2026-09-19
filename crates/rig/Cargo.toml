@@ -1,0 +1,13 @@
+[package]
+name = "rig"
+version = "0.1.0"
+edition = "2021"
+description = "Creature rig file format, body-type templates, and bake-to-files. No UI."
+
+[dependencies]
+rig_bake = { path = "../rig_bake" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+png = "0.17"
+

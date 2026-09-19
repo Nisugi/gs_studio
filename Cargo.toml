@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/rig_bake"]
+members = ["crates/rig_bake", "crates/rig", "crates/studio"]
+
+# The labeller is the hot loop behind every editor drag; keep it fast in
+# debug builds too (512 px: ~115 ms unoptimized vs ~18 ms).
+[profile.dev.package.rig_bake]
+opt-level = 3

@@ -1,0 +1,23 @@
+family = "humanoid"
+view = "front"
+ref_ft = 6.0
+axis = "crown"
+px_per_ft = 84.8525
+aspect = 0.3633
+span = 0.828
+ground_frac = 0.9995
+parts = ["head", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
+
+[map]
+width = 186
+height = 512
+
+[anchors]
+feet = [0.4991, 0.9995]
+head = [0.4991, 0.0085]
+mouth = [0.4991, 0.1377]
+saddle = [0.4991, 0.1792]
+
+[eyes]
+leftEye = [0.5538, 0.0631]
+rightEye = [0.4443, 0.0631]
