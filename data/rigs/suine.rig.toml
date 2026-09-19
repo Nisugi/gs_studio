@@ -36,29 +36,66 @@ sternum = [0.7, 1.4]
 stifle_l = [-2.05, 1.2]
 stifle_r = [-1.35, 1.25]
 tail_base = [-2.25, 1.98]
-tail_tip = [-2.44, 1.12]
+tail_tip = [-2.5, 1.1]
 withers = [0.68, 2.78]
 wrist_l = [0.02, 0.3]
 wrist_r = [0.5, 0.3]
 
+# NOTE: `rig --example bake` rewrites this file through the model and drops
+# comments. Re-add this block after a re-bake.
+#
+# Every value is the measured centre of the ONE limb band the front
+# silhouette shows on that side, at the joint's own row, with the documented
+# MERGE_GAP_FT = 0.08 hairline merge applied.
+#
+# Why overrides are needed at all. `suine-front` draws each leg with an
+# interior crease line down it; potrace turned that line into a 0.027-0.036 ft
+# gap (identical at 512 and 1024 px, so it is drawn, not aliasing). That is a
+# tracing hairline, exactly what MERGE_GAP_FT exists to close -- but
+# `guess_depths` probes with MERGE_GAP_FT * 0.25 = 0.02, too narrow to close
+# it. So the guess sees one leg as two half-legs and, at rows where the front
+# view is solid body, latches onto flank creases instead:
+#
+#   row          front view with merge 0.08      the guess picked
+#   y 0.30-0.95  one limb band [0.30,0.75]       its inner half, 0.435-0.445
+#   y 1.20/1.25  ONE span [-0.805,0.803],        0.751/0.769 = a 0.08-0.10 ft
+#                no limb at all                  flank-crease sliver
+#   y 2.15       ONE span [-0.811,0.815]         0.648 = a 0.22 ft crease
+#   y 2.25       ONE span [-0.750,0.748]         0.624 = a 0.25 ft crease
+#
+# The leg column is straight: its centre holds 0.50-0.52 over the whole
+# stretch where it is cleanly separable (mean 0.5166 over 51 rows, y
+# 0.30-0.80), flaring to 0.61 at the ground and dying into the belly at
+# y = 0.95. hip, shoulder and stifle sit above that, so they take the
+# column's value -- the column does not converge toward the midline going up,
+# so there is nothing to extrapolate them inboard to.
+#
+# The front view shows ONE band per side, not two or three, so it cannot tell
+# fore from hind: both pairs project onto the same column. Fore and hind
+# therefore take the SAME |x| at equal heights, which is what the drawing
+# supports. Left/right is the sign.
+#
+# eye_r is deliberately NOT overridden: measured, any value from -0.15 to
+# -0.30 leaves both IoUs bit-identical, so there is nothing to correct.
+#
+# Stability: every value jittered +/-0.03 keeps front IoU in 0.7937-0.7947.
 [depth]
-elbow_l = 0.64
-elbow_r = -0.64
-eye_r = -0.3
-forepaw_l = 0.76
-forepaw_r = -0.76
-hindpaw_l = 0.49
-hindpaw_r = -0.49
-hip_l = 0.3
-hip_r = -0.3
-hock_l = 0.43
-hock_r = -0.43
-shoulder_l = 0.7
-shoulder_r = -0.7
-stifle_l = 0.45
-stifle_r = -0.45
-wrist_l = 0.7
-wrist_r = -0.7
+elbow_l = 0.51
+elbow_r = -0.51
+forepaw_l = 0.61
+forepaw_r = -0.61
+hindpaw_l = 0.61
+hindpaw_r = -0.61
+hip_l = 0.51
+hip_r = -0.51
+hock_l = 0.51
+hock_r = -0.51
+shoulder_l = 0.51
+shoulder_r = -0.51
+stifle_l = 0.51
+stifle_r = -0.51
+wrist_l = 0.54
+wrist_r = -0.54
 
 [radius_depth_ft]
 underline = 0.32

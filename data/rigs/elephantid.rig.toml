@@ -24,45 +24,45 @@ groin = [-2.0, 1.0]
 hindpaw_l = [-2.57, 0.08]
 hindpaw_r = [-1.42, 0.08]
 hip_l = [-2.22, 2.15]
-hip_r = [-1.55, 1.8]
+hip_r = [-1.78, 2.15]
 hock_l = [-2.46, 0.75]
 hock_r = [-1.58, 0.75]
 mid_back = [-1.15, 2.5]
 nose = [1.28, 2.0]
 poll = [0.48, 2.85]
-shoulder_l = [-0.18, 2.05]
-shoulder_r = [0.25, 2.55]
+shoulder_l = [-0.2, 2.3]
+shoulder_r = [0.32, 2.3]
 sternum = [0.0, 1.35]
 stifle_l = [-2.36, 1.5]
 stifle_r = [-1.61, 1.4]
 tail_base = [-2.42, 1.95]
 tail_tip = [-2.57, 1.44]
-trunk_1 = [1.44, 1.86]
+trunk_1 = [1.45, 1.83]
 trunk_2 = [1.48, 1.45]
 trunk_3 = [1.53, 1.05]
 trunk_4 = [1.58, 0.66]
 trunk_tip = [1.44, 0.41]
 tusk_base_l = [1.56, 1.63]
-tusk_base_r = [1.61, 1.9]
+tusk_base_r = [1.72, 1.7]
 tusk_bend_l = [1.95, 1.47]
 tusk_bend_r = [2.03, 1.64]
-tusk_curl_l = [2.47, 1.58]
+tusk_curl_l = [2.58, 1.67]
 tusk_curl_r = [2.43, 1.83]
-tusk_tip_l = [2.87, 2.14]
+tusk_tip_l = [2.81, 2.05]
 tusk_tip_r = [2.65, 2.18]
 withers = [-0.18, 2.72]
 wrist_l = [-0.2, 0.6]
 wrist_r = [0.44, 0.6]
 
 [depth]
-tusk_base_l = 0.52
-tusk_base_r = -0.52
-tusk_bend_l = 1.0
+tusk_base_l = 1.0
+tusk_base_r = -0.97
+tusk_bend_l = 1.05
 tusk_bend_r = -1.0
-tusk_curl_l = 1.0
-tusk_curl_r = -1.0
-tusk_tip_l = 0.74
-tusk_tip_r = -0.74
+tusk_curl_l = 0.99
+tusk_curl_r = -0.89
+tusk_tip_l = 0.84
+tusk_tip_r = -0.84
 
 [[bones]]
 name = "skull"
@@ -125,6 +125,7 @@ name = "foreleg_l"
 part = "leftArm"
 parent = "spine"
 joints = ["shoulder_l", "elbow_l", "wrist_l"]
+radius_ft = 0.172
 
 [[bones]]
 name = "forepaw_l"
