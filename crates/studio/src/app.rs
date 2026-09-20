@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 
 use crate::calib::{CalibKind, HostEffects};
+use crate::data_home::{self, ImportPlan, ImportReport};
 use crate::data_root::DataRoot;
 use crate::pool_dir::{self, PoolDir};
 use crate::stage::StudioRoomContext;
@@ -65,8 +66,9 @@ impl ToolId {
 pub fn top_bar_layout(available_width: f32) -> (bool, f32) {
     /// Title + seven tabs + separators, generously measured.
     const TABS: f32 = 600.0;
-    /// "Data:" + "Open" + "Pool:" + "Set" + separators and spacing.
-    const BOX_CHROME: f32 = 230.0;
+    /// "Data:" + "Open" + "Pool:" + "Set" + "Import from VellumFE..." +
+    /// separators and spacing.
+    const BOX_CHROME: f32 = 400.0;
     const BOX: f32 = 240.0;
     if available_width >= TABS + BOX_CHROME + 2.0 * BOX {
         return (false, BOX);
@@ -103,6 +105,20 @@ pub struct StudioApp {
     room: StudioRoomContext,
     started: std::time::Instant,
     exit_after_secs: Option<f32>,
+    /// "Import from VellumFE...": the open confirmation, and the last
+    /// report. See [`Import`].
+    import: Import,
+}
+
+/// The VellumFE import: a read-only plan, shown and confirmed before a
+/// single byte is copied. Nothing here ever WRITES to the VellumFE
+/// directory -- it is the user's game client and is left exactly as found.
+#[derive(Default)]
+struct Import {
+    /// The confirmation window is open with this plan (source, plan).
+    asking: Option<(PathBuf, ImportPlan)>,
+    /// What the last import did.
+    report: Option<ImportReport>,
 }
 
 impl StudioApp {
@@ -120,6 +136,7 @@ impl StudioApp {
             room,
             started: std::time::Instant::now(),
             exit_after_secs,
+            import: Import::default(),
         }
     }
 
@@ -198,8 +215,9 @@ impl StudioApp {
         ui.separator();
         ui.label("Pool:");
         ui.add(egui::TextEdit::singleline(&mut self.pool_edit).desired_width(box_width)).on_hover_text(
-            "Art pool: the directory holding global/images/ and global/scenes/ (VellumFE's data directory). \
-             Also: --pool <dir> or GS_STUDIO_POOL",
+            "Art pool: the directory holding global/images/ and global/scenes/. \
+             Left alone it is gs-studio's OWN data home -- this app never reads VellumFE's \
+             ~/.vellum-fe unless you point it there. Also: --pool <dir> or GS_STUDIO_POOL",
         );
         if ui
             .button("Set")
@@ -211,6 +229,115 @@ impl StudioApp {
         {
             self.set_pool();
         }
+        self.import_button(ui);
+    }
+
+    /// "Import from VellumFE...": offers to COPY the game client's art pool
+    /// into gs-studio's own home. Disabled, with a reason, when there is no
+    /// VellumFE directory to copy from.
+    fn import_button(&mut self, ui: &mut egui::Ui) {
+        let source = data_home::importable_source();
+        let enabled = source.is_some();
+        let button = ui.add_enabled(enabled, egui::Button::new("Import from VellumFE..."));
+        let button = if enabled {
+            button.on_hover_text(
+                "COPY VellumFE's global/ art pool into this pool directory. \
+                 Nothing is moved, linked or written back: your game client is left exactly as it is. \
+                 You see what will be copied and confirm before anything happens.",
+            )
+        } else {
+            let where_it_looked = data_home::vellum_fe_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|| "(no home directory)".to_string());
+            button.on_disabled_hover_text(format!(
+                "No VellumFE data directory to import from.\nLooked in: {where_it_looked}"
+            ))
+        };
+        if button.clicked() {
+            if let Some(source) = source {
+                let plan = data_home::plan_import(&source);
+                self.import.report = None;
+                self.import.asking = Some((source, plan));
+            }
+        }
+    }
+
+    /// The import confirmation: what will be copied, and from/to where.
+    fn import_window(&mut self, ctx: &egui::Context) {
+        let Some((source, plan)) = self.import.asking.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut go = false;
+        let mut cancel = false;
+        egui::Window::new("Import from VellumFE").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+            ui.label("Copy VellumFE's art pool into gs-studio's pool directory.");
+            ui.add_space(4.0);
+            egui::Grid::new("import_paths").num_columns(2).show(ui, |ui| {
+                ui.label("From");
+                ui.label(source.display().to_string());
+                ui.end_row();
+                ui.label("To");
+                ui.label(self.pool.path.display().to_string());
+                ui.end_row();
+            });
+            ui.add_space(4.0);
+            if plan.is_empty() {
+                ui.colored_label(ui.visuals().warn_fg_color, "Nothing to copy: that directory has no pool art.");
+            } else {
+                ui.strong(format!("Will copy {}", plan.summary()));
+                for (part, files, bytes) in &plan.parts {
+                    ui.weak(format!("    {part}: {files} files, {}", data_home::human_bytes(*bytes)));
+                }
+                ui.add_space(4.0);
+                ui.weak(
+                    "COPY only -- nothing is moved, linked or deleted, and nothing is written back into VellumFE. \
+                     Files already in the pool are left as they are.",
+                );
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                go = ui.add_enabled(!plan.is_empty(), egui::Button::new("Copy")).clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if go {
+            let report = data_home::import(&source, &self.pool.path);
+            if let Some(stage) = &mut self.stage {
+                stage.pool_changed();
+                stage.push_status(report.summary());
+            }
+            gs_field::pool::invalidate_cache();
+            gs_field::geometry::invalidate_calibrations();
+            self.calibrators.pool_changed();
+            eprintln!("gs-studio: {} (from {})", report.summary(), source.display());
+            for error in &report.errors {
+                eprintln!("gs-studio: import error: {error}");
+            }
+            self.import.report = Some(report);
+        }
+        if go || cancel || !open {
+            self.import.asking = None;
+        }
+    }
+
+    /// Shown while the pool has no creature art: what directory is in use,
+    /// why it is empty, and the two ways to fill it.
+    fn first_run_banner(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.colored_label(ui.visuals().warn_fg_color, "This pool is empty.");
+            ui.label(if self.pool.source.is_explicit() {
+                format!("No art under {}/global/images/creatures.", self.pool.path.display())
+            } else {
+                format!(
+                    "gs-studio starts with its own data home ({}) rather than VellumFE's, \
+                     so there is no art in it yet.",
+                    self.pool.path.display()
+                )
+            });
+            self.import_button(ui);
+            ui.weak("or drop PNGs into global/images/, or point the Pool box at another directory.");
+        });
     }
 
     fn status_bar(&self, ui: &mut egui::Ui) {
@@ -231,9 +358,30 @@ impl StudioApp {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.active.uses_pool() {
-                    ui.weak(format!("pool: {} ({})", self.pool.path.display(), self.pool.source));
+                    // The answer to "where did it find my artwork": the
+                    // path AND whether anything asked for it.
+                    ui.weak(self.pool.status()).on_hover_text(if self.pool.source.is_explicit() {
+                        "You pointed gs-studio at this directory.".to_string()
+                    } else {
+                        format!(
+                            "Nothing pointed gs-studio anywhere, so this is its own data home.\n\
+                             It does NOT use VellumFE's data directory ({}).\n\
+                             To use another: --pool <dir>, GS_STUDIO_POOL, or type one in the Pool box.",
+                            data_home::vellum_fe_dir()
+                                .map(|d| d.display().to_string())
+                                .unwrap_or_else(|| "~/.vellum-fe".to_string())
+                        )
+                    });
                 } else {
                     ui.weak(format!("data: {} ({})", self.data.path.display(), self.data.source));
+                }
+                if let Some(report) = &self.import.report {
+                    ui.separator();
+                    ui.weak(report.summary()).on_hover_ui(|ui| {
+                        for error in &report.errors {
+                            ui.colored_label(ui.visuals().error_fg_color, error);
+                        }
+                    });
                 }
             });
         });
@@ -266,7 +414,14 @@ impl eframe::App for StudioApp {
         }
 
         egui::Panel::top("tool_tabs").show(ui, |ui| self.top_bar(ui));
+        // First run: the new home is empty, so every pool tab would just be
+        // blank. Say so, and say how to fill it.
+        if self.active.uses_pool() && data_home::is_empty_pool(&self.pool.path) {
+            egui::Panel::top("first_run").show(ui, |ui| self.first_run_banner(ui));
+        }
         egui::Panel::bottom("status_line").show(ui, |ui| self.status_bar(ui));
+        let ctx = ui.ctx().clone();
+        self.import_window(&ctx);
 
         match self.active {
             ToolId::Rigs => match &mut self.rigs {
@@ -342,16 +497,36 @@ mod tests {
 
     #[test]
     fn the_top_bar_goes_to_two_rows_before_anything_clips() {
-        // Default window: one row, full-size boxes.
-        assert_eq!(top_bar_layout(1384.0), (false, 240.0));
+        // The chrome allowance grew when "Import from VellumFE..." joined
+        // the boxes, so the one-row threshold moved with it: tabs (600) +
+        // chrome (400) + two boxes (480) = 1480.
+        assert_eq!(top_bar_layout(1480.0), (false, 240.0));
+        assert!(top_bar_layout(1479.0).0, "one pixel short goes to two rows");
+        // The default window is now a two-row window; it must still fit.
+        let (two_rows, box_width) = top_bar_layout(1384.0);
+        assert!(two_rows);
+        assert!(2.0 * box_width + 400.0 <= 1384.0, "{box_width}");
         // Minimum window (900 px minus the panel margins): two rows, and
         // the second row's boxes + chrome fit the width.
         let (two_rows, box_width) = top_bar_layout(884.0);
         assert!(two_rows);
-        assert!(box_width >= 240.0 && 2.0 * box_width + 230.0 <= 884.0, "{box_width}");
+        assert!(box_width >= 240.0 && 2.0 * box_width + 400.0 <= 884.0, "{box_width}");
         // Never degenerate, never absurd.
         assert_eq!(top_bar_layout(200.0), (true, 100.0));
-        assert!(top_bar_layout(1309.0).0);
-        assert_eq!(top_bar_layout(1310.0), (false, 240.0));
+    }
+
+    /// The import is offered only against a directory that exists and has
+    /// a `global/`, and it never targets the VellumFE directory itself.
+    #[test]
+    fn the_import_source_must_be_a_real_vellum_fe_directory() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("nothing-here");
+        std::env::set_var("VELLUM_FE_DIR", &fake);
+        assert_eq!(data_home::vellum_fe_dir().as_deref(), Some(fake.as_path()));
+        assert_eq!(data_home::importable_source(), None, "no global/, nothing to import");
+        std::fs::create_dir_all(fake.join("global").join("images")).unwrap();
+        assert_eq!(data_home::importable_source().as_deref(), Some(fake.as_path()));
+        std::env::remove_var("VELLUM_FE_DIR");
     }
 }

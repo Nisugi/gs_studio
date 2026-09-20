@@ -28,7 +28,51 @@
 //!   bone name always wins.
 //! * There is no translation anywhere. After FK the figure is dropped so
 //!   its lowest SURFACE (station ellipses, not bone points) rests on y = 0.
+//!
+//! # Per-family overrides
+//!
+//! A shared pose is a claim about a SHAPE, and one body type covers shapes
+//! that do not all bend alike: a wolf's legs are zigzags (hip, stifle and
+//! hock sharply angled) and an elephant's are straight columns, so the
+//! quadruped `sit` that folds a dog's hindlegs under it only pitches an
+//! elephant onto its nose. A family says so in its own section of the same
+//! file:
+//!
+//! ```toml
+//! [pose.sit]                          # every quadruped
+//! root = [-38.0, 0.0, 0.0]
+//! hindleg = { rot = [-34.0, 0.0, 0.0], bend = [85.0, -52.0] }
+//! tail = { rot = [58.0, 0.0, 0.0] }
+//!
+//! [family.elephantid.sit]             # ...except this one
+//! root = [-8.0, 0.0, 0.0]             # names root: replaces it
+//! hindleg = { rot = [-12.0, 0.0, 0.0], bend = [34.0, -20.0] }
+//! # tail is not named, so the shared tail angle still applies
+//! ```
+//!
+//! An override is SPARSE and composes by whole keys: a key it names
+//! REPLACES that key outright (both `rot` and `bend`, so a bend is never
+//! half-inherited), and a key it leaves out keeps whatever the shared pose
+//! said. `root` is one such key. Naming a pair stem (`hindleg`) replaces
+//! both sides; naming a side (`hindleg_r`) replaces just that one and, as
+//! everywhere else, an exact bone name beats the stem.
+//!
+//! A family may also name a pose the shared set does not have at all: that
+//! pose exists for that family only. A family with no section, and every
+//! pose it does not name, resolve exactly as if the section were not there
+//! -- [`PoseSet::for_family`] hands back the shared set untouched.
+//!
+//! The override lives HERE, in the body type's file, and not in the
+//! family's `.rig.toml`, because a `.rig.toml` is studio source that is
+//! never published: a game client is shipped `<family>.puppet.toml` (baked
+//! geometry, no rig) plus `<body_type>.toml`, so a correction in the rig
+//! file would never reach the thing that draws it. Keeping it beside the
+//! pose it corrects also means the two are read, diffed and reviewed
+//! together -- and the shared file stays legible, because a family section
+//! is a handful of lines at the bottom, not an edit to the pose everyone
+//! else uses.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -61,6 +105,29 @@ pub struct Pose {
 impl Default for Pose {
     fn default() -> Self {
         Pose { root: QUAT_IDENTITY, bones: BTreeMap::new() }
+    }
+}
+
+/// One family's corrections to the shared poses of its body type: pose name
+/// -> the keys that family replaces. See the module docs.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FamilyPoses {
+    pub poses: BTreeMap<String, PoseOverride>,
+}
+
+/// The sparse replacement for ONE pose: only the keys this family differs
+/// in. A named key replaces the shared key outright; an unnamed one is
+/// inherited.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PoseOverride {
+    /// `Some` = this family turns the whole figure differently.
+    pub root: Option<Quat>,
+    pub bones: BTreeMap<String, BonePose>,
+}
+
+impl PoseOverride {
+    pub fn is_empty(&self) -> bool {
+        self.root.is_none() && self.bones.is_empty()
     }
 }
 
@@ -98,6 +165,26 @@ impl Pose {
             Some(b) => b.clone(),
             None => BonePose::default(),
         }
+    }
+
+    /// This pose with `over` applied: every key `over` names replaces this
+    /// pose's key outright, everything else is kept. Naming a pair stem
+    /// (`hindleg`) drops the sides this pose spelled out (`hindleg_l`,
+    /// `hindleg_r`), so a family that simplifies a per-side shared pose is
+    /// not left with the old sides shadowing its stem.
+    pub fn with_override(&self, over: &PoseOverride) -> Pose {
+        let mut out = self.clone();
+        if let Some(root) = over.root {
+            out.root = root;
+        }
+        for (key, bp) in &over.bones {
+            if !(key.ends_with("_l") || key.ends_with("_r")) {
+                out.bones.remove(&format!("{key}_l"));
+                out.bones.remove(&format!("{key}_r"));
+            }
+            out.bones.insert(key.clone(), bp.clone());
+        }
+        out
     }
 
     /// Slerp per bone (and the root), lerp per bend.
@@ -144,13 +231,37 @@ struct PoseFile {
     body_type: String,
     #[serde(default)]
     pose: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[family.<family>.<pose>]`: that family's sparse corrections.
+    #[serde(default)]
+    family: BTreeMap<String, BTreeMap<String, BTreeMap<String, toml::Value>>>,
 }
 
-/// The poses of one body type, by name.
+/// One `key = { rot, bend }` entry of a pose table, parsed and checked.
+/// `root` is handled by the caller (it is a bare `[x, y, z]`).
+fn bone_def(where_: &str, key: &str, value: toml::Value) -> Result<BonePose, String> {
+    let def: BoneDef = value.try_into().map_err(|e| format!("{where_}, '{key}': {e}"))?;
+    let rot = def.rot.unwrap_or([0.0; 3]);
+    if !rot.iter().chain(&def.bend).all(|v| v.is_finite()) {
+        return Err(format!("{where_}, '{key}': not a finite angle"));
+    }
+    Ok(BonePose { rot: quat_from_euler(rot), bend: def.bend })
+}
+
+fn root_def(where_: &str, value: toml::Value) -> Result<Quat, String> {
+    let deg: [f32; 3] = value.try_into().map_err(|e| format!("{where_}, 'root': {e}"))?;
+    if !deg.iter().all(|v| v.is_finite()) {
+        return Err(format!("{where_}, 'root': not a finite angle"));
+    }
+    Ok(quat_from_euler(deg))
+}
+
+/// The poses of one body type, by name, plus any per-family corrections.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PoseSet {
     pub body_type: String,
     pub poses: BTreeMap<String, Pose>,
+    /// Family (lowercase) -> its overrides. Empty for most body types.
+    pub families: BTreeMap<String, FamilyPoses>,
 }
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
@@ -169,23 +280,90 @@ impl PoseSet {
         for (name, entries) in file.pose {
             let mut pose = Pose::default();
             for (key, value) in entries {
-                let bad = |e: toml::de::Error| format!("pose '{name}', '{key}': {e}");
+                let where_ = format!("pose '{name}'");
                 if key == "root" {
-                    let deg: [f32; 3] = value.try_into().map_err(bad)?;
-                    pose.root = quat_from_euler(deg);
+                    pose.root = root_def(&where_, value)?;
                     continue;
                 }
-                let def: BoneDef = value.try_into().map_err(bad)?;
-                let rot = def.rot.unwrap_or([0.0; 3]);
-                if !rot.iter().chain(&def.bend).all(|v| v.is_finite()) {
-                    return Err(format!("pose '{name}', '{key}': not a finite angle"));
-                }
-                pose.bones.insert(key, BonePose { rot: quat_from_euler(rot), bend: def.bend });
+                pose.bones.insert(key.clone(), bone_def(&where_, &key, value)?);
             }
             poses.insert(name, pose);
         }
         poses.entry("stand".to_owned()).or_default();
-        Ok(PoseSet { body_type: file.body_type, poses })
+
+        let mut families = BTreeMap::new();
+        for (family, by_pose) in file.family {
+            let family = family.trim().to_ascii_lowercase();
+            let mut fam = FamilyPoses::default();
+            for (name, entries) in by_pose {
+                let mut over = PoseOverride::default();
+                for (key, value) in entries {
+                    let where_ = format!("family '{family}', pose '{name}'");
+                    if key == "root" {
+                        over.root = Some(root_def(&where_, value)?);
+                        continue;
+                    }
+                    over.bones.insert(key.clone(), bone_def(&where_, &key, value)?);
+                }
+                if !over.is_empty() {
+                    fam.poses.insert(name, over);
+                }
+            }
+            if !fam.poses.is_empty() {
+                families.insert(family, fam);
+            }
+        }
+        Ok(PoseSet { body_type: file.body_type, poses, families })
+    }
+
+    /// This set as `family` sees it: the shared poses with that family's
+    /// overrides folded in. A family with no section (the usual case) gets
+    /// the shared set back untouched, so nothing about it can change.
+    ///
+    /// A family may name a pose the shared set lacks; it is added for that
+    /// family only.
+    pub fn for_family(&self, family: &str) -> Cow<'_, PoseSet> {
+        let Some(fam) = self.families.get(family.trim().to_ascii_lowercase().as_str()) else {
+            return Cow::Borrowed(self);
+        };
+        let mut out = self.clone();
+        for (name, over) in &fam.poses {
+            let base = out.poses.get(name).cloned().unwrap_or_default();
+            out.poses.insert(name.clone(), base.with_override(over));
+        }
+        Cow::Owned(out)
+    }
+
+    /// The bone (or pair-stem) names every override in this set mentions,
+    /// with the family and pose that mention them: what a caller checks
+    /// against a real puppet's bones, so a typo is caught instead of
+    /// silently posing nothing. See [`PoseSet::check_family_bones`].
+    pub fn override_keys(&self) -> Vec<(&str, &str, &str)> {
+        self.families
+            .iter()
+            .flat_map(|(f, fam)| {
+                fam.poses
+                    .iter()
+                    .flat_map(move |(p, o)| o.bones.keys().map(move |k| (f.as_str(), p.as_str(), k.as_str())))
+            })
+            .collect()
+    }
+
+    /// Every override key of `family` that names no bone of `bones`, as
+    /// messages. A pair stem counts as known when either side exists.
+    /// Empty = every key this family names will actually pose something.
+    pub fn check_family_bones(&self, family: &str, bones: &[&str]) -> Vec<String> {
+        let known = |key: &str| {
+            bones.contains(&key)
+                || bones.contains(&format!("{key}_l").as_str())
+                || bones.contains(&format!("{key}_r").as_str())
+        };
+        self.override_keys()
+            .into_iter()
+            .filter(|(f, _, _)| f.eq_ignore_ascii_case(family.trim()))
+            .filter(|(_, _, key)| !known(key))
+            .map(|(f, p, key)| format!("family '{f}', pose '{p}': '{key}' names no bone"))
+            .collect()
     }
 
     /// `<dir>/<body_type>.toml`

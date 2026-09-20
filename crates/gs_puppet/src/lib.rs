@@ -57,8 +57,10 @@ pub use depth::{depth_of, guess_depths, guess_depths_mask, joints3, snap_limb_jo
 pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WOUND_COLORS};
 pub use fit::{rest_iou, rest_prims};
 pub use paint::paint;
-pub use pose::{BonePose, Pose, PoseSet, Posed, SHIPPED_POSES};
+pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
+#[cfg(test)]
+mod pose_tests;
 #[cfg(test)]
 mod tests;

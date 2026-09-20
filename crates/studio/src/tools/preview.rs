@@ -61,15 +61,18 @@ impl StageTool {
         art.reset();
         let mut stage = StageState::new(context);
         // Smoke runs (no human at the window): GS_STUDIO_SMOKE=1 puts the
-        // first few cast entries, a placeholder, a wounded/stunned/targeted
-        // creature and the first saved scene on the stage, so the real art
-        // and render paths run.
+        // first few cast entries, an art-less creature (which draws as its
+        // family puppet), a wounded/stunned/targeted creature and the first
+        // saved scene on the stage, so the real art and render paths run.
         if std::env::var_os("GS_STUDIO_SMOKE").is_some() {
             let picks: Vec<_> = stage.cast.iter().take(3).map(|e| (e.display.clone(), e.noun.clone())).collect();
             for (display, noun) in picks {
                 stage.spawn(&display, Some(noun));
             }
-            stage.spawn("training dummy", Some("dummy".to_string()));
+            stage.spawn_named("training dummy", Some("dummy".to_string()));
+            // A real creature the pool almost certainly has no art for:
+            // exercises the non-humanoid puppet path.
+            stage.spawn_named("timber wolf", Some("wolf".to_string()));
             stage.set_status("studio-1", "stunned", true);
             stage.set_wound("studio-1", "head", 2);
             stage.set_health_bar("studio-1", true);
@@ -85,6 +88,11 @@ impl StageTool {
             );
         }
         StageTool { stage, art }
+    }
+
+    /// A line for the stage's own status log (the import report, say).
+    pub fn push_status(&mut self, message: String) {
+        self.stage.push_status(message);
     }
 
     /// The pool directory moved: re-root the art, re-scan the cast.
@@ -518,15 +526,26 @@ fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
 fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.heading("Cast");
+    ui.weak("Built from the ART POOL, so everything here HAS art -- and sprite art always beats the puppet.");
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut stage.filter).hint_text("filter").desired_width(140.0));
-        if ui.button("Add generic").clicked() {
-            stage.spawn("training dummy", Some("dummy".to_string()));
+        if ui
+            .button("Add generic")
+            .on_hover_text(
+                "Spawn an anonymous \"training dummy\". It has no art, so it draws as the humanoid puppet.",
+            )
+            .clicked()
+        {
+            stage.spawn_named("training dummy", Some("dummy".to_string()));
         }
     });
     if stage.cast.is_empty() {
-        ui.weak("No creature art in the pool (global/images/creatures). \"Add generic\" still works: it draws as a placeholder standee.");
+        ui.weak(
+            "No creature art in the pool (global/images/creatures). \"Add generic\" still works: \
+             with no art it draws as its family's 3D puppet.",
+        );
     }
+    spawn_by_name_ui(stage, ui);
     let filter = stage.filter.to_ascii_lowercase();
     let mut spawn_request: Option<(String, String)> = None;
     let mut cast_row = |ui: &mut egui::Ui, entry: &cast::CastEntry| {
@@ -591,6 +610,76 @@ fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         ui.separator();
         simulator_ui(stage, ui, &id);
     }
+}
+
+/// Spawn by bestiary NAME, art or no art. The Cast list above is built from
+/// the art pool, so every entry in it has art by definition, and sprite art
+/// beats the family puppet -- without this box there is no way to put a
+/// canine / elephantid / suine puppet on the stage short of emptying the
+/// pool. Suggestions come from the bestiary so the names are real creatures,
+/// but anything typed can be spawned.
+fn spawn_by_name_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new("Spawn by name (art or no art)").default_open(false).show(ui, |ui| {
+        ui.weak("Any creature from the bestiary. With no art in the pool it draws as its family's 3D puppet.");
+        let mut submit = false;
+        ui.horizontal(|ui| {
+            let box_id = ui.make_persistent_id("spawn_by_name");
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut stage.spawn_name)
+                    .id(box_id)
+                    .hint_text("creature name, e.g. timber wolf")
+                    .desired_width(180.0),
+            );
+            submit = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            submit |= ui
+                .add_enabled(!stage.spawn_name.trim().is_empty(), egui::Button::new("Spawn"))
+                .on_disabled_hover_text("Type a creature name first")
+                .clicked();
+        });
+
+        // What the typed name would get right now -- the same resolution
+        // the renderer runs, so this never disagrees with the card.
+        let typed = stage.spawn_name.trim().to_string();
+        if !typed.is_empty() {
+            let noun = cast::last_word(&typed);
+            let noun = (!noun.is_empty()).then_some(noun);
+            if cast::has_art(&typed, noun.as_deref()) {
+                ui.weak(format!("'{typed}': has art in the pool -- draws as its sprite."));
+            } else {
+                let text = match cast::puppet_family(&typed, noun.as_deref()) {
+                    Some(family) => format!("'{typed}': NO art in the pool -- draws as the {family} puppet."),
+                    None => format!("'{typed}': NO art and no puppet fits -- draws as a placeholder."),
+                };
+                ui.colored_label(ui.visuals().warn_fg_color, text);
+            }
+
+            // Bestiary suggestions: click one to fill the box.
+            let picks = cast::suggest(&typed, 12);
+            if !picks.is_empty() {
+                egui::ScrollArea::vertical().id_salt("spawn_suggestions").max_height(120.0).show(ui, |ui| {
+                    for pick in &picks {
+                        let art = cast::has_art(&pick.name, Some(&pick.noun));
+                        let mark = if art { "art" } else { "puppet" };
+                        let family = pick.family.as_deref().unwrap_or("?");
+                        let row = ui
+                            .selectable_label(false, format!("{}   [{mark}]", pick.name))
+                            .on_hover_text(format!("noun '{}', family {family}", pick.noun));
+                        if row.clicked() {
+                            stage.spawn_named(&pick.name, Some(pick.noun.clone()));
+                        }
+                    }
+                });
+                ui.weak("[art] = a sprite in the pool wins   [puppet] = no sprite, so the 3D puppet draws");
+            }
+        }
+
+        if submit {
+            let name = stage.spawn_name.trim().to_string();
+            if stage.spawn_named(&name, None) {
+                stage.spawn_name.clear();
+            }
+        }
+    });
 }
 
 /// State editor for one spawned creature: crtrStatus flags, class bools,

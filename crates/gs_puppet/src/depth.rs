@@ -14,6 +14,55 @@ use crate::puppet::MASK_PX;
 const LIMB_SPAN_FT: f32 = 0.6;
 const TOE_INSET_FT: f32 = 0.06;
 
+/// Filled spans on a row, with tracing hairlines healed but genuinely
+/// separate limbs left apart.
+///
+/// The depth probe asks a harder question than a station measurement does. A
+/// station already knows which limb it is on and only needs that limb's
+/// thickness, so it can merge at [`MERGE_GAP_FT`] unconditionally. The probe
+/// is handed a bare row and must find ONE limb on it, which means it has to
+/// tell two things apart that both look like a gap:
+///
+/// * a **hairline** -- an interior crease the artist drew, which potrace
+///   turns into a thin slit inside one filled body. Measured on the four
+///   shipped families these run 1-10 px, at most 0.093 ft, and one runs down
+///   each suine front leg at 0.030 ft. `MERGE_GAP_FT` exists precisely to
+///   close these.
+/// * a **limb separation** -- real space between two limbs, or between a limb
+///   and the trunk. On the same families the narrowest of these is 0.111 ft.
+///
+/// The populations do not overlap, and `MERGE_GAP_FT` sits in the valley
+/// between them, so ONE width serves both jobs -- but only if it is applied
+/// where it cannot do harm. Merging a row outright also bridges the toe gap
+/// between two feet planted side by side, fusing them into a blob too wide to
+/// pass the limb-width filter, so the probe would lose the reading entirely.
+///
+/// So: merge at `MERGE_GAP_FT`, and keep a merged span only while it is still
+/// limb-width. A merge that produces something wider than a limb was not
+/// healing a crease, it was welding two limbs together, and that row's
+/// unmerged spans are returned instead. The width is [`MERGE_GAP_FT`] itself,
+/// not a fraction of it: a crease is a crease whoever is looking at it.
+fn limb_spans(mask: &Mask, y: f32) -> Vec<(f32, f32)> {
+    let merged = row_spans(mask, y, MERGE_GAP_FT);
+    if merged.iter().all(|(a, b)| b - a < LIMB_SPAN_FT) {
+        return merged;
+    }
+    let raw = row_spans(mask, y, 0.0);
+    // Heal only within each merged group, so a group that grew too wide falls
+    // back to its own parts rather than costing the whole row its merge.
+    merged
+        .into_iter()
+        .flat_map(|(ga, gb)| {
+            let parts: Vec<(f32, f32)> = raw.iter().copied().filter(|(a, b)| *a >= ga && *b <= gb).collect();
+            if gb - ga < LIMB_SPAN_FT || parts.len() < 2 {
+                vec![(ga, gb)]
+            } else {
+                parts
+            }
+        })
+        .collect()
+}
+
 /// How a joint's off-plane coordinate was guessed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuessSource {
@@ -83,7 +132,7 @@ pub fn guess_depths_mask(rig: &Rig, other: Option<&Mask>) -> BTreeMap<String, De
         View::Side => {
             // The limb-width span right of centre on a row of the front view.
             let limb = |y: f32| {
-                row_spans(other?, y, MERGE_GAP_FT * 0.25)
+                limb_spans(other?, y)
                     .into_iter()
                     .filter(|(a, b)| *a > 0.02 && b - a < LIMB_SPAN_FT)
                     .max_by(|s, t| (s.1 - s.0).total_cmp(&(t.1 - t.0)))
@@ -174,4 +223,125 @@ pub fn snap_limb_joints(rig: &Rig, outlines: &Outlines) -> Rig {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod limb_span_tests {
+    use super::*;
+    use rig_bake::Grid;
+
+    const PPF: f32 = 164.0; // the shipped suine front mask's resolution
+
+    /// A one-row mask from filled runs given in feet, x centred on 0.
+    fn row_mask(half_width_ft: f32, runs: &[(f32, f32)]) -> Mask {
+        let w = (half_width_ft * 2.0 * PPF).round() as usize;
+        // One row, and `row_spans` reads it at y = 0: row = (max_y - y) * ppf.
+        let grid = Grid { w, h: 1, px_per_ft: PPF, min_x: -half_width_ft, max_y: 0.0 };
+        let mut inside = vec![false; w];
+        for (a, b) in runs {
+            let (lo, hi) = (((a + half_width_ft) * PPF) as usize, ((b + half_width_ft) * PPF) as usize);
+            for c in inside.iter_mut().take(hi.min(w)).skip(lo) {
+                *c = true;
+            }
+        }
+        Mask { grid, inside }
+    }
+
+    fn centres(spans: &[(f32, f32)]) -> Vec<f32> {
+        spans.iter().map(|(a, b)| (a + b) * 0.5).collect()
+    }
+
+    /// The bug: a drawn crease down a limb must not split it in two. This is
+    /// the shipped suine front view's own geometry at `wrist_l` (y = 0.300) --
+    /// one leg either side of centre, each cut by a 0.030 ft hairline.
+    #[test]
+    fn hairline_gap_does_not_split_a_limb() {
+        let mask = row_mask(1.0, &[(-0.750, -0.587), (-0.556, -0.326), (0.329, 0.560), (0.590, 0.754)]);
+
+        // Raw, the leg reads as two half-bands.
+        assert_eq!(row_spans(&mask, 0.0, 0.0).len(), 4);
+
+        // Healed, it is one limb per side, and the centre is the LIMB's
+        // centre -- not either half-band's.
+        let spans = limb_spans(&mask, 0.0);
+        assert_eq!(spans.len(), 2, "one span per leg, got {spans:?}");
+        let c = centres(&spans);
+        assert!((c[1] - 0.5417).abs() < 0.01, "right-of-centre limb centre {c:?}");
+        // The old probe returned the wider half-band's centre, ~0.4446.
+        assert!((c[1] - 0.4446).abs() > 0.05, "must not return a half-band centre");
+    }
+
+    /// The hairline width the fix must cover is the measured one: the suine
+    /// crease is 0.030 ft and is identical at 512 and 1024 px, so it is drawn
+    /// ink and not aliasing. Anything up to `MERGE_GAP_FT` heals.
+    #[test]
+    fn heals_every_measured_hairline_width() {
+        for gap in [0.006, 0.012, 0.024, 0.030, 0.036, 0.060, 0.079] {
+            let mask = row_mask(1.0, &[(0.330, 0.540), (0.540 + gap, 0.750)]);
+            let spans = limb_spans(&mask, 0.0);
+            assert_eq!(spans.len(), 1, "gap {gap} left the limb split: {spans:?}");
+            assert!((centres(&spans)[0] - 0.540).abs() < 0.02, "gap {gap}: {spans:?}");
+        }
+    }
+
+    /// The other half of the contract: a real separation is NOT a hairline.
+    /// The narrowest genuine limb separation across the four shipped families
+    /// is 0.111 ft, comfortably above `MERGE_GAP_FT`.
+    #[test]
+    fn genuine_limb_separation_survives() {
+        let mask = row_mask(1.0, &[(-0.500, -0.300), (0.111 - 0.300 + 0.500, 0.500)]);
+        assert_eq!(row_spans(&mask, 0.0, MERGE_GAP_FT).len(), 2);
+
+        // And two limbs a clear gap apart stay two.
+        let mask = row_mask(1.0, &[(-0.520, -0.180), (0.180, 0.520)]);
+        let spans = limb_spans(&mask, 0.0);
+        assert_eq!(spans.len(), 2, "{spans:?}");
+    }
+
+    /// Merging must never WELD two limbs into a blob too wide to be a limb.
+    /// Two feet planted side by side sit a toe-gap apart -- narrower than a
+    /// hairline -- so a blind merge fuses them and the row loses its reading
+    /// altogether. The healed span is kept only while it is still limb-width.
+    #[test]
+    fn a_merge_that_would_weld_two_limbs_is_refused() {
+        // Two 0.5 ft feet, 0.02 ft apart: merging gives 1.02 ft, over
+        // LIMB_SPAN_FT, so the parts must come back instead.
+        let mask = row_mask(1.5, &[(-0.520, -0.020), (0.000, 0.500)]);
+        assert_eq!(row_spans(&mask, 0.0, MERGE_GAP_FT).len(), 1, "precondition: a blind merge welds them");
+
+        let spans = limb_spans(&mask, 0.0);
+        assert_eq!(spans.len(), 2, "welded limbs must fall back to their parts: {spans:?}");
+        assert!(spans.iter().all(|(a, b)| b - a < LIMB_SPAN_FT));
+    }
+
+    /// A row that needs both behaviours at once: one leg creased (must heal)
+    /// beside a pair of touching feet (must not weld). Healing one group may
+    /// not cost the other its merge.
+    #[test]
+    fn heals_and_refuses_on_the_same_row() {
+        let mask = row_mask(2.0, &[
+            // a creased limb, left of centre
+            (-1.300, -1.100),
+            (-1.070, -0.900),
+            // two feet touching, right of centre
+            (0.100, 0.600),
+            (0.620, 1.120),
+        ]);
+        let spans = limb_spans(&mask, 0.0);
+        assert_eq!(spans.len(), 3, "creased limb healed, touching feet kept apart: {spans:?}");
+        let c = centres(&spans);
+        assert!((c[0] - (-1.100)).abs() < 0.03, "the creased limb is one span: {spans:?}");
+        assert!(spans.iter().all(|(a, b)| b - a < LIMB_SPAN_FT));
+    }
+
+    /// The probe and the station measurement now agree on what a crease is.
+    #[test]
+    fn probe_uses_the_documented_merge_width() {
+        // A gap just under MERGE_GAP_FT heals; one just over does not.
+        let heal = row_mask(1.0, &[(0.300, 0.500), (0.500 + MERGE_GAP_FT * 0.9, 0.700)]);
+        assert_eq!(limb_spans(&heal, 0.0).len(), 1);
+
+        let keep = row_mask(1.0, &[(0.300, 0.500), (0.500 + MERGE_GAP_FT * 1.5, 0.700)]);
+        assert_eq!(limb_spans(&keep, 0.0).len(), 2);
+    }
 }

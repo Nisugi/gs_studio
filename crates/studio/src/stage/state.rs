@@ -15,7 +15,7 @@ use gs_field::scenes::{SceneProp, StageScene};
 use gs_field::solver::{CreatureField, FieldParams, STAGE_W};
 use gs_field::{Creature, CreatureFlags};
 
-use super::cast::{build_cast, CastEntry};
+use super::cast::{self, build_cast, CastEntry};
 use super::naming::{NewSceneState, StudioRoomContext};
 use super::sparse;
 
@@ -92,6 +92,13 @@ pub struct StageState {
     current_target: String,
     pub cast: Vec<CastEntry>,
     pub filter: String,
+    /// "Spawn by name": what is typed in the bestiary box. The Cast list is
+    /// built from the ART POOL, so everything in it has art by definition
+    /// and sprite art always beats the family puppet -- this box is the only
+    /// way to put a creature the pool has NO art for on the stage, which is
+    /// the only way to see the canine / elephantid / suine puppets without
+    /// emptying the pool.
+    pub spawn_name: String,
     next_id: u64,
     pub selected: Option<String>,
     pub show_grid: bool,
@@ -140,6 +147,7 @@ impl StageState {
             current_target: String::new(),
             cast,
             filter: String::new(),
+            spawn_name: String::new(),
             next_id: 0,
             selected: None,
             show_grid: true,
@@ -217,6 +225,33 @@ impl StageState {
         });
         self.selected = Some(id);
         self.resync();
+    }
+
+    /// Spawn by NAME, whether or not the pool has art for it: the noun is
+    /// the name's last word unless one is given. Pushes a status line
+    /// saying which it got -- sprite art, or the family puppet -- because
+    /// the difference is invisible until the card draws.
+    ///
+    /// Returns false (and spawns nothing) for a blank name.
+    pub fn spawn_named(&mut self, name: &str, noun: Option<String>) -> bool {
+        let name = name.trim();
+        if name.is_empty() {
+            return false;
+        }
+        let noun = noun.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| cast::last_word(name));
+        let noun = (!noun.is_empty()).then_some(noun);
+        let art = cast::has_art(name, noun.as_deref());
+        let note = if art {
+            "sprite art from the pool".to_string()
+        } else {
+            match cast::puppet_family(name, noun.as_deref()) {
+                Some(family) => format!("NO art in the pool -- drawing as the {family} puppet"),
+                None => "NO art in the pool and no puppet fits -- drawing as a placeholder".to_string(),
+            }
+        };
+        self.spawn(name, noun);
+        self.push_status(format!("Spawned '{name}': {note}"));
+        true
     }
 
     pub fn remove(&mut self, id: &str) {
@@ -643,6 +678,36 @@ mod tests {
         s.clear();
         assert!(s.creatures().is_empty());
         assert_eq!((s.selected.clone(), s.current_target()), (None, ""));
+    }
+
+    /// Spawn-by-name puts a creature the pool has no art for on the stage
+    /// -- the only way to see a non-humanoid puppet without emptying the
+    /// pool -- and says so in the status line.
+    #[test]
+    fn spawning_by_name_works_without_art_and_reports_what_it_got() {
+        let _base = TempBase::new();
+        let mut s = stage();
+        assert!(!s.spawn_named("   ", None), "a blank name spawns nothing");
+        assert!(s.creatures().is_empty());
+
+        assert!(s.spawn_named("  a large timber wolf  ", None));
+        let c = &s.creatures()[0];
+        assert_eq!((c.name.as_str(), c.noun.as_deref()), ("a large timber wolf", Some("wolf")));
+        let line = s.status_lines().last().unwrap();
+        assert!(line.contains("NO art in the pool") && line.contains("canine puppet"), "{line}");
+
+        // An explicit noun overrides the last word.
+        assert!(s.spawn_named("the Beast", Some("  dummy  ".into())));
+        assert_eq!(s.creatures()[1].noun.as_deref(), Some("dummy"));
+        assert!(s.status_lines().last().unwrap().contains("humanoid puppet"));
+
+        // With art in the pool the sprite wins, and the line says so.
+        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        std::fs::create_dir_all(&creatures).unwrap();
+        std::fs::write(creatures.join("kobold.png"), b"x").unwrap();
+        gs_field::pool::invalidate_cache();
+        assert!(s.spawn_named("kobold", None));
+        assert!(s.status_lines().last().unwrap().contains("sprite art"), "{:?}", s.status_lines().last());
     }
 
     #[test]

@@ -34,8 +34,59 @@ const LIMB_MERGED: f32 = 1.7;
 /// of its chain measures out in the open, times this: a limb does thicken
 /// toward its root, but not into a sphere.
 const BURIED_CALIBRE: f32 = 1.45;
+/// A limb station's half-DEPTH, read off the other view, is believed only
+/// within this band of the segment's MEDIAN half-width.
+///
+/// The median, not the width at that same station: a per-station window is
+/// circular, because the one reading that could contradict a bad width is
+/// thrown out for disagreeing with it. A median survives a few buried
+/// stations; that is what makes the gate able to catch anything at all.
+///
+/// The band is wide because a limb's width and its depth are read in
+/// DIFFERENT views and are not the same measurement. A side-view quadruped's
+/// foreleg is narrow fore-aft (its width) while its depth is read across the
+/// front view on a row that still crosses body mass, so ratios well above 1
+/// are ordinary rather than suspect. Measured over the four rigged families,
+/// of the limb stations that are NOT buried, 30% read above 2.0 and 3% above
+/// 4.0 -- while NONE reads below 0.5. So the upper bound has to be generous,
+/// and the lower one never binds. The bound that does the real work is
+/// [`BURIED_CALIBRE`], which is absolute; this gate only discards the
+/// grossly implausible.
+///
+/// Tuning sweep, front / side rest IoU against the committed rigs (lower
+/// bound held at 0.5; mean front IoU over the four families in brackets):
+///
+/// ```text
+/// HI   humanoid       canine         elephantid     suine          [mean front]
+/// 2.0  .9534 / .9486  .7741 / .9502  .7962 / .9505  .7843 / .9600  [.8270]
+/// 3.0  .9534 / .9488  .7780 / .9502  .8133 / .9505  .7945 / .9600  [.8348]
+/// 3.5  .9534 / .9488  .7849 / .9502  .8099 / .9505  .7974 / .9600  [.8364]
+/// 4.0  .9534 / .9488  .7974 / .9502  .8124 / .9505  .7932 / .9600  [.8391]  <-
+/// 4.5  .9534 / .9488  .7987 / .9502  .8124 / .9505  .7927 / .9600  [.8393]
+/// 5.0  .9534 / .9488  .8008 / .9502  .8068 / .9505  .7919 / .9600  [.8382]
+/// inf  .9534 / .9488  .8008 / .9502  .8066 / .9505  .7944 / .9600  [.8388]
+/// ```
+///
+/// 4.0 is the knee: the curve is flat above it, so a wider bound buys nothing
+/// and only admits more torso. The lower bound sweeps INERT from 0.0 to 0.5
+/// (identical IoU on all four families, as the distribution predicts) and
+/// starts rejecting real readings at 0.6, so it is kept at the tighter end of
+/// its inert range rather than loosened for no measured gain.
+pub(crate) const LIMB_DEPTH_MAX: f32 = 4.0;
+pub(crate) const LIMB_DEPTH_MIN: f32 = 0.5;
 /// Half-thickness may change by at most this much per foot along the bone.
 const MAX_TAPER: f32 = 2.5;
+/// What a badly-measured limb may eat back out of a trunk that crosses it,
+/// as a share of its own length: a limb is not broader than it is long.
+const LIMB_REACH: f32 = 0.5;
+/// Shortest chain length, in feet, the limb bounds are applied against, so a
+/// stubby chain (a paw) is not bounded down to nothing.
+const MIN_CHAIN_FT: f32 = 0.2;
+/// A limb station may be this many times the thinnest reading along its own
+/// chain before it is taken for trunk. Looser than [`BURIED_CALIBRE`], which
+/// bounds the RESULT: this one only rejects a reading, and a limb really does
+/// thicken toward its root.
+const CHAIN_CALIBRE_MAX: f32 = 2.5;
 /// A mitten is this deep, as a share of its width.
 const HAND_DEPTH: f32 = 0.4;
 
@@ -304,6 +355,46 @@ fn fill_gaps(v: &[Option<f32>], ds: f32, grow: f32) -> Option<Vec<f32>> {
     )
 }
 
+/// A limb's half-depth per station, from the stations whose reading was
+/// believed. A rejected station BETWEEN two believed ones is interpolated
+/// (the bone's real depth varies smoothly, and its neighbours bracket it);
+/// one OUTSIDE that range keeps its own half-width instead.
+///
+/// The asymmetry is the point, and it is why this is not [`fill_gaps`].
+/// Interpolation is bounded by the two readings it sits between, so a single
+/// bad value cannot move a station further than those two allow. Extrapolation
+/// has no such bracket: past the last believed station it is one reading
+/// alone, projected outward, so one bad reading would ride along the rest of
+/// the bone. Falling back to the station's OWN width keeps that error local,
+/// which is what the pre-`405bdcc` code did per station -- interpolation is
+/// the part of that change worth keeping, extrapolation is not.
+///
+/// Measured against the committed rigs, dropping the extrapolation costs
+/// nothing: front IoU moves by at most 0.0005 on any of the four families
+/// (humanoid and elephantid are bit-identical; canine .7969 -> .7974, suine
+/// .7943 -> .7932), so the bounded form is taken for free.
+pub(crate) fn interpolate_depth(depth: &[Option<f32>], w: &[f32]) -> Vec<f32> {
+    let known: Vec<usize> = (0..depth.len()).filter(|&k| depth[k].is_some()).collect();
+    let (Some(&first), Some(&last)) = (known.first(), known.last()) else {
+        // Nothing believable anywhere: the limb is as deep as it is wide.
+        return w.to_vec();
+    };
+    (0..depth.len())
+        .map(|k| {
+            if let Some(x) = depth[k] {
+                return x;
+            }
+            if k < first || k > last {
+                return w[k];
+            }
+            let a = known.iter().rev().find(|&&j| j < k).copied().expect("bracketed below");
+            let b = known.iter().find(|&&j| j > k).copied().expect("bracketed above");
+            let t = (k - a) as f32 / (b - a) as f32;
+            depth[a].unwrap() + (depth[b].unwrap() - depth[a].unwrap()) * t
+        })
+        .collect()
+}
+
 struct Measured {
     view: View,
     axis_w: V3,
@@ -392,7 +483,7 @@ impl Puppet {
                 // What the trunk stops at. Clamped to a plausible limb
                 // radius so one badly-measured limb can never eat the trunk
                 // back by more than its own length allows.
-                let reach = 0.5 * len(sub(raws[i].tail, raws[i].head)).max(0.2);
+                let reach = LIMB_REACH * len(sub(raws[i].tail, raws[i].head)).max(MIN_CHAIN_FT);
                 limb_r[i] = median(&mut ws).min(reach);
                 measured[i] = Some(m);
             }
@@ -416,11 +507,7 @@ impl Puppet {
             let centre = |k: usize| add(lerp(r.head, r.tail, k as f32 / (n - 1) as f32), scale(m.axis_w, m.off[k]));
             let mut depth: Vec<Option<f32>> = Vec::with_capacity(n);
             let mut shift: Vec<f32> = Vec::with_capacity(n);
-            // Judge a limb's depth against the segment's MEDIAN width, not
-            // the width at this station: a per-station window is circular
-            // (the one reading that could contradict a bad width is thrown
-            // out because that width is bad), and a median survives a few
-            // buried stations.
+            // What a limb's depth is judged against: see `LIMB_DEPTH_MAX`.
             let ref_w = median(&mut m.w.clone()).max(MIN_HALF_FT);
             for k in 0..n {
                 let c = centre(k);
@@ -428,7 +515,9 @@ impl Puppet {
                 let (half, mid) = run.map(|(lo, hi)| ((hi - lo) * 0.5, (lo + hi) * 0.5)).unwrap_or((0.0, 0.0));
                 let ok = match kind {
                     Kind::Trunk => run.is_some(),
-                    Kind::Limb => run.is_some() && half <= 4.0 * ref_w && half >= 0.25 * ref_w,
+                    Kind::Limb => {
+                        run.is_some() && half <= LIMB_DEPTH_MAX * ref_w && half >= LIMB_DEPTH_MIN * ref_w
+                    }
                     Kind::Hand => false,
                 };
                 depth.push(ok.then_some(half));
@@ -436,9 +525,7 @@ impl Puppet {
             }
             let mut d: Vec<f32> = match kind {
                 Kind::Hand => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
-                // A limb with SOME believable depth interpolates from it;
-                // only one with none anywhere falls back to its width.
-                Kind::Limb => fill_gaps(&depth, ds, 0.8).unwrap_or_else(|| m.w.clone()),
+                Kind::Limb => interpolate_depth(&depth, &m.w),
                 Kind::Trunk => fill_gaps(&depth, ds, 0.0).unwrap_or_else(|| m.w.clone()),
             };
             // A segment buried in the trunk is buried in BOTH views: the
@@ -773,8 +860,8 @@ fn measure_segment<'m>(
             // chain it belongs to is long, nor much thicker than the
             // thinnest point along that same chain.
             (_, Some(h)) => {
-                let cap = (LIMB_MERGED * med).min(0.5 * chain_len.max(0.2));
-                h > cap.min(calibre.map_or(f32::INFINITY, |c| 2.5 * c))
+                let cap = (LIMB_MERGED * med).min(LIMB_REACH * chain_len.max(MIN_CHAIN_FT));
+                h > cap.min(calibre.map_or(f32::INFINITY, |c| CHAIN_CALIBRE_MAX * c))
             }
         };
         if bad {

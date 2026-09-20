@@ -46,12 +46,39 @@ top bar:
 | | Holds | Used by | Set with | Default |
 |---|---|---|---|---|
 | **Data** root | `outlines.json`, `rigs/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable |
-| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...) and `global/scenes/*.toml` -- VellumFE's data directory | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | gs_field's base dir: `VELLUM_FE_DIR`, else `~/.vellum-fe` |
+| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...) and `global/scenes/*.toml` | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | **gs-studio's own data home** (below) |
 
 Setting the pool calls `gs_field::data_dirs::set_base_dir`, drops the pool
 scan and calibration caches, resets the art store, re-scans the cast and
 drops every open calibrator (each re-opens against the new pool when its tab
 is next shown -- unsaved calibration edits do not survive a pool change).
+
+#### The data home, and why it is not `~/.vellum-fe`
+
+gs-studio is a standalone app. Left alone, its pool is its **own** data home:
+the platform config directory + `gs-studio` (`%APPDATA%\gs-studio`,
+`~/.config/gs-studio`, `~/Library/Application Support/gs-studio`), created on
+first run with the pool subtree (`global/images/<category>/`,
+`global/scenes/`, `global/skins/`, `global/puppets/`).
+
+It **never** reads or writes `~/.vellum-fe` unless you say so -- `--pool`,
+`GS_STUDIO_POOL`, or a path typed into the Pool box. The status bar always
+names the directory in use and whether anything asked for it
+(`pool: <dir> (gs-studio home, the default)` vs `(--pool)`).
+
+`gs_field::data_dirs`' own default is unchanged -- `VELLUM_FE_DIR`, else
+`~/.vellum-fe` -- because VellumFE is adopting that crate and depends on it.
+gs-studio is a *host*: it installs its default through the `set_base_dir`
+override the crate already provides (`crates/studio/src/data_home.rs`,
+`pool_dir.rs`). Setting `VELLUM_FE_DIR` steers VellumFE, not this app.
+
+**Import from VellumFE...** (top bar, and in the empty-pool banner) offers to
+**copy** VellumFE's `global/images`, `global/scenes`, `global/skins` and
+`global/puppets` into the pool directory. It shows the file count and size
+per subtree and asks before copying. It only ever copies -- never moves,
+never symlinks, never writes a byte back into `~/.vellum-fe` -- and files
+already in the pool are left as they are. With no VellumFE directory to copy
+from, the button is disabled and says where it looked.
 
     gs-studio [--data <dir>] [--pool <dir>]
               [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
@@ -65,10 +92,13 @@ what the stage and the calibrators hold), `GS_STUDIO_SMOKE=1` pre-populates
 the stage and `GS_STUDIO_DOLL_VIEW=sets` starts the Dolls tab on its Sets
 view.
 
-The top bar holds the tool tabs and the two directory boxes. It is one row
-when the window is wide enough (about 1310 px) and otherwise two -- tabs
-above, boxes below, the boxes sized to share the row -- so nothing clips at
-the 900 px minimum width. Three tools sit behind the seven tabs: the rig
+The top bar holds the tool tabs, the two directory boxes and *Import from
+VellumFE...*. It is one row when the window is wide enough (1480 px) and
+otherwise two -- tabs above, boxes below, the boxes sized to share the row --
+so nothing clips at the 900 px minimum width. While the pool holds no
+creature art a banner sits under it: which directory is in use, why it is
+empty, and the ways to fill it (Import, drop PNGs in, or point the Pool box
+elsewhere). Three tools sit behind the seven tabs: the rig
 editor, the stage (Scenes + Preview) and the calibrators (Frames, Dolls,
 Creatures, Scenery). Each is built lazily and kept while the app runs;
 switching tabs never loses work. A new tool is a new `ToolId` + entry in
@@ -251,10 +281,28 @@ across -- and differ only in the right-hand panel:
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
   and, behind a checkbox, the Solver tunables.
 - **Preview**: the Cast (creature-pool base art grouped by bestiary area,
-  filter, *Add generic*), the Roster, and for the selected creature the
-  simulator: Target, the crtrStatus flags, dead / boss / mini boss /
-  sympathetic / rider / mount, a health bar, and wound rank 0-3 per body part.
-  The first creature flagged rider mounts the first flagged mount.
+  filter, *Add generic*), **Spawn by name**, the Roster, and for the selected
+  creature the simulator: Target, the crtrStatus flags, dead / boss / mini
+  boss / sympathetic / rider / mount, a health bar, and wound rank 0-3 per
+  body part. The first creature flagged rider mounts the first flagged mount.
+
+**Sprites beat puppets, so the Cast alone cannot show you a puppet.** A
+creature with base art in the pool draws as that art; only one with none
+falls back to its family's 3D puppet. The Cast list is built *from* the art
+pool, so everything in it has art by definition -- which is why a canine,
+elephantid or suine puppet never appeared on the stage however much art was
+in the pool.
+
+**Spawn by name** is the way in. Type any creature name: it spawns with that
+name and its last word as the noun, art or no art. Suggestions come from the
+bestiary (`gs_field::bestiary`) so the names are real creatures, each tagged
+`[art]` (a sprite in the pool wins) or `[puppet]` (no sprite, so the puppet
+draws), and hovering shows its noun and family. The line under the box says
+what the typed name would get, resolved by the same `resolve_tier_art` the
+renderer runs -- so the hint cannot disagree with the card. Every spawn
+writes what it got to the status log. *Add generic* is the old shortcut: an
+anonymous "training dummy", which has no art and so draws as the humanoid
+puppet.
 
 | Input | Does |
 |---|---|
@@ -289,9 +337,14 @@ leaf. No creature has a derived-effect severity.
 stage is kept.
 
 All stage logic -- roster and simulator edits, mount pairing, scene naming,
-the sparse-save maths, the cast scan, the evaluator, the Elanthian clock --
-lives in `crates/studio/src/stage/`, which may not mention egui (a test
-enforces it). `tools/preview.rs` only draws and forwards input.
+the sparse-save maths, the cast scan, the bestiary suggestions and the
+has-art / which-puppet resolution behind Spawn by name, the evaluator, the
+Elanthian clock -- lives in `crates/studio/src/stage/`, which may not mention
+egui (a test enforces it). `tools/preview.rs` only draws and forwards input.
+Directory resolution is the same way: `data_root.rs`, `data_home.rs` and
+`pool_dir.rs` are egui-free and unit-tested, including the precedence
+(`--pool` > `GS_STUDIO_POOL` > the gs-studio home) and that the default is
+never `~/.vellum-fe`.
 
 ### Frames, Dolls, Creatures, Scenery (the calibrators)
 

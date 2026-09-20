@@ -64,6 +64,86 @@ pub fn build_cast() -> Vec<CastEntry> {
     tokens.iter().map(|token| entry_for(token, |name| db.areas_for_name(name))).collect()
 }
 
+// ------------------------------------------------- spawning without art
+
+/// One bestiary creature offered by the spawn-by-name box: a real creature
+/// the pool may have no art for. Sprite art beats the family puppet, so the
+/// only way to SEE a canine / elephantid / suine puppet in the app -- short
+/// of emptying the pool -- is to spawn something that has none.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BestiaryPick {
+    pub name: String,
+    pub noun: String,
+    /// Bestiary family ("canine", "humanoid"), for the hint text.
+    pub family: Option<String>,
+}
+
+/// Bestiary entries whose name or noun contains `query` (case-insensitive),
+/// nearest first: exact name, then name prefix, then the rest, capped at
+/// `limit`. An empty query offers nothing (the list is thousands long).
+pub fn bestiary_matches(db: &gs_field::bestiary::BestiaryDb, query: &str, limit: usize) -> Vec<BestiaryPick> {
+    let q = query.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let mut ranked: Vec<(u8, &gs_field::bestiary::CreatureEntry)> = db
+        .entries
+        .iter()
+        .filter_map(|e| {
+            let name = e.name.to_ascii_lowercase();
+            let rank = if name == q {
+                0
+            } else if name.starts_with(&q) {
+                1
+            } else if name.contains(&q) || e.noun.to_ascii_lowercase().contains(&q) {
+                2
+            } else {
+                return None;
+            };
+            Some((rank, e))
+        })
+        .collect();
+    ranked.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.name.cmp(&b.1.name)));
+    ranked.dedup_by(|a, b| a.1.name == b.1.name);
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(_, e)| BestiaryPick {
+            name: e.name.clone(),
+            noun: if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() },
+            family: e.family.clone().filter(|f| !f.trim().is_empty()),
+        })
+        .collect()
+}
+
+/// [`bestiary_matches`] against the shared database.
+pub fn suggest(query: &str, limit: usize) -> Vec<BestiaryPick> {
+    bestiary_matches(gs_field::bestiary::shared(), query, limit)
+}
+
+/// The noun a free-typed name spawns with: its last word.
+pub fn last_word(name: &str) -> String {
+    name.trim().rsplit(|c: char| c.is_whitespace()).find(|w| !w.is_empty()).unwrap_or("").to_string()
+}
+
+/// Does the pool hold base art for this creature? The same resolution the
+/// renderer's art store runs (`resolve_tier_art` against the pool root and
+/// the default card skin), so a "no art -- drawing as a puppet" hint in the
+/// UI cannot disagree with what actually gets drawn.
+pub fn has_art(name: &str, noun: Option<&str>) -> bool {
+    let Ok(root) = gs_field::data_dirs::global_images_dir() else {
+        return false;
+    };
+    let family = noun.and_then(gs_field::cards::family_for_noun);
+    let skin = gs_field::skins::CreatureCardSkin::default();
+    gs_field::cards::resolve_tier_art(&root, &skin, Some(name), noun, family.as_deref()).is_some()
+}
+
+/// The family puppet a creature with no art falls back to, if any.
+pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
+    gs_field::puppets::puppet_for(name, noun).map(|d| d.family)
+}
+
 /// Grouped by bestiary area (multi-area creatures list under each;
 /// unknowns under "Other").
 pub fn by_area(cast: &[CastEntry]) -> BTreeMap<&str, Vec<&CastEntry>> {
@@ -125,5 +205,67 @@ mod tests {
         let grouped = by_area(&cast);
         assert_eq!(grouped.keys().copied().collect::<Vec<_>>(), ["Glatoph", "Other", "Zeltoph"]);
         assert_eq!(grouped["Other"][0].display, "kobold");
+    }
+
+    #[test]
+    fn suggestions_rank_exact_then_prefix_then_substring() {
+        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        let e = |name: &str, noun: &str, family: &str| CreatureEntry {
+            name: name.into(),
+            noun: noun.into(),
+            family: (!family.is_empty()).then(|| family.to_string()),
+            ..Default::default()
+        };
+        let db = BestiaryDb::from_entries(vec![
+            e("timber wolf", "wolf", "canine"),
+            e("wolf", "wolf", "canine"),
+            e("wolf spider", "spider", "arachnid"),
+            e("cave troll", "troll", "humanoid"),
+        ]);
+        let names: Vec<String> = bestiary_matches(&db, " WOLF ", 10).into_iter().map(|p| p.name).collect();
+        assert_eq!(names, ["wolf", "wolf spider", "timber wolf"]);
+        assert_eq!(bestiary_matches(&db, "wolf", 2).len(), 2, "capped");
+        assert!(bestiary_matches(&db, "   ", 10).is_empty(), "an empty query offers nothing");
+        assert!(bestiary_matches(&db, "zzz", 10).is_empty());
+        let pick = &bestiary_matches(&db, "timber", 10)[0];
+        assert_eq!((pick.noun.as_str(), pick.family.as_deref()), ("wolf", Some("canine")));
+
+        // A blank noun in the file falls back to the name's last word.
+        let db = BestiaryDb::from_entries(vec![e("gnarled hinterboar", "", "")]);
+        let pick = &bestiary_matches(&db, "hinter", 10)[0];
+        assert_eq!((pick.noun.as_str(), pick.family.as_deref()), ("hinterboar", None));
+    }
+
+    #[test]
+    fn a_free_typed_name_spawns_with_its_last_word_as_the_noun() {
+        assert_eq!(last_word("  a large timber wolf "), "wolf");
+        assert_eq!(last_word("kobold"), "kobold");
+        assert_eq!(last_word("   "), "");
+    }
+
+    /// The hint the spawn box shows must match what actually draws: with an
+    /// empty pool nothing has art, and the family puppet is what stands in.
+    #[test]
+    fn with_an_empty_pool_nothing_has_art_and_a_puppet_stands_in() {
+        let _base = crate::stage::test_support::TempBase::new();
+        assert!(!has_art("timber wolf", Some("wolf")));
+        assert!(!has_art("training dummy", Some("dummy")));
+        // The doll cascade run with "has a puppet" as the test: the
+        // humanoid puppet is the generic fallback, so SOMETHING always
+        // stands in for a creature with no sprite.
+        assert_eq!(puppet_family("training dummy", Some("dummy")).as_deref(), Some("humanoid"));
+    }
+
+    /// ... and art in the pool wins, which is why the owner never saw a
+    /// puppet: every Cast entry is built FROM the art pool.
+    #[test]
+    fn art_in_the_pool_is_found_by_the_same_resolver_the_renderer_uses() {
+        let _base = crate::stage::test_support::TempBase::new();
+        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        std::fs::create_dir_all(&creatures).unwrap();
+        std::fs::write(creatures.join("timber_wolf.png"), b"not really a png").unwrap();
+        gs_field::pool::invalidate_cache();
+        assert!(has_art("timber wolf", Some("wolf")));
+        assert!(!has_art("cave troll", Some("troll")));
     }
 }

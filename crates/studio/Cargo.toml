@@ -20,7 +20,11 @@ gs_field = { path = "../gs_field" }
 gs_field_egui = { path = "../gs_field_egui" }
 # The five art calibrators, hosted as tabs through `ui_contents`.
 gs_calibrators = { path = "../gs_calibrators" }
-egui = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }
+# gs-studio's own data home (`data_home.rs`): the platform config directory,
+# so this standalone app does not squat in VellumFE's. Same crate and major
+# gs_field uses for `~`.
+dirs = "5"
+egui ={ git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }
 eframe = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 
 [dev-dependencies]

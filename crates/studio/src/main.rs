@@ -6,19 +6,25 @@
 //!
 //! Two directories: the DATA ROOT (`--data` / GS_STUDIO_DATA: outlines.json
 //! and rigs/, for the rig editor) and the POOL (`--pool` / GS_STUDIO_POOL:
-//! global/images/ and global/scenes/, VellumFE's data directory, for the
-//! stage). `GS_STUDIO_TAB` is the env form of `--tab`;
+//! global/images/ and global/scenes/, for the stage and the calibrators).
+//! `GS_STUDIO_TAB` is the env form of `--tab`;
 //! `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs).
 //!
-//! Layering: `editor/`, `stage/`, `calib`, `status_log`, `cli`, `data_root`
-//! and `pool_dir` are egui-free and unit-tested; `app` (the shell) and
-//! `tools/` only draw and forward input.
+//! gs-studio is a STANDALONE app: with no `--pool` / `GS_STUDIO_POOL` the
+//! pool is gs-studio's OWN data home (`data_home`), never VellumFE's
+//! `~/.vellum-fe`. See `pool_dir` for why, and "Import from VellumFE..." in
+//! the top bar for getting art across.
+//!
+//! Layering: `editor/`, `stage/`, `calib`, `status_log`, `cli`, `data_root`,
+//! `data_home` and `pool_dir` are egui-free and unit-tested; `app` (the
+//! shell) and `tools/` only draw and forward input.
 //!
 //! Licence: GPL-3.0-or-later (the stage is ported from VellumFE).
 
 mod app;
 mod calib;
 mod cli;
+mod data_home;
 mod data_root;
 mod editor;
 mod pool_dir;
@@ -47,7 +53,11 @@ fn main() -> eframe::Result {
     let data = data_root::from_environment(cli.data);
     eprintln!("gs-studio: data root {} ({})", data.path.display(), data.source);
     let pool = pool_dir::from_environment(cli.pool);
-    eprintln!("gs-studio: pool {} ({})", pool.path.display(), pool.source);
+    eprintln!("gs-studio: {}", pool.status());
+    if !pool.source.is_explicit() {
+        eprintln!("gs-studio: nothing pointed the pool anywhere, so this is gs-studio's own data home.");
+        eprintln!("gs-studio: it does NOT read ~/.vellum-fe -- use --pool, GS_STUDIO_POOL or the Pool box for that.");
+    }
     let exit_after_secs = std::env::var("GS_STUDIO_EXIT_AFTER_SECS").ok().and_then(|s| s.parse().ok());
 
     let options = eframe::NativeOptions {
