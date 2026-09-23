@@ -412,14 +412,16 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let set = puppets();
-        // humanoid + canine published: a biped is a humanoid, a quadruped a
-        // canine, everything else lands on the generic biped.
+        // Every rigged family is published: a creature gets its own family's
+        // puppet.
         let wolf = set.puppet_for("timber wolf", Some("wolf")).expect("canine");
         assert_eq!((wolf.family.as_str(), wolf.tier), ("canine", DollTier::Family));
-        let troll = set.puppet_for("forest troll", Some("troll")).expect("humanoid");
-        assert_eq!(troll.family.as_str(), "humanoid");
-        // Falling through to the generic biped is still a puppet.
-        let bird = set.puppet_for("raven", Some("raven"));
+        let troll = set.puppet_for("forest troll", Some("troll")).expect("troll");
+        assert_eq!((troll.family.as_str(), troll.tier), ("troll", DollTier::Family));
+        // A family nobody published falls through the cascade (body type,
+        // then the generic biped) and is still a puppet.
+        let only_humanoid = PuppetRigs::from_rigs(set.get("humanoid").map(|r| (**r).clone()), []);
+        let bird = only_humanoid.puppet_for("raven", Some("raven"));
         assert_eq!(bird.map(|d| d.family), Some("humanoid".to_string()));
 
         // With nothing published there is no puppet at all: the doll draws.
@@ -443,14 +445,14 @@ mod tests {
 
         let before = puppets();
         assert_eq!(before.get("humanoid").unwrap().source, PuppetSource::Embedded);
-        assert!(!before.has("feline"));
+        assert!(!before.has("chimera"));
         assert_eq!(puppets().generation(), before.generation(), "cached");
 
         let dir_path = puppets_dir().unwrap();
         assert_eq!(dir_path, dir.path().join("global").join("puppets"));
         std::fs::create_dir_all(&dir_path).unwrap();
-        let feline = before.get("canine").unwrap().baked.replace("\"canine\"", "\"feline\"");
-        std::fs::write(dir_path.join("feline.puppet.toml"), &feline).unwrap();
+        let chimera = before.get("canine").unwrap().baked.replace("\"canine\"", "\"chimera\"");
+        std::fs::write(dir_path.join("chimera.puppet.toml"), &chimera).unwrap();
         std::fs::write(
             dir_path.join("humanoid.puppet.toml"),
             "version = 1\nbody_type = \"biped\"\n",
@@ -458,12 +460,12 @@ mod tests {
         .unwrap();
         std::fs::write(dir_path.join("biped.toml"), "body_type = \"biped\"\n").unwrap();
 
-        assert!(!puppets().has("feline"), "still cached until invalidated");
+        assert!(!puppets().has("chimera"), "still cached until invalidated");
         invalidate_cache();
         let after = puppets();
         assert_ne!(after.generation(), before.generation());
-        assert_eq!(after.get("feline").unwrap().source, PuppetSource::Override);
-        assert_eq!(after.get("feline").unwrap().body_type, "quadruped");
+        assert_eq!(after.get("chimera").unwrap().source, PuppetSource::Override);
+        assert_eq!(after.get("chimera").unwrap().body_type, "quadruped");
         let humanoid = after.get("humanoid").unwrap();
         assert_eq!(humanoid.source, PuppetSource::Override);
         assert_eq!(&*humanoid.baked, "version = 1\nbody_type = \"biped\"\n");
@@ -481,7 +483,7 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         std::env::set_var("VELLUM_FE_DIR", other.path());
         let moved = puppets();
-        assert!(!moved.has("feline"));
+        assert!(!moved.has("chimera"));
         assert_eq!(moved.get("humanoid").unwrap().source, PuppetSource::Embedded);
 
         std::env::remove_var("VELLUM_FE_DIR");

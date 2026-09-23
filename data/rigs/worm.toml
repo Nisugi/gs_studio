@@ -1,0 +1,72 @@
+family = "worm"
+view = "side"
+ref_ft = 2.0
+axis = "diameter"
+px_per_ft = 35.5062
+aspect = 1.8286
+span = 0.6563
+ground_frac = 1.0037
+eye_radius_ft = 0.0862
+parts = ["head", "rightEye", "neck", "chest", "abdomen", "back"]
+
+[map]
+width = 512
+height = 280
+
+[anchors]
+feet = [0.5, 1.0037]
+head = [0.8675, 0.1287]
+mouth = [0.9646, 0.116]
+saddle = [0.7358, 0.6233]
+
+[eyes]
+rightEye = [0.9369, 0.0653]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "neck"
+pivot = [0.8675, 0.1287]
+tip = [0.9646, 0.116]
+joints = [[0.9646, 0.116], [0.8675, 0.1287]]
+pixels = 3466
+
+[[bones]]
+index = 2
+name = "neck"
+part = "neck"
+parent = "fore_body"
+pivot = [0.7774, 0.3443]
+tip = [0.8675, 0.1287]
+joints = [[0.8675, 0.1287], [0.7774, 0.3443]]
+pixels = 4821
+
+[[bones]]
+index = 3
+name = "fore_body"
+part = "chest"
+parent = "mid_body"
+pivot = [0.7358, 0.6233]
+tip = [0.7774, 0.3443]
+joints = [[0.7774, 0.3443], [0.7358, 0.6233]]
+pixels = 6816
+
+[[bones]]
+index = 4
+name = "mid_body"
+part = "abdomen"
+pivot = [0.6664, 0.8388]
+tip = [0.5347, 0.8769]
+joints = [[0.7358, 0.6233], [0.6664, 0.8388], [0.5347, 0.8769]]
+pixels = 9149
+
+[[bones]]
+index = 5
+name = "hind_body"
+part = "back"
+parent = "mid_body"
+pivot = [0.5347, 0.8769]
+tip = [0.0215, 0.9339]
+joints = [[0.5347, 0.8769], [0.396, 0.8832], [0.2573, 0.8832], [0.1186, 0.8959], [0.0215, 0.9339]]
+pixels = 15740

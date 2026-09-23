@@ -1,0 +1,132 @@
+version = 2
+family = "troll"
+body_type = "biped"
+view = "front"
+ref_ft = 6.0
+axis = "crown"
+joint_order = ["crown", "chin", "neck_base", "sternum", "pelvis", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "hip_r", "knee_r", "ankle_r", "toe_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l", "hip_l", "knee_l", "ankle_l", "toe_l"]
+
+[anchors]
+head = "crown"
+mouth = "chin"
+saddle = "neck_base"
+
+[joints]
+ankle_l = [0.5, 0.35]
+ankle_r = [-0.5, 0.35]
+chin = [0, 4.95]
+crown = [0, 5.4]
+elbow_l = [1.85, 3.2]
+elbow_r = [-1.85, 3.2]
+eye_l = [0.2, 5.25]
+eye_r = [-0.2, 5.25]
+fingertip_l = [1.65, 0.725]
+fingertip_r = [-1.65, 0.725]
+hip_l = [0.8, 2.6]
+hip_r = [-0.8, 2.6]
+knee_l = [0.75, 1.5]
+knee_r = [-0.75, 1.5]
+neck_base = [0, 5.3]
+pelvis = [0, 3.0]
+shoulder_l = [1.0, 4.9]
+shoulder_r = [-1.0, 4.9]
+sternum = [0, 4.0]
+toe_l = [1.0, 0.095]
+toe_r = [-1.0, 0.095]
+wrist_l = [1.975, 1.4]
+wrist_r = [-1.975, 1.4]
+
+[depth]
+ankle_l = -0.1
+ankle_r = -1.75
+chin = 1.6
+crown = 1.5
+elbow_l = 0.97
+elbow_r = 0.97
+fingertip_l = 1.87
+fingertip_r = 1.87
+hip_l = -0.5
+hip_r = -0.5
+knee_l = -0.1
+knee_r = -1.5
+neck_base = 0.9
+toe_l = 1.1
+toe_r = -0.7
+wrist_l = 1.9
+wrist_r = 1.9
+
+[radius_depth_ft]
+neck = 0.35
+skull = 0.45
+
+[[bones]]
+name = "skull"
+radius_ft = 0.45
+part = "head"
+parent = "neck"
+joints = ["crown", "chin"]
+pivot = "chin"
+
+[[bones]]
+name = "neck"
+radius_ft = 0.35
+part = "neck"
+parent = "torso_upper"
+joints = ["chin", "neck_base"]
+pivot = "neck_base"
+
+[[bones]]
+name = "clavicle"
+part = "chest"
+parent = "torso_upper"
+joints = ["shoulder_r", "neck_base", "shoulder_l"]
+pivot = "neck_base"
+
+[[bones]]
+name = "torso_upper"
+part = "chest"
+parent = "torso_lower"
+joints = ["neck_base", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "torso_lower"
+part = "abdomen"
+joints = ["sternum", "pelvis"]
+pivot = "pelvis"
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "clavicle"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "clavicle"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]
+
+[[bones]]
+name = "leg_r"
+part = "rightLeg"
+parent = "torso_lower"
+joints = ["hip_r", "knee_r", "ankle_r", "toe_r"]
+
+[[bones]]
+name = "leg_l"
+part = "leftLeg"
+parent = "torso_lower"
+joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]

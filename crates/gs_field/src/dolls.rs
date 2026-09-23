@@ -892,7 +892,7 @@ mod tests {
 
         let before = rigs();
         assert_eq!(before.get("humanoid").unwrap().source, DollSource::Embedded);
-        assert!(!before.has("canine"));
+        assert_eq!(before.get("canine").unwrap().source, DollSource::Embedded);
         assert_eq!(rigs().generation(), before.generation(), "cached");
 
         let rigs_dir = rigs_dir().unwrap();
@@ -904,9 +904,9 @@ mod tests {
         std::fs::write(rigs_dir.join("humanoid.png"), b"override").unwrap();
         // Ignored: rig sources, and a toml with no png.
         std::fs::write(rigs_dir.join("canine.rig.toml"), "family = \"canine\"").unwrap();
-        std::fs::write(rigs_dir.join("worm.toml"), "family = \"worm\"").unwrap();
+        std::fs::write(rigs_dir.join("wyrm.toml"), "family = \"wyrm\"").unwrap();
 
-        assert!(!rigs().has("canine"), "still cached until invalidated");
+        assert_eq!(rigs().get("canine").unwrap().source, DollSource::Embedded, "still cached until invalidated");
         invalidate_cache();
         let after = rigs();
         assert_ne!(after.generation(), before.generation());
@@ -915,8 +915,8 @@ mod tests {
         let humanoid = after.get("humanoid").unwrap();
         assert_eq!(humanoid.source, DollSource::Override);
         assert_eq!(humanoid.meta.aspect, Some(0.5));
-        assert!(!after.has("worm"));
-        assert_eq!(after.len(), embedded().count() + 1);
+        assert!(!after.has("wyrm"));
+        assert_eq!(after.len(), embedded().count(), "canine replaced, nothing added");
 
         // A wolf now draws as the canine rig (tier 2 until `canine` is its
         // bestiary family... which it is: tier 1).
@@ -927,7 +927,7 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         std::env::set_var("VELLUM_FE_DIR", other.path());
         let moved = rigs();
-        assert!(!moved.has("canine"));
+        assert_eq!(moved.get("canine").unwrap().source, DollSource::Embedded);
         assert_eq!(moved.get("humanoid").unwrap().source, DollSource::Embedded);
 
         std::env::remove_var("VELLUM_FE_DIR");

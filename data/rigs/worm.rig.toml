@@ -1,0 +1,64 @@
+version = 2
+family = "worm"
+body_type = "serpentine"
+view = "side"
+ref_ft = 2.0
+axis = "diameter"
+joint_order = ["snout", "skull_base", "neck_end", "chest_end", "belly_mid", "belly_end", "back_1", "back_2", "tail_mid", "tail_tip", "eye_r"]
+
+[anchors]
+head = "skull_base"
+mouth = "snout"
+saddle = "chest_end"
+
+[joints]
+snout = [6.7, 7.0]
+skull_base = [5.3, 6.9]
+neck_end = [4.0, 5.2]
+chest_end = [3.4, 3.0]
+belly_mid = [2.4, 1.3]
+belly_end = [0.5, 1.0]
+back_1 = [-1.5, 0.95]
+back_2 = [-3.5, 0.95]
+tail_mid = [-5.5, 0.85]
+tail_tip = [-6.9, 0.55]
+eye_r = [6.3, 7.4]
+
+[depth]
+back_1 = -1.2
+back_2 = -1.2
+tail_mid = 1.6
+tail_tip = 3.2
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["snout", "skull_base"]
+pivot = "skull_base"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "fore_body"
+joints = ["skull_base", "neck_end"]
+pivot = "neck_end"
+
+[[bones]]
+name = "fore_body"
+part = "chest"
+parent = "mid_body"
+joints = ["neck_end", "chest_end"]
+pivot = "chest_end"
+
+[[bones]]
+name = "mid_body"
+part = "abdomen"
+joints = ["chest_end", "belly_mid", "belly_end"]
+pivot = "belly_mid"
+
+[[bones]]
+name = "hind_body"
+part = "back"
+parent = "mid_body"
+joints = ["belly_end", "back_1", "back_2", "tail_mid", "tail_tip"]

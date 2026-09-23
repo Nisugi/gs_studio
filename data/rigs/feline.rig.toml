@@ -1,0 +1,161 @@
+version = 2
+family = "feline"
+body_type = "quadruped"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+belly = [0.075, 1.55]
+chest_front = [1.85, 2.05]
+croup = [-1.075, 2.9]
+elbow_l = [1.5, 1.2]
+elbow_r = [0.95, 1.3]
+eye_r = [2.75, 2.9]
+forepaw_l = [1.7, 0.12]
+forepaw_r = [1.15, 0.08]
+groin = [-0.95, 1.75]
+hindpaw_l = [-1.5, 0.08]
+hindpaw_r = [-0.4, 0.12]
+hip_l = [-1.35, 2.25]
+hip_r = [-1.05, 2.3]
+hock_l = [-1.72, 0.6]
+hock_r = [-0.85, 0.55]
+mid_back = [0.0, 2.75]
+nose = [3.0, 2.6]
+poll = [2.35, 3.05]
+shoulder_l = [1.45, 2.3]
+shoulder_r = [1.05, 2.3]
+sternum = [1.15, 1.6]
+stifle_l = [-1.35, 1.3]
+stifle_r = [-0.65, 1.4]
+tail_base = [-1.92, 2.3]
+tail_tip = [-2.35, 0.55]
+withers = [1.3, 2.85]
+wrist_l = [1.5, 0.35]
+wrist_r = [0.97, 0.35]
+
+# Depth notes (the rig file loses comments on a re-bake; re-add them).
+# feline-front is drawn as a SITTING cat, off-centre: body and head centred
+# on x = -0.32, the tail curled out to the right (x 0.46..1.2). So the
+# centre line is moved to -0.32, and every leg sits 0.40 either side of it:
+# at the leg rows the front view shows one merged inner+outer limb band per
+# side, centred at -0.72 / +0.08, and matching that keeps each leg a straight
+# column instead of a zig-zag. The tail stays behind the body.
+# [radius_depth_ft] on the legs: without it the far legs read the curled tail
+# (0.04 ft away at y 0.9-1.1, closed by the hairline merge) as leg and grow a
+# fin, and the thighs read the whole haunch.
+[depth]
+belly = -0.32
+chest_front = -0.32
+croup = -0.32
+elbow_l = 0.08
+elbow_r = -0.72
+forepaw_l = 0.08
+forepaw_r = -0.72
+groin = -0.32
+hindpaw_l = 0.08
+hindpaw_r = -0.72
+hip_l = 0.08
+hip_r = -0.72
+hock_l = 0.08
+hock_r = -0.72
+mid_back = -0.32
+nose = -0.32
+poll = -0.32
+shoulder_l = 0.08
+shoulder_r = -0.72
+sternum = -0.32
+stifle_l = 0.08
+stifle_r = -0.72
+tail_base = -0.32
+tail_tip = -0.32
+withers = -0.32
+wrist_l = 0.08
+wrist_r = -0.72
+
+[radius_depth_ft]
+foreleg_l = 0.3
+foreleg_r = 0.3
+hindleg_l = 0.3
+hindleg_r = 0.3
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]

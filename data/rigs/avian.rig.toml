@@ -1,0 +1,139 @@
+version = 2
+family = "avian"
+body_type = "avian"
+view = "side"
+ref_ft = 2.0
+axis = "crown"
+joint_order = ["beak_tip", "crown", "nape", "mid_back", "rump", "tail_tip", "throat", "breast", "belly", "vent", "eye_r", "wing_root_r", "wing_elbow_r", "wing_wrist_r", "wing_tip_r", "hip_r", "knee_r", "ankle_r", "toe_r", "wing_root_l", "wing_elbow_l", "wing_wrist_l", "wing_tip_l", "hip_l", "knee_l", "ankle_l", "toe_l"]
+
+[anchors]
+head = "crown"
+mouth = "beak_tip"
+saddle = "mid_back"
+
+[joints]
+beak_tip = [2.12, 2.05]
+crown = [1.45, 2.2]
+eye_r = [1.85, 2.25]
+nape = [1.0, 2.0]
+mid_back = [0.0, 1.55]
+rump = [-0.9, 1.18]
+tail_tip = [-2.1, 0.5]
+throat = [1.35, 1.6]
+breast = [0.85, 1.1]
+belly = [0.2, 0.85]
+vent = [-0.4, 0.85]
+wing_root_r = [0.8, 1.91]
+wing_elbow_r = [0.45, 1.75]
+wing_wrist_r = [-0.3, 1.43]
+wing_tip_r = [-1.8, 0.86]
+wing_root_l = [0.8, 1.91]
+wing_elbow_l = [0.45, 1.75]
+wing_wrist_l = [-0.3, 1.43]
+wing_tip_l = [-1.8, 0.86]
+hip_r = [0.4, 0.95]
+knee_r = [0.55, 0.7]
+ankle_r = [0.42, 0.42]
+toe_r = [0.6, 0.07]
+hip_l = [0.3, 0.95]
+knee_l = [0.45, 0.72]
+ankle_l = [0.26, 0.4]
+toe_l = [0.42, 0.07]
+
+[depth]
+ankle_l = 0.2
+ankle_r = -0.2
+hip_l = 0.2
+hip_r = -0.2
+knee_l = 0.22
+knee_r = -0.22
+toe_l = 0.2
+toe_r = -0.2
+wing_elbow_l = 0.42
+wing_elbow_r = -0.42
+wing_root_l = 0.28
+wing_root_r = -0.28
+wing_tip_l = 0.2
+wing_tip_r = -0.2
+wing_wrist_l = 0.48
+wing_wrist_r = -0.48
+
+[radius_depth_ft]
+wing_hand_l = 0.06
+wing_hand_r = 0.06
+wing_l = 0.08
+wing_r = 0.08
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["beak_tip", "crown"]
+pivot = "crown"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["crown", "nape"]
+pivot = "nape"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["nape", "mid_back", "rump"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["rump", "tail_tip"]
+
+[[bones]]
+name = "breast"
+part = "chest"
+parent = "spine"
+joints = ["throat", "breast"]
+pivot = "breast"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["breast", "belly", "vent"]
+
+[[bones]]
+name = "wing_r"
+part = "rightArm"
+parent = "spine"
+joints = ["wing_root_r", "wing_elbow_r", "wing_wrist_r"]
+
+[[bones]]
+name = "wing_hand_r"
+part = "rightHand"
+parent = "wing_r"
+joints = ["wing_wrist_r", "wing_tip_r"]
+
+[[bones]]
+name = "leg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "knee_r", "ankle_r", "toe_r"]
+
+[[bones]]
+name = "wing_l"
+part = "leftArm"
+parent = "spine"
+joints = ["wing_root_l", "wing_elbow_l", "wing_wrist_l"]
+
+[[bones]]
+name = "wing_hand_l"
+part = "leftHand"
+parent = "wing_l"
+joints = ["wing_wrist_l", "wing_tip_l"]
+
+[[bones]]
+name = "leg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]

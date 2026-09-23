@@ -1,0 +1,196 @@
+version = 2
+family = "caprine"
+body_type = "quadruped"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "horn_base_r", "horn_mid_r", "horn_bend_r", "horn_tip_r", "horn_base_l", "horn_mid_l", "horn_bend_l", "horn_tip_l", "ear_base_r", "ear_tip_r", "ear_base_l", "ear_tip_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+belly = [-0.325, 1.65]
+chest_front = [0.95, 1.95]
+croup = [-1.45, 2.8]
+ear_base_l = [1.2, 3.65]
+ear_base_r = [1.2, 3.65]
+ear_tip_l = [1.15, 3.78]
+ear_tip_r = [1.15, 3.78]
+elbow_l = [0.63, 1.4]
+elbow_r = [0.25, 1.45]
+eye_r = [1.8, 3.35]
+forepaw_l = [0.68, 0.12]
+forepaw_r = [0.35, 0.1]
+groin = [-1.1, 1.8]
+hindpaw_l = [-1.9, 0.08]
+hindpaw_r = [-1.25, 0.12]
+hip_l = [-1.675, 2.3]
+hip_r = [-1.4, 2.3]
+hock_l = [-2.03, 0.9]
+hock_r = [-1.6, 1.0]
+horn_base_l = [1.42, 3.75]
+horn_base_r = [1.42, 3.75]
+horn_bend_l = [0.95, 4.2]
+horn_bend_r = [0.95, 4.2]
+horn_mid_l = [1.25, 4.0]
+horn_mid_r = [1.25, 4.0]
+horn_tip_l = [0.55, 4.12]
+horn_tip_r = [0.55, 4.12]
+mid_back = [-0.5, 2.8]
+nose = [2.2, 2.9]
+poll = [1.45, 3.5]
+shoulder_l = [0.6, 2.3]
+shoulder_r = [0.35, 2.3]
+sternum = [0.45, 1.65]
+stifle_l = [-1.75, 1.5]
+stifle_r = [-1.3, 1.55]
+tail_base = [-1.975, 2.55]
+tail_tip = [-2.22, 2.2]
+withers = [0.55, 2.875]
+wrist_l = [0.525, 0.4]
+wrist_r = [0.22, 0.45]
+
+# Depth notes (the rig file loses comments on a re-bake; re-add them).
+# Horns and ears are extra head bones; their spread is read off caprine-front
+# (horns rise from the crown and curl out to +-1.0, ears stick out to +-0.7).
+# Legs: forelegs +-0.20 (inner columns), hind legs +-0.38 (outer columns).
+# [radius_depth_ft]: slim legs where they merge into the body in the front
+# view, and an underline no wider than the belly (the leg outline slivers
+# otherwise merge into it).
+[depth]
+ear_base_l = 0.4
+ear_base_r = -0.4
+ear_tip_l = 0.68
+ear_tip_r = -0.68
+elbow_l = 0.2
+elbow_r = -0.2
+forepaw_l = 0.2
+forepaw_r = -0.2
+hindpaw_l = 0.38
+hindpaw_r = -0.38
+hip_l = 0.38
+hip_r = -0.38
+hock_l = 0.38
+hock_r = -0.38
+horn_base_l = 0.15
+horn_base_r = -0.15
+horn_bend_l = 0.55
+horn_bend_r = -0.55
+horn_mid_l = 0.3
+horn_mid_r = -0.3
+horn_tip_l = 0.95
+horn_tip_r = -0.95
+shoulder_l = 0.2
+shoulder_r = -0.2
+stifle_l = 0.38
+stifle_r = -0.38
+wrist_l = 0.2
+wrist_r = -0.2
+
+[radius_depth_ft]
+foreleg_l = 0.1
+foreleg_r = 0.1
+hindleg_l = 0.1
+hindleg_r = 0.1
+underline = 0.3
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[[bones]]
+name = "horn_r"
+part = "head"
+parent = "skull"
+joints = ["horn_base_r", "horn_mid_r", "horn_bend_r", "horn_tip_r"]
+
+[[bones]]
+name = "horn_l"
+part = "head"
+parent = "skull"
+joints = ["horn_base_l", "horn_mid_l", "horn_bend_l", "horn_tip_l"]
+
+[[bones]]
+name = "ear_r"
+part = "head"
+parent = "skull"
+joints = ["ear_base_r", "ear_tip_r"]
+
+[[bones]]
+name = "ear_l"
+part = "head"
+parent = "skull"
+joints = ["ear_base_l", "ear_tip_l"]

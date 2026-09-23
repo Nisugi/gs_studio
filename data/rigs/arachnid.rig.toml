@@ -1,0 +1,210 @@
+version = 2
+family = "arachnid"
+body_type = "multileg"
+view = "front"
+ref_ft = 2.0
+axis = "carapace"
+joint_order = ["head_top", "mouth", "thorax_top", "thorax_bottom", "abdomen_tip", "eye_r", "leg1_base_r", "leg1_knee_r", "leg1_tip_r", "leg2_base_r", "leg2_knee_r", "leg2_tip_r", "leg3_base_r", "leg3_knee_r", "leg3_tip_r", "leg4_base_r", "leg4_knee_r", "leg4_tip_r", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "eye_l", "leg1_base_l", "leg1_knee_l", "leg1_tip_l", "leg2_base_l", "leg2_knee_l", "leg2_tip_l", "leg3_base_l", "leg3_knee_l", "leg3_tip_l", "leg4_base_l", "leg4_knee_l", "leg4_tip_l", "leg5_base_l", "leg5_knee_l", "leg5_tip_l"]
+
+[anchors]
+head = "head_top"
+mouth = "mouth"
+saddle = "thorax_top"
+
+[joints]
+abdomen_tip = [0.0, 2.15]
+eye_l = [0.1, 1.62]
+eye_r = [-0.1, 1.62]
+head_top = [0.0, 1.75]
+leg1_base_l = [0.42, 1.35]
+leg1_base_r = [-0.42, 1.35]
+leg1_knee_l = [0.49, 0.95]
+leg1_knee_r = [-0.49, 0.95]
+leg1_tip_l = [0.48, 0.43]
+leg1_tip_r = [-0.48, 0.43]
+leg2_base_l = [0.8, 1.65]
+leg2_base_r = [-0.8, 1.65]
+leg2_knee_l = [1.2, 1.8]
+leg2_knee_r = [-1.2, 1.8]
+leg2_tip_l = [1.49, 0.05]
+leg2_tip_r = [-1.49, 0.05]
+leg3_base_l = [0.75, 1.75]
+leg3_base_r = [-0.75, 1.75]
+leg3_knee_l = [1.3, 2.05]
+leg3_knee_r = [-1.3, 2.05]
+leg3_tip_l = [2.36, 0.33]
+leg3_tip_r = [-2.36, 0.33]
+leg4_base_l = [0.5, 1.95]
+leg4_base_r = [-0.5, 1.95]
+leg4_knee_l = [0.8, 2.62]
+leg4_knee_r = [-0.8, 2.62]
+leg4_tip_l = [2.4, 0.88]
+leg4_tip_r = [-2.4, 0.88]
+leg5_base_l = [0.55, 1.6]
+leg5_base_r = [-0.55, 1.6]
+leg5_knee_l = [1.0, 1.45]
+leg5_knee_r = [-1.0, 1.45]
+leg5_tip_l = [1.49, 0.05]
+leg5_tip_r = [-1.49, 0.05]
+mouth = [0.0, 1.27]
+thorax_bottom = [0.0, 1.7]
+thorax_top = [0.0, 1.95]
+
+# Why every joint below is overridden. From the front, a spider's legs
+# stack: the automatic guess gives every joint the centre of the side
+# view's widest span at its height, so all four leg pairs land on the same
+# z and render as one fan. Each pair is instead set onto one leg of the
+# side view `arachnid`, front to back:
+#   leg1 = pedipalps (the short straight pair hanging in front of the fangs)
+#   leg2 = front legs -> side leg reaching forward to z 2.35
+#   leg3 = second legs -> side leg planted at z ~1.0
+#   leg4 = third legs (the high arch in front) -> side leg at z ~-0.5
+#   leg5 = rear legs: hidden behind leg2 in the front view (same front
+#          path), set onto the side view's rear leg at z -2.35
+# Centre joints: head in front, thorax sloping back to the pedicel, abdomen
+# rising back to z -1.8 (the side view's big dome). Values tuned against
+# rest IoU with rig_check. `rig --example bake` drops comments; re-add.
+[depth]
+abdomen_tip = -1.8
+head_top = 0.35
+leg1_base_l = 0.45
+leg1_base_r = 0.45
+leg1_knee_l = 0.6
+leg1_knee_r = 0.6
+leg1_tip_l = 0.65
+leg1_tip_r = 0.65
+leg2_base_l = 0.5
+leg2_base_r = 0.5
+leg2_knee_l = 1.3
+leg2_knee_r = 1.3
+leg2_tip_l = 2.33
+leg2_tip_r = 2.33
+leg3_base_l = 0.2
+leg3_base_r = 0.2
+leg3_knee_l = 0.55
+leg3_knee_r = 0.55
+leg3_tip_l = 0.95
+leg3_tip_r = 0.95
+leg4_base_l = -0.2
+leg4_base_r = -0.2
+leg4_knee_l = -0.35
+leg4_knee_r = -0.35
+leg4_tip_l = -0.45
+leg4_tip_r = -0.45
+leg5_base_l = -0.45
+leg5_base_r = -0.45
+leg5_knee_l = -1.5
+leg5_knee_r = -1.5
+leg5_tip_l = -2.35
+leg5_tip_r = -2.35
+mouth = 0.18
+thorax_bottom = -0.4
+thorax_top = 0.4
+
+[radius_depth_ft]
+abdomen = 0.45
+skull = 0.2
+thorax = 0.6
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "thorax"
+joints = ["head_top", "mouth"]
+pivot = "mouth"
+radius_ft = 0.35
+
+[[bones]]
+name = "thorax"
+part = "chest"
+joints = ["thorax_top", "thorax_bottom"]
+
+[[bones]]
+name = "abdomen"
+part = "abdomen"
+parent = "thorax"
+joints = ["thorax_bottom", "abdomen_tip"]
+
+[[bones]]
+name = "leg1_r"
+part = "rightArm"
+parent = "thorax"
+joints = ["leg1_base_r", "leg1_knee_r"]
+
+[[bones]]
+name = "leg1_l"
+part = "leftArm"
+parent = "thorax"
+joints = ["leg1_base_l", "leg1_knee_l"]
+
+[[bones]]
+name = "leg1_tip_r"
+part = "rightHand"
+parent = "leg1_r"
+joints = ["leg1_knee_r", "leg1_tip_r"]
+
+[[bones]]
+name = "leg1_tip_l"
+part = "leftHand"
+parent = "leg1_l"
+joints = ["leg1_knee_l", "leg1_tip_l"]
+
+[[bones]]
+name = "leg2_r"
+part = "rightArm"
+parent = "thorax"
+joints = ["leg2_base_r", "leg2_knee_r"]
+
+[[bones]]
+name = "leg2_l"
+part = "leftArm"
+parent = "thorax"
+joints = ["leg2_base_l", "leg2_knee_l"]
+
+[[bones]]
+name = "leg2_tip_r"
+part = "rightHand"
+parent = "leg2_r"
+joints = ["leg2_knee_r", "leg2_tip_r"]
+
+[[bones]]
+name = "leg2_tip_l"
+part = "leftHand"
+parent = "leg2_l"
+joints = ["leg2_knee_l", "leg2_tip_l"]
+
+[[bones]]
+name = "leg3_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg3_base_r", "leg3_knee_r", "leg3_tip_r"]
+
+[[bones]]
+name = "leg3_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg3_base_l", "leg3_knee_l", "leg3_tip_l"]
+
+[[bones]]
+name = "leg4_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg4_base_r", "leg4_knee_r", "leg4_tip_r"]
+
+[[bones]]
+name = "leg4_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg4_base_l", "leg4_knee_l", "leg4_tip_l"]
+
+[[bones]]
+name = "leg5_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg5_base_r", "leg5_knee_r", "leg5_tip_r"]
+
+[[bones]]
+name = "leg5_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg5_base_l", "leg5_knee_l", "leg5_tip_l"]

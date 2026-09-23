@@ -1,0 +1,128 @@
+version = 2
+family = "ursine"
+body_type = "quadruped"
+view = "side"
+ref_ft = 3.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+belly = [-0.425, 1.35]
+chest_front = [1.15, 1.75]
+croup = [-1.55, 2.55]
+elbow_l = [0.9, 1.2]
+elbow_r = [0.2, 1.25]
+eye_r = [2.35, 2.35]
+forepaw_l = [1.1, 0.12]
+forepaw_r = [0.35, 0.05]
+groin = [-1.1, 1.4]
+hindpaw_l = [-2.3, 0.12]
+hindpaw_r = [-0.95, 0.12]
+hip_l = [-1.8, 2.0]
+hip_r = [-1.3, 2.0]
+hock_l = [-2.5, 0.5]
+hock_r = [-1.3, 0.5]
+mid_back = [-0.45, 2.7]
+nose = [2.6, 2.0]
+poll = [2.0, 2.6]
+shoulder_l = [0.75, 2.05]
+shoulder_r = [0.3, 2.0]
+sternum = [0.6, 1.3]
+stifle_l = [-1.95, 1.1]
+stifle_r = [-1.2, 1.2]
+tail_base = [-2.3, 2.1]
+tail_tip = [-2.43, 1.9]
+withers = [0.7, 2.75]
+wrist_l = [0.875, 0.35]
+wrist_r = [0.15, 0.4]
+
+# Depth notes (the rig file loses comments on a re-bake; re-add them).
+# No [depth] overrides: the guess puts every leg on the inner front-view
+# column (+-0.54) and the hairline merge centres it on the merged
+# inner+outer band (+-0.66), which is right for both pairs.
+# [radius_depth_ft] on the legs: that merged band is 0.7 ft wide, which made
+# every leg a flat paddle in the lying poses.
+[radius_depth_ft]
+foreleg_l = 0.28
+foreleg_r = 0.28
+hindleg_l = 0.28
+hindleg_r = 0.28
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]

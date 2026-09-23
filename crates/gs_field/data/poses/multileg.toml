@@ -19,3 +19,74 @@
 body_type = "multileg"
 
 [pose.stand]
+
+# Resting: every leg swung up and out (+z) so the legs lie splayed flat
+# and grounding lets the body settle onto the floor. Knees cannot fold
+# inward (a leg's knee hinge swings its tip fore-aft), so a spider rests
+# spread, not tucked. Serves kneel and sit too (they fall back to lie).
+[pose.lie]
+leg1 = { rot = [0.0, 0.0, 25.0] }
+leg2 = { rot = [0.0, 0.0, 25.0] }
+leg3 = { rot = [0.0, 0.0, 25.0] }
+leg4 = { rot = [0.0, 0.0, 25.0] }
+leg5 = { rot = [0.0, 0.0, 25.0] }
+
+# Rolled onto its right side. The upper (left) legs fall across the belly
+# (-z), the lower (right) legs fold toward it too (+z on a right leg), so
+# none of them props the body up; front and rear pairs converge.
+[pose.fallen_side]
+root = [0.0, 0.0, 90.0]
+leg1_l = { rot = [0.0, 0.0, -50.0] }
+leg2_l = { rot = [15.0, 0.0, -55.0] }
+leg3_l = { rot = [5.0, 0.0, -60.0] }
+leg4_l = { rot = [-5.0, 0.0, -60.0] }
+leg5_l = { rot = [-15.0, 0.0, -55.0] }
+leg1_r = { rot = [0.0, 0.0, 40.0] }
+leg2_r = { rot = [10.0, 0.0, 45.0] }
+leg3_r = { rot = [0.0, 0.0, 55.0] }
+leg4_r = { rot = [0.0, 0.0, 55.0] }
+leg5_r = { rot = [-10.0, 0.0, 50.0] }
+
+# Dazed on its feet: nose down, abdomen sagging, legs splayed wide,
+# the arm pairs curled and drooping.
+[pose.stunned]
+root = [14.0, 0.0, 6.0]
+skull = { rot = [18.0, 0.0, 0.0] }
+abdomen = { rot = [16.0, 0.0, 0.0] }
+leg1 = { rot = [10.0, 0.0, -12.0] }
+leg1_tip = { rot = [0.0, 0.0, 25.0] }
+leg2 = { rot = [-10.0, 0.0, 20.0] }
+leg2_tip = { rot = [0.0, 0.0, -25.0] }
+leg3 = { rot = [0.0, 0.0, 18.0] }
+leg4 = { rot = [0.0, 0.0, 18.0] }
+leg5 = { rot = [10.0, 0.0, 16.0] }
+
+# The classic dead spider: on its back, every leg drawn in over the belly
+# and bunched fore-aft (front pairs swing back, rear pairs forward).
+[pose.dead]
+root = [0.0, 0.0, 180.0]
+leg1 = { rot = [0.0, 0.0, -15.0] }
+leg1_tip = { rot = [0.0, 0.0, 25.0] }
+leg2 = { rot = [25.0, 0.0, -38.0] }
+leg2_tip = { rot = [0.0, 0.0, -45.0] }
+leg3 = { rot = [12.0, 0.0, -38.0], bend = [25.0] }
+leg4 = { rot = [-12.0, 0.0, -38.0], bend = [-25.0] }
+leg5 = { rot = [-25.0, 0.0, -35.0], bend = [-30.0] }
+
+# Threat display: front raised, the two arm pairs (palps and first legs on
+# a spider, claws and the raised first walking leg on a crab) lifted up
+# and forward; the rear legs stay planted.
+[pose.rear]
+root = [-25.0, 0.0, 0.0]
+leg1 = { rot = [-30.0, 0.0, 20.0] }
+leg2 = { rot = [-40.0, 0.0, 40.0] }
+
+
+# ---------------------------------------------------------------- families
+#
+# A crab's body is flat and wide and its legs short: pitched back as far as
+# the spider rears, it tips over onto its abdomen. It rears less and lets
+# the raised claws carry the pose.
+[family.crustacean.rear]
+root = [-8.0, 0.0, 0.0]
+leg1 = { rot = [-20.0, 0.0, 30.0] }

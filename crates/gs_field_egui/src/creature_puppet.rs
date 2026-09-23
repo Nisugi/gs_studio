@@ -741,11 +741,31 @@ mod tests {
         PuppetKey::new(pose, &injuries, false, false, body(), false, 160.0)
     }
 
+    /// Every published puppet parses, has a pose set for its body type, and
+    /// every pose in that set poses it onto the ground.
+    #[test]
+    fn every_embedded_puppet_parses_and_poses() {
+        let mut cache = cache();
+        let families: Vec<String> = gs_field::puppets::embedded().map(|(f, _)| f.to_string()).collect();
+        assert!(families.len() >= 22, "{families:?}");
+        for family in &families {
+            let fam: Arc<str> = Arc::from(family.as_str());
+            let puppet = cache.puppet(&fam).unwrap_or_else(|| panic!("{family}: bake does not parse"));
+            let set = cache.pose_set(&fam).unwrap_or_else(|| panic!("{family}: no pose set for {}", puppet.body_type));
+            for (name, pose) in &set.poses {
+                let posed = puppet.pose(pose);
+                let b = posed.bounds();
+                assert!(b[0][1].abs() < 1e-3, "{family} {name}: rests on the ground ({:?})", b);
+                assert!(b.iter().flatten().all(|v| v.is_finite()), "{family} {name}");
+            }
+        }
+    }
+
     #[test]
     fn baked_puppets_load_from_the_embedded_bake_only() {
         let mut cache = cache();
         for (name, noun, family, body_type) in [
-            ("forest troll", "troll", "humanoid", "biped"),
+            ("forest troll", "troll", "troll", "biped"),
             ("timber wolf", "wolf", "canine", "quadruped"),
         ] {
             let resolved = cache.family_for(name, Some(noun)).expect("a puppet");

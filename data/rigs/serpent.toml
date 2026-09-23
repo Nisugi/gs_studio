@@ -1,0 +1,72 @@
+family = "serpent"
+view = "side"
+ref_ft = 1.0
+axis = "diameter"
+px_per_ft = 74.6791
+aspect = 1.8286
+span = 0.8438
+ground_frac = 1.0079
+eye_radius_ft = 0.0486
+parts = ["head", "rightEye", "neck", "chest", "abdomen", "back"]
+
+[map]
+width = 512
+height = 280
+
+[anchors]
+feet = [0.5, 1.0079]
+head = [0.5438, 0.1144]
+mouth = [0.7334, 0.0611]
+saddle = [0.1937, 0.4691]
+
+[eyes]
+rightEye = [0.6823, 0.0477]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "neck"
+pivot = [0.5438, 0.1144]
+tip = [0.7334, 0.0611]
+joints = [[0.7334, 0.0611], [0.5438, 0.1144]]
+pixels = 3936
+
+[[bones]]
+index = 2
+name = "neck"
+part = "neck"
+parent = "fore_body"
+pivot = [0.5875, 0.4478]
+tip = [0.5438, 0.1144]
+joints = [[0.5438, 0.1144], [0.5875, 0.4478]]
+pixels = 4168
+
+[[bones]]
+index = 3
+name = "fore_body"
+part = "chest"
+parent = "mid_body"
+pivot = [0.1937, 0.4691]
+tip = [0.5875, 0.4478]
+joints = [[0.5875, 0.4478], [0.1937, 0.4691]]
+pixels = 10901
+
+[[bones]]
+index = 4
+name = "mid_body"
+part = "abdomen"
+pivot = [0.1208, 0.6345]
+tip = [0.6604, 0.6452]
+joints = [[0.1937, 0.4691], [0.1208, 0.6345], [0.6604, 0.6452]]
+pixels = 15816
+
+[[bones]]
+index = 5
+name = "hind_body"
+part = "back"
+parent = "mid_body"
+pivot = [0.6604, 0.6452]
+tip = [0.9901, 0.6612]
+joints = [[0.6604, 0.6452], [0.7042, 0.8612], [0.0333, 0.8692], [0.7698, 0.9546], [0.9901, 0.6612]]
+pixels = 28777
