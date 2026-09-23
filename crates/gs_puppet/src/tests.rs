@@ -511,3 +511,27 @@ fn baked_puppets_round_trip_and_bad_ones_are_refused() {
     future.version = crate::BAKED_VERSION + 1;
     assert!(Puppet::from_baked(&future).is_err());
 }
+
+/// An arm hanging beside the torso in the front view is hidden inside the
+/// torso in the side view: that side-view row is the TORSO's depth, not the
+/// arm's. The arm must keep its own calibre instead of becoming a slab as
+/// deep as the chest (the humanoid's forearms read 0.39 ft deep this way).
+#[test]
+fn a_limb_in_front_of_the_trunk_does_not_take_the_trunks_depth() {
+    const ARM_HALF: f32 = 0.1;
+    const TORSO_DEPTH_HALF: f32 = 0.35;
+    let front = mask_from(|x, y| {
+        ((1.0..=3.9).contains(&y) && x.abs() <= 0.5) || ((2.4..=3.9).contains(&y) && (x.abs() - 0.8).abs() <= ARM_HALF)
+            || ((0.0..1.0).contains(&y) && (x.abs() - 0.25).abs() <= 0.1)
+    });
+    let side = mask_from(|z, y| ((1.0..=3.9).contains(&y) && z.abs() <= TORSO_DEPTH_HALF) || ((0.0..1.0).contains(&y) && z.abs() <= 0.1));
+    let rig = plain_rig(
+        View::Front,
+        &[("top", [0.0, 3.8]), ("pelvis", [0.0, 1.1]), ("shoulder", [0.8, 3.8]), ("wrist", [0.8, 2.5])],
+        vec![bone("spine", "chest", None, &["top", "pelvis"]), bone("arm", "leftArm", Some("spine"), &["shoulder", "wrist"])],
+    );
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).unwrap();
+    let arm = segment(&p, "arm");
+    let deepest = arm.stations.iter().map(|s| s.d).fold(0.0f32, f32::max);
+    assert!(deepest < 0.2, "the arm is as deep as the torso: {deepest}");
+}

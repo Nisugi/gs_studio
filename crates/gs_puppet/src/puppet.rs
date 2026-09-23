@@ -74,6 +74,9 @@ const BURIED_CALIBRE: f32 = 1.45;
 /// its inert range rather than loosened for no measured gain.
 pub(crate) const LIMB_DEPTH_MAX: f32 = 4.0;
 pub(crate) const LIMB_DEPTH_MIN: f32 = 0.5;
+/// A trunk bone counts as present on a row this far past its end joints
+/// (a torso's bulk extends a little beyond the joints that bound it).
+const TRUNK_ROW_MARGIN_FT: f32 = 0.1;
 /// Half-thickness may change by at most this much per foot along the bone.
 const MAX_TAPER: f32 = 2.5;
 /// What a badly-measured limb may eat back out of a trunk that crosses it,
@@ -384,8 +387,16 @@ pub(crate) fn interpolate_depth(depth: &[Option<f32>], w: &[f32]) -> Vec<f32> {
             if let Some(x) = depth[k] {
                 return x;
             }
-            if k < first || k > last {
-                return w[k];
+            // Past the last believable reading (typically where the limb
+            // runs into the trunk and the other view reads the trunk), keep
+            // the limb's own nearest depth: it continues into the body at its
+            // own calibre, and the trunk covers the join. Its in-plane width
+            // there is no guide -- a thigh is broad in profile, not deep.
+            if k < first {
+                return depth[first].unwrap().min(w[k]);
+            }
+            if k > last {
+                return depth[last].unwrap().min(w[k]);
             }
             let a = known.iter().rev().find(|&&j| j < k).copied().expect("bracketed below");
             let b = known.iter().find(|&&j| j > k).copied().expect("bracketed above");
@@ -514,6 +525,30 @@ impl Puppet {
             let mut shift: Vec<f32> = Vec::with_capacity(n);
             // What a limb's depth is judged against: see `LIMB_DEPTH_MAX`.
             let ref_w = median(&mut m.w.clone()).max(MIN_HALF_FT);
+            // The other view stacks everything along its line of sight, so
+            // where a limb passes in front of (or behind) the trunk, its row
+            // there IS the trunk's row: an arm hanging beside a torso reads
+            // the torso's full depth in the side view, and the top of a
+            // quadruped's leg reads the chest in the front view -- then the
+            // station is shifted to that run's middle, pulling the limb in
+            // toward the body's centre line. Such a row says nothing about
+            // the limb. It is recognised by the trunk's own centre line
+            // lying inside the run at that height.
+            let trunk_centres = |y: f32| -> Vec<f32> {
+                raws.iter()
+                    .zip(&kinds)
+                    .filter(|(_, k)| **k == Kind::Trunk)
+                    .filter_map(|(t, _)| {
+                        let (y0, y1) = (t.head[1].min(t.tail[1]), t.head[1].max(t.tail[1]));
+                        if y < y0 - TRUNK_ROW_MARGIN_FT || y > y1 + TRUNK_ROW_MARGIN_FT {
+                            return None;
+                        }
+                        let dy = t.tail[1] - t.head[1];
+                        let s = if dy.abs() < 1e-4 { 0.5 } else { ((y - t.head[1]) / dy).clamp(0.0, 1.0) };
+                        Some(t.head[oa] + (t.tail[oa] - t.head[oa]) * s)
+                    })
+                    .collect()
+            };
             for k in 0..n {
                 let c = centre(k);
                 // KNOWN LIMIT: the merge also welds two limbs a toe-gap apart
@@ -533,7 +568,14 @@ impl Puppet {
                     }
                     Kind::Hand => false,
                 };
-                depth.push(ok.then_some(half));
+                // Over the trunk the row still says where the limb sits (it
+                // is tucked into the body there -- shifting it to the run's
+                // middle hides a shoulder or thigh inside the chest instead of
+                // leaving it standing proud), but not how THICK it is: that
+                // is the trunk's depth, and the limb keeps its own.
+                let over_trunk = kind == Kind::Limb
+                    && run.is_some_and(|(lo, hi)| trunk_centres(c[1]).iter().any(|x| (lo..=hi).contains(x)));
+                depth.push((ok && !over_trunk).then_some(half));
                 shift.push(if ok { mid } else { 0.0 });
             }
             let mut d: Vec<f32> = match kind {
