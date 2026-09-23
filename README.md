@@ -65,6 +65,21 @@ scan and calibration caches, resets the art store, re-scans the cast and
 drops every open calibrator (each re-opens against the new pool when its tab
 is next shown -- unsaved calibration edits do not survive a pool change).
 
+#### Bundled art (release builds)
+
+    cargo build --release -p studio --features bundled-art
+
+packs an art pool into the executable (`crates/studio/build.rs`): its
+`global/images` minus the injury dolls (`dolls/`, ~680 MB of overlays),
+`global/scenes` and `global/skins`, plus the data root's `outlines.json`,
+`rigs/` and `poses/`. `.bak` files are skipped. The source pool is
+`GS_STUDIO_EMBED_POOL`, set per machine in `.cargo/config.toml` under
+`[env]` (git-ignored); `GS_STUDIO_EMBED_DATA` overrides the data source
+(default: the workspace's `data/`). On startup such a build ADDS any missing
+file to gs-studio's own pool and data home -- never overwriting one, never
+touching a folder pointed elsewhere (`src/bundle.rs`). Ordinary builds carry
+nothing.
+
 #### The data home, and why it is not `~/.vellum-fe`
 
 gs-studio is a standalone app. Left alone, its pool is its **own** data home:

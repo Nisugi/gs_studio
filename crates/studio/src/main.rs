@@ -22,6 +22,7 @@
 //! Licence: GPL-3.0-or-later (the stage is ported from VellumFE).
 
 mod app;
+mod bundle;
 mod calib;
 mod cli;
 mod data_home;
@@ -38,6 +39,27 @@ mod tools;
 fn fail(message: &str) -> ! {
     eprintln!("{message}");
     std::process::exit(2);
+}
+
+/// Fill gs-studio's OWN folders from the art and rigs packed into the
+/// binary (the `bundled-art` feature), adding only what is missing. A pool or
+/// data root the user pointed elsewhere is never touched.
+fn seed_from_bundle(data: &data_root::DataRoot, pool: &pool_dir::PoolDir) {
+    let home = data_home::default_home_or_local();
+    let targets = [
+        (bundle::Root::Pool, "art", pool.path.clone(), pool.source == pool_dir::PoolSource::StudioHome),
+        (bundle::Root::Data, "rigs", data.path.clone(), data.path == home.join("data")),
+    ];
+    for (root, what, dest, ours) in targets {
+        if !ours || bundle::contents(root).0 == 0 {
+            continue;
+        }
+        let report = bundle::seed(root, &dest);
+        if report.written > 0 || !report.errors.is_empty() {
+            eprintln!("gs-studio: {}", report.summary(what, &dest));
+        }
+    }
+    pool_dir::invalidate_caches();
 }
 
 fn main() -> eframe::Result {
@@ -61,6 +83,7 @@ fn main() -> eframe::Result {
     let publish = editor::resolve_publish_dir(&data.path, publish_override.as_deref());
     eprintln!("gs-studio: publish to {}", publish.display());
     let pool = pool_dir::from_environment(cli.pool, saved.pool);
+    seed_from_bundle(&data, &pool);
     eprintln!("gs-studio: {}", pool.status());
     if !pool.source.is_explicit() {
         eprintln!("gs-studio: nothing pointed the pool anywhere, so this is gs-studio's own data home.");

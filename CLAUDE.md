@@ -13,6 +13,7 @@ section before changing behaviour it describes, and keep it in sync.
     cargo test -p studio editor_is_egui_free   # one test (name filter)
     cargo run -p studio                        # the app, binary gs-studio
     cargo run -p studio -- --pool <dir> --tab preview
+    cargo build --release -p studio --features bundled-art   # packs art into the exe (needs GS_STUDIO_EMBED_POOL)
     cargo run --release -p rig --example bake -- data humanoid   # headless bake + timing
 
 Headless smoke run of the app: `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the

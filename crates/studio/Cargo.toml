@@ -9,6 +9,12 @@ description = "gs_studio: art-authoring app for GemStone IV clients."
 name = "gs-studio"
 path = "src/main.rs"
 
+[features]
+# Pack an art pool (minus the injury dolls) and the rig data into the
+# binary; a fresh gs-studio home is filled from it. See build.rs.
+#   cargo build --release -p studio --features bundled-art
+bundled-art = []
+
 [dependencies]
 rig = { path = "../rig" }
 rig_bake = { path = "../rig_bake" }
