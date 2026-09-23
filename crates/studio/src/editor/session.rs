@@ -9,6 +9,7 @@ use rig::{
     bake_mask, family_default, template, templates, write_baked, Baked, OutlineEntry, Outlines,
     Rig, Template, View,
 };
+use gs_puppet::Puppet;
 use rig_bake::{rasterize, Mask};
 
 use super::depth::DepthModel;
@@ -19,16 +20,21 @@ use super::warnings::warnings;
 pub const DRAG_PX: usize = 256;
 pub const FULL_PX: usize = 512;
 
-/// Environment override for where baked rigs are published.
+/// Environment override for where baked artefacts are published.
 pub const PUBLISH_ENV_VAR: &str = "GS_STUDIO_PUBLISH";
 
-/// Where baked rigs go for game clients to embed: `override_dir` if given,
-/// else the workspace's `crates/gs_field/data/rigs`, found relative to the
-/// data root (`<data>/../crates/gs_field/data/rigs`).
-pub fn resolve_publish_dir(data_root: &Path, override_dir: Option<&str>) -> PathBuf {
-    match override_dir.map(str::trim).filter(|d| !d.is_empty()) {
-        Some(dir) => PathBuf::from(dir),
-        None => data_root.join("..").join("crates").join("gs_field").join("data").join("rigs"),
+/// Where Publish ships to: a directory holding `rigs/`, `puppets/` and
+/// `poses/`, the layout of `crates/gs_field/data` (whose contents game
+/// clients compile in). `override_dir` if given, else that directory found
+/// relative to the data root (`<data>/../crates/gs_field/data`).
+///
+/// An override that names a `rigs` directory (the old meaning of
+/// `GS_STUDIO_PUBLISH`) means its parent.
+pub fn resolve_publish_dir(data_root: &Path, override_dir: Option<&Path>) -> PathBuf {
+    match override_dir.filter(|d| !d.as_os_str().is_empty()) {
+        Some(dir) if dir.file_name().is_some_and(|n| n == "rigs") => dir.parent().unwrap_or(dir).to_path_buf(),
+        Some(dir) => dir.to_path_buf(),
+        None => data_root.join("..").join("crates").join("gs_field").join("data"),
     }
 }
 
@@ -75,8 +81,12 @@ pub struct Session {
     /// The canvas should re-fit (a new silhouette was opened).
     pub fit_requested: bool,
     pub status: String,
-    /// Where Publish copies `<family>.png` + `<family>.toml`.
+    /// Where Publish ships (`rigs/`, `puppets/`, `poses/` under it).
     pub publish_dir: PathBuf,
+    /// The art pool. Save installs the bake and the puppet into its
+    /// `global/rigs/` and `global/puppets/`, so the stage draws them at
+    /// once. None = do not install (tests, or no pool).
+    pub pool: Option<PathBuf>,
     /// Save also publishes (when the publish directory is usable).
     pub publish_on_save: bool,
     masks: HashMap<usize, Mask>,
@@ -91,7 +101,7 @@ pub struct Session {
 
 impl Session {
     /// Load `<data_root>/outlines.json` and open a first family.
-    pub fn open(data_root: &Path) -> Result<Session, String> {
+    pub fn open(data_root: &Path, publish_dir: PathBuf, pool: Option<PathBuf>) -> Result<Session, String> {
         let outlines = Outlines::load(&data_root.join("outlines.json")).map_err(|e| e.to_string())?;
         let families = outlines.families();
         let first = families
@@ -109,7 +119,8 @@ impl Session {
             quit_approved: false,
             fit_requested: true,
             status: String::new(),
-            publish_dir: resolve_publish_dir(data_root, std::env::var(PUBLISH_ENV_VAR).ok().as_deref()),
+            publish_dir,
+            pool,
             publish_on_save: true,
             masks: HashMap::new(),
             bake: None,
@@ -320,28 +331,55 @@ impl Session {
         dir.join(format!("{family}.png")).is_file() && dir.join(format!("{family}.toml")).is_file()
     }
 
-    /// Copy the SAVED `<family>.png` + `<family>.toml` (never the
-    /// `.rig.toml` source) into the publish directory. Publishes what is on
-    /// disk: unsaved edits are not in it.
+    /// The SAVED files of a family that ship: `(file name, subdirectory)`.
+    /// The puppet is there only when the last save could build one.
+    fn shipped_files(&self, family: &str) -> Vec<(String, &'static str)> {
+        let mut files = vec![(format!("{family}.png"), "rigs"), (format!("{family}.toml"), "rigs")];
+        let puppet = Puppet::baked_file_name(family);
+        if self.rigs_dir().join(&puppet).is_file() {
+            files.push((puppet, "puppets"));
+        }
+        files
+    }
+
+    /// Ship the SAVED bake (`rigs/<family>.png` + `.toml`), the saved puppet
+    /// (`puppets/<family>.puppet.toml`) and every pose set in
+    /// `<data>/poses/` (`poses/`) into the publish directory. Never the
+    /// `.rig.toml` source. Publishes what is on disk: unsaved edits are not
+    /// in it.
     pub fn publish(&mut self) -> Result<PathBuf, String> {
         let dir = self.publish_target()?;
         let family = self.editor.rig().family.clone();
         if !self.has_saved_bake(&family) {
             return Err(format!("{family} has no saved bake yet: save first"));
         }
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        for name in [format!("{family}.png"), format!("{family}.toml")] {
-            let (from, to) = (self.rigs_dir().join(&name), dir.join(&name));
-            std::fs::copy(&from, &to).map_err(|e| format!("{} -> {}: {e}", from.display(), to.display()))?;
+        let mut shipped = Vec::new();
+        for (name, sub) in self.shipped_files(&family) {
+            copy_into(&self.rigs_dir().join(&name), &dir.join(sub))?;
+            shipped.push(format!("{sub}/{name}"));
         }
-        self.status = format!("Published {family}.png + {family}.toml to {}", dir.display());
+        let mut pose_count = 0;
+        for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "toml") {
+                copy_into(&path, &dir.join("poses"))?;
+                pose_count += 1;
+            }
+        }
+        if pose_count > 0 {
+            shipped.push(format!("{pose_count} pose sets"));
+        }
+        self.status = format!("Published {} to {}", shipped.join(", "), dir.display());
         Ok(dir)
     }
 
-    /// Write `<family>.rig.toml`, `<family>.png` and `<family>.toml` into
-    /// `<data>/rigs/`; then, with "publish on save" on and somewhere to
-    /// publish to, copy the two baked files there as well. A publish that
-    /// fails does not fail the save: the status line says what happened.
+    /// Write `<family>.rig.toml`, `<family>.png`, `<family>.toml` and (when
+    /// the rig makes one) `<family>.puppet.toml` into `<data>/rigs/`; install
+    /// the bake and the puppet into the pool so the stage shows them; then,
+    /// with "publish on save" on and somewhere to publish to, publish. Only
+    /// the rig and its bake can fail the save: a puppet that cannot be built
+    /// yet, or a pool or publish that cannot be written, is said on the
+    /// status line.
     pub fn save(&mut self) -> Result<(), String> {
         let family = self.editor.rig().family.clone();
         let path = self.rig_path(&family);
@@ -351,17 +389,62 @@ impl Session {
         rig.save(&path).map_err(|e| e.to_string())?;
         write_baked(rig, &baked, &dir).map_err(|e| e.to_string())?;
         self.editor.mark_saved();
-        let saved = format!("Saved {} (+ {family}.png, {family}.toml)", path.display());
-        self.status = match self.publish_on_save.then(|| self.publish_target()) {
-            Some(Ok(_)) => match self.publish() {
-                Ok(dir) => format!("{saved}; published to {}", dir.display()),
-                Err(e) => format!("{saved}; PUBLISH FAILED: {e}"),
+        let mut notes = vec![format!("Saved {}", path.display())];
+
+        let puppet_path = dir.join(Puppet::baked_file_name(&family));
+        match Puppet::build(self.editor.rig(), &self.outlines).and_then(|p| p.to_baked_toml()) {
+            Ok(text) => match std::fs::write(&puppet_path, text) {
+                Ok(()) => notes.push("puppet built".into()),
+                Err(e) => notes.push(format!("PUPPET NOT WRITTEN: {}: {e}", puppet_path.display())),
             },
-            Some(Err(_)) => format!("{saved}; not published (no publish directory)"),
-            None => saved,
-        };
+            Err(e) => {
+                // A stale puppet must not outlive the rig it came from.
+                let _ = std::fs::remove_file(&puppet_path);
+                notes.push(format!("no puppet yet ({e})"));
+            }
+        }
+
+        if let Some(pool) = self.pool.clone() {
+            match self.install_in_pool(&family, &pool) {
+                Ok(()) => notes.push("installed in the pool".into()),
+                Err(e) => notes.push(format!("NOT INSTALLED IN THE POOL: {e}")),
+            }
+        }
+
+        match self.publish_on_save.then(|| self.publish_target()) {
+            Some(Ok(_)) => match self.publish() {
+                Ok(dir) => notes.push(format!("published to {}", dir.display())),
+                Err(e) => notes.push(format!("PUBLISH FAILED: {e}")),
+            },
+            Some(Err(_)) => notes.push("not published (no publish directory)".into()),
+            None => {}
+        }
+        self.status = notes.join("; ");
         Ok(())
     }
+
+    /// Copy the saved bake into `<pool>/global/rigs/` and the saved puppet
+    /// into `<pool>/global/puppets/` (removing a pool puppet this family no
+    /// longer has), then drop gs_field's caches so they are read again.
+    fn install_in_pool(&self, family: &str, pool: &Path) -> Result<(), String> {
+        let global = pool.join("global");
+        let files = self.shipped_files(family);
+        if !files.iter().any(|(_, sub)| *sub == "puppets") {
+            let _ = std::fs::remove_file(global.join("puppets").join(Puppet::baked_file_name(family)));
+        }
+        for (name, sub) in files {
+            copy_into(&self.rigs_dir().join(&name), &global.join(sub))?;
+        }
+        crate::pool_dir::invalidate_caches();
+        Ok(())
+    }
+}
+
+/// Copy `file` into directory `dir` (created if missing), keeping its name.
+fn copy_into(file: &Path, dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let to = dir.join(file.file_name().unwrap_or_default());
+    std::fs::copy(file, &to).map(|_| ()).map_err(|e| format!("{} -> {}: {e}", file.display(), to.display()))
 }
 
 pub fn other_view(view: View) -> View {
@@ -383,6 +466,11 @@ mod tests {
 
     struct TempData(PathBuf);
 
+    /// A session with nowhere to publish and no pool to install into.
+    fn open(data: &Path) -> Result<Session, String> {
+        Session::open(data, data.join("no/such/publish/dir"), None)
+    }
+
     impl TempData {
         fn new(tag: &str) -> TempData {
             let dir = std::env::temp_dir().join(format!("gs_studio_{tag}_{}", std::process::id()));
@@ -402,7 +490,7 @@ mod tests {
     #[test]
     fn opens_humanoid_from_its_default_template() {
         let data = TempData::new("open");
-        let s = Session::open(&data.0).unwrap();
+        let s = open(&data.0).unwrap();
         let rig = s.editor.rig();
         assert_eq!((rig.family.as_str(), rig.body_type.as_str(), rig.view), ("humanoid", "biped", View::Front));
         assert_eq!((rig.ref_ft, rig.axis.as_str()), (6.0, "crown"));
@@ -411,13 +499,13 @@ mod tests {
 
     #[test]
     fn a_missing_data_dir_is_an_error_not_a_panic() {
-        assert!(Session::open(Path::new("definitely/not/here")).is_err());
+        assert!(open(Path::new("definitely/not/here")).is_err());
     }
 
     #[test]
     fn save_writes_three_files_and_reopening_loads_them() {
         let data = TempData::new("save");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         s.editor.place_current([0.0, 5.8]);
         s.editor.place_current([0.0, 5.0]);
         assert!(s.editor.is_dirty());
@@ -427,7 +515,7 @@ mod tests {
             assert!(data.0.join("rigs").join(f).is_file(), "{f}");
         }
 
-        let mut again = Session::open(&data.0).unwrap();
+        let mut again = open(&data.0).unwrap();
         assert_eq!(again.editor.rig(), s.editor.rig());
         assert_eq!(again.editor.current(), Some("neck_base"));
         assert!(again.status.starts_with("Loaded"));
@@ -440,18 +528,27 @@ mod tests {
     #[test]
     fn the_publish_dir_is_the_workspace_crate_unless_overridden() {
         let default = resolve_publish_dir(Path::new("ws/data"), None);
-        assert!(default.ends_with("crates/gs_field/data/rigs") && default.starts_with("ws/data/.."), "{default:?}");
-        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some("  ")), default);
-        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(" out/rigs ")), PathBuf::from("out/rigs"));
+        assert!(default.ends_with("crates/gs_field/data") && default.starts_with("ws/data/.."), "{default:?}");
+        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(Path::new(""))), default);
+        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(Path::new("out/ship"))), PathBuf::from("out/ship"));
+        // The old meaning (the rigs directory itself) still lands right.
+        assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(Path::new("out/data/rigs"))), PathBuf::from("out/data"));
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
     }
 
     #[test]
-    fn save_publishes_the_baked_pair_but_never_the_source() {
+    fn save_publishes_the_baked_pair_and_the_poses_but_never_the_source() {
         let data = TempData::new("pub");
-        let mut s = Session::open(&data.0).unwrap();
-        // Default location: <data>/../crates/... is not there -> unavailable,
-        // and saving still works.
-        s.publish_dir = resolve_publish_dir(&data.0.join("nested/data"), None);
+        std::fs::create_dir_all(data.0.join("poses")).unwrap();
+        std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n").unwrap();
+        let mut s = open(&data.0).unwrap();
+        // Nowhere to publish: unavailable, and saving still works.
         assert!(s.publish_target().unwrap_err().contains("GS_STUDIO_PUBLISH"));
         assert!(s.publish().is_err());
         s.editor.place_current([0.0, 5.8]);
@@ -465,11 +562,14 @@ mod tests {
         s.editor.place_current([0.0, 5.0]);
         s.save().unwrap();
         assert!(s.status.contains("published to"), "{}", s.status);
-        let mut names: Vec<String> =
-            std::fs::read_dir(&out).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
-        names.sort();
-        assert_eq!(names, ["humanoid.png", "humanoid.toml"]);
-        assert_eq!(std::fs::read(out.join("humanoid.png")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.png")).unwrap());
+        // Two joints already make one bone, so a (one-piece) puppet ships.
+        assert!(s.status.contains("puppet built"), "{}", s.status);
+        assert_eq!(names(&out), ["poses", "puppets", "rigs"]);
+        assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml"]);
+        assert_eq!(names(&out.join("rigs")), ["humanoid.png", "humanoid.toml"]);
+        assert_eq!(names(&out.join("poses")), ["biped.toml"]);
+        let read = |p: PathBuf| std::fs::read(p).unwrap();
+        assert_eq!(read(out.join("rigs/humanoid.png")), read(data.0.join("rigs/humanoid.png")));
 
         // With the box unticked Save leaves the published copy alone; the
         // button still publishes the last SAVED bake.
@@ -477,13 +577,52 @@ mod tests {
         s.editor.place_current([0.0, 4.9]);
         s.save().unwrap();
         assert!(!s.status.contains("ublish"), "{}", s.status);
-        assert_ne!(std::fs::read(out.join("humanoid.toml")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.toml")).unwrap());
+        assert_ne!(read(out.join("rigs/humanoid.toml")), read(data.0.join("rigs/humanoid.toml")));
         s.publish().unwrap();
-        assert_eq!(std::fs::read(out.join("humanoid.toml")).unwrap(), std::fs::read(data.0.join("rigs/humanoid.toml")).unwrap());
+        assert_eq!(read(out.join("rigs/humanoid.toml")), read(data.0.join("rigs/humanoid.toml")));
 
         // A family never saved has nothing to publish.
         s.request(DocAction::OpenFamily("worm".into()));
         assert!(s.publish().unwrap_err().contains("save first"));
+    }
+
+    /// The real humanoid rig against the real silhouettes: Save builds the
+    /// puppet, installs bake + puppet into the pool, and Publish ships it.
+    #[test]
+    fn save_builds_the_puppet_and_puts_it_on_the_stage() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let data = TempData::new("puppet");
+        std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
+        std::fs::create_dir_all(data.0.join("rigs")).unwrap();
+        std::fs::copy(repo.join("rigs/humanoid.rig.toml"), data.0.join("rigs/humanoid.rig.toml")).unwrap();
+        let pool = data.0.join("pool");
+        let out = data.0.join("published");
+        let mut s = Session::open(&data.0, out.clone(), Some(pool.clone())).unwrap();
+        s.save().unwrap();
+        assert!(s.status.contains("puppet built") && s.status.contains("installed in the pool"), "{}", s.status);
+        let baked = std::fs::read_to_string(data.0.join("rigs/humanoid.puppet.toml")).unwrap();
+        assert!(Puppet::from_baked_toml(&baked).is_ok());
+        assert_eq!(names(&pool.join("global/puppets")), ["humanoid.puppet.toml"]);
+        assert_eq!(names(&pool.join("global/rigs")), ["humanoid.png", "humanoid.toml"]);
+        assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml"]);
+
+        // The pool copy is what gs_field now serves.
+        gs_field::data_dirs::set_base_dir(pool.clone());
+        crate::pool_dir::invalidate_caches();
+        let set = gs_field::puppets::puppets();
+        assert_eq!(set.get("humanoid").unwrap().source, gs_field::puppets::PuppetSource::Override);
+        gs_field::data_dirs::clear_base_dir();
+        crate::pool_dir::invalidate_caches();
+
+        // A rig that can no longer make a puppet (one joint: no bone) takes
+        // its old one with it.
+        s.request(DocAction::NewFromTemplate { template: "biped".into(), view: View::Front });
+        s.editor.place_current([0.0, 5.8]);
+        s.save().unwrap();
+        assert!(s.status.contains("no puppet yet"), "{}", s.status);
+        assert!(!data.0.join("rigs/humanoid.puppet.toml").exists());
+        assert!(!pool.join("global/puppets/humanoid.puppet.toml").exists());
     }
 
     #[test]
@@ -497,7 +636,7 @@ mod tests {
         }
         std::fs::create_dir_all(data.0.join("rigs")).unwrap();
         std::fs::write(data.0.join("rigs/humanoid.rig.toml"), old.to_toml().unwrap()).unwrap();
-        let s = Session::open(&data.0).unwrap();
+        let s = open(&data.0).unwrap();
         assert!(s.status.contains("filled 10 bone parent(s)"), "{}", s.status);
         assert!(!s.editor.is_dirty());
         assert_eq!(s.editor.rig().hierarchy_issues(), []);
@@ -507,7 +646,7 @@ mod tests {
     #[test]
     fn unsaved_changes_park_the_action_until_confirmed() {
         let data = TempData::new("confirm");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         s.editor.place_current([0.0, 5.8]);
         s.request(DocAction::OpenFamily("worm".into()));
         assert_eq!(s.pending, Some(DocAction::OpenFamily("worm".into())));
@@ -533,7 +672,7 @@ mod tests {
     #[test]
     fn a_missing_view_falls_back_to_the_one_that_exists() {
         let data = TempData::new("view");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         s.request(DocAction::OpenFamily("worm".into()));
         s.request(DocAction::NewFromTemplate { template: "serpentine".into(), view: View::Front });
         assert_eq!(s.editor.rig().view, View::Side);
@@ -543,7 +682,7 @@ mod tests {
     #[test]
     fn bakes_are_cached_per_revision_and_size() {
         let data = TempData::new("bake");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         let first = s.baked(false).unwrap().serial;
         assert_eq!(s.baked(false).unwrap().serial, first, "no change, no re-bake");
         assert_eq!(s.baked(false).unwrap().baked.map.grid.h, FULL_PX);
@@ -564,7 +703,7 @@ mod tests {
     #[test]
     fn depth_guesses_follow_the_rig_and_need_a_second_silhouette() {
         let data = TempData::new("depth");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         assert!(s.depth_available(), "humanoid has both views in the fixture");
         s.editor.place_current([0.0, 5.8]);
         s.refresh_depth();
@@ -590,7 +729,7 @@ mod tests {
     #[test]
     fn saving_writes_overrides_and_leaves_guesses_out() {
         let data = TempData::new("depthsave");
-        let mut s = Session::open(&data.0).unwrap();
+        let mut s = open(&data.0).unwrap();
         s.editor.place_current([0.0, 5.8]);
         s.editor.place_current([0.0, 5.0]);
         s.editor.set_joint_depth("crown", 0.31);
@@ -606,7 +745,7 @@ mod tests {
             "only the override is written; the guesses are not: {depth_table}"
         );
 
-        let again = Session::open(&data.0).unwrap();
+        let again = open(&data.0).unwrap();
         assert_eq!(again.editor.rig().depth.len(), 1);
         assert!((again.editor.rig().depth["crown"] - 0.31).abs() < 1e-4);
     }
@@ -616,7 +755,7 @@ mod tests {
         let data = TempData::new("corrupt");
         std::fs::create_dir_all(data.0.join("rigs")).unwrap();
         std::fs::write(data.0.join("rigs/humanoid.rig.toml"), "this is = not [a rig").unwrap();
-        let s = Session::open(&data.0).unwrap();
+        let s = open(&data.0).unwrap();
         assert!(s.status.starts_with("Could not load"), "{}", s.status);
         assert_eq!(s.editor.rig().body_type, "biped");
     }

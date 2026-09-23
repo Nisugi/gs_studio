@@ -28,6 +28,8 @@ pub enum PoolSource {
     Cli,
     /// `GS_STUDIO_POOL`.
     Env,
+    /// `settings.toml`: set in the app on an earlier run.
+    Remembered,
     /// gs-studio's own data home -- nothing pointed it anywhere.
     StudioHome,
     /// Typed into the Pool box and applied with "Set".
@@ -40,6 +42,7 @@ impl PoolSource {
         match self {
             PoolSource::Cli => "--pool",
             PoolSource::Env => ENV_VAR,
+            PoolSource::Remembered => "remembered",
             PoolSource::StudioHome => "gs-studio home, the default",
             PoolSource::SetInApp => "set in the app",
         }
@@ -65,15 +68,18 @@ impl PoolDir {
     }
 }
 
-/// `--pool` > `GS_STUDIO_POOL` > gs-studio's own home. `studio_home` is
-/// passed in so the precedence can be tested without touching the real
-/// filesystem or the user's environment.
-pub fn resolve(cli: Option<PathBuf>, env: Option<PathBuf>, studio_home: PathBuf) -> PoolDir {
+/// `--pool` > `GS_STUDIO_POOL` > remembered > gs-studio's own home.
+/// `studio_home` is passed in so the precedence can be tested without
+/// touching the real filesystem or the user's environment.
+pub fn resolve(cli: Option<PathBuf>, env: Option<PathBuf>, saved: Option<PathBuf>, studio_home: PathBuf) -> PoolDir {
     if let Some(path) = cli {
         return PoolDir { path, source: PoolSource::Cli };
     }
     if let Some(path) = env {
         return PoolDir { path, source: PoolSource::Env };
+    }
+    if let Some(path) = saved {
+        return PoolDir { path, source: PoolSource::Remembered };
     }
     PoolDir { path: studio_home, source: PoolSource::StudioHome }
 }
@@ -84,9 +90,9 @@ pub fn resolve(cli: Option<PathBuf>, env: Option<PathBuf>, studio_home: PathBuf)
 /// gs_field's own unset default is `~/.vellum-fe` and this app must never
 /// land there by accident. The home directory is created when it is the
 /// one being used, so a first run has somewhere to put art.
-pub fn from_environment(cli: Option<PathBuf>) -> PoolDir {
+pub fn from_environment(cli: Option<PathBuf>, saved: Option<PathBuf>) -> PoolDir {
     let env = std::env::var_os(ENV_VAR).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let pool = resolve(cli, env, data_home::default_home_or_local());
+    let pool = resolve(cli, env, saved, data_home::default_home_or_local());
     if pool.source == PoolSource::StudioHome {
         if let Err(e) = data_home::ensure(&pool.path) {
             eprintln!("gs-studio: could not create {}: {e}", pool.path.display());
@@ -96,12 +102,22 @@ pub fn from_environment(cli: Option<PathBuf>) -> PoolDir {
     pool
 }
 
-/// Point gs_field at `dir` and drop everything it cached from the old one
-/// (the pool scan, the art calibrations). The caller resets its art store.
+/// Point gs_field at `dir` and drop everything it cached from the old one.
+/// The caller resets its art store.
 pub fn apply(dir: &Path) {
     gs_field::data_dirs::set_base_dir(dir.to_path_buf());
+    invalidate_caches();
+}
+
+/// Drop everything gs_field cached from the pool: the image scan, the art
+/// calibrations, and the doll and puppet sets (whose override layers live
+/// in `global/rigs/` and `global/puppets/`). Call after anything writes
+/// into the pool behind gs_field's back -- an import, a rig save.
+pub fn invalidate_caches() {
     gs_field::pool::invalidate_cache();
     gs_field::geometry::invalidate_calibrations();
+    gs_field::dolls::invalidate_cache();
+    gs_field::puppets::invalidate_cache();
 }
 
 /// A pool dir typed into the app.
@@ -122,11 +138,15 @@ mod tests {
     #[test]
     fn cli_beats_env_beats_the_gs_studio_home() {
         let home = PathBuf::from("/config/gs-studio");
-        let r = resolve(Some("/cli".into()), Some("/env".into()), home.clone());
+        let saved = || Some(PathBuf::from("/saved"));
+        let r = resolve(Some("/cli".into()), Some("/env".into()), saved(), home.clone());
         assert_eq!((r.path.as_path(), r.source), (Path::new("/cli"), PoolSource::Cli));
-        let r = resolve(None, Some("/env".into()), home.clone());
+        let r = resolve(None, Some("/env".into()), saved(), home.clone());
         assert_eq!((r.path.as_path(), r.source), (Path::new("/env"), PoolSource::Env));
-        let r = resolve(None, None, home.clone());
+        let r = resolve(None, None, saved(), home.clone());
+        assert_eq!((r.path.as_path(), r.source), (Path::new("/saved"), PoolSource::Remembered));
+        assert!(r.source.is_explicit());
+        let r = resolve(None, None, None, home.clone());
         assert_eq!((r.path.as_path(), r.source), (home.as_path(), PoolSource::StudioHome));
         assert!(!r.source.is_explicit());
         assert!(PoolSource::Cli.is_explicit() && PoolSource::Env.is_explicit() && PoolSource::SetInApp.is_explicit());
@@ -136,7 +156,7 @@ mod tests {
     /// must NOT land in the user's VellumFE directory.
     #[test]
     fn the_default_pool_is_not_the_vellum_fe_directory() {
-        let pool = resolve(None, None, data_home::default_home_or_local());
+        let pool = resolve(None, None, None, data_home::default_home_or_local());
         let text = pool.path.to_string_lossy().to_ascii_lowercase();
         assert!(!text.contains(".vellum-fe"), "{:?}", pool.path);
         assert!(text.ends_with(data_home::APP_DIR), "{:?}", pool.path);
@@ -146,7 +166,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", "/somebodys/.vellum-fe");
         gs_field::data_dirs::clear_base_dir();
         assert_eq!(gs_field::data_dirs::base_dir().unwrap(), Path::new("/somebodys/.vellum-fe"), "gs_field unchanged");
-        let pool = resolve(None, None, data_home::default_home_or_local());
+        let pool = resolve(None, None, None, data_home::default_home_or_local());
         assert_ne!(pool.path, Path::new("/somebodys/.vellum-fe"));
         std::env::remove_var("VELLUM_FE_DIR");
     }

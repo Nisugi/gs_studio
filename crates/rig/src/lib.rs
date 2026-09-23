@@ -7,6 +7,7 @@
 //! right (`_r`) is screen-left, at negative x.
 
 mod bake;
+pub mod chart;
 mod model;
 mod outlines;
 mod templates;

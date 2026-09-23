@@ -28,7 +28,10 @@ mod data_home;
 mod data_root;
 mod editor;
 mod pool_dir;
+mod settings;
 mod stage;
+
+use std::path::PathBuf;
 mod status_log;
 mod tools;
 
@@ -46,13 +49,18 @@ fn main() -> eframe::Result {
         None => app::ToolId::Rigs,
     };
 
-    // The rig session reads this each time it opens, so the flag rides the env.
-    if let Some(dir) = &cli.publish {
-        std::env::set_var("GS_STUDIO_PUBLISH", dir);
+    // Every folder: --flag > environment variable > settings.toml > default.
+    let (saved, settings_note) = settings::Settings::load(&settings::home());
+    if let Some(note) = &settings_note {
+        eprintln!("gs-studio: {note}");
     }
-    let data = data_root::from_environment(cli.data);
+    let data = data_root::from_environment(cli.data, saved.data);
     eprintln!("gs-studio: data root {} ({})", data.path.display(), data.source);
-    let pool = pool_dir::from_environment(cli.pool);
+    let publish_env = std::env::var_os(editor::PUBLISH_ENV_VAR).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let publish_override = cli.publish.or(publish_env).or(saved.publish);
+    let publish = editor::resolve_publish_dir(&data.path, publish_override.as_deref());
+    eprintln!("gs-studio: publish to {}", publish.display());
+    let pool = pool_dir::from_environment(cli.pool, saved.pool);
     eprintln!("gs-studio: {}", pool.status());
     if !pool.source.is_explicit() {
         eprintln!("gs-studio: nothing pointed the pool anywhere, so this is gs-studio's own data home.");
@@ -67,6 +75,7 @@ fn main() -> eframe::Result {
             .with_min_inner_size([900.0, 600.0]),
         ..Default::default()
     };
-    let startup = app::Startup { data, pool, tab, room: cli.room, exit_after_secs };
+    let startup =
+        app::Startup { data, pool, publish, chart: saved.chart, settings_note, tab, room: cli.room, exit_after_secs };
     eframe::run_native("gs_studio", options, Box::new(move |_cc| Ok(Box::new(app::StudioApp::new(startup)))))
 }

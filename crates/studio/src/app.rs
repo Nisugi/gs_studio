@@ -7,12 +7,13 @@
 //! Scenery). Each is built lazily and then kept for the life of the app, so
 //! switching tabs never loses work.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::calib::{CalibKind, HostEffects};
 use crate::data_home::{self, ImportPlan, ImportReport};
-use crate::data_root::DataRoot;
+use crate::data_root::{self, DataRoot};
 use crate::pool_dir::{self, PoolDir};
+use crate::settings;
 use crate::stage::StudioRoomContext;
 use crate::tools::calibrators::CalibratorsTool;
 use crate::tools::preview::{StagePanel, StageTool};
@@ -80,6 +81,12 @@ pub fn top_bar_layout(available_width: f32) -> (bool, f32) {
 pub struct Startup {
     pub data: DataRoot,
     pub pool: PoolDir,
+    /// Where Publish ships (`rigs/`, `puppets/`, `poses/` under it).
+    pub publish: PathBuf,
+    /// The silhouette chart, if one is known (`settings.toml`).
+    pub chart: Option<PathBuf>,
+    /// A problem reading `settings.toml`, for the status line.
+    pub settings_note: Option<String>,
     pub tab: ToolId,
     pub room: StudioRoomContext,
     /// Smoke runs: close the window by itself after this many seconds.
@@ -94,6 +101,13 @@ pub struct StudioApp {
     pool: PoolDir,
     /// The pool text box (applied with "Set").
     pool_edit: String,
+    publish: PathBuf,
+    /// The publish text box (applied with "Set").
+    publish_edit: String,
+    /// The silhouette chart box (applied with "Import").
+    chart_edit: String,
+    /// The last folder-strip message (an import, a failed remember).
+    folders_note: Option<String>,
     active: ToolId,
     rigs: Result<RigTool, String>,
     /// Scenes + Preview share one stage. Built lazily on first entry (the
@@ -123,13 +137,17 @@ struct Import {
 
 impl StudioApp {
     pub fn new(startup: Startup) -> StudioApp {
-        let Startup { data, pool, tab, room, exit_after_secs } = startup;
+        let Startup { data, pool, publish, chart, settings_note, tab, room, exit_after_secs } = startup;
         StudioApp {
             data_edit: data.path.display().to_string(),
-            rigs: RigTool::open(&data.path),
+            rigs: RigTool::open(&data.path, publish.clone(), Some(pool.path.clone())),
             data,
             pool_edit: pool.path.display().to_string(),
             pool,
+            publish_edit: publish.display().to_string(),
+            publish,
+            chart_edit: chart.map(|c| c.display().to_string()).unwrap_or_default(),
+            folders_note: settings_note,
             active: tab,
             stage: None,
             calibrators: CalibratorsTool::new(),
@@ -143,6 +161,11 @@ impl StudioApp {
     fn set_pool(&mut self) {
         match pool_dir::set_in_app(&self.pool_edit) {
             Ok(pool) => {
+                let path = pool.path.clone();
+                self.folders_note = settings::remember(|s| s.pool = Some(path.clone()));
+                if let Ok(tool) = &mut self.rigs {
+                    tool.set_pool(path);
+                }
                 self.pool = pool;
                 if let Some(stage) = &mut self.stage {
                     stage.pool_changed();
@@ -154,6 +177,62 @@ impl StudioApp {
             // An empty box: put the current path back.
             Err(_) => self.pool_edit = self.pool.path.display().to_string(),
         }
+    }
+
+    /// (Re)open the rig editor on the current data root.
+    fn open_rigs(&mut self) {
+        self.rigs = RigTool::open(&self.data.path, self.publish.clone(), Some(self.pool.path.clone()));
+    }
+
+    /// The Rigs tab's folder strip: the silhouette chart (Import writes
+    /// `<data>/outlines.json` from it) and where Publish ships.
+    fn folders_strip(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Silhouettes:");
+            ui.add(egui::TextEdit::singleline(&mut self.chart_edit).hint_text("path to scale-chart.html").desired_width(300.0))
+                .on_hover_text("The silhouette chart. Import converts it into outlines.json in the data root.");
+            let dirty = self.dirty();
+            let import = ui
+                .add_enabled(!dirty && !self.chart_edit.trim().is_empty(), egui::Button::new("Import"))
+                .on_hover_text("Read the chart and (re)write <data>/outlines.json, then reopen the rig editor")
+                .on_disabled_hover_text(if dirty { "Save or discard the current rig first" } else { "Type the chart's path first" });
+            if import.clicked() {
+                let chart = PathBuf::from(self.chart_edit.trim());
+                match data_root::import_outlines(&chart, &self.data.path) {
+                    Ok(summary) => {
+                        eprintln!("gs-studio: {summary}");
+                        let failed = settings::remember(|s| s.chart = Some(chart.clone()));
+                        self.open_rigs();
+                        self.folders_note = Some(failed.unwrap_or(summary));
+                    }
+                    Err(e) => self.folders_note = Some(format!("Import failed: {e}")),
+                }
+            }
+            ui.separator();
+            ui.label("Publish to:");
+            ui.add(egui::TextEdit::singleline(&mut self.publish_edit).desired_width(300.0)).on_hover_text(
+                "Where Publish ships baked rigs, puppets and pose sets for game clients: a folder holding \
+                 rigs/, puppets/, poses/ (the workspace's crates/gs_field/data). Also: --publish or GS_STUDIO_PUBLISH",
+            );
+            if ui.button("Set").clicked() {
+                let text = self.publish_edit.trim();
+                if text.is_empty() {
+                    self.publish_edit = self.publish.display().to_string();
+                } else {
+                    self.publish = crate::editor::resolve_publish_dir(&self.data.path, Some(Path::new(text)));
+                    self.publish_edit = self.publish.display().to_string();
+                    let dir = self.publish.clone();
+                    self.folders_note = settings::remember(|s| s.publish = Some(dir.clone()));
+                    if let Ok(tool) = &mut self.rigs {
+                        tool.set_publish_dir(self.publish.clone());
+                    }
+                }
+            }
+            if let Some(note) = &self.folders_note {
+                ui.separator();
+                ui.weak(note);
+            }
+        });
     }
 
     fn dirty(&self) -> bool {
@@ -210,7 +289,9 @@ impl StudioApp {
             .on_disabled_hover_text("Save or discard the current rig first");
         if open.clicked() {
             self.data = DataRoot { path: PathBuf::from(self.data_edit.trim()), source: "set in the app" };
-            self.rigs = RigTool::open(&self.data.path);
+            let path = self.data.path.clone();
+            self.folders_note = settings::remember(|s| s.data = Some(path.clone()));
+            self.open_rigs();
         }
         ui.separator();
         ui.label("Pool:");
@@ -307,8 +388,7 @@ impl StudioApp {
                 stage.pool_changed();
                 stage.push_status(report.summary());
             }
-            gs_field::pool::invalidate_cache();
-            gs_field::geometry::invalidate_calibrations();
+            pool_dir::invalidate_caches();
             self.calibrators.pool_changed();
             eprintln!("gs-studio: {} (from {})", report.summary(), source.display());
             for error in &report.errors {
@@ -423,6 +503,10 @@ impl eframe::App for StudioApp {
         let ctx = ui.ctx().clone();
         self.import_window(&ctx);
 
+        if self.active == ToolId::Rigs {
+            egui::Panel::top("rig_folders").show(ui, |ui| self.folders_strip(ui));
+        }
+
         match self.active {
             ToolId::Rigs => match &mut self.rigs {
                 Ok(tool) => {
@@ -430,12 +514,21 @@ impl eframe::App for StudioApp {
                     if tool.quit_approved() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
+                    if let Some(family) = tool.take_show_on_stage() {
+                        let room = &self.room;
+                        self.stage.get_or_insert_with(|| StageTool::new(room.clone())).spawn_puppet(&family);
+                        self.active = ToolId::Preview;
+                    }
                 }
                 Err(e) => {
                     egui::CentralPanel::default().show(ui, |ui| {
-                        ui.heading("No data");
+                        ui.heading("No silhouettes yet");
                         ui.label(format!("Could not open the data root: {e}"));
-                        ui.label("Point the Data box above at a directory holding outlines.json, then press Open.");
+                        ui.label(
+                            "Put the path of scale-chart.html in the Silhouettes box above and press Import: \
+                             it writes outlines.json into the data root. Or point the Data box at a directory \
+                             that already holds outlines.json and press Open.",
+                        );
                     });
                 }
             },

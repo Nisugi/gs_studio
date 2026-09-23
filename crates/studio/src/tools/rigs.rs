@@ -1,7 +1,7 @@
 //! The rig editor's egui layer. It draws `editor::Session` and forwards
 //! input to it; every rule lives in `crate::editor`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use egui::{Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use rig::{templates, View, AXES, PARTS};
@@ -39,6 +39,8 @@ pub struct RigTool {
     depth_value_drag: bool,
     /// The open Add / Rename prompt, and whether its text box still needs focus.
     prompt: Option<(NamePrompt, bool)>,
+    /// "Show on stage" was pressed for this family; the app takes it.
+    show_on_stage: Option<String>,
 }
 
 fn label_color(label: usize) -> Color32 {
@@ -51,9 +53,9 @@ fn pos(p: [f32; 2]) -> Pos2 {
 }
 
 impl RigTool {
-    pub fn open(data_root: &Path) -> Result<RigTool, String> {
+    pub fn open(data_root: &Path, publish_dir: PathBuf, pool: Option<PathBuf>) -> Result<RigTool, String> {
         Ok(RigTool {
-            session: Session::open(data_root)?,
+            session: Session::open(data_root, publish_dir, pool)?,
             view: ViewTransform::default(),
             depth_view: ViewTransform::default(),
             depth_fit: true,
@@ -62,7 +64,23 @@ impl RigTool {
             eye_drag: false,
             depth_value_drag: false,
             prompt: None,
+            show_on_stage: None,
         })
+    }
+
+    /// Where Publish ships from now on.
+    pub fn set_publish_dir(&mut self, dir: PathBuf) {
+        self.session.publish_dir = dir;
+    }
+
+    /// The pool Save installs bakes and puppets into.
+    pub fn set_pool(&mut self, pool: PathBuf) {
+        self.session.pool = Some(pool);
+    }
+
+    /// The family whose puppet "Show on stage" asked for, once.
+    pub fn take_show_on_stage(&mut self) -> Option<String> {
+        self.show_on_stage.take()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -309,7 +327,8 @@ impl RigTool {
             let button = ui.add_enabled(target.is_ok() && saved, egui::Button::new("Publish"));
             let button = match &target {
                 Ok(dir) if saved => button.on_hover_text(format!(
-                    "Copy the SAVED {family}.png + {family}.toml to {} for game clients to embed.\n\
+                    "Copy the SAVED bake ({family}.png + .toml), its puppet and the pose sets into {} \
+                     (rigs/, puppets/, poses/) for game clients to embed.\n\
                      Unsaved edits are not included.",
                     dir.display()
                 )),
@@ -322,9 +341,11 @@ impl RigTool {
                 }
             }
             ui.add_enabled(target.is_ok(), egui::Checkbox::new(&mut s.publish_on_save, "publish on save"))
-                .on_hover_text("Save also copies the baked map + metadata to the publish directory")
+                .on_hover_text("Save also publishes")
                 .on_disabled_hover_text(target.err().unwrap_or_default());
         });
+        let puppet_saved = s.pool.is_some() && s.rigs_dir().join(gs_puppet::Puppet::baked_file_name(&family)).is_file();
+        let mut show = false;
         ui.horizontal(|ui| {
             if ui.add_enabled(s.editor.can_undo(), egui::Button::new("Undo")).clicked() {
                 s.editor.undo();
@@ -332,7 +353,16 @@ impl RigTool {
             if ui.add_enabled(s.editor.can_redo(), egui::Button::new("Redo")).clicked() {
                 s.editor.redo();
             }
+            ui.separator();
+            show = ui
+                .add_enabled(puppet_saved, egui::Button::new("Show on stage"))
+                .on_hover_text("Open Preview with this family's puppet spawned (the SAVED puppet, from the pool)")
+                .on_disabled_hover_text("Save first: saving builds the puppet and puts it in the pool")
+                .clicked();
         });
+        if show {
+            self.show_on_stage = Some(family);
+        }
     }
 
     fn joint_list(&mut self, ui: &mut egui::Ui) {

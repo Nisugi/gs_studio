@@ -2654,7 +2654,9 @@ dependencies = [
  "gs_puppet",
  "rig",
  "rig_bake",
+ "serde",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

@@ -22,12 +22,11 @@ GPL-3.0-or-later (ported from VellumFE).
 | `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_calibrators/` | Library. The five art calibrators (frames, doll anchors, doll sets, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
 | `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with seven tabs: **Rigs**, **Scenes**, **Frames**, **Dolls**, **Creatures**, **Scenery**, **Preview** |
-| `tools/extract_outlines.py` | `scale-chart.html` -> `data/outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped) |
+| `crates/rig/src/chart.rs` | `scale-chart.html` -> `outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped); the app's *Import* runs it. `tools/extract_outlines.py` is the original it was ported from |
 | `data/outlines.json` | Generated. `{key: {ref_ft, subpaths}}`; x centred, y up, ground at 0. Keys are `<family>` (side view) and `<family>-front` |
 | `data/rigs/` | Saved rigs and their baked output. `humanoid.*` is the test fixture |
 | `data/rigs_wip/` | The original hand-typed `humanoid.rig.json` that proved the labeller |
 
-    python tools/extract_outlines.py
     cargo test --workspace
     cargo run -p studio                      # the app
     cargo run -p studio -- --data some/dir   # or set GS_STUDIO_DATA
@@ -41,12 +40,25 @@ at negative x.
 ## The app
 
 `gs-studio` works out of two directories, both shown (and changeable) in the
-top bar:
+top bar, plus a publish directory set on the Rigs tab:
 
 | | Holds | Used by | Set with | Default |
 |---|---|---|---|---|
-| **Data** root | `outlines.json`, `rigs/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable |
-| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...) and `global/scenes/*.toml` | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | **gs-studio's own data home** (below) |
+| **Data** root | `outlines.json`, `rigs/` (rig sources, bakes, puppets), `poses/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable, else `<gs-studio home>/data` |
+| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...), `global/scenes/*.toml`, and the live `global/rigs/` + `global/puppets/` a rig save installs | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | **gs-studio's own data home** (below) |
+| **Publish** | `rigs/`, `puppets/`, `poses/`: what game clients compile in | Rigs (Publish) | `--publish <dir>`, `GS_STUDIO_PUBLISH`, the *Publish to* box + Set | `<data>/../crates/gs_field/data` |
+
+Every folder resolves `--flag` > environment variable > **remembered** >
+default. A folder changed in the app (Data Open, Pool Set, Publish Set, and
+the silhouette chart after a successful Import) is remembered in
+`<gs-studio home>/settings.toml`; one that came from a flag or variable is
+used for that run only and never written.
+
+**Silhouettes.** The Rigs tab has a strip above the editor: the path of
+`scale-chart.html` and *Import*, which converts the chart into
+`<data>/outlines.json` (creating the data root if needed; a chart that fails
+to read leaves the old file alone) and reopens the editor. With no
+`outlines.json` yet, the Rigs tab says so and points at that box.
 
 Setting the pool calls `gs_field::data_dirs::set_base_dir`, drops the pool
 scan and calibration caches, resets the art store, re-scans the cast and
@@ -242,7 +254,15 @@ progress, 512 px on release. (humanoid, release build: ~3 ms at 256, ~13 ms at
 512, bone channel and eyes included -- about 6% over the part-only labeller.
 `rig_bake` is compiled optimized in dev builds too.)
 
-**Save** writes three files into `<data>/rigs/`. Opening a family that has a
+**Save** writes `<family>.rig.toml`, `<family>.png` and `<family>.toml` into
+`<data>/rigs/`, and builds the family's 3D puppet into
+`<family>.puppet.toml` beside them (a rig that cannot make one yet -- no bone
+with two placed joints -- says so, and loses any old puppet file). It then
+INSTALLS the bake and the puppet into the pool (`global/rigs/`,
+`global/puppets/`) and reloads gs_field's doll and puppet sets, so the stage
+draws the new puppet at once; *Show on stage* opens Preview with it spawned.
+A pool copy replaces the built-in puppet of that family (the Preview
+*Puppets* list marks it "pool"). Opening a family that has a
 saved rig loads it; otherwise it starts from the family's default template.
 Anything that would discard unsaved changes (another family, another view or
 template, closing the window) asks first. A rig file from before bones had
@@ -250,13 +270,16 @@ parents loads with its hierarchy, pivots and joint order filled in from its
 template by name (the status line says so); it is rewritten in the new form
 the next time it is saved.
 
-**Publish** copies the SAVED `<family>.png` + `<family>.toml` -- never the
-`.rig.toml` source -- into the publish directory, the folder of baked rigs
-that game clients embed. Default `<data>/../crates/gs_field/data/rigs` (the
-workspace's `gs_field` crate); `GS_STUDIO_PUBLISH=<dir>` overrides it. With
-*publish on save* ticked (the default) Save publishes too. The directory is
-created if its parent exists; if not even the parent exists, the button and
-the checkbox are disabled and their hover text says why -- Save still works.
+**Publish** copies what is SAVED -- `rigs/<family>.png` + `.toml`, the
+puppet `puppets/<family>.puppet.toml`, and every pose set in `<data>/poses/`
+into `poses/` -- never the `.rig.toml` source, into the publish directory:
+the folder whose contents game clients embed. Default
+`<data>/../crates/gs_field/data`; `--publish`, `GS_STUDIO_PUBLISH` or the
+*Publish to* box override it (a path naming a `rigs` directory, the old
+meaning, is taken as its parent). With *publish on save* ticked (the
+default) Save publishes too. The directory is created if its parent exists;
+if not even the parent exists, the button and the checkbox are disabled and
+their hover text says why -- Save still works.
 
 All editor logic -- state, hit-testing, placement and mirror rules, structure
 edits, the depth pass (`editor/depth.rs`: guesses, overrides, the DEPTH-view
@@ -293,7 +316,12 @@ pool, so everything in it has art by definition -- which is why a canine,
 elephantid or suine puppet never appeared on the stage however much art was
 in the pool.
 
-**Spawn by name** is the way in. Type any creature name: it spawns with that
+The **Puppets** list at the top of the Preview panel is the direct way in:
+every published puppet (built in, or from the pool), each with *Spawn*,
+which puts up a real bestiary creature of that family that has NO sprite
+art -- or says why none will do.
+
+**Spawn by name** is the other way in. Type any creature name: it spawns with that
 name and its last word as the noun, art or no art. Suggestions come from the
 bestiary (`gs_field::bestiary`) so the names are real creatures, each tagged
 `[art]` (a sprite in the pool wins) or `[puppet]` (no sprite, so the puppet

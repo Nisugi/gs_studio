@@ -95,6 +95,11 @@ impl StageTool {
         self.stage.push_status(message);
     }
 
+    /// "Show on stage" from the rig editor: put that family's puppet up.
+    pub fn spawn_puppet(&mut self, family: &str) {
+        self.stage.spawn_puppet(family);
+    }
+
     /// The pool directory moved: re-root the art, re-scan the cast.
     pub fn pool_changed(&mut self) {
         let root = gs_field::data_dirs::global_images_dir().unwrap_or_default();
@@ -524,7 +529,40 @@ fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
 // ------------------------------------------------------------------- cast
 
+/// Every published puppet, one Spawn button each. The Cast below is built
+/// from the art pool and sprite art beats the puppet, so this is the direct
+/// way to look at one: it spawns a real creature of that family that has no
+/// art.
+fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    egui::CollapsingHeader::new("Puppets").default_open(true).show(ui, |ui| {
+        let set = gs_field::puppets::puppets();
+        let mut spawn: Option<String> = None;
+        for family in set.families() {
+            let Some(rig) = set.get(family) else { continue };
+            ui.horizontal(|ui| {
+                if ui.small_button("Spawn").on_hover_text("Spawn a creature of this family that has no sprite art").clicked() {
+                    spawn = Some(family.to_string());
+                }
+                ui.label(family);
+                let body = if rig.body_type.is_empty() { "?" } else { rig.body_type.as_str() };
+                match rig.source {
+                    gs_field::puppets::PuppetSource::Embedded => ui.weak(format!("{body}, built in")),
+                    gs_field::puppets::PuppetSource::Override => ui
+                        .weak(format!("{body}, pool"))
+                        .on_hover_text("From the pool's global/puppets/ (a rig save puts it there); it replaces any built-in one"),
+                };
+            });
+        }
+        ui.weak("Save a rig in the Rigs tab to build its puppet.");
+        if let Some(family) = spawn {
+            stage.spawn_puppet(&family);
+        }
+    });
+}
+
 fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    puppets_ui(stage, ui);
+    ui.separator();
     ui.heading("Cast");
     ui.weak("Built from the ART POOL, so everything here HAS art -- and sprite art always beats the puppet.");
     ui.horizontal(|ui| {

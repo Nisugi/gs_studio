@@ -254,6 +254,19 @@ impl StageState {
         true
     }
 
+    /// Put `family`'s puppet on the stage: spawn a bestiary creature of that
+    /// family that has no sprite art (see [`cast::puppet_showcase`]).
+    /// Returns false, with a status line saying why, when none will do.
+    pub fn spawn_puppet(&mut self, family: &str) -> bool {
+        match cast::puppet_showcase(family) {
+            Ok(pick) => self.spawn_named(&pick.name, Some(pick.noun)),
+            Err(why) => {
+                self.push_status(format!("Cannot show the {family} puppet: {why}"));
+                false
+            }
+        }
+    }
+
     pub fn remove(&mut self, id: &str) {
         self.creatures.retain(|c| c.id != id);
         if self.selected.as_deref() == Some(id) {

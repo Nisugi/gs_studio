@@ -15,7 +15,7 @@ pub mod view;
 pub mod warnings;
 
 pub use depth::{DepthModel, EditView};
-pub use session::{DocAction, Session};
+pub use session::{resolve_publish_dir, DocAction, Session, PUBLISH_ENV_VAR};
 pub use view::{Canvas, ViewTransform};
 
 #[cfg(test)]

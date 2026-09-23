@@ -1,4 +1,5 @@
-//! Loader for `data/outlines.json` (written by `tools/extract_outlines.py`).
+//! Loader for `data/outlines.json` (written from `scale-chart.html` by
+//! [`crate::chart`]).
 
 use std::collections::BTreeMap;
 use std::path::Path;

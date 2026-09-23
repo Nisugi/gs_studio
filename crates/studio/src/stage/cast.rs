@@ -144,6 +144,44 @@ pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
     gs_field::puppets::puppet_for(name, noun).map(|d| d.family)
 }
 
+/// A creature that shows `family`'s puppet: a bestiary creature of that
+/// family with NO art in the pool (sprite art would win), whose puppet
+/// resolves to that family. First by name, so the pick is stable. Err says
+/// why none will do.
+pub fn puppet_showcase_in(
+    db: &gs_field::bestiary::BestiaryDb,
+    family: &str,
+    has_art: impl Fn(&str, &str) -> bool,
+    puppet_of: impl Fn(&str, &str) -> Option<String>,
+) -> Result<BestiaryPick, String> {
+    let mut of_family: Vec<&gs_field::bestiary::CreatureEntry> = db
+        .entries
+        .iter()
+        .filter(|e| e.family.as_deref().is_some_and(|f| f.trim().eq_ignore_ascii_case(family)))
+        .collect();
+    if of_family.is_empty() {
+        return Err(format!("no creature in the bestiary is of the {family} family"));
+    }
+    of_family.sort_by(|a, b| a.name.cmp(&b.name));
+    of_family
+        .into_iter()
+        .map(|e| BestiaryPick {
+            name: e.name.clone(),
+            noun: if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() },
+            family: e.family.clone(),
+        })
+        .find(|p| !has_art(&p.name, &p.noun) && puppet_of(&p.name, &p.noun).is_some_and(|f| f.eq_ignore_ascii_case(family)))
+        .ok_or_else(|| format!("every {family} creature has sprite art in the pool, and sprite art beats the puppet"))
+}
+
+/// [`puppet_showcase_in`] against the shared bestiary, the pool and the
+/// published puppets.
+pub fn puppet_showcase(family: &str) -> Result<BestiaryPick, String> {
+    puppet_showcase_in(gs_field::bestiary::shared(), family, |n, noun| has_art(n, Some(noun)), |n, noun| {
+        puppet_family(n, Some(noun))
+    })
+}
+
 /// Grouped by bestiary area (multi-area creatures list under each;
 /// unknowns under "Other").
 pub fn by_area(cast: &[CastEntry]) -> BTreeMap<&str, Vec<&CastEntry>> {
@@ -234,6 +272,35 @@ mod tests {
         let db = BestiaryDb::from_entries(vec![e("gnarled hinterboar", "", "")]);
         let pick = &bestiary_matches(&db, "hinter", 10)[0];
         assert_eq!((pick.noun.as_str(), pick.family.as_deref()), ("hinterboar", None));
+    }
+
+    #[test]
+    fn a_puppet_showcase_is_an_artless_creature_whose_puppet_is_that_family() {
+        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        let e = |name: &str, family: &str| CreatureEntry {
+            name: name.into(),
+            noun: last_word(name),
+            family: Some(family.into()),
+            ..Default::default()
+        };
+        let db = BestiaryDb::from_entries(vec![
+            e("wolf", "canine"),
+            e("coyote", "canine"),
+            e("timber wolf", "canine"),
+            e("mastodon", "Elephantid"),
+        ]);
+        let canine = |_: &str, _: &str| Some("canine".to_string());
+        // Sorted by name; the coyote has art, so the next one shows the puppet.
+        let pick = puppet_showcase_in(&db, "canine", |n, _| n == "coyote", canine).unwrap();
+        assert_eq!((pick.name.as_str(), pick.noun.as_str()), ("timber wolf", "wolf"));
+        // Family names match in any case.
+        let pick = puppet_showcase_in(&db, "elephantid", |_, _| false, |_, _| Some("elephantid".into())).unwrap();
+        assert_eq!(pick.name, "mastodon");
+        // Say why when nothing will do.
+        assert!(puppet_showcase_in(&db, "canine", |_, _| true, canine).unwrap_err().contains("sprite art"));
+        assert!(puppet_showcase_in(&db, "suine", |_, _| false, canine).unwrap_err().contains("no creature"));
+        // A creature whose puppet resolves elsewhere does not show this one.
+        assert!(puppet_showcase_in(&db, "canine", |_, _| false, |_, _| Some("humanoid".into())).is_err());
     }
 
     #[test]
