@@ -97,6 +97,8 @@ pub struct Session {
     other_mask: Option<Option<Mask>>,
     /// The depth guesses, re-read whenever the rig changes.
     depth: Option<(u64, DepthModel)>,
+    /// The 3D puppet, as of an editor revision (Err = why none builds yet).
+    puppet: Option<(u64, Result<Puppet, String>)>,
 }
 
 impl Session {
@@ -127,6 +129,7 @@ impl Session {
             bake_serial: 0,
             other_mask: None,
             depth: None,
+            puppet: None,
         };
         session.open_family(&first);
         Ok(session)
@@ -189,6 +192,7 @@ impl Session {
         self.bake = None;
         self.other_mask = None;
         self.depth = None;
+        self.puppet = None;
         self.fit_requested = true;
     }
 
@@ -284,12 +288,40 @@ impl Session {
         if self.depth.as_ref().is_some_and(|(at, _)| *at == revision) {
             return;
         }
+        self.ensure_other_mask();
+        let mask = self.other_mask.as_ref().and_then(Clone::clone);
+        self.depth = Some((revision, DepthModel::new(self.editor.rig(), mask)));
+    }
+
+    fn ensure_other_mask(&mut self) {
         if self.other_mask.is_none() {
             let outline = self.other_outline().map(|o| o.outline());
             self.other_mask = Some(outline.map(|o| rasterize(&o, FULL_PX)));
         }
-        let mask = self.other_mask.as_ref().and_then(Clone::clone);
-        self.depth = Some((revision, DepthModel::new(self.editor.rig(), mask)));
+    }
+
+    /// The rig's 3D puppet, rebuilt only when the rig has changed since the
+    /// last call. Built from the same full-size masks the bake and the depth
+    /// guesses use (`FULL_PX` = `gs_puppet::MASK_PX`), so it is exactly what
+    /// Save would write. Err says why there is none yet.
+    pub fn puppet(&mut self) -> &Result<Puppet, String> {
+        let revision = self.editor.revision();
+        if !self.puppet.as_ref().is_some_and(|(at, _)| *at == revision) {
+            self.ensure_other_mask();
+            let own = self.outline().map(|o| o.outline());
+            if let Some(outline) = own {
+                self.masks.entry(FULL_PX).or_insert_with(|| rasterize(&outline, FULL_PX));
+            }
+            let own = self.masks.get(&FULL_PX);
+            let other = self.other_mask.as_ref().and_then(Option::as_ref);
+            let (front, side) = match self.editor.rig().view {
+                View::Front => (own, other),
+                View::Side => (other, own),
+            };
+            let built = Puppet::build_masks(self.editor.rig(), front, side).map_err(|e| e.to_string());
+            self.puppet = Some((revision, built));
+        }
+        &self.puppet.as_ref().expect("just built").1
     }
 
     /// The depth guesses as [`Session::refresh_depth`] last took them. An
@@ -748,6 +780,22 @@ mod tests {
         let again = open(&data.0).unwrap();
         assert_eq!(again.editor.rig().depth.len(), 1);
         assert!((again.editor.rig().depth["crown"] - 0.31).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_preview_puppet_follows_the_rig_and_is_cached_per_revision() {
+        let data = TempData::new("preview");
+        let mut s = open(&data.0).unwrap();
+        assert!(s.puppet().is_err(), "nothing placed yet: no puppet");
+        s.editor.place_current([0.0, 5.8]);
+        s.editor.place_current([0.0, 5.0]);
+        let first = s.puppet().as_ref().unwrap().clone();
+        assert_eq!(first.family, "humanoid");
+        assert!(std::ptr::eq(s.puppet(), s.puppet()), "same revision: the cached build");
+        // Move a joint: rebuilt, and it shows.
+        s.editor.set_current("crown");
+        s.editor.place_current([0.0, 5.5]);
+        assert_ne!(s.puppet().as_ref().unwrap(), &first);
     }
 
     #[test]

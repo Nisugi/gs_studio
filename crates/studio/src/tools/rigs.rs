@@ -9,6 +9,7 @@ use rig::{templates, View, AXES, PARTS};
 use crate::editor::depth::{axis_label, other_view};
 use crate::editor::palette::{label_rgba, LABEL_RGB};
 use crate::editor::prompt::{NamePrompt, PromptKind};
+use crate::editor::puppet_view::{PoseSource, PuppetView};
 use crate::editor::state::Editor;
 use crate::editor::structure::{AnchorSlot, MAX_NAME_LEN};
 use crate::editor::warnings::MIN_SHARE;
@@ -41,6 +42,8 @@ pub struct RigTool {
     prompt: Option<(NamePrompt, bool)>,
     /// "Show on stage" was pressed for this family; the app takes it.
     show_on_stage: Option<String>,
+    /// The live 3D puppet panel.
+    puppet_view: PuppetView,
 }
 
 fn label_color(label: usize) -> Color32 {
@@ -65,6 +68,7 @@ impl RigTool {
             depth_value_drag: false,
             prompt: None,
             show_on_stage: None,
+            puppet_view: PuppetView::default(),
         })
     }
 
@@ -144,6 +148,13 @@ impl RigTool {
         egui::Panel::right("rig_right").default_size(270.0).min_size(200.0).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.right_panel(ui));
         });
+        if self.puppet_view.show {
+            egui::Panel::right("rig_puppet")
+                .resizable(true)
+                .default_size(380.0)
+                .min_size(220.0)
+                .show(ui, |ui| self.puppet_panel(ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| self.centre(ui));
         self.discard_prompt(ui.ctx());
         self.name_prompt(ui.ctx());
@@ -354,6 +365,8 @@ impl RigTool {
                 s.editor.redo();
             }
             ui.separator();
+            ui.toggle_value(&mut self.puppet_view.show, "3D preview")
+                .on_hover_text("Show the rig's 3D puppet beside the canvas, rebuilt live as you edit");
             show = ui
                 .add_enabled(puppet_saved, egui::Button::new("Show on stage"))
                 .on_hover_text("Open Preview with this family's puppet spawned (the SAVED puppet, from the pool)")
@@ -362,6 +375,99 @@ impl RigTool {
         });
         if show {
             self.show_on_stage = Some(family);
+        }
+    }
+
+    // --------------------------------------------------------- 3D preview
+
+    /// The live puppet: built from the rig as it stands (unsaved edits
+    /// included), posed from the body type's pose set, orbited by dragging.
+    fn puppet_panel(&mut self, ui: &mut egui::Ui) {
+        let (family, body_type) = {
+            let rig = self.session.editor.rig();
+            (rig.family.clone(), rig.body_type.clone())
+        };
+        let data_root = self.session.data_root.clone();
+        let pv = &mut self.puppet_view;
+
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("3D puppet");
+            let (names, source, error) = match pv.poses(&data_root, &body_type, &family) {
+                Ok((set, source)) => (set.names().into_iter().map(str::to_owned).collect::<Vec<_>>(), Some(*source), None),
+                Err(e) => (Vec::new(), None, Some(e.clone())),
+            };
+            let shown = if pv.pose.is_empty() { "rest (as clicked)".to_owned() } else { pv.pose.clone() };
+            egui::ComboBox::from_id_salt("puppet_pose").selected_text(shown).show_ui(ui, |ui| {
+                ui.selectable_value(&mut pv.pose, String::new(), "rest (as clicked)");
+                for name in &names {
+                    ui.selectable_value(&mut pv.pose, name.clone(), name);
+                }
+            });
+            if ui.button("Reload poses").on_hover_text("Read the pose files again after editing them").clicked() {
+                pv.reload_poses();
+            }
+            if ui.button("Reset view").clicked() {
+                pv.reset_camera();
+            }
+            match (source, error) {
+                (Some(PoseSource::DataRoot), _) => ui.weak(format!("poses: data/poses/{body_type}.toml")),
+                (Some(PoseSource::Shipped), _) => ui.weak(format!("poses: built-in {body_type}")),
+                (None, Some(e)) => ui.colored_label(ui.visuals().warn_fg_color, e),
+                (None, None) => ui.weak(""),
+            };
+        });
+        ui.weak("drag: turn   wheel: zoom");
+
+        let pose = pv.current_pose(&data_root, &body_type, &family);
+        let (yaw, pitch, zoom) = (pv.yaw, pv.pitch, pv.zoom);
+        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+        let rect = response.rect;
+        if response.dragged() {
+            let d = response.drag_delta();
+            self.puppet_view.orbit(d.x, d.y);
+        }
+        if response.hovered() {
+            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            self.puppet_view.zoom_by((scroll * 0.002).exp() * pinch);
+        }
+
+        let dark = ui.visuals().dark_mode;
+        let (bg, grid, shadow) = if dark {
+            (Color32::from_rgb(0x2b, 0x30, 0x36), [0x4a, 0x52, 0x5c, 255], [0x1d, 0x21, 0x26, 255])
+        } else {
+            (Color32::from_rgb(0xe8, 0xea, 0xed), [0xc4, 0xc9, 0xd0, 255], [0xb8, 0xbd, 0xc4, 255])
+        };
+        let painter = painter.with_clip_rect(rect);
+        painter.rect_filled(rect, 0.0, bg);
+        match self.session.puppet() {
+            Ok(puppet) => {
+                let mut cam = gs_puppet::Camera::framing(puppet.height.max(0.5), [rect.width(), rect.height()]);
+                cam.center = [rect.center().x, rect.center().y];
+                cam.focal *= zoom;
+                cam.pitch_deg = pitch;
+                let look = gs_puppet::Look { yaw, outline_px: 1.5, ..gs_puppet::Look::default() };
+                let posed = puppet.pose(&pose);
+                let project = |p: gs_puppet::math::V3| cam.project(p);
+                gs_puppet::paint(&painter, Vec2::ZERO, &posed.ground_shadow(&project, &look, shadow));
+                gs_puppet::paint(&painter, Vec2::ZERO, &gs_puppet::ground_grid(&project, 5, grid, 1.0));
+                gs_puppet::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
+                painter.text(
+                    rect.left_bottom() + Vec2::new(8.0, -8.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{} segments, {:.1} ft", puppet.segments.len(), puppet.height),
+                    egui::FontId::proportional(12.0),
+                    guide_text(dark),
+                );
+            }
+            Err(why) => {
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    format!("No puppet yet: {why}"),
+                    egui::FontId::proportional(14.0),
+                    guide_text(dark),
+                );
+            }
         }
     }
 

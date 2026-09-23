@@ -7,6 +7,7 @@
 pub mod depth;
 pub mod palette;
 pub mod prompt;
+pub mod puppet_view;
 pub mod session;
 pub mod state;
 pub mod structure;

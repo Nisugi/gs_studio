@@ -168,6 +168,13 @@ all editable afterwards.
 | Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo (every rig edit; one gesture = one step) |
 | Ctrl+S | save |
 
+**3D preview** (the toggle beside Undo / Redo) opens a panel with the rig's
+puppet, rebuilt live from the rig as it stands -- unsaved edits, depth
+overrides and all -- so a joint drag shows its effect on the 3D body at once.
+Drag turns it, the wheel zooms; the pose list comes from
+`<data>/poses/<body_type>.toml` (else the built-in copy) with the family's
+own overrides applied, and *Reload poses* re-reads the file after an edit.
+
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:
 

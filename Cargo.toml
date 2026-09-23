@@ -6,3 +6,8 @@ members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", 
 # debug builds too (512 px: ~115 ms unoptimized vs ~18 ms).
 [profile.dev.package.rig_bake]
 opt-level = 3
+
+# The rig editor's 3D preview rebuilds the puppet on every rig change
+# (elephantid: ~10 ms unoptimized vs ~1.5 ms).
+[profile.dev.package.gs_puppet]
+opt-level = 3
