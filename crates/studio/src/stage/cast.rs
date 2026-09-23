@@ -144,10 +144,10 @@ pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
     gs_field::puppets::puppet_for(name, noun).map(|d| d.family)
 }
 
-/// A creature that shows `family`'s puppet: a bestiary creature of that
-/// family with NO art in the pool (sprite art would win), whose puppet
-/// resolves to that family. First by name, so the pick is stable. Err says
-/// why none will do.
+/// A creature to show `family`'s puppet with: a bestiary creature of that
+/// family whose puppet resolves to that family, preferring one with NO art
+/// in the pool (so it needs no forcing anywhere). First by name within each,
+/// so the pick is stable. Err says why none will do.
 pub fn puppet_showcase_in(
     db: &gs_field::bestiary::BestiaryDb,
     family: &str,
@@ -163,15 +163,20 @@ pub fn puppet_showcase_in(
         return Err(format!("no creature in the bestiary is of the {family} family"));
     }
     of_family.sort_by(|a, b| a.name.cmp(&b.name));
-    of_family
+    let picks: Vec<BestiaryPick> = of_family
         .into_iter()
         .map(|e| BestiaryPick {
             name: e.name.clone(),
             noun: if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() },
             family: e.family.clone(),
         })
-        .find(|p| !has_art(&p.name, &p.noun) && puppet_of(&p.name, &p.noun).is_some_and(|f| f.eq_ignore_ascii_case(family)))
-        .ok_or_else(|| format!("every {family} creature has sprite art in the pool, and sprite art beats the puppet"))
+        .filter(|p| puppet_of(&p.name, &p.noun).is_some_and(|f| f.eq_ignore_ascii_case(family)))
+        .collect();
+    let first_artless = picks.iter().position(|p| !has_art(&p.name, &p.noun));
+    let chosen = first_artless.or((!picks.is_empty()).then_some(0));
+    chosen
+        .map(|i| picks[i].clone())
+        .ok_or_else(|| format!("no {family} creature resolves to the {family} puppet"))
 }
 
 /// [`puppet_showcase_in`] against the shared bestiary, the pool and the
@@ -296,8 +301,8 @@ mod tests {
         // Family names match in any case.
         let pick = puppet_showcase_in(&db, "elephantid", |_, _| false, |_, _| Some("elephantid".into())).unwrap();
         assert_eq!(pick.name, "mastodon");
-        // Say why when nothing will do.
-        assert!(puppet_showcase_in(&db, "canine", |_, _| true, canine).unwrap_err().contains("sprite art"));
+        // Every one has art: still a pick (the stage forces the puppet).
+        assert_eq!(puppet_showcase_in(&db, "canine", |_, _| true, canine).unwrap().name, "coyote");
         assert!(puppet_showcase_in(&db, "suine", |_, _| false, canine).unwrap_err().contains("no creature"));
         // A creature whose puppet resolves elsewhere does not show this one.
         assert!(puppet_showcase_in(&db, "canine", |_, _| false, |_, _| Some("humanoid".into())).is_err());

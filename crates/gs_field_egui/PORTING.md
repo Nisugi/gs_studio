@@ -331,7 +331,7 @@ The no-art draw path is now three tiers, none of them lost:
 | `PuppetCache`, `SharedPuppetCache` | per-`egui::Context` (in `ctx.data`, so `CreatureFieldView` did not change): parsed puppets, pose sets, `parts`, cached cascade results, and an LRU (`POSE_CACHE_CAP` = 96) of posed display lists keyed by (family, `PuppetKey`). Built only on a key miss; everything drops when `gs_field::puppets::puppets().generation()` changes |
 | `calibration_for`, `CALIBRATION_HEIGHT_PX` | the SHAPE calibration (aspect, span, and the prone pose's content ratio) from the REAL posed boxes, standing and prone -- so a solver box is the box that is drawn. Shape only, exactly as the doll's is: `size` is never set |
 
-### 7.6 `src/creature_field.rs` -- still exactly two marked regions
+### 7.6 `src/creature_field.rs` -- still exactly two marked regions (three since 7.9)
 
 Both additions stayed INSIDE the existing `>>>doll` / `<<<doll` markers, so
 `creature_field_is_the_port_plus_marked_additions_only` still pins the rest
@@ -370,3 +370,23 @@ total, rebuilding nothing.
 
 Tests: +10 in `creature_puppet::tests`, +1 in `creature_art::tests`;
 26 -> 36. New dependency: `gs_puppet` (path).
+
+### 7.9 Forcing the puppet over the sprite -- a third marked region
+
+Sprite art always beat the puppet, so once any art reaches the pool -- above
+all `creatures/default/`, the last tier, which matches EVERY creature -- no
+puppet could be seen at all. A host can now ask for it per creature:
+
+* `creature_puppet::set_forced_puppets(ctx, ids)` /
+  `is_forced_puppet(ctx, exist_id)`: a set of exist ids kept in `ctx.data`,
+  like the caches, so `CreatureFieldView` is unchanged and a host that never
+  calls it (VellumFE) sees no difference.
+* `creature_field.rs` gained a third `>>>doll` / `<<<doll` region, right
+  after `active_art` is chosen: a forced creature's `active_art` is `None`,
+  so it takes the puppet arm (then the doll, then the standee) exactly as a
+  creature with no art does. The port test now counts three regions; the
+  text outside them is unchanged (same length and hash).
+
+Known limit: the no-art calibration feed (7.7) still runs only on a `bases`
+miss, so a forced creature that HAS art is placed with its sprite's
+envelope while drawing the puppet.

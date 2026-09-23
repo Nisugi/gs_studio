@@ -553,6 +553,11 @@ fn paint_creature_card(
         .and_then(|p| art_cache.and_then(|c| c.variant_base(p)))
         .or(prone_art)
         .or(art);
+// >>>doll
+    // A host may ask for the puppet over the sprite (creature_puppet.rs).
+    let active_art = active_art
+        .filter(|_| !crate::creature_puppet::is_forced_puppet(painter.ctx(), &creature.id));
+// <<<doll
 
     // Sprite geometry before the shadow (the shadow needs the drawn
     // footprint). Aspect-fit into the card rect, then hang the image so

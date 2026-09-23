@@ -340,8 +340,11 @@ in the pool.
 
 The **Puppets** list at the top of the Preview panel is the direct way in:
 every published puppet (built in, or from the pool), each with *Spawn*,
-which puts up a real bestiary creature of that family that has NO sprite
-art -- or says why none will do.
+which puts up a real bestiary creature of that family DRAWN AS ITS PUPPET
+whatever art the pool holds (preferring one with no art). Any creature on
+the stage can be switched the same way with the simulator's *Draw as
+puppet*. This matters as soon as the pool has `creatures/default/`: that
+last tier matches every creature, so without forcing no puppet would show.
 
 **Spawn by name** is the other way in. Type any creature name: it spawns with that
 name and its last word as the noun, art or no art. Suggestions come from the

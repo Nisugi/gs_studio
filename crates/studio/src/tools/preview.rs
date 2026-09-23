@@ -540,7 +540,7 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         for family in set.families() {
             let Some(rig) = set.get(family) else { continue };
             ui.horizontal(|ui| {
-                if ui.small_button("Spawn").on_hover_text("Spawn a creature of this family that has no sprite art").clicked() {
+                if ui.small_button("Spawn").on_hover_text("Spawn a creature of this family, drawn as this puppet whatever art the pool has").clicked() {
                     spawn = Some(family.to_string());
                 }
                 ui.label(family);
@@ -564,7 +564,7 @@ fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     puppets_ui(stage, ui);
     ui.separator();
     ui.heading("Cast");
-    ui.weak("Built from the ART POOL, so everything here HAS art -- and sprite art always beats the puppet.");
+    ui.weak("Built from the ART POOL, so everything here draws as its sprite. Use Puppets above, or a creature's \"Draw as puppet\", to see the 3D puppet.");
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut stage.filter).hint_text("filter").desired_width(140.0));
         if ui
@@ -734,6 +734,14 @@ fn simulator_ui(stage: &mut StageState, ui: &mut egui::Ui, id: &str) {
     if ui.checkbox(&mut want_target, "Target").changed() {
         stage.set_target(id, want_target);
     }
+    let mut puppet = stage.is_forced_puppet(id);
+    if ui
+        .checkbox(&mut puppet, "Draw as puppet")
+        .on_hover_text("Draw this creature as its family's 3D puppet even though sprite art resolves for it")
+        .changed()
+    {
+        stage.set_forced_puppet(id, puppet);
+    }
 
     ui.label("Status");
     ui.horizontal_wrapped(|ui| {
@@ -810,6 +818,7 @@ fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, 
     // creature state comes from the fabricated roster. There is no game
     // state: conditions go through the sandbox evaluator and no creature
     // has a derived-effect severity.
+    gs_field_egui::creature_puppet::set_forced_puppets(ui.ctx(), stage.forced_puppets().cloned());
     let click = {
         let view = CreatureFieldView {
             field: &stage.field,

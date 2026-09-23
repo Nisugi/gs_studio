@@ -101,6 +101,9 @@ pub struct StageState {
     pub spawn_name: String,
     next_id: u64,
     pub selected: Option<String>,
+    /// Creatures drawn as their family's puppet even when sprite art
+    /// resolves (the Puppets list, the simulator's "Draw as puppet").
+    forced_puppets: std::collections::BTreeSet<String>,
     pub show_grid: bool,
     pub show_order: bool,
     /// Currently applied rider/mount pair (first flagged rider + mount).
@@ -150,6 +153,7 @@ impl StageState {
             spawn_name: String::new(),
             next_id: 0,
             selected: None,
+            forced_puppets: Default::default(),
             show_grid: true,
             show_order: false,
             pair: None,
@@ -255,11 +259,18 @@ impl StageState {
     }
 
     /// Put `family`'s puppet on the stage: spawn a bestiary creature of that
-    /// family that has no sprite art (see [`cast::puppet_showcase`]).
-    /// Returns false, with a status line saying why, when none will do.
+    /// family (see [`cast::puppet_showcase`]) and draw it as its puppet
+    /// whatever art the pool holds. Returns false, with a status line saying
+    /// why, when no creature resolves to that puppet.
     pub fn spawn_puppet(&mut self, family: &str) -> bool {
         match cast::puppet_showcase(family) {
-            Ok(pick) => self.spawn_named(&pick.name, Some(pick.noun)),
+            Ok(pick) => {
+                self.spawn(&pick.name, Some(pick.noun));
+                let id = self.selected.clone().expect("spawn selects");
+                self.forced_puppets.insert(id);
+                self.push_status(format!("Spawned '{}': drawing as the {family} puppet", pick.name));
+                true
+            }
             Err(why) => {
                 self.push_status(format!("Cannot show the {family} puppet: {why}"));
                 false
@@ -267,7 +278,26 @@ impl StageState {
         }
     }
 
+    /// Is this creature drawn as its puppet regardless of art?
+    pub fn is_forced_puppet(&self, id: &str) -> bool {
+        self.forced_puppets.contains(id)
+    }
+
+    pub fn set_forced_puppet(&mut self, id: &str, on: bool) {
+        if on {
+            self.forced_puppets.insert(id.to_string());
+        } else {
+            self.forced_puppets.remove(id);
+        }
+    }
+
+    /// Every creature drawn as its puppet regardless of art (for the renderer).
+    pub fn forced_puppets(&self) -> impl Iterator<Item = &String> {
+        self.forced_puppets.iter()
+    }
+
     pub fn remove(&mut self, id: &str) {
+        self.forced_puppets.remove(id);
         self.creatures.retain(|c| c.id != id);
         if self.selected.as_deref() == Some(id) {
             self.selected = None;
@@ -280,6 +310,7 @@ impl StageState {
 
     pub fn clear(&mut self) {
         self.creatures.clear();
+        self.forced_puppets.clear();
         self.selected = None;
         self.current_target = String::new();
         self.resync();
@@ -696,6 +727,35 @@ mod tests {
     /// Spawn-by-name puts a creature the pool has no art for on the stage
     /// -- the only way to see a non-humanoid puppet without emptying the
     /// pool -- and says so in the status line.
+    /// The Puppets list puts a family's puppet up even when the pool's art
+    /// (the `default` tier matches every creature) would otherwise win.
+    #[test]
+    fn spawning_a_puppet_forces_it_over_the_art() {
+        let base = TempBase::new();
+        let default = base.path().join("global/images/creatures/default");
+        std::fs::create_dir_all(&default).unwrap();
+        std::fs::write(default.join("default.png"), b"not really a png").unwrap();
+        gs_field::pool::invalidate_cache();
+        let mut s = stage();
+        assert!(cast::has_art("timber wolf", Some("wolf")), "the default tier matches everything");
+
+        assert!(s.spawn_puppet("canine"));
+        let id = s.selected.clone().unwrap();
+        assert!(s.is_forced_puppet(&id));
+        assert_eq!(s.forced_puppets().count(), 1);
+        assert!(s.status_lines().last().unwrap().contains("canine puppet"));
+        // The simulator's checkbox, and removal, both clear it.
+        s.set_forced_puppet(&id, false);
+        assert!(!s.is_forced_puppet(&id));
+        s.set_forced_puppet(&id, true);
+        s.remove(&id);
+        assert_eq!(s.forced_puppets().count(), 0);
+        assert!(s.spawn_puppet("canine"));
+        s.clear();
+        assert_eq!(s.forced_puppets().count(), 0);
+        assert!(!s.spawn_puppet("no_such_family"), "a family nobody belongs to is refused, with a reason");
+    }
+
     #[test]
     fn spawning_by_name_works_without_art_and_reports_what_it_got() {
         let _base = TempBase::new();

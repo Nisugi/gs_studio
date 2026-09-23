@@ -844,10 +844,11 @@ mod tests {
             regions += 1;
         }
         stripped.push_str(rest);
-        // Two regions: the draw-branch arms (puppet, then doll, then the
-        // untouched standee), and the block holding both
-        // paint_creature_puppet and paint_creature_doll.
-        assert_eq!(regions, 2, "exactly the two documented additions");
+        // Three regions: the host's forced-puppet filter on the active art,
+        // the draw-branch arms (puppet, then doll, then the untouched
+        // standee), and the block holding both paint_creature_puppet and
+        // paint_creature_doll.
+        assert_eq!(regions, 3, "exactly the three documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

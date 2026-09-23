@@ -36,6 +36,11 @@ pub mod test_support {
             gs_field::pool::invalidate_cache();
             TempBase { _dir: dir, _guard: guard }
         }
+
+        /// The temporary base dir (the pool root).
+        pub fn path(&self) -> &std::path::Path {
+            self._dir.path()
+        }
     }
 
     impl Drop for TempBase {

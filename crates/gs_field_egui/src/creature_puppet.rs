@@ -33,6 +33,27 @@ use std::sync::{Arc, Mutex};
 use gs_field::puppets::PuppetRigs;
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
 
+/// Creatures (by exist id, no leading '#') the HOST wants drawn as their
+/// family's puppet even when sprite art resolves: a studio previewing a
+/// puppet, or a client setting. Kept per `egui::Context`, like the caches,
+/// so `CreatureFieldView` is unchanged. A forced creature with no puppet
+/// falls through to the doll and the standee as usual.
+pub fn set_forced_puppets(ctx: &egui::Context, ids: impl IntoIterator<Item = String>) {
+    let ids: std::collections::HashSet<String> =
+        ids.into_iter().map(|id| id.trim().trim_start_matches('#').to_string()).collect();
+    ctx.data_mut(|d| d.insert_temp(forced_id(), Arc::new(ids)));
+}
+
+/// Is this creature forced onto its puppet? See [`set_forced_puppets`].
+pub fn is_forced_puppet(ctx: &egui::Context, exist_id: &str) -> bool {
+    let ids: Option<Arc<std::collections::HashSet<String>>> = ctx.data(|d| d.get_temp(forced_id()));
+    ids.is_some_and(|ids| !ids.is_empty() && ids.contains(exist_id.trim().trim_start_matches('#')))
+}
+
+fn forced_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::forced_puppets")
+}
+
 /// How many posed display lists one context keeps.
 pub const POSE_CACHE_CAP: usize = 96;
 
@@ -784,6 +805,17 @@ mod tests {
         assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
         let canine = cache.pose_set(&Arc::from("canine")).unwrap();
         assert_eq!(canine.get("sit"), shared.get("sit"));
+    }
+
+    #[test]
+    fn a_host_can_force_creatures_onto_their_puppet() {
+        let ctx = egui::Context::default();
+        assert!(!is_forced_puppet(&ctx, "123"), "nothing forced by default");
+        set_forced_puppets(&ctx, ["#123".to_string()]);
+        assert!(is_forced_puppet(&ctx, "123") && is_forced_puppet(&ctx, "#123"));
+        assert!(!is_forced_puppet(&ctx, "124"));
+        set_forced_puppets(&ctx, []);
+        assert!(!is_forced_puppet(&ctx, "123"), "a new set replaces the old");
     }
 
     #[test]
