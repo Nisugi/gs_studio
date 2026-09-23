@@ -406,3 +406,108 @@ fn a_chain_hangs_away_from_its_pivot() {
     );
     assert!(split_chain(&[], None).is_empty());
 }
+
+// ------------------------------------------------ review regressions
+
+/// A rig built from `(joint, point)` pairs and bones; everything else plain.
+fn plain_rig(view: View, joints: &[(&str, [f32; 2])], bones: Vec<RigBone>) -> Rig {
+    let mut rig = buried_rig(view);
+    rig.joint_order = joints.iter().map(|(n, _)| n.to_string()).collect();
+    rig.joints = joints.iter().map(|(n, p)| (n.to_string(), *p)).collect();
+    rig.bones = bones;
+    rig
+}
+
+fn bone(name: &str, part: &str, parent: Option<&str>, joints: &[&str]) -> RigBone {
+    RigBone {
+        name: name.into(),
+        part: Some(part.into()),
+        parent: parent.map(Into::into),
+        joints: joints.iter().map(|j| j.to_string()).collect(),
+        pivot: None,
+        radius_ft: None,
+    }
+}
+
+/// Two joints on one spot (hip and knee clicked together) drop the
+/// zero-length pair; the next segment is then the FIRST of its chain and
+/// takes the bone's rotation, not a bend.
+#[test]
+fn a_zero_length_first_pair_does_not_shift_the_chain() {
+    let (front, side) = buried_masks();
+    let rig = plain_rig(
+        View::Front,
+        &[("top", [0.0, 4.0]), ("hip", [0.0, 2.0]), ("knee", [0.0, 2.0]), ("foot", [0.0, 0.2])],
+        vec![bone("spine", "chest", None, &["top", "hip"]), bone("leg", "leftLeg", Some("spine"), &["hip", "knee", "foot"])],
+    );
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).unwrap();
+    let li = p.segment("leg").expect("one real segment, named for its bone");
+    assert_eq!(p.segments[li].chain_index, 0);
+    let tail = p.segments[li].tail;
+    let rest = p.pose(&crate::Pose::default()).point(li, tail);
+    let swung = p.pose(&crate::Pose::from_euler(&[("leg", [-60.0, 0.0, 0.0], &[])])).point(li, tail);
+    assert!((rest[2] - swung[2]).abs() > 0.5, "the bone's rotation moves it: {rest:?} vs {swung:?}");
+}
+
+/// A parent loop that does not pass through the bone being built (A hangs
+/// off B, B and C point at each other) must end the build, not hang it.
+#[test]
+fn a_parent_loop_up_the_chain_does_not_hang_the_build() {
+    let (front, side) = buried_masks();
+    let rig = plain_rig(
+        View::Front,
+        &[("top", [0.0, 4.0]), ("hip", [0.0, 2.0]), ("a", [0.1, 2.0]), ("b", [0.1, 1.0]), ("c", [0.1, 0.5]), ("d", [0.1, 0.2])],
+        vec![
+            bone("spine", "chest", None, &["top", "hip"]),
+            bone("A", "leftLeg", Some("B"), &["a", "b"]),
+            bone("B", "leftLeg", Some("C"), &["b", "c"]),
+            bone("C", "leftLeg", Some("B"), &["c", "d"]),
+        ],
+    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(Puppet::build_masks(&rig, Some(&front), Some(&side)).is_ok());
+    });
+    assert!(rx.recv_timeout(std::time::Duration::from_secs(10)).is_ok(), "build hung on a parent loop");
+}
+
+/// A front rig whose head points AT the viewer (measured in the side view):
+/// the two eyes stay on their own sides of the face, both facing forward.
+#[test]
+fn eyes_on_a_head_pointing_at_the_viewer_keep_their_sides() {
+    let mut rig = plain_rig(
+        View::Front,
+        &[("neck", [0.0, 3.0]), ("snout", [0.0, 3.1]), ("hip", [0.0, 1.0])],
+        vec![bone("spine", "chest", None, &["neck", "hip"]), bone("head", "head", Some("spine"), &["neck", "snout"])],
+    );
+    rig.depth.insert("neck".into(), 0.0);
+    rig.depth.insert("snout".into(), 1.5);
+    rig.eyes.left_eye = Some([0.25, 3.05]);
+    rig.eyes.right_eye = Some([-0.25, 3.05]);
+    let front = mask_from(|x, y| (0.5..=3.4).contains(&y) && x.abs() <= 0.6);
+    let side = mask_from(|z, y| (0.5..=3.4).contains(&y) && (-0.6..=1.7).contains(&z));
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).unwrap();
+    assert_eq!(p.eyes.len(), 2);
+    let (l, r) = (p.eyes[0], p.eyes[1]);
+    assert!(l.pos[0] > 0.1 && r.pos[0] < -0.1, "left {:?} right {:?}", l.pos, r.pos);
+    assert!(l.normal[0] > 0.0 && r.normal[0] < 0.0, "each looks out its own side: {:?} {:?}", l.normal, r.normal);
+}
+
+/// A baked puppet survives the round trip exactly; a malformed one is
+/// refused rather than drawn collapsed.
+#[test]
+fn baked_puppets_round_trip_and_bad_ones_are_refused() {
+    let p = build_buried(View::Front);
+    let text = p.to_baked_toml().unwrap();
+    assert_eq!(Puppet::from_baked_toml(&text).unwrap(), p);
+
+    let mut zero_hinge = p.to_baked();
+    zero_hinge.segments[0].hinge = [0.0; 3];
+    assert!(Puppet::from_baked(&zero_hinge).is_err());
+    let mut unversioned = p.to_baked();
+    unversioned.version = 0;
+    assert!(Puppet::from_baked(&unversioned).is_err());
+    let mut future = p.to_baked();
+    future.version = crate::BAKED_VERSION + 1;
+    assert!(Puppet::from_baked(&future).is_err());
+}

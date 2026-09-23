@@ -137,8 +137,8 @@ impl Puppet {
 
     pub fn from_baked(baked: &BakedPuppet) -> Result<Puppet, PuppetError> {
         let bad = |what: String| Err(PuppetError::Baked(what));
-        if baked.version > BAKED_VERSION {
-            return bad(format!("version {} is newer than this code ({BAKED_VERSION})", baked.version));
+        if baked.version == 0 || baked.version > BAKED_VERSION {
+            return bad(format!("version {} is not one this code reads (1..={BAKED_VERSION})", baked.version));
         }
         let mut segments = Vec::with_capacity(baked.segments.len());
         for (i, s) in baked.segments.iter().enumerate() {
@@ -153,6 +153,12 @@ impl Puppet {
                 && s.stations.iter().all(|st| st[3] > 0.0 && st[4] > 0.0);
             if !finite {
                 return bad(format!("segment '{}': not finite, or an empty station", s.name));
+            }
+            // The axes are unit vectors, rounded when baked. One that is not
+            // (a zero hinge, say) would scale the segment instead of turning it.
+            let unit = |v: [f64; 3]| ((v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt() - 1.0).abs() < 1e-2;
+            if !(unit(s.axis_w) && unit(s.axis_d) && unit(s.hinge)) {
+                return bad(format!("segment '{}': axis_w, axis_d and hinge must be unit vectors", s.name));
             }
             segments.push(Segment {
                 name: s.name.clone(),

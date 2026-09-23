@@ -564,16 +564,24 @@ impl PuppetCache {
         parts
     }
 
-    /// The pose set for a family's body type (parsed once; misses cached).
+    /// The pose set a family poses with: its body type's set, with that
+    /// family's `[family.<name>]` overrides folded in (parsed once per
+    /// family; misses cached).
     pub fn pose_set(&mut self, family: &Arc<str>) -> Option<Arc<PoseSet>> {
         if let Some(hit) = self.pose_sets.get(family) {
             return hit.clone();
         }
         let rigs = self.rigs();
         let set = rigs.get(family).and_then(|rig| {
-            let file = rigs.pose_file(&rig.body_type)?;
+            let Some(file) = rigs.pose_file(&rig.body_type) else {
+                tracing::warn!(
+                    "puppet '{family}': no pose set for body type '{}' -- drawing the flat doll instead",
+                    rig.body_type
+                );
+                return None;
+            };
             match PoseSet::from_toml(&file.toml) {
-                Ok(set) => Some(Arc::new(set)),
+                Ok(set) => Some(Arc::new(set.for_family(family).into_owned())),
                 Err(e) => {
                     tracing::warn!(
                         "puppet '{family}': pose set '{}' did not load: {e}",
@@ -735,6 +743,47 @@ mod tests {
         let humanoid = cache.family_for("forest troll", Some("troll")).unwrap();
         cache.puppet(&humanoid);
         assert_eq!(cache.parses, 2);
+    }
+
+    /// `gs_field` embeds copies of the workspace's `data/poses/`; they must
+    /// not drift from what `gs_puppet` ships (Publish re-copies them).
+    #[test]
+    fn the_embedded_pose_sets_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        let embedded: HashMap<&str, &str> = gs_field::puppets::embedded_poses().collect();
+        for (body_type, shipped) in gs_puppet::SHIPPED_POSES {
+            let got = embedded.get(body_type).unwrap_or_else(|| panic!("{body_type}.toml not embedded"));
+            assert!(
+                norm(got) == norm(shipped),
+                "crates/gs_field/data/poses/{body_type}.toml differs from data/poses/{body_type}.toml: re-copy it (or Publish)"
+            );
+        }
+    }
+
+    /// A family's `[family.<name>]` overrides reach the drawn pose; a family
+    /// without a section gets the shared set.
+    #[test]
+    fn a_family_poses_with_its_own_overrides() {
+        use gs_field::puppets::{PoseFile, PuppetRig, PuppetSource};
+        let canine = gs_field::puppets::embedded().find(|(f, _)| *f == "canine").unwrap().1;
+        let quadruped = gs_puppet::SHIPPED_POSES.iter().find(|(b, _)| *b == "quadruped").unwrap().1;
+        let shared = PoseSet::from_toml(quadruped).unwrap();
+        let rig = |family: &str| PuppetRig {
+            family: family.into(),
+            body_type: "quadruped".into(),
+            baked: canine.into(),
+            source: PuppetSource::Embedded,
+        };
+        let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
+        let mut cache = PuppetCache {
+            rigs: Some(Arc::new(PuppetRigs::from_rigs([rig("elephantid"), rig("canine")], [poses]))),
+            ..Default::default()
+        };
+        let elephantid = cache.pose_set(&Arc::from("elephantid")).unwrap();
+        assert_ne!(elephantid.get("sit"), shared.get("sit"), "the elephantid sit override applies");
+        assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
+        let canine = cache.pose_set(&Arc::from("canine")).unwrap();
+        assert_eq!(canine.get("sit"), shared.get("sit"));
     }
 
     #[test]

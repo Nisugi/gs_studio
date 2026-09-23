@@ -442,7 +442,11 @@ impl Puppet {
             let pivot = bone.pivot.as_deref().filter(|p| placed.iter().any(|j| j == p));
             for (ci, chain) in split_chain(&placed, pivot).into_iter().enumerate() {
                 let mut prev = None;
-                for (k, (hj, tj)) in chain.into_iter().enumerate() {
+                // Position in the chain AS BUILT: a zero-length pair (two
+                // joints on one spot) is skipped and must not shift the rest,
+                // or the first real segment would pose as an inner one.
+                let mut k = 0;
+                for (hj, tj) in chain {
                     let (head, tail) = (joints[&hj], joints[&tj]);
                     if len(sub(tail, head)) < 1e-4 {
                         continue;
@@ -450,6 +454,7 @@ impl Puppet {
                     let parent = prev.or_else(|| attach(rig, &raws, rig.parent_index(bi), &hj, head));
                     raws.push(Raw { bone: bi, chain: ci, k, head_joint: hj, tail_joint: tj, head, tail, parent });
                     prev = Some(raws.len() - 1);
+                    k += 1;
                 }
             }
         }
@@ -511,6 +516,14 @@ impl Puppet {
             let ref_w = median(&mut m.w.clone()).max(MIN_HALF_FT);
             for k in 0..n {
                 let c = centre(k);
+                // KNOWN LIMIT: the merge also welds two limbs a toe-gap apart
+                // (a side rig's legs nearly touching in the front view) into
+                // one fat centred read. Applying `depth::limb_spans`' rule
+                // here (read unmerged when the merge is wider than a limb)
+                // fixes that case but lowers every committed family's rest
+                // IoU (humanoid side .9488 -> .9148): buried and creased limb
+                // rows split into slivers. Needs a rule that tells the two
+                // apart before it can go in.
                 let run = other.and_then(|mask| run_along(mask, [c[oa], c[1]], [1.0, 0.0], MERGE_GAP_FT, 0.12));
                 let (half, mid) = run.map(|(lo, hi)| ((hi - lo) * 0.5, (lo + hi) * 0.5)).unwrap_or((0.0, 0.0));
                 let ok = match kind {
@@ -626,13 +639,15 @@ impl Puppet {
             let group_key = if kind == Kind::Trunk {
                 if bone.part.as_deref() == Some("head") { "head".to_owned() } else { "trunk".to_owned() }
             } else {
-                // The root-most limb bone this one hangs from.
+                // The root-most limb bone this one hangs from. At most one
+                // hop per bone: a parent loop anywhere up the chain (a
+                // hand-edited rig) must end the walk, not hang the build.
                 let mut at = r.bone;
-                while let Some(p) = rig.parent_index(at).filter(|p| is_limb_part(rig.bones[*p].part.as_deref())) {
-                    if p == r.bone {
-                        break;
+                for _ in 0..rig.bones.len() {
+                    match rig.parent_index(at).filter(|p| is_limb_part(rig.bones[*p].part.as_deref())) {
+                        Some(p) if p != r.bone => at = p,
+                        _ => break,
                     }
-                    at = p;
                 }
                 rig.bones[at].name.clone()
             };
@@ -643,7 +658,6 @@ impl Puppet {
 
             let count = raws.iter().filter(|o| o.bone == r.bone).count();
             let index = raws[..i].iter().filter(|o| o.bone == r.bone).count();
-            let _ = r.chain;
             segments.push(Segment {
                 name: if count == 1 { bone.name.clone() } else { format!("{}.{index}", bone.name) },
                 bone: bone.name.clone(),
@@ -920,6 +934,12 @@ fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) ->
         }
     }
     let a = norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0]);
+    // The world axis the clicked eye point says nothing about: z for a front
+    // rig, x for a side rig. The eye sits where that line meets the head.
+    let unknown = match rig.view {
+        View::Front => [0.0, 0.0, 1.0],
+        View::Side => [1.0, 0.0, 0.0],
+    };
     let mut out = Vec::new();
     for (p, side) in wanted {
         // The station whose plane the eye sits nearest.
@@ -927,16 +947,36 @@ fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) ->
         else {
             continue;
         };
-        let e = dot(sub(p, st.c), s.axis_w);
-        let ratio = (e / st.w.max(1e-3)).clamp(-0.9, 0.9);
-        let bulge = st.d * (1.0 - ratio * ratio).sqrt() * side;
         let along = dot(sub(p, st.c), a);
         let on_axis = add(st.c, scale(a, along));
-        let pos = add(add(on_axis, scale(s.axis_w, ratio * st.w)), scale(s.axis_d, bulge));
-        let normal = norm_or(
-            add(scale(s.axis_w, ratio / st.w.max(1e-3)), scale(s.axis_d, bulge / (st.d * st.d).max(1e-6))),
-            s.axis_d,
-        );
+        let (w, d) = (st.w.max(1e-3), st.d.max(1e-3));
+        let o = sub(unknown, scale(a, dot(unknown, a)));
+        // Usually the unknown axis IS the head's depth axis (a head measured
+        // in the view the rig was clicked in): bulge along it, clamped so an
+        // eye on the rim still sits on the face. Otherwise (a head pointing
+        // at the viewer, measured in the OTHER view) solve for where the
+        // line through the eye along the unknown axis meets the ellipse.
+        let (u, v) = if dot(norm_or(o, s.axis_d), s.axis_d).abs() >= 0.9 {
+            let ratio = (dot(sub(p, st.c), s.axis_w) / w).clamp(-0.9, 0.9);
+            (ratio * w, d * (1.0 - ratio * ratio).sqrt() * side)
+        } else {
+            let q = sub(sub(p, st.c), scale(a, along));
+            let (u0, v0, u1, v1) = (dot(q, s.axis_w), dot(q, s.axis_d), dot(o, s.axis_w), dot(o, s.axis_d));
+            let qa = (u1 / w).powi(2) + (v1 / d).powi(2);
+            let qb = 2.0 * (u0 * u1 / (w * w) + v0 * v1 / (d * d));
+            let qc = (u0 / w).powi(2) + (v0 / d).powi(2) - 1.0;
+            let disc = qb * qb - 4.0 * qa * qc;
+            if qa < 1e-9 || disc < 0.0 {
+                // The line misses the head: put the eye on the rim nearest it.
+                let r = ((u0 / w).powi(2) + (v0 / d).powi(2)).sqrt().max(1e-6);
+                (u0 / r * 0.95, v0 / r * 0.95)
+            } else {
+                let t = (-qb + side * disc.sqrt()) / (2.0 * qa);
+                (u0 + t * u1, v0 + t * v1)
+            }
+        };
+        let pos = add(add(on_axis, scale(s.axis_w, u)), scale(s.axis_d, v));
+        let normal = norm_or(add(scale(s.axis_w, u / (w * w)), scale(s.axis_d, v / (d * d))), s.axis_d);
         let radius = rig.eye_radius_ft.filter(|r| *r > 0.0).unwrap_or((st.w.min(st.d) * 0.16).max(0.025));
         out.push(Eye { segment: si, pos: q3(pos), normal: q3(normal), radius: q(radius) });
     }
