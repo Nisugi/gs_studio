@@ -476,6 +476,9 @@ struct Measured {
     /// calibre its chain reads where it is out in the open. The other view
     /// is buried there too, so the depth needs the same bound.
     buried_calibre: Option<f32>,
+    /// A trunk bone lying across the body with more trunk hanging off it (a
+    /// clavicle).
+    girdle: bool,
 }
 
 impl Puppet {
@@ -700,6 +703,27 @@ impl Puppet {
                         shift[k] = 0.0;
                     }
                     d[k] = d[k].max(m.w[k] * 0.4);
+                }
+            }
+            // A clavicle's slices read the whole chest's depth in the other
+            // view, right out to the shoulder: its end stood out in front of
+            // and behind the arm's shoulder as a flat fin. Where a biped's arm
+            // starts at its far end, it is no deeper than the arm: ease it
+            // down over its outer half.
+            if m.girdle && rig.body_type == "biped" {
+                let arm_root = raws.iter().enumerate().find(|(j, o)| {
+                    o.k == 0
+                        && kinds[*j] == Kind::Limb
+                        && o.head_joint == r.tail_joint
+                        && rig.bones[o.bone].part.as_deref().is_some_and(|p| p.ends_with("Arm"))
+                });
+                if let Some((j, _)) = arm_root {
+                    let (mid, arm) = (n / 2, limb_r[j]);
+                    let from = d[mid];
+                    for (k, x) in d.iter_mut().enumerate().skip(mid) {
+                        let t = (k - mid) as f32 / (n - 1 - mid).max(1) as f32;
+                        *x = x.min(from + (arm - from) * t);
+                    }
                 }
             }
             let mut w = m.w.clone();
@@ -1276,7 +1300,7 @@ fn measure_segment<'m>(
     median3(&mut w);
     box3(&mut w);
     box3(&mut off);
-    Measured { view, axis_w, axis_d, off, w, unsplit, buried_calibre: buried.then_some(calibre).flatten() }
+    Measured { view, axis_w, axis_d, off, w, unsplit, buried_calibre: buried.then_some(calibre).flatten(), girdle }
 }
 
 fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) -> Vec<Eye> {

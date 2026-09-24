@@ -636,4 +636,11 @@ fn a_humanoid_arm_is_its_own_and_the_shoulder_goes_with_it() {
     let widest = body.iter().map(|s| s.w).fold(0.0f32, f32::max);
     let neck_base = body.last().expect("rings");
     assert!(neck_base.w < widest, "the chest ends {:.3} ft wide at the shoulders, wider than its {widest:.3}: a yoke", neck_base.w);
+    // The clavicle reads the whole chest's depth in the side view; at the
+    // shoulder it must not stand out in front of or behind the arm (a fin at
+    // each shoulder blade).
+    let clavicle = segment(&p, "clavicle.0");
+    let end = clavicle.stations[clavicle.stations.len() - CAP_RINGS - 1];
+    let root = upper.stations[CAP_RINGS];
+    assert!(end.d <= root.d.max(root.w) * 1.1, "the clavicle ends {:.3} ft deep at a {:.3} ft shoulder", end.d, root.d.max(root.w));
 }
