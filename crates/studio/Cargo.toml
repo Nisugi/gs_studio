@@ -37,6 +37,8 @@ dirs = "5"
 # settings.toml (remembered folders).
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+# The pose editor rewrites pose files in place, comments kept (editor::pose_edit).
+toml_edit = "0.22"
 egui ={ git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }
 eframe = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 

@@ -8,6 +8,7 @@ use rig::{templates, View, AXES, PARTS};
 
 use crate::editor::depth::{axis_label, other_view};
 use crate::editor::palette::{label_rgba, LABEL_RGB};
+use crate::editor::pose_edit::{self, Origin, PairState, PoseDoc, Scope, ROOT};
 use crate::editor::prompt::{NamePrompt, PromptKind};
 use crate::editor::puppet_view::{PoseSource, PuppetView};
 use crate::editor::state::Editor;
@@ -53,6 +54,22 @@ pub struct RigTool {
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
     files: crate::fs_cache::Ttl<(String, PathBuf, bool), FileFacts>,
+    /// The pose editor: on, the body type's pose file open for editing,
+    /// which section it writes, the row (bone) being edited.
+    pose_edit: bool,
+    pose_doc: Option<PoseDoc>,
+    pose_scope: Scope,
+    pose_row: Option<String>,
+    new_pose_name: String,
+    /// Closing with unsaved poses: asking, or answered.
+    pose_quit: PoseQuit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PoseQuit {
+    No,
+    Asking,
+    Approved,
 }
 
 /// Everything a preview skin depends on; a new one is rendered only when
@@ -64,6 +81,8 @@ struct SkinKey {
     view: [u32; 5],
     /// The texture worn (its load serial), if any.
     texture: Option<u64>,
+    /// The pose file's edit revision (the pose changes under one name).
+    poses: u64,
 }
 
 /// The family's `sheet.png`, as read from disk (re-read on `serial`).
@@ -108,6 +127,12 @@ impl RigTool {
             sheet_serial: 0,
             sheet_texture: None,
             files: Default::default(),
+            pose_edit: false,
+            pose_doc: None,
+            pose_scope: Scope::Shared,
+            pose_row: None,
+            new_pose_name: String::new(),
+            pose_quit: PoseQuit::No,
         })
     }
 
@@ -122,18 +147,36 @@ impl RigTool {
         self.session.pool = Some(pool);
     }
 
+    /// Open the 3D preview with the pose editor on `<pose>[:<row>]`
+    /// (`GS_STUDIO_POSE_EDIT`, for visual checks).
+    pub fn open_pose_editor(&mut self, spec: &str) {
+        let (pose, row) = spec.split_once(':').unwrap_or((spec, ""));
+        self.puppet_view.show = true;
+        self.pose_edit = true;
+        self.puppet_view.pose = if pose.is_empty() { "stand".into() } else { pose.to_owned() };
+        self.pose_row = (!row.is_empty()).then(|| row.to_owned());
+    }
+
     /// The family whose puppet "Show on stage" asked for, once.
     pub fn take_show_on_stage(&mut self) -> Option<String> {
         self.show_on_stage.take()
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.session.editor.is_dirty()
+        self.session.editor.is_dirty() || self.poses_dirty()
+    }
+
+    fn poses_dirty(&self) -> bool {
+        self.pose_doc.as_ref().is_some_and(PoseDoc::is_dirty)
     }
 
     /// The window wants to close. True = go ahead; false = a discard prompt
-    /// is now showing.
+    /// is now showing (unsaved poses are asked about first).
     pub fn approve_quit(&mut self) -> bool {
+        if self.poses_dirty() && self.pose_quit != PoseQuit::Approved {
+            self.pose_quit = PoseQuit::Asking;
+            return false;
+        }
         if !self.session.quit_approved {
             self.session.request(DocAction::Quit);
         }
@@ -141,7 +184,7 @@ impl RigTool {
     }
 
     pub fn quit_approved(&self) -> bool {
-        self.session.quit_approved
+        self.session.quit_approved && (!self.poses_dirty() || self.pose_quit == PoseQuit::Approved)
     }
 
     pub fn status(&self, ui: &mut egui::Ui) {
@@ -198,6 +241,7 @@ impl RigTool {
         egui::CentralPanel::default().show(ui, |ui| self.centre(ui));
         self.discard_prompt(ui.ctx());
         self.name_prompt(ui.ctx());
+        self.pose_quit_prompt(ui.ctx());
     }
 
     fn ask(&mut self, kind: PromptKind) {
@@ -212,10 +256,22 @@ impl RigTool {
         let pressed = |ui: &mut egui::Ui, mods: Modifiers, key: Key| {
             ui.input_mut(|i| i.consume_shortcut(&KeyboardShortcut::new(mods, key)))
         };
+        // While a pose is being edited, undo is the pose's.
+        let poses = self.pose_doc.as_mut().filter(|_| self.pose_edit && self.puppet_view.show);
         if pressed(ui, Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || pressed(ui, Modifiers::COMMAND, Key::Y) {
-            self.session.editor.redo();
+            match poses {
+                Some(doc) => doc.redo(),
+                None => {
+                    self.session.editor.redo();
+                }
+            }
         } else if pressed(ui, Modifiers::COMMAND, Key::Z) {
-            self.session.editor.undo();
+            match poses {
+                Some(doc) => doc.undo(),
+                None => {
+                    self.session.editor.undo();
+                }
+            }
         }
         if pressed(ui, Modifiers::COMMAND, Key::S) {
             self.save();
@@ -446,6 +502,10 @@ impl RigTool {
             (rig.family.clone(), rig.body_type.clone())
         };
         let data_root = self.session.data_root.clone();
+        // The pose file open in the editor, when it is this body type's:
+        // the preview shows its (unsaved) poses.
+        let editing = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type);
+        let doc_names = editing.map(|d| d.pose_names(&family));
         let pv = &mut self.puppet_view;
         let mut reload_stage = false;
         let (mut export, mut build, mut reload_sheet) = (false, false, false);
@@ -456,6 +516,7 @@ impl RigTool {
                 Ok((set, source)) => (set.names().into_iter().map(str::to_owned).collect::<Vec<_>>(), Some(*source), None),
                 Err(e) => (Vec::new(), None, Some(e.clone())),
             };
+            let names = doc_names.unwrap_or(names);
             let shown = if pv.pose.is_empty() { "rest (as clicked)".to_owned() } else { pv.pose.clone() };
             egui::ComboBox::from_id_salt("puppet_pose").selected_text(shown).show_ui(ui, |ui| {
                 ui.selectable_value(&mut pv.pose, String::new(), "rest (as clicked)");
@@ -473,6 +534,15 @@ impl RigTool {
             }
             if ui.button("Reset view").clicked() {
                 pv.reset_camera();
+            }
+            if ui
+                .toggle_value(&mut self.pose_edit, "Edit pose")
+                .on_hover_text("Change the shown pose's angles: pick a bone (click it, or its name), then its sliders")
+                .clicked()
+                && self.pose_edit
+                && pv.pose.is_empty()
+            {
+                pv.pose = "stand".into();
             }
             ui.checkbox(&mut pv.skin, "Smooth skin")
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
@@ -530,16 +600,42 @@ impl RigTool {
             self.sheet_serial += 1;
         }
         if reload_stage {
+            // Reload means the files on disk: drop unsaved pose edits'
+            // parse so the editor re-reads them too (unless unsaved).
+            if !self.poses_dirty() {
+                self.pose_doc = None;
+            }
             self.session.status = match self.session.install_poses() {
                 Ok(n) => format!("Poses reloaded: {n} pose sets now on the stage too"),
                 Err(e) => e,
             };
         }
-        ui.weak("drag: turn   wheel: zoom");
+        if self.pose_edit {
+            egui::Panel::bottom("pose_editor")
+                .resizable(true)
+                .default_size(250.0)
+                .min_size(120.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.pose_editor(ui, &family, &body_type));
+                });
+        }
+        ui.weak(if self.pose_edit { "drag: turn   wheel: zoom   click: pick a bone" } else { "drag: turn   wheel: zoom" });
 
-        let pose = pv.current_pose(&data_root, &body_type, &family);
+        let pv = &mut self.puppet_view;
+        let from_doc = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type).map(|d| {
+            let revision = d.revision();
+            let pose = match d.set_for(&family) {
+                Ok(set) if !pv.pose.is_empty() => set.get(&pv.pose).cloned().unwrap_or_default(),
+                _ => gs_puppet::Pose::default(),
+            };
+            (pose, revision + 1)
+        });
+        let (pose, poses_revision) = match from_doc {
+            Some(p) => p,
+            None => (pv.current_pose(&data_root, &body_type, &family), 0),
+        };
         let (yaw, pitch, zoom) = (pv.yaw, pv.pitch, pv.zoom);
-        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::drag());
+        let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = response.rect;
         if response.dragged() {
             let d = response.drag_delta();
@@ -606,6 +702,7 @@ impl RigTool {
                         pose: self.puppet_view.pose.clone(),
                         view: [yaw, pitch, zoom, rect.width(), rect.height()].map(f32::to_bits),
                         texture: texture_serial,
+                        poses: poses_revision,
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let mut local = cam;
@@ -621,6 +718,25 @@ impl RigTool {
                     }
                 } else {
                     gs_puppet::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
+                }
+                if self.pose_edit {
+                    // Click a bone to edit it; the edited one is outlined.
+                    let split = |stem: &str| {
+                        self.pose_doc.as_ref().is_some_and(|d| d.pair_is_split(self.pose_scope, &family, &self.puppet_view.pose, stem))
+                    };
+                    let rows = pose_edit::rows(puppet, &split);
+                    if response.clicked() {
+                        if let Some(at) = response.interact_pointer_pos() {
+                            let picked = pose_edit::pick_bone(&posed, yaw, &project, [at.x, at.y], 14.0);
+                            self.pose_row = Some(picked.and_then(|b| pose_edit::row_of(&rows, &b)).map_or(ROOT.to_owned(), |r| r.key.clone()));
+                        }
+                    }
+                    if let Some(row) = rows.iter().find(|r| Some(&r.key) == self.pose_row.as_ref()) {
+                        for [a, b] in pose_edit::bone_lines(&posed, yaw, &project, &row.bones) {
+                            painter.line_segment([Pos2::new(a[0], a[1]), Pos2::new(b[0], b[1])], Stroke::new(3.0, Color32::from_rgb(255, 210, 60)));
+                            painter.circle_filled(Pos2::new(a[0], a[1]), 3.5, Color32::from_rgb(255, 210, 60));
+                        }
+                    }
                 }
                 painter.text(
                     rect.left_bottom() + Vec2::new(8.0, -8.0),
@@ -1631,6 +1747,244 @@ impl RigTool {
         });
         if !done && !modal.should_close() {
             self.prompt = Some((prompt, false));
+        }
+    }
+
+    /// The pose editor strip: which section to write, the pose file's own
+    /// actions, the rows (bones) and the picked row's angles.
+    fn pose_editor(&mut self, ui: &mut egui::Ui, family: &str, body_type: &str) {
+        let warn = ui.visuals().warn_fg_color;
+        if self.pose_doc.as_ref().is_none_or(|d| d.body_type() != body_type) {
+            if let Some(other) = self.pose_doc.as_ref().filter(|d| d.is_dirty()).map(|d| d.body_type().to_owned()) {
+                ui.colored_label(warn, format!("The {other} poses have unsaved edits."));
+                ui.horizontal(|ui| {
+                    if ui.button("Save them").clicked() {
+                        self.save_poses();
+                    }
+                    if ui.button("Discard them").clicked() {
+                        self.pose_doc = None;
+                    }
+                });
+                return;
+            }
+            match PoseDoc::open(&self.session.data_root, body_type) {
+                Ok(doc) => self.pose_doc = Some(doc),
+                Err(e) => {
+                    ui.colored_label(warn, e);
+                    return;
+                }
+            }
+        }
+        if self.puppet_view.pose.is_empty() {
+            self.puppet_view.pose = "stand".into();
+        }
+        let pose = self.puppet_view.pose.clone();
+        let mut save = false;
+        let mut revert = false;
+        {
+            let Some(doc) = self.pose_doc.as_mut() else { return };
+            ui.horizontal_wrapped(|ui| {
+                ui.strong(format!("Pose: {pose}"));
+                ui.label("edits");
+                ui.selectable_value(&mut self.pose_scope, Scope::Shared, format!("every {body_type}"))
+                    .on_hover_text(format!("[pose.{pose}]: the pose every family rigged as {body_type} uses"));
+                ui.selectable_value(&mut self.pose_scope, Scope::Family, format!("{family} only")).on_hover_text(format!(
+                    "[family.{family}.{pose}]: only the angles {family} does differently; everything else follows the shared pose"
+                ));
+                if self.pose_scope == Scope::Family
+                    && doc.family_has(family, &pose)
+                    && ui.button("Clear correction").on_hover_text(format!("{family} follows the shared {pose} again")).clicked()
+                {
+                    doc.clear_family(family, &pose);
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                if ui.add_enabled(doc.can_undo(), egui::Button::new("Undo")).clicked() {
+                    doc.undo();
+                }
+                if ui.add_enabled(doc.can_redo(), egui::Button::new("Redo")).clicked() {
+                    doc.redo();
+                }
+                let dirty = doc.is_dirty();
+                save = ui
+                    .add_enabled(dirty, egui::Button::new(if dirty { "Save poses *" } else { "Save poses" }))
+                    .on_hover_text(format!("Write {} and put it on the stage", doc.path().display()))
+                    .clicked();
+                revert = ui.add_enabled(dirty, egui::Button::new("Revert")).on_hover_text("Throw away unsaved pose edits").clicked();
+                ui.separator();
+                ui.add(egui::TextEdit::singleline(&mut self.new_pose_name).hint_text("new pose name").desired_width(110.0));
+                if ui.button("New").on_hover_text(format!("A new shared pose, starting as a copy of {pose}")).clicked() {
+                    let name = self.new_pose_name.trim().to_owned();
+                    if doc.new_pose(&name, Some(&pose)) {
+                        self.puppet_view.pose = name;
+                        self.new_pose_name.clear();
+                    } else {
+                        self.session.status = format!("'{name}': taken, or not a name (letters, digits, _)");
+                    }
+                }
+                if ui
+                    .add_enabled(pose != "stand", egui::Button::new("Delete"))
+                    .on_hover_text(format!("Remove {pose} (and every family's correction of it); Undo brings it back"))
+                    .clicked()
+                {
+                    doc.delete_pose(&pose);
+                    self.puppet_view.pose = "stand".into();
+                }
+            });
+        }
+        if save {
+            self.save_poses();
+        }
+        if revert {
+            self.pose_doc = None;
+            return;
+        }
+        let pose = self.puppet_view.pose.clone();
+        let scope = self.pose_scope;
+        let Some(doc) = self.pose_doc.as_mut() else { return };
+        let rows = match self.session.puppet() {
+            Ok(puppet) => pose_edit::rows(puppet, &|stem| doc.pair_is_split(scope, family, &pose, stem)),
+            Err(why) => {
+                ui.weak(format!("No puppet yet: {why}"));
+                return;
+            }
+        };
+        // A row that split or joined: follow it to its new key.
+        if let Some(key) = self.pose_row.clone().filter(|k| !rows.iter().any(|r| &r.key == k)) {
+            let stem = key.strip_suffix("_l").or_else(|| key.strip_suffix("_r")).unwrap_or(&key).to_owned();
+            self.pose_row = [stem.clone(), format!("{stem}_l")].into_iter().find(|k| rows.iter().any(|r| &r.key == k));
+        }
+        ui.separator();
+        ui.horizontal_wrapped(|ui| {
+            for row in &rows {
+                let (_, origin) = doc.value(scope, family, &pose, &row.key);
+                let text = egui::RichText::new(&row.key);
+                let text = match origin {
+                    Origin::Here => text.strong(),
+                    Origin::Shared => text.italics(),
+                    Origin::Rest => text.weak(),
+                };
+                let hover = match origin {
+                    Origin::Here => "Set in this pose",
+                    Origin::Shared => "From the shared pose",
+                    Origin::Rest => "At rest (not named)",
+                };
+                if ui.selectable_label(self.pose_row.as_ref() == Some(&row.key), text).on_hover_text(hover).clicked() {
+                    self.pose_row = Some(row.key.clone());
+                }
+            }
+        });
+        let Some(row) = rows.iter().find(|r| Some(&r.key) == self.pose_row.as_ref()) else {
+            ui.weak("Pick a bone: click it on the puppet, or its name above.");
+            return;
+        };
+        let (mut entry, origin) = doc.value(scope, family, &pose, &row.key);
+        if row.key != ROOT {
+            let n = row.bends.max(entry.bend.len());
+            entry.bend.resize(n, 0.0);
+        }
+        let before = entry.clone();
+        let names = if row.key == ROOT {
+            ["pitch (x)", "turn (y)", "roll (z)"]
+        } else {
+            ["swing (x)", "twist (y)", "spread (z)"]
+        };
+        ui.strong(match row.pair {
+            Some(PairState::Joined) => format!("{} (both sides, mirrored)", row.key),
+            _ => row.key.clone(),
+        });
+        for (k, name) in names.iter().enumerate() {
+            ui.add(egui::Slider::new(&mut entry.rot[k], -180.0..=180.0).step_by(0.5).text(*name));
+        }
+        for (i, b) in entry.bend.iter_mut().enumerate() {
+            ui.add(egui::Slider::new(b, -180.0..=180.0).step_by(0.5).text(format!("bend {}", i + 1)));
+        }
+        if entry != before {
+            doc.set(scope, family, &pose, &row.key, Some(&entry));
+        }
+        ui.horizontal_wrapped(|ui| {
+            match origin {
+                Origin::Here => ui.weak("set in this section"),
+                Origin::Shared => ui.weak(format!("the shared value; moving it makes a {family} correction")),
+                Origin::Rest => ui.weak("at rest (not in the file)"),
+            };
+            if ui.add_enabled(origin == Origin::Here, egui::Button::new("Clear")).on_hover_text("Remove this key: back to the shared value or rest").clicked() {
+                doc.set(scope, family, &pose, &row.key, None);
+            }
+            match row.pair {
+                Some(PairState::Joined) => {
+                    if ui.button("Split sides").on_hover_text("Write left and right separately, to pose them differently").clicked() {
+                        doc.split_pair(scope, family, &pose, &row.key);
+                        self.pose_row = Some(format!("{}_l", row.key));
+                    }
+                }
+                Some(PairState::Split) => {
+                    let stem = row.key.trim_end_matches("_l").trim_end_matches("_r").to_owned();
+                    if ui.button("Join sides").on_hover_text("One mirrored entry again (the left side's angles win)").clicked() {
+                        doc.join_pair(scope, family, &pose, &stem);
+                        self.pose_row = Some(stem);
+                    }
+                }
+                None => {}
+            }
+        });
+        if row.key != ROOT {
+            ui.weak("A hanging limb: +swing takes it back, -swing forward; +spread lifts a left limb out. Knees bend +, elbows -.");
+        }
+    }
+
+    fn save_poses(&mut self) {
+        let Some(doc) = self.pose_doc.as_mut() else { return };
+        self.session.status = match doc.save() {
+            Ok(path) => {
+                let path = path.display().to_string();
+                self.puppet_view.reload_poses();
+                match self.session.install_poses() {
+                    Ok(_) => format!("Poses saved to {path} and put on the stage (Publish ships them)"),
+                    Err(e) => format!("Poses saved to {path}; {e}"),
+                }
+            }
+            Err(e) => format!("Poses not saved: {e}"),
+        };
+    }
+
+    fn pose_quit_prompt(&mut self, ctx: &egui::Context) {
+        if self.pose_quit != PoseQuit::Asking {
+            return;
+        }
+        let body_type = self.pose_doc.as_ref().map(|d| d.body_type().to_owned()).unwrap_or_default();
+        let mut answer = None;
+        let modal = egui::Modal::new(egui::Id::new("pose_discard")).show(ctx, |ui| {
+            ui.set_width(340.0);
+            ui.heading("Unsaved poses");
+            ui.label(format!("The {body_type} poses have unsaved edits. Save them before closing?"));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    answer = Some(true);
+                }
+                if ui.button("Discard").clicked() {
+                    answer = Some(false);
+                }
+                if ui.button("Cancel").clicked() {
+                    self.pose_quit = PoseQuit::No;
+                }
+            });
+        });
+        if modal.should_close() && answer.is_none() {
+            self.pose_quit = PoseQuit::No;
+        }
+        if let Some(save) = answer {
+            if save {
+                self.save_poses();
+            }
+            if !save || !self.poses_dirty() {
+                self.pose_quit = PoseQuit::Approved;
+                // Carry on closing (the rig's own prompt, if it has one).
+                self.approve_quit();
+            } else {
+                self.pose_quit = PoseQuit::No;
+            }
         }
     }
 

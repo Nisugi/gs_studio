@@ -6,6 +6,7 @@
 
 pub mod depth;
 pub mod palette;
+pub mod pose_edit;
 pub mod prompt;
 pub mod puppet_view;
 pub mod session;

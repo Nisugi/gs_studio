@@ -122,9 +122,18 @@ pub struct StudioApp {
     room: StudioRoomContext,
     started: std::time::Instant,
     exit_after_secs: Option<f32>,
+    /// `GS_STUDIO_SHOT`: save a frame here, then close.
+    shot: Option<Shot>,
     /// "Import from VellumFE...": the open confirmation, and the last
     /// report. See [`Import`].
     import: Import,
+}
+
+/// A dev screenshot (`GS_STUDIO_SHOT`): frames drawn, and asked for yet.
+struct Shot {
+    path: PathBuf,
+    frames: u32,
+    requested: bool,
 }
 
 /// The VellumFE import: a read-only plan, shown and confirmed before a
@@ -141,9 +150,13 @@ struct Import {
 impl StudioApp {
     pub fn new(startup: Startup) -> StudioApp {
         let Startup { data, pool, publish, chart, settings_note, tab, room, exit_after_secs } = startup;
+        let mut rigs = RigTool::open(&data.path, publish.clone(), Some(pool.path.clone()));
+        if let (Ok(tool), Ok(spec)) = (&mut rigs, std::env::var("GS_STUDIO_POSE_EDIT")) {
+            tool.open_pose_editor(&spec);
+        }
         StudioApp {
             data_edit: data.path.display().to_string(),
-            rigs: RigTool::open(&data.path, publish.clone(), Some(pool.path.clone())),
+            rigs,
             data,
             pool_edit: pool.path.display().to_string(),
             pool,
@@ -159,6 +172,7 @@ impl StudioApp {
             room,
             started: std::time::Instant::now(),
             exit_after_secs,
+            shot: std::env::var_os("GS_STUDIO_SHOT").map(|p| Shot { path: PathBuf::from(p), frames: 0, requested: false }),
             import: Import::default(),
         }
     }
@@ -502,6 +516,30 @@ impl StudioApp {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
             }
+        }
+
+        if let Some(shot) = &mut self.shot {
+            shot.frames += 1;
+            if !shot.requested && shot.frames >= 30 {
+                shot.requested = true;
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            }
+            let image = ui.ctx().input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Screenshot { image, .. } => Some(image.clone()),
+                    _ => None,
+                })
+            });
+            if let Some(image) = image {
+                let [w, h] = image.size;
+                let rgba: Vec<u8> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                match crate::editor::texture::write_png(&shot.path, w, h, &rgba) {
+                    Ok(()) => eprintln!("gs-studio: wrote {} ({w}x{h})", shot.path.display()),
+                    Err(e) => eprintln!("gs-studio: could not write {}: {e}", shot.path.display()),
+                }
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            ui.ctx().request_repaint();
         }
 
         if let Some(secs) = self.exit_after_secs {

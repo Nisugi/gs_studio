@@ -207,6 +207,26 @@ refused with a note. Save installs it beside the puppet as
 `<pool>/global/puppets/<family>.texture.png` and Publish ships it to
 `puppets/`; the stage's puppets wear it.
 
+**Edit pose** (in the 3D panel's top row) opens the pose editor under the
+puppet, on the pose in the list (*rest* becomes `stand`). Click a bone on
+the puppet, or its name in the row list, and its sliders appear: *swing
+(x)*, *twist (y)*, *spread (z)* and one *bend* per inner joint (for `root`:
+pitch, turn, roll), in half degrees; the picked bone is outlined in yellow.
+A mirror pair is one row (`leg`, both sides mirrored) until *Split sides*
+writes `leg_l` / `leg_r` separately; *Join sides* folds them back (the left
+wins). *edits every <body type>* writes the shared `[pose.<name>]`;
+*<family> only* writes that family's sparse correction
+`[family.<family>.<name>]`: rows it does not name show the shared value in
+italics, and moving one adds it to the correction. *Clear* removes a key,
+*Clear correction* the family's whole section. Row names are bold when set
+in the section being edited, dim when at rest. *New* makes a shared pose
+starting as a copy of the current one; *Delete* removes a pose and every
+family's correction of it. Undo / Redo (and Ctrl+Z / Ctrl+Y while the editor
+is open) step through pose edits, a slider drag being one step. The file is
+edited in place -- comments, order and line endings kept -- and *Save poses*
+writes `<data>/poses/<body_type>.toml` and puts it on the stage; Publish
+ships it. Closing the window with unsaved poses asks first.
+
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:
 
