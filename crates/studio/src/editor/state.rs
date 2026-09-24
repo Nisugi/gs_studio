@@ -124,15 +124,44 @@ impl Editor {
         self.rig.joints.contains_key(joint)
     }
 
+    /// Deliberately left out of this family (see [`Rig::unused`]).
+    pub fn is_unused(&self, joint: &str) -> bool {
+        self.rig.unused.contains(joint)
+    }
+
+    /// Still to be placed: not placed, and not marked unused.
+    fn wants_placing(&self, joint: &str) -> bool {
+        !self.is_placed(joint) && !self.is_unused(joint)
+    }
+
     pub(super) fn first_unplaced(&self) -> Option<String> {
-        self.joint_order().into_iter().find(|j| !self.is_placed(j))
+        self.joint_order().into_iter().find(|j| self.wants_placing(j))
+    }
+
+    /// Mark a joint as one this family does not have (it is un-placed and the
+    /// click-through skips it), or bring it back. One undo step.
+    pub fn set_unused(&mut self, joint: &str, unused: bool) {
+        if self.is_unused(joint) == unused || !self.rig.joint_order.iter().any(|j| j == joint) {
+            return;
+        }
+        let rig = self.edit(None);
+        if unused {
+            rig.unused.insert(joint.to_owned());
+            rig.joints.remove(joint);
+        } else {
+            rig.unused.remove(joint);
+        }
+        if self.selected.as_deref() == Some(joint) {
+            self.selected = None;
+        }
+        self.current = if unused { self.first_unplaced() } else { Some(joint.to_owned()) };
     }
 
     /// The next unplaced joint after `from` in click order, wrapping round.
     fn next_unplaced_after(&self, from: &str) -> Option<String> {
         let order = self.joint_order();
         let start = order.iter().position(|j| j == from).map_or(0, |i| i + 1);
-        (0..order.len()).map(|k| &order[(start + k) % order.len()]).find(|j| !self.is_placed(j)).cloned()
+        (0..order.len()).map(|k| &order[(start + k) % order.len()]).find(|j| self.wants_placing(j)).cloned()
     }
 
     /// Clicking a joint in the list: it becomes current (and selected, if it
@@ -159,6 +188,8 @@ impl Editor {
             .filter(|m| self.mirror_applies() && !self.is_placed(m) && self.joint_order().contains(m));
         let rig = self.edit(None);
         rig.joints.insert(joint.clone(), world);
+        // Placing a joint says the family has it after all.
+        rig.unused.remove(&joint);
         let mut placed = vec![joint.clone()];
         if let Some(twin) = twin {
             rig.joints.insert(twin.clone(), [-world[0], world[1]]);
@@ -454,6 +485,51 @@ mod tests {
         assert_eq!(e.selected(), Some("crown"));
         e.undo();
         assert!(!e.can_undo());
+    }
+
+    /// A joint the family does not have: skipped by the click-through,
+    /// un-placed when marked, un-marked by placing it, carried through a
+    /// rename and dropped with a delete; one undo step each.
+    #[test]
+    fn unused_joints_are_skipped_and_follow_edits() {
+        let mut e = quadruped();
+        assert_eq!(e.current(), Some("nose"));
+        e.place_current([1.0, 2.0]);
+        let next = e.current().unwrap().to_owned();
+        e.place_current([0.5, 2.5]);
+        assert!(e.is_placed(&next));
+        // Marking a placed joint unused un-places it and moves the cursor on.
+        e.set_unused(&next, true);
+        assert!(e.is_unused(&next) && !e.is_placed(&next));
+        assert_ne!(e.current(), Some(next.as_str()));
+        // The click-through never lands on it.
+        let order = e.joint_order();
+        for _ in 0..order.len() {
+            let Some(c) = e.current().map(str::to_owned) else { break };
+            assert_ne!(c, next);
+            e.place_current([0.0, 1.0]);
+        }
+        assert_eq!(e.current(), None, "every joint but the unused one is placed");
+        // Undo brings it back as placed.
+        e.undo();
+        e.undo();
+        let mut steps = 0;
+        while e.is_unused(&next) {
+            e.undo();
+            steps += 1;
+            assert!(steps < 100);
+        }
+        assert!(e.is_placed(&next));
+        // Placing it clears the mark; rename and delete keep the set in step.
+        e.set_unused("eye_r", true);
+        e.set_current("eye_r");
+        e.place_current([1.0, 2.6]);
+        assert!(!e.is_unused("eye_r"));
+        e.set_unused("tail_tip", true);
+        e.rename_joint("tail_tip", "tail_end", false).unwrap();
+        assert!(e.is_unused("tail_end") && !e.is_unused("tail_tip"));
+        e.delete_joint("tail_end");
+        assert!(e.rig().unused.is_empty());
     }
 
     #[test]

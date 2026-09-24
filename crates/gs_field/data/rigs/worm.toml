@@ -6,8 +6,7 @@ px_per_ft = 35.5062
 aspect = 1.8286
 span = 0.6563
 ground_frac = 1.0037
-eye_radius_ft = 0.0862
-parts = ["head", "rightEye", "neck", "chest", "abdomen", "back"]
+parts = ["head", "neck", "chest", "abdomen", "back"]
 
 [map]
 width = 512
@@ -18,9 +17,6 @@ feet = [0.5, 1.0037]
 head = [0.8675, 0.1287]
 mouth = [0.9646, 0.116]
 saddle = [0.7358, 0.6233]
-
-[eyes]
-rightEye = [0.9369, 0.0653]
 
 [[bones]]
 index = 1

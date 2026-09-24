@@ -5,18 +5,6 @@ view = "side"
 height = 7.8861
 groups = ["trunk", "head"]
 
-[[eyes]]
-segment = 4
-pos = [0.8457, 7.4, 6.3]
-normal = [0.8688, 0.494, -0.0353]
-radius = 0.1312
-
-[[eyes]]
-segment = 4
-pos = [-0.8457, 7.4, 6.3]
-normal = [-0.8688, 0.494, -0.0353]
-radius = 0.1312
-
 [[segments]]
 name = "mid_body.0"
 bone = "mid_body"

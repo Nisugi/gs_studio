@@ -5,6 +5,8 @@ view = "side"
 ref_ft = 2.0
 axis = "diameter"
 joint_order = ["snout", "skull_base", "neck_end", "chest_end", "belly_mid", "belly_end", "back_1", "back_2", "tail_mid", "tail_tip", "eye_r"]
+# The worm art has no eye.
+unused = ["eye_r"]
 
 [anchors]
 head = "skull_base"
@@ -22,7 +24,6 @@ back_1 = [-1.5, 0.95]
 back_2 = [-3.5, 0.95]
 tail_mid = [-5.5, 0.85]
 tail_tip = [-6.9, 0.55]
-eye_r = [6.3, 7.4]
 
 [depth]
 back_1 = -1.2

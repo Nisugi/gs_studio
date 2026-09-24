@@ -74,6 +74,15 @@ const BURIED_CALIBRE: f32 = 1.45;
 /// its inert range rather than loosened for no measured gain.
 pub(crate) const LIMB_DEPTH_MAX: f32 = 4.0;
 pub(crate) const LIMB_DEPTH_MIN: f32 = 0.5;
+/// A girdle (a trunk bone lying across the body, like a clavicle) is never
+/// thicker, half-width, than this share of its own length. Healthy rigs
+/// measure 0.4-0.8; a broad flat-topped torso read the whole chest into it
+/// (a golem's 2.15 ft clavicle came out 2.9 ft thick).
+const GIRDLE_THICKNESS: f32 = 0.8;
+/// A chain counts as visibly bent at rest (so its own plane can give a knee
+/// its hinge) when the sine of the angle between two consecutive segments is
+/// at least this: about 17 degrees.
+const CHAIN_BEND_MIN: f32 = 0.3;
 /// A trunk bone counts as present on a row this far past its end joints
 /// (a torso's bulk extends a little beyond the joints that bound it).
 const TRUNK_ROW_MARGIN_FT: f32 = 0.1;
@@ -672,10 +681,41 @@ impl Puppet {
             // the bone; for a bone that itself points sideways, the axis that
             // folds its tip DOWN.
             let x = [1.0, 0.0, 0.0];
-            let hinge = if dot(x, a).abs() < 0.85 {
+            let axis_rule = if dot(x, a).abs() < 0.85 {
                 norm_or(sub(x, scale(a, dot(x, a))), x)
             } else {
                 norm_or(cross([0.0, 1.0, 0.0], a), [0.0, 0.0, 1.0])
+            };
+            // A limb that splays OUT from the body (a spider's leg, a lizard's
+            // sprawl) is bent at rest in its own out-and-down plane, and the
+            // left-right axis lies nearly IN that plane: bending about it only
+            // swings the tip fore and aft, so the knee can never fold. Where
+            // the chain's own bend is clear and the rule's axis is far from
+            // its normal, the knee hinges about that normal instead -- signed
+            // to agree with the rule, so a positive bend still folds the same
+            // way. Legs under a body bend about (nearly) the left-right axis
+            // already and keep it exactly.
+            let chain_normal = (r.k > 0 && kind != Kind::Trunk)
+                .then(|| raws.iter().find(|o| o.bone == r.bone && o.chain == r.chain && o.k + 1 == r.k))
+                .flatten()
+                .map(|prev| norm_or(sub(prev.tail, prev.head), a))
+                // Only a limb that SPLAYS: its upper segment reaches out
+                // sideways at least as far as it runs up or down. An arm or
+                // leg hanging under a body keeps the left-right knee even when
+                // it angles out a little -- an elbow flexes forward.
+                .filter(|up| up[0].abs() >= up[1].abs())
+                .map(|up| cross(up, a))
+                .filter(|n| len(*n) > CHAIN_BEND_MIN)
+                .map(|n| norm_or(n, axis_rule));
+            let hinge = match chain_normal {
+                Some(n) if dot(n, axis_rule).abs() < 0.7 => {
+                    if dot(n, axis_rule) < 0.0 || (dot(n, axis_rule) == 0.0 && n[2] < 0.0) {
+                        scale(n, -1.0)
+                    } else {
+                        n
+                    }
+                }
+                _ => axis_rule,
             };
 
             let group_key = if kind == Kind::Trunk {
@@ -849,6 +889,26 @@ fn measure_segment<'m>(
         })
         .collect();
 
+    // A trunk bone lying ACROSS the body with more trunk hanging off it (a
+    // clavicle, with torso_upper and the neck meeting at neck_base) is sliced
+    // vertically, and on a broad, flat-topped torso every slice runs the
+    // whole chest height -- which the bones hanging off it already own. The
+    // clip above cannot catch it (those bones cross at right angles), so the
+    // girdle's thickness is capped by its own length instead (below).
+    let girdle = kind == Kind::Trunk
+        && u[1].abs() < 0.5
+        && raws.iter().zip(kinds).enumerate().any(|(o, (other, k))| {
+            if o == i || *k != Kind::Trunk {
+                return false;
+            }
+            // Either end of the other bone at one of this bone's joints, its
+            // far end hanging below (a chain may run either way along it).
+            [(other.head, other.tail), (other.tail, other.head)].iter().any(|(near, far)| {
+                let d = flat(view, sub(*far, *near));
+                let dl = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                dl > 0.05 && d[1] < -0.7 * dl && [r.head, r.tail].iter().any(|j| len(sub(*j, *near)) < 0.05)
+            })
+        });
     let mut off: Vec<Option<f32>> = Vec::with_capacity(n);
     let mut half: Vec<Option<f32>> = Vec::with_capacity(n);
     let mut unsplit = vec![0.0f32; n];
@@ -940,6 +1000,9 @@ fn measure_segment<'m>(
         e.iter_mut().for_each(|x| *x = x.max(m * 0.6).min(m * 1.4));
         e
     });
+    if girdle {
+        w.iter_mut().for_each(|x| *x = x.min(GIRDLE_THICKNESS * length));
+    }
     // A limb thickens toward its root, but only so far. For a segment that
     // lost most of its stations to the trunk, bound the result by what the
     // chain measures where it IS out in the open -- otherwise the leg simply

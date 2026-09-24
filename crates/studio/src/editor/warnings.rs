@@ -50,7 +50,10 @@ pub fn warnings(rig: &Rig, baked: &Baked, mask: &Mask) -> Vec<String> {
                 bone.joints.len()
             ));
         } else if rig.bone_points(bone).len() < 2 {
-            unplaced.push(bone.name.as_str());
+            // Short only because of joints the family does not have: by design.
+            if bone.joints.iter().any(|j| !rig.joints.contains_key(j) && !rig.unused.contains(j)) {
+                unplaced.push(bone.name.as_str());
+            }
         } else if bone.part.is_none() {
             out.push(format!("bone '{}' has no part, so it labels no pixels", bone.name));
         } else if baked.bone_pixels.get(i).copied().unwrap_or(0) == 0 {

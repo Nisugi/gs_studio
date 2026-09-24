@@ -306,7 +306,7 @@ impl Session {
     /// Save would write. Err says why there is none yet.
     pub fn puppet(&mut self) -> &Result<Puppet, String> {
         let revision = self.editor.revision();
-        if !self.puppet.as_ref().is_some_and(|(at, _)| *at == revision) {
+        if self.puppet.as_ref().is_none_or(|(at, _)| *at != revision) {
             self.ensure_other_mask();
             let own = self.outline().map(|o| o.outline());
             if let Some(outline) = own {

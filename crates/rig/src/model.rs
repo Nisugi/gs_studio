@@ -113,6 +113,11 @@ pub struct Rig {
     /// Empty in files from before joints were editable ([`Rig::migrate`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub joint_order: Vec<String>,
+    /// Template joints this family deliberately does not have (a worm's eye,
+    /// a spider's missing leg pair). Never placed; editors and checks do not
+    /// ask for them. A bone left short by them is skipped like any other.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub unused: BTreeSet<String>,
     pub anchors: Anchors,
     #[serde(default, skip_serializing_if = "Eyes::is_empty")]
     pub eyes: Eyes,
@@ -484,4 +489,19 @@ fn ser_f32_map<S: Serializer>(v: &BTreeMap<String, f32>, s: S) -> Result<S::Ok, 
 
 fn ser_joints<S: Serializer>(v: &BTreeMap<String, Pt>, s: S) -> Result<S::Ok, S::Error> {
     s.collect_map(v.iter().map(|(k, p)| (k, tidy_pt(*p))))
+}
+
+#[cfg(test)]
+mod unused_tests {
+    use super::*;
+
+    #[test]
+    fn unused_joints_round_trip_and_are_left_out_when_empty() {
+        let mut rig = crate::template("serpentine").unwrap().new_rig("worm", View::Side, 2.0, "diameter");
+        assert!(!rig.to_toml().unwrap().contains("unused"));
+        rig.unused.insert("eye_r".into());
+        let text = rig.to_toml().unwrap();
+        assert!(text.contains("unused = [\"eye_r\"]"), "{text}");
+        assert_eq!(Rig::from_toml(&text).unwrap().unused, rig.unused);
+    }
 }

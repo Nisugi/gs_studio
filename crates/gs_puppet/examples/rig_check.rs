@@ -180,7 +180,11 @@ fn check(family: &str, outlines: &Outlines, data: &Path, out: &Path) {
     for issue in rig.hierarchy_issues() {
         problems.push(format!("hierarchy: {issue:?}"));
     }
-    let unplaced: Vec<&String> = rig.joint_order.iter().filter(|j| !rig.joints.contains_key(*j)).collect();
+    let unplaced: Vec<&String> =
+        rig.joint_order.iter().filter(|j| !rig.joints.contains_key(*j) && !rig.unused.contains(*j)).collect();
+    if !rig.unused.is_empty() {
+        println!("  unused (by design): {:?}", rig.unused);
+    }
     if !unplaced.is_empty() {
         problems.push(format!("unplaced joints: {unplaced:?}"));
     }

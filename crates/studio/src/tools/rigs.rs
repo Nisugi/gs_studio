@@ -510,6 +510,16 @@ impl RigTool {
             if ui.button("Down").on_hover_text("Later in the click order").clicked() {
                 editor.move_joint(&joint, false);
             }
+            let unused = editor.is_unused(&joint);
+            if ui
+                .selectable_label(unused, "Unused")
+                .on_hover_text(
+                    "This family does not have this joint (a worm's eye, a missing leg pair): it is un-placed,                      skipped by the click-through and not warned about. Click again to bring it back.",
+                )
+                .clicked()
+            {
+                editor.set_unused(&joint, !unused);
+            }
         });
         // Above the list, so the list can take every pixel that is left.
         match &current {
@@ -524,7 +534,8 @@ impl RigTool {
             for joint in &order {
                 let is_current = current.as_deref() == Some(joint);
                 let placed = editor.is_placed(joint);
-                let mut text = egui::RichText::new(joint);
+                let label = if editor.is_unused(joint) { format!("{joint}  (unused)") } else { joint.clone() };
+                let mut text = egui::RichText::new(label);
                 if is_current {
                     text = text.strong();
                 } else if !placed {

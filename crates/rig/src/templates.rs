@@ -70,6 +70,7 @@ impl Template {
             version: RIG_VERSION,
             eye_radius_ft: None,
             joint_order: self.joints.clone(),
+            unused: Default::default(),
             family: family.to_owned(),
             body_type: self.name.to_owned(),
             view,

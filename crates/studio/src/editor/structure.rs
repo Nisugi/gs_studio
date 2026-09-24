@@ -76,6 +76,9 @@ pub fn check_name(kind: &str, name: &str) -> Result<String, String> {
 
 /// Rename a joint everywhere a rig names it.
 fn rename_joint_in(rig: &mut Rig, old: &str, new: &str) {
+    if rig.unused.remove(old) {
+        rig.unused.insert(new.to_owned());
+    }
     for j in rig.joint_order.iter_mut().filter(|j| *j == old) {
         *j = new.to_owned();
     }
@@ -221,6 +224,7 @@ impl Editor {
         let rig = self.edit(None);
         rig.joint_order.remove(at);
         rig.joints.remove(joint);
+        rig.unused.remove(joint);
         // No joint, no depth override for it.
         rig.depth.remove(joint);
         for bone in &mut rig.bones {
