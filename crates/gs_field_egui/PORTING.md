@@ -545,5 +545,11 @@ mesh), in depth order among the cards: `Prepared::new` in the first block
 region, and the loop-top and front regions now call
 `field_occluders::paint_behind`, which draws occluders and lamps merged far
 to near (`field_lights::lamps_due` / `paint_lamp` became `pub(crate)`). Still
-sixteen regions. Occluders also cover a card's name and bars when it stands
-behind one. `set_show_occluders` tints them (a host setting).
+sixteen regions. `set_show_occluders` tints them (a host setting).
+
+Later: a card's labels (HP bar, name, badges, icons, stun stars, target
+marker) stay readable over occluders -- a new region before the HP bar
+rebinds `painter` to `field_occluders::label_painter`, which, only when the
+scene has occluders, is a sublayer drawn directly above the field's layer
+(`Context::set_sublayer`). Without occluders it is the field painter itself,
+so VellumFE's look is untouched. Seventeen regions.

@@ -394,7 +394,8 @@ across -- and differ only in the right-hand panel:
   mask* writes a transparent one the backdrop's size, to paint as a layer
   over it; any size works). Each connected blob is one occluder, standing
   where its lowest pixel meets the floor: creatures behind that depth are
-  hidden by it, nearer ones stand in front, lamps too. *Reload mask* after
+  hidden by it (their names and bars stay on top), nearer ones stand in
+  front, lamps too. *Reload mask* after
   painting; *Show* tints them red (`gs_field_egui::field_occluders`).
 - **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
   Sleet, Blood rain or Fog, with Amount and Wind -- a preview of what the

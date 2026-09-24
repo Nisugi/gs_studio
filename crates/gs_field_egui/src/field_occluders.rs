@@ -17,7 +17,8 @@
 //!
 //! Hooks in `creature_field.rs` (the marked regions that also draw lamps):
 //! [`Prepared::new`] after the backdrop, [`paint_behind`] before each card
-//! or prop and after the last.
+//! or prop and after the last, and [`label_painter`] for the part of a card
+//! that labels it.
 
 use std::cell::RefCell;
 
@@ -159,6 +160,23 @@ thread_local! {
     static DRAWN: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
     /// Show every occluder tinted (the Studio's check).
     static SHOW: RefCell<bool> = const { RefCell::new(false) };
+    /// This frame's scene has occluders (card labels then go on top).
+    static ANY: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Where a card paints its labels -- HP bar, name, status badges and icons,
+/// stun stars, target marker. When the scene has occluders: a layer drawn
+/// directly above the field's, so an occluder never hides who is behind it
+/// (labels then also sit above nearer creatures' bodies). Otherwise the
+/// field's own painter, exactly as VellumFE draws.
+pub fn label_painter(painter: &egui::Painter) -> egui::Painter {
+    if !ANY.with(|a| *a.borrow()) {
+        return painter.clone();
+    }
+    let parent = painter.layer_id();
+    let layer = egui::LayerId::new(parent.order, parent.id.with("gs_field_egui::card_labels"));
+    painter.ctx().set_sublayer(parent, layer);
+    painter.clone().with_layer_id(layer)
 }
 
 fn show_id() -> egui::Id {
@@ -183,6 +201,7 @@ impl Prepared {
         field: &gs_field::solver::CreatureField,
     ) -> Option<Prepared> {
         DRAWN.with(|d| d.borrow_mut().clear());
+        ANY.with(|a| *a.borrow_mut() = false);
         SHOW.with(|s| *s.borrow_mut() = ctx.data(|d| d.get_temp::<bool>(show_id())).unwrap_or(false));
         let bg = scene?.background.as_deref()?;
         let cache = art_cache?;
@@ -209,6 +228,7 @@ impl Prepared {
             })
             .collect();
         DRAWN.with(|d| d.borrow_mut().resize(blobs.len(), false));
+        ANY.with(|a| *a.borrow_mut() = !blobs.is_empty());
         Some(Prepared { texture: texture.id(), blobs })
     }
 

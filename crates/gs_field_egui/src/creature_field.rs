@@ -844,6 +844,11 @@ fn paint_creature_card(
         );
     }
 
+// >>>doll
+    // Everything from here on labels the card: over the scene's occluders.
+    let labels = crate::field_occluders::label_painter(painter);
+    let painter = &labels;
+// <<<doll
     // HP bar under the card, when the extended feed reports health
     // (bridge-fed). Estimated maxes render dimmed.
     let mut label_y = card.bottom() + 2.0;
