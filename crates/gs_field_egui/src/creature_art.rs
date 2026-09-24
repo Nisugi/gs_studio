@@ -280,6 +280,7 @@ impl CreatureArtCache {
                     *entry = Some(tex);
                 }
             }
+            Slot::Worn(_) => {}
         }
     }
 

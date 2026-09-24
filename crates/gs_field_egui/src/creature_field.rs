@@ -557,6 +557,9 @@ fn paint_creature_card(
     // A host may ask for the puppet over the sprite (creature_puppet.rs).
     let active_art = active_art
         .filter(|_| !crate::creature_puppet::is_forced_puppet(painter.ctx(), &creature.id));
+    // Lighting: the layers drawn next are this creature's (its frame for
+    // shared overlays, its corpse grey for every layer).
+    crate::creature_light::set_wearer(&token, dead);
 // <<<doll
 
     // Sprite geometry before the shadow (the shadow needs the drawn
@@ -984,7 +987,7 @@ fn paint_card_overlays(
         } else {
             overlay.image.clone()
         };
-        let Some(texture) = cache.overlays.get(&image).cloned().flatten() else {
+        let Some(texture) = cache.overlays.get(&image).cloned().flatten()/* >>>doll */ .map(|t| crate::creature_light::worn(cache, &image, t, art, overlay.anchor.as_deref(), matches!(overlay.space, OverlaySpace::Quad))) /* <<<doll */  else {
             continue;
         };
         let anim = overlay.animate.as_ref();
@@ -1023,7 +1026,7 @@ fn paint_card_overlays(
                     }
                     _ => 255,
                 };
-                painter.image(texture.id(), rect, uv, Color32::from_white_alpha(alpha));
+                painter.image(texture.id(), rect, uv, Color32::from_white_alpha(alpha)/* >>>doll */ * crate::creature_light::wearer_tint() /* <<<doll */ );
             }
             OverlaySpace::Screen => {
                 let pt = anchor_pt(overlay.anchor.as_deref().unwrap_or("head"));
@@ -1133,7 +1136,7 @@ fn paint_wound_overlays(
             match authored {
                 // Canvas-matched: full overlay over the drawn base.
                 None => {
-                    painter.image(texture.id(), dest, uv, Color32::WHITE);
+                    painter.image(texture.id(), dest, uv, Color32::WHITE/* >>>doll */ * crate::creature_light::wearer_tint() /* <<<doll */ );
                 }
                 // Artist-cropped sprite: calibrated scale × creature.
                 Some(_) => {
@@ -1148,7 +1151,7 @@ fn paint_wound_overlays(
                         texture.id(),
                         egui::Rect::from_center_size(pt, egui::vec2(w, h)),
                         uv,
-                        Color32::WHITE,
+                        Color32::WHITE/* >>>doll */ * crate::creature_light::wearer_tint() /* <<<doll */ ,
                     );
                 }
             }
@@ -1163,7 +1166,7 @@ fn paint_wound_overlays(
                     .get(image)
                     .cloned()
                     .flatten()
-                    .map(|texture| (image, texture))
+                    /* >>>doll */ .map(|t| crate::creature_light::worn(cache, image, t, art, Some(part.as_str()), true)) /* <<<doll */ .map(|texture| (image, texture))
             })
         };
         match global {
@@ -1178,7 +1181,7 @@ fn paint_wound_overlays(
                     texture.id(),
                     egui::Rect::from_center_size(pt, egui::vec2(w, h)),
                     uv,
-                    Color32::WHITE,
+                    Color32::WHITE/* >>>doll */ * crate::creature_light::wearer_tint() /* <<<doll */ ,
                 );
             }
             None => paint_wound_marker(painter, pt, dest.width(), *rank),

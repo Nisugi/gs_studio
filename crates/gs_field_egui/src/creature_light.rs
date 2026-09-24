@@ -24,10 +24,16 @@
 //! * tier wound art: the wearer's (standing base's value range, the
 //!   wearing art's rows), canvas-matched or anchored as it is drawn;
 //! * shared overlays (manifest part art, `creatures/wounds/`, card
-//!   overlays): the cache cannot know the wearer, so a fixed mid-range
-//!   frame. KNOWN DEVIATION from the request, whose layer rules want the
-//!   wearer's frame; it shows most on pale overlays (web).
+//!   overlays): the WEARER's frame. The renderer names the creature it is
+//!   drawing ([`set_wearer`], from a marked region in `creature_field.rs`)
+//!   and looks each shared overlay up through [`worn`], which returns that
+//!   wearer's lit copy -- baked on first use; until it arrives, the copy lit
+//!   with a fixed mid-range frame.
+//!
+//! [`wearer_tint`] is the request's dead-tint fix: a corpse's wounds and
+//! quad overlays take the grey its body is drawn with.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{channel, Receiver};
@@ -65,6 +71,9 @@ pub enum Slot {
     Overlay(String),
     Scenery(String),
     Backdrop(String),
+    /// A shared overlay lit for one wearer (see [`worn`]); never swapped
+    /// into the cache, looked up by key.
+    Worn(u64),
 }
 
 /// How a layer is framed (see the module docs).
@@ -81,6 +90,18 @@ pub enum Role {
     /// Shared between creatures.
     Shared,
     Backdrop,
+    /// A shared overlay on one wearer: the wearer's standing value range,
+    /// the drawn art's content rows, the overlay's rows mapped onto them.
+    Worn { standing: Slot, rows: (f32, f32), ymap: YMap },
+}
+
+/// A shared overlay wanted lit for one wearer.
+#[derive(Debug, Clone)]
+struct WornReq {
+    image: String,
+    token: String,
+    rows: (f32, f32),
+    ymap: YMap,
 }
 
 struct Layer {
@@ -115,9 +136,12 @@ struct Plan {
     keyframes: Vec<((LightEnv, vellum_light::Derived), f32)>,
 }
 
+/// One baked layer: slot, pixels, size, texture name.
+type Baked = (Slot, Vec<u8>, usize, usize, String);
+
 struct Job {
     key: u64,
-    rx: Receiver<Vec<(Slot, Vec<u8>)>>,
+    rx: Receiver<Vec<Baked>>,
 }
 
 /// Lighting state, one per art cache.
@@ -135,6 +159,11 @@ pub struct LightState {
     /// Bumped whenever the lit set changes; puppets key on it.
     generation: u64,
     current: Option<Arc<ResolvedLight>>,
+    /// Shared overlays lit per wearer, for the plan `worn_for`.
+    worn: HashMap<u64, egui::TextureHandle>,
+    worn_for: Option<u64>,
+    /// Asked for while painting (the cache is borrowed shared then).
+    pending: std::sync::Mutex<HashMap<u64, WornReq>>,
 }
 
 /// The lights in force, for whoever lights something the cache does not
@@ -161,6 +190,81 @@ impl std::fmt::Debug for LightState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LightState").field("layers", &self.layers.len()).field("applied", &self.applied).finish()
     }
+}
+
+thread_local! {
+    /// The creature being drawn: its art token, and whether it is dead.
+    static WEARER: RefCell<Option<(String, bool)>> = const { RefCell::new(None) };
+}
+
+/// The renderer names the creature whose layers it draws next (a marked
+/// region at the top of `paint_creature_card`).
+pub fn set_wearer(token: &str, dead: bool) {
+    WEARER.with(|w| *w.borrow_mut() = Some((token.to_string(), dead)));
+}
+
+/// The tint every layer of the current creature is drawn with: the body's
+/// corpse grey when dead (the request's bug fix: wounds and overlays used
+/// to stay full-bright on a corpse), else white.
+pub fn wearer_tint() -> egui::Color32 {
+    let dead = WEARER.with(|w| w.borrow().as_ref().is_some_and(|(_, dead)| *dead));
+    if dead {
+        egui::Color32::from_gray(110)
+    } else {
+        egui::Color32::WHITE
+    }
+}
+
+/// A shared overlay's texture for the creature being drawn: lit with that
+/// creature's frame when the lighting is up and the wearer has sprite
+/// art, else `tex` (the shared copy) -- and the wearer's copy is asked for.
+/// `anchor` is the overlay's anchor name (None = stretched over the art's
+/// box).
+pub fn worn(
+    cache: &crate::creature_art::CreatureArtCache,
+    image: &str,
+    tex: egui::TextureHandle,
+    art: &crate::creature_art::CreatureArt,
+    anchor: Option<&str>,
+    quad: bool,
+) -> egui::TextureHandle {
+    let light = &cache.light;
+    if !quad {
+        // Screen-space layers (stun stars) are UI, not surfaces: unlit.
+        return light.layers.get(&Slot::Overlay(image.to_string())).map_or(tex, |l| l.original.clone());
+    }
+    if light.applied.is_none() {
+        return tex;
+    }
+    let Some(token) = WEARER.with(|w| w.borrow().as_ref().map(|(t, _)| t.clone())) else { return tex };
+    let Some(layer) = light.layers.get(&Slot::Overlay(image.to_string())) else { return tex };
+    if !light.layers.contains_key(&Slot::Base(token.clone())) {
+        return tex;
+    }
+    let [art_w, art_h] = art.texture.size();
+    let rows = (art.bbox[1] * art_h as f32, (art.bbox[3] * art_h as f32 - 1.0).max(0.0));
+    let ymap = match anchor {
+        None => YMap::body_wrap(art.bbox[1], art.bbox[3], art_h, layer.px.h),
+        Some(name) => {
+            let fy = art
+                .anchor(name)
+                .or(if name == "head" { Some(art.head) } else { None })
+                .or_else(|| gs_field::skins::default_creature_anchor(name))
+                .map_or(0.5, |a| a[1]);
+            let scale = cache.overlay_scale(image).unwrap_or(1.0);
+            YMap::anchored(fy, art_w, art_h, scale, layer.px.w, layer.px.h)
+        }
+    };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (image, &token, rows.0.to_bits(), rows.1.to_bits(), ymap.offset.to_bits(), ymap.scale.to_bits()).hash(&mut h);
+    let key = h.finish();
+    if let Some(t) = light.worn.get(&key) {
+        return t.clone();
+    }
+    if let Ok(mut p) = light.pending.lock() {
+        p.entry(key).or_insert(WornReq { image: image.to_string(), token, rows, ymap });
+    }
+    tex
 }
 
 fn light_id() -> egui::Id {
@@ -284,12 +388,18 @@ impl LightState {
                             self.lit.clear();
                         }
                         self.applied = Some(key);
-                        for (slot, rgba) in results {
-                            let Some(layer) = self.layers.get(&slot) else { continue };
-                            let image = egui::ColorImage::from_rgba_unmultiplied([layer.px.w, layer.px.h], &rgba);
-                            let tex = ctx.load_texture(format!("{}#light", layer.name), image, egui::TextureOptions::LINEAR);
-                            self.lit.insert(slot.clone());
-                            swaps.push((slot, tex));
+                        for (slot, rgba, w, h, name) in results {
+                            let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
+                            let tex = ctx.load_texture(format!("{name}#light"), image, egui::TextureOptions::LINEAR);
+                            match slot {
+                                Slot::Worn(k) => {
+                                    self.worn.insert(k, tex);
+                                }
+                                slot => {
+                                    self.lit.insert(slot.clone());
+                                    swaps.push((slot, tex));
+                                }
+                            }
                         }
                         self.generation += 1;
                     }
@@ -312,6 +422,10 @@ impl LightState {
             self.current = None;
             return swaps;
         };
+        if self.worn_for != Some(plan.key) {
+            self.worn.clear();
+            self.worn_for = Some(plan.key);
+        }
         if self.current.as_ref().is_none_or(|c| c.key != plan.key) {
             self.current = Some(Arc::new(ResolvedLight { key: plan.key, scene: plan.scene.clone(), keyframes: plan.keyframes.clone() }));
             self.generation += 1;
@@ -325,29 +439,47 @@ impl LightState {
         } else {
             self.layers.keys().cloned().collect()
         };
-        if todo.is_empty() || self.job.is_some() {
+        if self.job.is_some() {
             return swaps;
         }
-        let work: Vec<(Slot, Arc<Px>, Role, Option<Arc<Px>>, Option<Arc<Px>>)> = todo
+        let get = |s: &Slot| self.layers.get(s).map(|l| l.px.clone());
+        let mut work: Vec<(Slot, Arc<Px>, Role, Option<Arc<Px>>, Option<Arc<Px>>, String)> = todo
             .into_iter()
             .filter_map(|slot| {
                 let layer = self.layers.get(&slot)?;
-                let get = |s: &Slot| self.layers.get(s).map(|l| l.px.clone());
                 let (standing, wearer) = match &layer.role {
                     Role::Pose { standing } => (get(standing), None),
                     Role::Wound { standing, wearer, .. } => (get(standing), get(wearer)),
                     _ => (None, None),
                 };
-                Some((slot, layer.px.clone(), layer.role.clone(), standing, wearer))
+                Some((slot, layer.px.clone(), layer.role.clone(), standing, wearer, layer.name.clone()))
             })
             .collect();
+        // Shared overlays asked for per wearer, once their own light is up.
+        if work.is_empty() && self.applied == Some(plan.key) {
+            let pending: Vec<(u64, WornReq)> = self.pending.lock().map(|mut p| p.drain().collect()).unwrap_or_default();
+            for (k, req) in pending {
+                if self.worn.contains_key(&k) {
+                    continue;
+                }
+                let standing = Slot::Base(req.token.clone());
+                let (Some(layer), Some(base)) = (self.layers.get(&Slot::Overlay(req.image.clone())), get(&standing)) else {
+                    continue;
+                };
+                let role = Role::Worn { standing, rows: req.rows, ymap: req.ymap };
+                work.push((Slot::Worn(k), layer.px.clone(), role, Some(base), None, format!("{}@{}", layer.name, req.token)));
+            }
+        }
+        if work.is_empty() {
+            return swaps;
+        }
         let (tx, rx) = channel();
         let key = plan.key;
         let spawned = std::thread::Builder::new().name("creature-light".into()).spawn(move || {
             let lut = Srgb8Lut::new();
-            let out: Vec<(Slot, Vec<u8>)> = work
+            let out: Vec<Baked> = work
                 .into_iter()
-                .map(|(slot, px, role, standing, wearer)| {
+                .map(|(slot, px, role, standing, wearer, name)| {
                     let rgba = match role {
                         Role::Backdrop => bake_backdrop(&plan, &px, &lut),
                         Role::Own => bake_one(&plan, &px, None, None, YMap::IDENTITY, &lut),
@@ -361,8 +493,12 @@ impl LightState {
                             bake_one(&plan, &px, standing.as_deref(), wearer.as_deref(), ymap, &lut)
                         }
                         Role::Shared => bake_shared(&plan, &px, &lut),
+                        Role::Worn { rows, ymap, .. } => {
+                            let base = standing.as_deref().unwrap_or(&px);
+                            bake_rows(&plan, &px, base, rows, ymap, &lut)
+                        }
                     };
-                    (slot, rgba)
+                    (slot, rgba, px.w, px.h, name)
                 })
                 .collect();
             let _ = tx.send(out);
@@ -401,6 +537,25 @@ fn bake_one(plan: &Plan, px: &Px, standing: Option<&Px>, rows: Option<&Px>, ymap
         apply(&mut b, base.w, se, sd, &frame_of(&base.rgba), YMap::IDENTITY, lut);
         frame_of(&b)
     };
+    blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr2, ymap, lut))
+}
+
+/// [`bake_one`] with the active art's content rows given, not measured
+/// (a worn overlay knows the drawn art's box, not its pixels).
+fn bake_rows(plan: &Plan, px: &Px, standing: &Px, rows: (f32, f32), ymap: YMap, lut: &Srgb8Lut) -> Vec<u8> {
+    let frame_of = |range_src: &[u8]| {
+        let (l_lo, l_hi) = LightFrame::value_range(range_src, lut);
+        LightFrame { l_lo, l_hi, y_top: rows.0, y_bot: rows.1 }
+    };
+    let (se, sd) = &plan.scene;
+    let mut lit = px.rgba.clone();
+    apply(&mut lit, px.w, se, sd, &frame_of(&standing.rgba), ymap, lut);
+    if plan.keyframes.is_empty() {
+        return lit;
+    }
+    let mut b = standing.rgba.clone();
+    apply(&mut b, standing.w, se, sd, &frame_of(&standing.rgba), YMap::IDENTITY, lut);
+    let fr2 = frame_of(&b);
     blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr2, ymap, lut))
 }
 
@@ -569,4 +724,59 @@ mod tests {
         }
         assert!(state.current().is_none());
     }
+
+    /// A corpse's layers take its grey; a shared overlay is the shared copy
+    /// until the wearer's own is baked, then that; screen-space overlays
+    /// stay unlit.
+    #[test]
+    fn shared_overlays_are_lit_per_wearer_and_corpses_are_grey() {
+        let ctx = egui::Context::default();
+        let mut cache = crate::creature_art::CreatureArtCache::new(std::path::Path::new("."), "test");
+        let body: Vec<u8> = (0..8 * 16).flat_map(|i| [150, (i * 2) as u8, 70, 255]).collect();
+        let web: Vec<u8> = (0..4 * 4).flat_map(|_| [235, 235, 230, 255]).collect();
+        let (base_tex, web_tex) = (tex(&ctx, "base"), tex(&ctx, "web"));
+        cache.light.register(Slot::Base("bandit".into()), Arc::new(Px { w: 8, h: 16, rgba: body }), base_tex.clone(), Role::Own, "base".into());
+        cache.light.register(Slot::Overlay("status/webbed.png".into()), Arc::new(Px { w: 4, h: 4, rgba: web }), web_tex.clone(), Role::Shared, "web".into());
+        let art = crate::creature_art::CreatureArt {
+            texture: base_tex.clone(),
+            head: [0.5, 0.0],
+            feet: [0.5, 1.0],
+            bbox: [0.0, 0.0, 1.0, 1.0],
+            anchors: Default::default(),
+            footprint: None,
+            size: None,
+            lift: None,
+            alpha_px: 128,
+            extras: Default::default(),
+        };
+
+        set_wearer("bandit", true);
+        assert_eq!(wearer_tint(), egui::Color32::from_gray(110));
+        set_wearer("bandit", false);
+        assert_eq!(wearer_tint(), egui::Color32::WHITE);
+
+        // Unlit: the shared texture, and nothing asked for.
+        assert_eq!(worn(&cache, "status/webbed.png", web_tex.clone(), &art, None, true).id(), web_tex.id());
+
+        cache.light.set_scene(Some(SceneLight::default()), None);
+        cache.light.set_clock(LightClock { game_hour: Some(12.0), strength: 1.0, outdoor_guess: None });
+        for (slot, t) in bake(&mut cache.light, &ctx) {
+            cache.swap_texture(&slot, t);
+        }
+        let first = worn(&cache, "status/webbed.png", web_tex.clone(), &art, None, true);
+        assert_eq!(first.id(), web_tex.id(), "the shared copy until the wearer's arrives");
+        let mut second = first.clone();
+        for _ in 0..500 {
+            assert!(cache.light.update(&ctx).is_empty(), "a worn copy is never swapped into the cache");
+            second = worn(&cache, "status/webbed.png", web_tex.clone(), &art, None, true);
+            if second.id() != web_tex.id() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_ne!(second.id(), web_tex.id(), "the wearer's own lit copy arrives");
+        // Screen space: the original, lit or not.
+        assert_eq!(worn(&cache, "status/webbed.png", second.clone(), &art, None, false).id(), web_tex.id());
+    }
+
 }

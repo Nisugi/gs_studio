@@ -454,10 +454,18 @@ test is unchanged apart from the puppet region.
   strength, outdoor_guess })`, `set_global_lighting`, `scene_auto_colours`.
 * Time-of-day keyframes are blended INTO the lit texture (weights quantized
   to 1/32), not cross-faded at draw time: no second draw per layer.
-* KNOWN DEVIATION: shared overlays (manifest part art, `creatures/wounds/`,
-  card overlays) are lit with a fixed mid-range frame, not the wearer's --
-  the cache cannot know who wears them. The request's dead-tint fix (wounds
-  and overlays of a corpse) needs draw-site changes and is not done yet.
+* Shared overlays (manifest part art, `creatures/wounds/`, quad card
+  overlays) are lit with the WEARER's frame: `creature_light::worn` returns
+  the wearer's own lit copy, baked on first use (the shared, mid-range-frame
+  copy shows until it arrives). Screen-space overlays stay unlit (UI).
+* Dead-tint fix (the request's bug): a corpse's wounds (all three draws)
+  and quad overlays take `creature_light::wearer_tint()`, the grey its body
+  is drawn with.
+* `creature_field.rs` now has NINE marked regions: the first block also
+  calls `set_wearer(token, dead)`, and six inline regions add the `worn`
+  lookups (card overlay, part overlay) and the corpse tint (quad overlay,
+  canvas and anchored tier wound, part overlay). Stripped, the file is
+  still byte-identical to the port (same length and FNV-1a hash).
 * Puppets: `PuppetCache::set_light` (from `creature_light::current_light`,
   published by the art cache each frame); a skin is lit as its own standing
   base; the light's key is part of the cache key.

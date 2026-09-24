@@ -844,11 +844,14 @@ mod tests {
             regions += 1;
         }
         stripped.push_str(rest);
-        // Three regions: the host's forced-puppet filter on the active art,
-        // the draw-branch arms (puppet, then doll, then the untouched
-        // standee), and the block holding both paint_creature_puppet and
-        // paint_creature_doll.
-        assert_eq!(regions, 3, "exactly the three documented additions");
+        // Nine regions: the host's forced-puppet filter on the active art
+        // (which also names the wearer for lighting), the draw-branch arms
+        // (puppet, then doll, then the untouched standee), the block
+        // holding both paint_creature_puppet and paint_creature_doll, and
+        // six inline lighting additions -- the wearer-lit copy of a shared
+        // card overlay and part overlay, and the corpse tint on the quad
+        // overlay and the three wound draws.
+        assert_eq!(regions, 9, "exactly the nine documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;
