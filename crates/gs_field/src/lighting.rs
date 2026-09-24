@@ -461,6 +461,22 @@ mod tests {
     }
 
     #[test]
+    fn edited_defaults_survive_the_file_and_a_missing_phase_keeps_its_default() {
+        let mut g = GlobalLighting::default();
+        g.phase.night.as_mut().unwrap().intensity = Some(0.5);
+        g.phase.night.as_mut().unwrap().key = Some("#334466".into());
+        let text = toml::to_string_pretty(&g).unwrap();
+        assert_eq!(GlobalLighting::from_toml(&text).unwrap(), g);
+        // A file with only night keeps the shipped dawn and dusk.
+        let only_night = "[phase.night]
+key = \"#112233\"
+";
+        let back = GlobalLighting::from_toml(only_night).unwrap();
+        assert_eq!(back.phase.dawn, GlobalLighting::default().phase.dawn);
+        assert_eq!(back.phase.night.unwrap().key.as_deref(), Some("#112233"));
+    }
+
+    #[test]
     fn an_empty_light_table_is_all_auto_at_the_scene_defaults() {
         let scene: crate::scenes::StageScene = toml::from_str("background = \"scenes/desert.png\"\n[light]\n").unwrap();
         let light = scene.light.clone().expect("[light] turns lighting on");

@@ -730,6 +730,9 @@ mod tests {
     /// stay unlit.
     #[test]
     fn shared_overlays_are_lit_per_wearer_and_corpses_are_grey() {
+        // Building an art cache scans the pool: hold the lock the pool
+        // tests take while they re-point it.
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();
         let mut cache = crate::creature_art::CreatureArtCache::new(std::path::Path::new("."), "test");
         let body: Vec<u8> = (0..8 * 16).flat_map(|i| [150, (i * 2) as u8, 70, 255]).collect();

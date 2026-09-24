@@ -192,7 +192,8 @@ impl StageTool {
             ctx.request_repaint_after(std::time::Duration::from_secs(20));
         }
         let auto = stage.scene().background.as_deref().and_then(|bg| self.art.scene_auto_colours(bg));
-        let lighting = &self.lighting;
+        let lighting = &mut self.lighting;
+        let mut lighting_changed = false;
         let art = self.art.creature_art();
 
         egui::Panel::right("stage_panel").default_size(300.0).min_size(240.0).show(ui, |ui| {
@@ -200,6 +201,7 @@ impl StageTool {
                 StagePanel::Scenes => {
                     calibrate_scenery = scene_ui(stage, ui);
                     light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
+                    lighting_changed = global_light_ui(ui, lighting, stage);
                     ui.separator();
                     camera_ui(stage, ui);
                     ui.separator();
@@ -216,6 +218,9 @@ impl StageTool {
             });
         });
         egui::CentralPanel::default().show(ui, |ui| field_ui(stage, ui, &art, panel));
+        if lighting_changed {
+            self.art.set_global_lighting(self.lighting.clone());
+        }
         calibrate_scenery
     }
 }
@@ -362,7 +367,8 @@ fn light_colour_row(
 }
 
 /// An optional number: shows the default until touched; "x" drops it.
-fn light_opt_slider(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, default: f32, range: std::ops::RangeInclusive<f32>) {
+fn light_opt_slider(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, default: f32, range: std::ops::RangeInclusive<f32>) -> bool {
+    let before = *value;
     ui.horizontal(|ui| {
         let mut v = value.unwrap_or(default);
         if ui.add(egui::Slider::new(&mut v, range).text(label)).changed() {
@@ -372,6 +378,54 @@ fn light_opt_slider(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, def
             *value = None;
         }
     });
+    *value != before
+}
+
+/// `global/lighting.toml`: the dawn, dusk and night every scene inherits
+/// unless it overrides a field (Niffy's "Settings > Lighting"). Edits apply
+/// live; Save writes the file. Returns true when anything changed.
+fn global_light_ui(ui: &mut egui::Ui, global: &mut gs_field::lighting::GlobalLighting, stage: &mut StageState) -> bool {
+    let mut changed = false;
+    egui::CollapsingHeader::new("Global time-of-day defaults").id_salt("light_global").show(ui, |ui| {
+        ui.weak("Every scene's dawn, dusk and night, unless the scene overrides a field.");
+        let phases = [("Dawn", &mut global.phase.dawn), ("Dusk", &mut global.phase.dusk), ("Night", &mut global.phase.night)];
+        for (label, slot) in phases {
+            let Some(f) = slot.as_mut() else { continue };
+            ui.strong(label);
+            ui.horizontal(|ui| {
+                for (name, value) in [("Key", &mut f.key), ("Ambient", &mut f.ambient)] {
+                    ui.label(name);
+                    let mut rgb = value.as_deref().and_then(parse_hex_rgb).unwrap_or(NEUTRAL_SLATE);
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        *value = Some(hex_rgb(rgb));
+                        changed = true;
+                    }
+                }
+            });
+            changed |= light_opt_slider(ui, "Intensity", &mut f.intensity, 1.0, 0.0..=1.0);
+            egui::CollapsingHeader::new("More").id_salt(("light_global_more", label)).show(ui, |ui| {
+                changed |= light_opt_slider(ui, "Exposure", &mut f.exposure, 1.0, 0.1..=1.5);
+                changed |= light_opt_slider(ui, "Strength", &mut f.strength, 0.85, 0.0..=1.0);
+                changed |= light_opt_slider(ui, "Haze", &mut f.haze, 0.0, 0.0..=0.5);
+                changed |= light_opt_slider(ui, "Saturation", &mut f.chroma, 1.0, 0.0..=1.2);
+                changed |= light_opt_slider(ui, "Night vision", &mut f.night, 0.0, 0.0..=1.0);
+            });
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Save").on_hover_text("Write global/lighting.toml").clicked() {
+                let msg = match global.save() {
+                    Ok(()) => "Saved global/lighting.toml".to_string(),
+                    Err(e) => format!("Could not save global/lighting.toml: {e}"),
+                };
+                stage.push_status(msg);
+            }
+            if ui.button("Restore shipped defaults").clicked() {
+                *global = gs_field::lighting::GlobalLighting::default();
+                changed = true;
+            }
+        });
+    });
+    changed
 }
 
 /// One time-of-day row: the global default, or this scene's own key,

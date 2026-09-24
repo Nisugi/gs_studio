@@ -338,7 +338,9 @@ across -- and differ only in the right-hand panel:
   Saturation show the values read from the backdrop ("auto") and can each be
   overridden or reset; Intensity; Outdoor (time of day applies); *More*
   (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
-  / Night rows over `global/lighting.toml`, "Use default" per row). *Preview*
+  / Night rows over `global/lighting.toml`, "Use default" per row); *Global
+  time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;
+  *Restore shipped defaults*). *Preview*
   picks the hour: the live Elanthian clock, the Dawn / Day / Dusk / Night
   buttons or the slider, plus the player's Lighting strength. Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
