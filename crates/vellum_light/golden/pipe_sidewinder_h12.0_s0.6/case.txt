@@ -1,0 +1,17 @@
+mode=pipeline
+w=96
+h=122
+hour=12
+strength=0.6
+scene.key=#e0ae7c
+scene.ambient=None
+scene.bounce=#d4a070
+scene.fog=None
+scene.ambient_offset=180.0
+scene.strength=0.6
+scene.bounce_strength=0.45
+scene.haze=0.0
+scene.exposure=None
+scene.chroma=0.95
+scene.night=0.0
+scene.intensity=1.0

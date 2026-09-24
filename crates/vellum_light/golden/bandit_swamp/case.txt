@@ -1,0 +1,13 @@
+w=159
+h=281
+key=#9c9d86
+ambient=#6f7564
+bounce=#6d6a52
+fog=None
+ambient_offset=180.0
+strength=0.9
+bounce_strength=0.35
+haze=0.14
+exposure=None
+chroma=0.62
+night=0.0

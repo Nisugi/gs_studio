@@ -1,0 +1,12 @@
+[package]
+name = "vellum_light"
+version = "0.1.0"
+edition = "2021"
+description = "Creature-field lighting (Niffy's reference port of relight.py): scene light, time of day, per-pixel relight. No dependencies; Android-safe."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vlight"
+path = "src/bin/vlight.rs"

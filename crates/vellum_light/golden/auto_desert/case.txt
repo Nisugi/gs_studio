@@ -1,0 +1,7 @@
+mode=auto
+w=1122
+h=593
+key=#c59c68
+ambient=#81abc6
+bounce=#b58857
+chroma=0.9598
