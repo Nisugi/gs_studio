@@ -44,6 +44,9 @@ pub struct PuppetView {
     pub skin: bool,
     /// Dress the skin in the family's painted texture (`editor::texture`).
     pub texture: bool,
+    /// The creature shown, by bestiary name token: the family's puppet in
+    /// its outfit, wearing its own sheet; "" = the family bare.
+    pub creature: String,
     /// What the right hand holds, by weapon key; "" = nothing.
     pub hold: String,
     /// What the left hand holds (a shield, a second weapon); "" = nothing.
@@ -65,6 +68,7 @@ impl Default for PuppetView {
             pose: String::new(),
             skin: true,
             texture: true,
+            creature: String::new(),
             hold: String::new(),
             hold_left: String::new(),
             loaded: None,

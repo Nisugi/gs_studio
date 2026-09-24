@@ -48,6 +48,16 @@
 //! only contract is `gs_puppet::BAKED_VERSION`, which the frontend checks
 //! when it parses. `data/poses/*.toml` are copies of the workspace's
 //! `data/poses/` and are equally read-only here.
+//!
+//! # Creature skins and outfits
+//!
+//! A creature can wear an outfit (`data/outfits/kit.toml` and
+//! `outfits.toml`, `gs_puppet::outfit`, keyed by its bestiary name token)
+//! and a skin of its own: `skins/<family>/<creature>.png` beside the
+//! puppets, the pattern sheet painted for that family's puppet in that
+//! outfit. Both are published copies, embedded and overridable in the pool
+//! (`<base dir>/global/outfits/`, `<base dir>/global/puppets/skins/`), and
+//! like the rest never parsed here.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -61,6 +71,9 @@ static EMBEDDED_PUPPETS: include_dir::Dir<'static> =
 
 static EMBEDDED_POSES: include_dir::Dir<'static> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/data/poses");
+
+/// The folder, under a puppets folder, that holds creature skins.
+pub const SKINS_DIR: &str = "skins";
 
 /// The baked puppet file name for a family: `<family>.puppet.toml`.
 pub fn baked_file_name(family: &str) -> String {
@@ -96,6 +109,14 @@ pub struct PuppetRig {
 /// The texture file name for a family: `<family>.texture.png`.
 pub fn texture_file_name(family: &str) -> String {
     format!("{family}.texture.png")
+}
+
+/// A creature's own skin, relative to a puppets folder:
+/// `skins/<family>/<creature>.png` (`creature` is its bestiary name token,
+/// `crate::naming::name_token`). Laid out for the family's puppet wearing
+/// the creature's outfit, if it has one.
+pub fn skin_file_name(family: &str, creature: &str) -> String {
+    format!("{SKINS_DIR}/{family}/{creature}.png")
 }
 
 /// One pose set: the UNPARSED `<body_type>.toml`.
@@ -139,6 +160,12 @@ pub struct PuppetRigs {
     /// The UNPARSED held-props file (`gs_puppet::PropSet`): which weapons a
     /// puppet can hold and their shapes. Empty = none.
     props: Arc<str>,
+    /// The UNPARSED clothing kit (`gs_puppet::Kit`) and who wears what
+    /// (`gs_puppet::Outfits`). Empty = none.
+    kit: Arc<str>,
+    outfits: Arc<str>,
+    /// Creature skins, undecoded, by (family, creature).
+    skins: BTreeMap<(String, String), Arc<[u8]>>,
     /// Identity of this load: changes whenever the set is rebuilt, so a
     /// frontend can key parsed puppets / posed caches on it.
     generation: u64,
@@ -205,6 +232,42 @@ impl PuppetRigs {
         self
     }
 
+    /// The clothing kit in force (see [`outfits_dir`]); "" when none.
+    pub fn kit(&self) -> &str {
+        &self.kit
+    }
+
+    /// Who wears what (see [`outfits_dir`]); "" when nobody.
+    pub fn outfits(&self) -> &str {
+        &self.outfits
+    }
+
+    /// This set with its own kit and outfits (tests, hosts with their own
+    /// source).
+    pub fn with_outfits(mut self, kit: &str, outfits: &str) -> Self {
+        self.kit = kit.into();
+        self.outfits = outfits.into();
+        self
+    }
+
+    /// A creature's own skin on `family`'s puppet, undecoded (see
+    /// [`skin_file_name`]).
+    pub fn skin(&self, family: &str, creature: &str) -> Option<&Arc<[u8]>> {
+        self.skins.get(&(family.to_ascii_lowercase(), creature.to_ascii_lowercase()))
+    }
+
+    /// Every creature skin: (family, creature).
+    pub fn skins(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.skins.keys().map(|(f, c)| (f.as_str(), c.as_str()))
+    }
+
+    /// This set with `png` as `creature`'s skin on `family` (tests, hosts
+    /// with their own source).
+    pub fn with_skin(mut self, family: &str, creature: &str, png: &[u8]) -> Self {
+        self.skins.insert((family.to_ascii_lowercase(), creature.to_ascii_lowercase()), png.into());
+        self
+    }
+
     /// The puppet for a creature, against THIS set: the doll cascade, run
     /// with "has a PUPPET" as the test, so a family without a puppet falls
     /// through to the body type's default family and finally to the generic
@@ -248,6 +311,54 @@ pub const EMBEDDED_PROPS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR")
 /// embedded one.
 pub fn props_dir() -> anyhow::Result<PathBuf> {
     Ok(crate::data_dirs::global_dir()?.join("props"))
+}
+
+/// The clothing kit and outfits compiled into this crate (READ-ONLY copies
+/// of the workspace's `data/outfits/`, published beside the puppets).
+pub const EMBEDDED_KIT: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/outfits/kit.toml"));
+pub const EMBEDDED_OUTFITS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/outfits/outfits.toml"));
+
+/// `<base dir>/global/outfits/` — where a `kit.toml` or `outfits.toml`
+/// overrides the embedded one.
+pub fn outfits_dir() -> anyhow::Result<PathBuf> {
+    Ok(crate::data_dirs::global_dir()?.join("outfits"))
+}
+
+/// The creature skins compiled into this crate: `(family, creature, png)`,
+/// from `data/puppets/skins/<family>/<creature>.png`.
+pub fn embedded_skins() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
+    EMBEDDED_PUPPETS
+        .get_dir(SKINS_DIR)
+        .into_iter()
+        .flat_map(|skins| skins.dirs())
+        .flat_map(|family| {
+            let name = family.path().file_name().and_then(|n| n.to_str()).unwrap_or("");
+            family.files().filter_map(move |file| {
+                let creature = file.path().file_name()?.to_str()?.strip_suffix(".png")?;
+                Some((name, creature, file.contents()))
+            })
+        })
+}
+
+/// The creature skins in a puppets folder: `(family, creature, png)` for
+/// every `skins/<family>/<creature>.png`. A missing folder is simply empty.
+pub fn load_skins(dir: &std::path::Path) -> Vec<(String, String, Vec<u8>)> {
+    let mut out = Vec::new();
+    for family in std::fs::read_dir(dir.join(SKINS_DIR)).into_iter().flatten().flatten() {
+        let Some(name) = family.file_name().to_str().map(str::to_ascii_lowercase) else { continue };
+        for file in std::fs::read_dir(family.path()).into_iter().flatten().flatten() {
+            let path = file.path();
+            let Some(creature) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".png")) else {
+                continue;
+            };
+            match std::fs::read(&path) {
+                Ok(bytes) => out.push((name.clone(), creature.to_ascii_lowercase(), bytes)),
+                Err(e) => tracing::warn!("creature skin {} skipped: {e}", path.display()),
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// `<base dir>/global/puppets/` — the runtime override layer. Holds both
@@ -341,6 +452,11 @@ pub fn puppets() -> Arc<PuppetRigs> {
         );
     }
     set.props = EMBEDDED_PROPS.into();
+    set.kit = EMBEDDED_KIT.into();
+    set.outfits = EMBEDDED_OUTFITS.into();
+    for (family, creature, png) in embedded_skins() {
+        set.skins.insert((family.to_ascii_lowercase(), creature.to_ascii_lowercase()), png.into());
+    }
     for (body_type, text) in embedded_poses() {
         let body_type = body_type.to_ascii_lowercase();
         set.poses.insert(
@@ -362,6 +478,16 @@ pub fn puppets() -> Arc<PuppetRigs> {
         }
         if let Ok(text) = std::fs::read_to_string(base.join("global").join("props").join("weapons.toml")) {
             set.props = text.into();
+        }
+        let outfits = base.join("global").join("outfits");
+        if let Ok(text) = std::fs::read_to_string(outfits.join("kit.toml")) {
+            set.kit = text.into();
+        }
+        if let Ok(text) = std::fs::read_to_string(outfits.join("outfits.toml")) {
+            set.outfits = text.into();
+        }
+        for (family, creature, png) in load_skins(&base.join("global").join("puppets")) {
+            set.skins.insert((family, creature), png.into());
         }
     }
     set.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -525,6 +651,43 @@ mod tests {
         let moved = puppets();
         assert!(!moved.has("chimera"));
         assert_eq!(moved.get("humanoid").unwrap().source, PuppetSource::Embedded);
+
+        std::env::remove_var("VELLUM_FE_DIR");
+        invalidate_cache();
+    }
+
+    /// Outfits ship embedded; the pool's outfit files and creature skins
+    /// lay over them.
+    #[test]
+    fn creature_skins_and_outfits_ship_and_override() {
+        let _guard = crate::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("VELLUM_FE_DIR", dir.path());
+        crate::data_dirs::clear_base_dir();
+        invalidate_cache();
+
+        let before = puppets();
+        assert_eq!(before.kit(), EMBEDDED_KIT);
+        assert!(before.kit().contains("[robe]"), "the kit ships");
+        assert!(before.outfits().contains("[grim_gigas_skald]"), "the outfits ship");
+
+        let skin = puppets_dir().unwrap().join(skin_file_name("humanoid", "grim_gigas_skald"));
+        std::fs::create_dir_all(skin.parent().unwrap()).unwrap();
+        std::fs::write(&skin, b"png").unwrap();
+        let outfits = outfits_dir().unwrap();
+        assert_eq!(outfits, dir.path().join("global").join("outfits"));
+        std::fs::create_dir_all(&outfits).unwrap();
+        std::fs::write(outfits.join("outfits.toml"), "[bandit]\nwear = [\"cloak\"]\n").unwrap();
+
+        invalidate_cache();
+        let after = puppets();
+        assert_eq!(after.skin("humanoid", "grim_gigas_skald").map(|b| &b[..]), Some(&b"png"[..]));
+        assert!(after.skin("canine", "grim_gigas_skald").is_none(), "a skin belongs to one family");
+        assert!(after.skins().any(|s| s == ("humanoid", "grim_gigas_skald")));
+        assert_eq!(after.outfits(), "[bandit]\nwear = [\"cloak\"]\n");
+        assert_eq!(after.kit(), EMBEDDED_KIT, "a file the pool does not replace stays embedded");
 
         std::env::remove_var("VELLUM_FE_DIR");
         invalidate_cache();

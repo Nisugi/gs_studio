@@ -573,7 +573,7 @@ gs-studio work (ours), in the order the milestones need it:
 
 | # | Deliverable | Needed by |
 | --- | --- | --- |
-| G1 | A separate skin per creature, and a "build every skin" command | **Studio side done**: creature folders (`out_dir`), *Build every skin*. The stage does not show per-creature skins yet |
+| G1 | A separate skin per creature, and a "build every skin" command | **Done**: creature folders (`out_dir`), *Build every skin*; Save installs and Publish ships each creature's sheet (`puppets/skins/<family>/<creature>.png`), and the stage draws the creature in its outfit wearing it. The Rigs preview's *Creature* picker shows one before Save |
 | G2 | `jobs.json` export (section 2) | **Done**: `--export-jobs` |
 | G3 | Control sheet export per family: views at one shared scale, mask, `layout.json` | M3 (per-view jobs until then) |
 | G4 | Textured turnaround render for review | M5 |

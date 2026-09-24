@@ -580,3 +580,18 @@ read the family through `base_family`. `set_puppet_props(ctx, on)` (default
 on) turns it off; `paint_creature_puppet` passes it to the cache each frame
 (one line inside its marked region). `yawed_bounds` measures the body only,
 so a weapon never moves or resizes a creature in its card.
+
+### 7.22 Creatures in outfits and their own skins
+
+A puppet key is now `<family>[#<creature>][@<arms>]`
+(`creature_puppet::base_family`, `creature_of`). `PuppetCache::family_for`
+adds `#<creature>` (`creature_key`: the bestiary entry's name token) when
+the creature wears an outfit (`gs_field` `PuppetRigs::outfits`) or has a
+skin of its own (`PuppetRigs::skin`); creatures with neither share the bare
+family key and everything cached for it. `puppet(key)` dresses the family's
+puppet in the outfit (`gs_puppet::Puppet::wearing`) before arming it;
+`texture(key)` is the creature's skin, else -- undressed -- the family's
+sheet; a dressed creature with no skin wears none (the family's sheet has
+no garments on it). A sheet whose size does not match the dressed figure's
+layout is refused with a warning, as before. Poses, parts and calibration
+read through `base_family` as for armed keys.

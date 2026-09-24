@@ -53,6 +53,11 @@ pub struct RigTool {
     sheet: Option<SheetFile>,
     sheet_serial: u64,
     sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
+    /// The creatures the preview can show on this family, and for which
+    /// family and sheet serial they were listed.
+    creatures: Option<(String, u64, Vec<String>)>,
+    /// The shown creature's figure (the puppet in its outfit).
+    dressed: Option<Figure>,
     /// A running "Export jobs" (every family's templates and jobs.json).
     jobs_export: Option<std::sync::mpsc::Receiver<Result<(std::path::PathBuf, usize), String>>>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
@@ -95,6 +100,8 @@ struct SkinKey {
     poses: u64,
     /// What each hand holds.
     hold: [String; 2],
+    /// The creature shown ("" = the family bare).
+    creature: String,
     /// Rendered at half size while something moves (see `DRAFT_SCALE`).
     draft: bool,
 }
@@ -105,8 +112,18 @@ struct SkinKey {
 const DRAFT_SCALE: f32 = 0.5;
 
 /// The family's `sheet.png`, as read from disk (re-read on `serial`).
+/// A creature's figure in the preview: the family's puppet in its outfit,
+/// and the rig revision, creature and sheet serial it was built for.
+struct Figure {
+    revision: u64,
+    creature: String,
+    serial: u64,
+    puppet: Result<std::sync::Arc<gs_puppet::Puppet>, String>,
+}
+
 struct SheetFile {
-    family: String,
+    /// `<family>` or `<family>/<creature>`: whose sheet it is.
+    who: String,
     serial: u64,
     pixels: Result<Option<(usize, usize, std::sync::Arc<Vec<u8>>)>, String>,
 }
@@ -146,6 +163,8 @@ impl RigTool {
             sheet: None,
             sheet_serial: 0,
             sheet_texture: None,
+            creatures: None,
+            dressed: None,
             jobs_export: None,
             files: Default::default(),
             saved_rigs: Default::default(),
@@ -573,6 +592,14 @@ impl RigTool {
             (rig.family.clone(), rig.body_type.clone())
         };
         let data_root = self.session.data_root.clone();
+        if self.creatures.as_ref().is_none_or(|(f, s, _)| *f != family || *s != self.sheet_serial) {
+            let list = crate::editor::texture::family_creatures(&data_root, &family);
+            self.creatures = Some((family.clone(), self.sheet_serial, list));
+        }
+        let creatures = self.creatures.as_ref().map(|(_, _, c)| c.clone()).unwrap_or_default();
+        if !self.puppet_view.creature.is_empty() && !creatures.contains(&self.puppet_view.creature) {
+            self.puppet_view.creature.clear();
+        }
         // The pose file open in the editor, when it is this body type's:
         // the preview shows its (unsaved) poses.
         let editing = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type);
@@ -631,7 +658,17 @@ impl RigTool {
             ui.checkbox(&mut pv.skin, "Smooth skin")
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
             ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.texture, "Texture"))
-                .on_hover_text("Dress the skin in data/textures/<family>/sheet.png");
+                .on_hover_text("Dress the skin in data/textures/<family>/sheet.png (a creature's own: <family>/<creature>/sheet.png)");
+            ui.label("Creature");
+            let shown = if pv.creature.is_empty() { format!("({family})") } else { pv.creature.clone() };
+            egui::ComboBox::from_id_salt("preview_creature").selected_text(shown).height(400.0).show_ui(ui, |ui| {
+                ui.selectable_value(&mut pv.creature, String::new(), format!("({family})"));
+                for c in &creatures {
+                    ui.selectable_value(&mut pv.creature, c.clone(), c);
+                }
+            })
+            .response
+            .on_hover_text("Show a creature: this puppet in its outfit (data/outfits/outfits.toml), in its own sheet -- as the stage will. Build sheet and projection follow it.");
             if ui.button("Reset view").on_hover_text("Face front, default zoom").clicked() {
                 pv.reset_camera();
             }
@@ -672,7 +709,7 @@ impl RigTool {
                     .clicked();
                 build = ui
                     .button("Build sheet from paintings")
-                    .on_hover_text("Project front.png / side.png / back.png from that folder onto the pattern: writes sheet.png")
+                    .on_hover_text("Project front.png / side.png / back.png from that folder (the creature's, when one is shown) onto the pattern: writes sheet.png")
                     .clicked();
                 reload_sheet = ui.button("Reload").on_hover_text("Read sheet.png again after painting on it").clicked();
                 build_all = ui
@@ -714,12 +751,19 @@ impl RigTool {
                     let outlines = &self.session.outlines;
                     match project {
                         Some(view) => {
-                            let d = crate::editor::texture::Dressed::new(&puppet, outlines, &family, None);
-                            crate::editor::texture::export_projected(&crate::editor::texture::dir(&data_root, &family), &d, view, gs_puppet::GRAZING)
-                                .map(|files| format!("Projected: {}", files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", ")))
+                            let creature = &self.puppet_view.creature;
+                            let dressed = if creature.is_empty() {
+                                Ok((crate::editor::texture::Dressed::new(&puppet, outlines, &family, None), crate::editor::texture::dir(&data_root, &family)))
+                            } else {
+                                crate::editor::texture::Dressed::creature(&data_root, &puppet, outlines, &family, creature)
+                                    .map(|d| (d, crate::editor::texture::creature_dir(&data_root, &family, creature)))
+                            };
+                            dressed.and_then(|(d, folder)| crate::editor::texture::export_projected(&folder, &d, view, gs_puppet::GRAZING)).map(|files| {
+                                format!("Projected: {}", files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "))
+                            })
                         }
                         None => crate::editor::texture::build_every_skin(&data_root, &family, &puppet, outlines).map(|(built, failed)| {
-                            let mut s = format!("Built {} skin(s)", built.len());
+                            let mut s = format!("Built {} skin(s): {}; Save puts them on the stage", built.len(), built.join(", "));
                             if !failed.is_empty() {
                                 s += &format!("; FAILED: {}", failed.join("; "));
                             }
@@ -729,6 +773,7 @@ impl RigTool {
                 }
             };
             self.session.status = outcome.unwrap_or_else(|e| e);
+            reload_sheet |= build_all;
         }
         if export_jobs && self.jobs_export.is_none() {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -760,8 +805,13 @@ impl RigTool {
                     if export {
                         crate::editor::texture::export_templates(&data_root, &family, &puppet, outlines)
                             .map(|dir| format!("Templates written to {}", dir.display()))
-                    } else {
+                    } else if self.puppet_view.creature.is_empty() {
                         crate::editor::texture::build_sheet(&data_root, &family, &puppet, outlines)
+                            .map(|(path, n)| format!("{} built from {n} painting(s); Save puts it on the stage", path.display()))
+                    } else {
+                        let creature = &self.puppet_view.creature;
+                        crate::editor::texture::Dressed::creature(&data_root, &puppet, outlines, &family, creature)
+                            .and_then(|d| crate::editor::texture::build_sheet_in(&crate::editor::texture::creature_dir(&data_root, &family, creature), &d))
                             .map(|(path, n)| format!("{} built from {n} painting(s); Save puts it on the stage", path.display()))
                     }
                 }
@@ -866,19 +916,50 @@ impl RigTool {
         let revision = self.session.editor.revision();
         // The sheet on disk, read once per family / reload; the texture it
         // makes, rebuilt when the rig changes (its layout follows the rig).
+        let creature = self.puppet_view.creature.clone();
+        // A creature is the family's puppet in its outfit, rebuilt when the
+        // rig, the creature or the files change.
+        if !creature.is_empty() && self.dressed.as_ref().is_none_or(|f| f.revision != revision || f.creature != creature || f.serial != self.sheet_serial) {
+            let made = match self.session.puppet() {
+                Ok(p) => crate::editor::texture::outfits(&data_root).map(|(_, outfits)| {
+                    std::sync::Arc::new(match outfits.get(&creature) {
+                        Some(o) if !o.pieces.is_empty() => p.wearing(o),
+                        _ => p.clone(),
+                    })
+                }),
+                Err(e) => Err(e.clone()),
+            };
+            self.dressed = Some(Figure { revision, creature: creature.clone(), serial: self.sheet_serial, puppet: made });
+            self.sheet_texture = None;
+        }
+        let who = if creature.is_empty() { family.clone() } else { format!("{family}/{creature}") };
         let want_texture = self.puppet_view.skin && self.puppet_view.texture;
-        if want_texture && self.sheet.as_ref().is_none_or(|s| s.family != family || s.serial != self.sheet_serial) {
-            let path = crate::editor::texture::sheet_path(&data_root, &family);
+        if want_texture && self.sheet.as_ref().is_none_or(|s| s.who != who || s.serial != self.sheet_serial) {
+            let path = if creature.is_empty() {
+                crate::editor::texture::sheet_path(&data_root, &family)
+            } else {
+                crate::editor::texture::creature_dir(&data_root, &family, &creature).join(crate::editor::texture::SHEET)
+            };
             let pixels = if path.is_file() {
                 crate::editor::texture::read_png(&path).map(|(w, h, px)| Some((w, h, std::sync::Arc::new(px))))
             } else {
                 Ok(None)
             };
-            self.sheet = Some(SheetFile { family: family.clone(), serial: self.sheet_serial, pixels });
+            self.sheet = Some(SheetFile { who: who.clone(), serial: self.sheet_serial, pixels });
             self.sheet_texture = None;
         }
+        // The figure shown: the creature's, else the family's.
+        let dressed = if creature.is_empty() { None } else { self.dressed.as_ref().map(|f| &f.puppet) };
+        let figure: Result<&gs_puppet::Puppet, String> = {
+            let _t = crate::perf_log::span("rigs: build puppet");
+            match dressed {
+                Some(Ok(p)) => Ok(p.as_ref()),
+                Some(Err(e)) => Err(e.clone()),
+                None => self.session.puppet().as_ref().map_err(|e| e.clone()),
+            }
+        };
         if want_texture && self.sheet_texture.as_ref().is_none_or(|(r, s, _)| *r != revision || *s != self.sheet_serial) {
-            let made = match (self.sheet.as_ref().map(|s| &s.pixels), self.session.puppet()) {
+            let made = match (self.sheet.as_ref().map(|s| &s.pixels), &figure) {
                 (Some(Ok(Some((w, h, px)))), Ok(puppet)) => {
                     crate::editor::texture::sheet_texture(puppet, *w, *h, px.as_ref().clone()).map(|t| Some(std::sync::Arc::new(t)))
                 }
@@ -892,13 +973,9 @@ impl RigTool {
             None
         };
         let texture_serial = texture.as_ref().map(|_| self.sheet_serial);
-        {
-            let _t = crate::perf_log::span("rigs: build puppet");
-            let _ = self.session.puppet();
-        }
         let held = self.puppet_view.held(&data_root);
         let hold = [self.puppet_view.hold.clone(), self.puppet_view.hold_left.clone()];
-        match self.session.puppet() {
+        match figure {
             Ok(puppet) => {
                 let armed = (!held.is_empty()).then(|| puppet.holding(&held.iter().map(|(h, p)| (*h, p)).collect::<Vec<_>>()));
                 let puppet = armed.as_ref().unwrap_or(puppet);
@@ -929,6 +1006,7 @@ impl RigTool {
                         texture: texture_serial,
                         poses: poses_revision,
                         hold: hold.clone(),
+                        creature: creature.clone(),
                         draft,
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {

@@ -152,7 +152,7 @@ impl Outfits {
                 }
                 pieces.push((name.clone(), piece));
             }
-            for key in table.keys().filter(|k| *k != "wear" && !wear.contains(k)) {
+            if let Some(key) = table.keys().find(|k| *k != "wear" && !wear.contains(k)) {
                 return Err(format!("outfits: {creature} tweaks '{key}' but does not wear it"));
             }
             by_creature.insert(creature, Outfit { pieces });

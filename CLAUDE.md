@@ -97,11 +97,14 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
   tab's *Import*; `tools/extract_outlines.py` is the Python original).
 - `<data>/rigs/<family>.rig.toml` is the source of truth. Save writes the
   bake (`<family>.png` + `.toml`) and the puppet (`<family>.puppet.toml`)
-  beside it, then installs bake + puppet into the pool's `global/rigs/` and
-  `global/puppets/` and calls `pool_dir::invalidate_caches()` so the stage
+  beside it, then installs bake + puppet (+ the family's texture and its
+  creatures' skins, `skins/<family>/<creature>.png`) into the pool's
+  `global/rigs/` and `global/puppets/`, and the outfit files into
+  `global/outfits/`, and calls `pool_dir::invalidate_caches()` so the stage
   picks them up live. `humanoid.*` is the test fixture.
-- Publish copies the saved bake, puppet and `<data>/poses/*.toml` into the
-  publish dir (`rigs/`, `puppets/`, `poses/`), by default
+- Publish copies the saved bake, puppet, textures, `<data>/poses/*.toml`,
+  props and outfits into the publish dir (`rigs/`, `puppets/`, `poses/`,
+  `props/`, `outfits/`), by default
   `crates/gs_field/data`, which is compiled into `gs_field`. Those files are
   never hand-edited; the puppet contract is `gs_puppet::BAKED_VERSION`.
 - Anything that writes into the pool behind gs_field's back must call

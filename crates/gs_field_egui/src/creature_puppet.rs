@@ -26,6 +26,12 @@
 //!
 //! Severance is the puppet's own (rank 3 on an arm / leg part), so wounds
 //! travel as plain `(part, rank)` pairs into `gs_puppet::Look`.
+//!
+//! A puppet KEY names what is drawn: `<family>[#<creature>][@<arms>]`. The
+//! `#<creature>` part (its bestiary name token) appears when the creature
+//! wears an outfit or has a skin of its own, and dresses the family's
+//! puppet in it; `@<arms>` is what it holds. Creatures with neither share
+//! the bare family key, and everything built from it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -658,10 +664,31 @@ fn yawed_bounds(posed: &Posed<'_>, yaw_deg: f32) -> [[f32; 3]; 2] {
 
 // ---- the cache ----------------------------------------------------------
 
-/// The family of a puppet key: the key itself, or what comes before an
-/// armed key's `@` (see [`PuppetCache::family_for`]).
+/// The family of a puppet key (`<family>[#<creature>][@<arms>]`, see
+/// [`PuppetCache::family_for`]).
 pub fn base_family(key: &str) -> &str {
-    key.split_once('@').map_or(key, |(family, _)| family)
+    key.split(['#', '@']).next().unwrap_or(key)
+}
+
+/// The creature a puppet key is dressed and skinned for, if any.
+pub fn creature_of(key: &str) -> Option<&str> {
+    let (_, rest) = key.split_once('#')?;
+    Some(rest.split_once('@').map_or(rest, |(creature, _)| creature))
+}
+
+/// A puppet key without what it holds: the figure a skin is laid out for.
+fn unarmed(key: &str) -> &str {
+    key.split_once('@').map_or(key, |(dressed, _)| dressed)
+}
+
+/// A creature's bestiary name token, the key outfits and skins are filed
+/// under: its bestiary entry's (exact name, else a lone noun), else its own.
+pub fn creature_key(name: &str) -> String {
+    let canonical = gs_field::naming::canonical_name(name);
+    match gs_field::bestiary::shared().entry_for_name(&canonical) {
+        Some(entry) => gs_field::naming::name_token(&entry.name),
+        None => gs_field::naming::name_token(&canonical),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -692,6 +719,9 @@ pub struct PuppetCache {
     /// The held-props file of this puppet set, parsed once (inner None:
     /// none, or it did not parse).
     props: Option<Option<Arc<gs_puppet::PropSet>>>,
+    /// The clothing kit and who wears what, parsed once (inner None: they
+    /// did not parse).
+    outfits: Option<Option<Arc<gs_puppet::Outfits>>>,
     /// Hold props at all ([`set_puppet_props`]; see [`PuppetCache::set_props`]).
     hide_props: bool,
     tick: u64,
@@ -772,6 +802,7 @@ impl PuppetCache {
             self.resolved.clear();
             self.posed.clear();
             self.props = None;
+            self.outfits = None;
         }
         self.rigs = Some(rigs);
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
@@ -793,11 +824,12 @@ impl PuppetCache {
     }
 
     /// The puppet a creature draws with (cached cascade result), or `None`
-    /// when no puppet resolves — the caller then draws the doll. Armed, the
-    /// key is `<family>@<weapon>[+<shield>]`: the family's puppet holding the
-    /// first weapon its bestiary entry attacks with (and a shield if it
-    /// bashes with one). Everything that takes the key reads the family's
-    /// rig, poses and texture through [`base_family`].
+    /// when no puppet resolves — the caller then draws the doll. The key is
+    /// `<family>[#<creature>][@<weapon>[+<shield>]]`: `#<creature>` when it
+    /// wears an outfit or has its own skin; armed, the family's puppet
+    /// holding the first weapon its bestiary entry attacks with (and a
+    /// shield if it bashes with one). Everything that takes the key reads
+    /// the family's rig and poses through [`base_family`].
     pub fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -806,7 +838,15 @@ impl PuppetCache {
         if let Some(hit) = self.resolved.get(&key) {
             return hit.clone();
         }
-        let family = self.rigs().puppet_for(name, noun).map(|d| d.family);
+        let family = self.rigs().puppet_for(name, noun).map(|d| d.family).map(|family| {
+            let creature = creature_key(name);
+            let own = self.outfit(&creature).is_some() || self.rigs().skin(&family, &creature).is_some();
+            if own {
+                format!("{family}#{creature}")
+            } else {
+                family
+            }
+        });
         let armed = family.map(|family| match self.arms_for(name) {
             Some(arms) => Arc::<str>::from(format!("{family}@{arms}")),
             None => Arc::<str>::from(family.as_str()),
@@ -834,6 +874,32 @@ impl PuppetCache {
         };
         self.props = Some(set.clone());
         set
+    }
+
+    /// The kit and outfits of the current set, parsed once.
+    pub fn outfits(&mut self) -> Option<Arc<gs_puppet::Outfits>> {
+        if let Some(hit) = &self.outfits {
+            return hit.clone();
+        }
+        let rigs = self.rigs();
+        let parsed = (|| {
+            let kit = if rigs.kit().trim().is_empty() { gs_puppet::Kit::shipped().clone() } else { gs_puppet::Kit::from_toml(rigs.kit())? };
+            gs_puppet::Outfits::from_toml(rigs.outfits(), &kit)
+        })();
+        let set = match parsed {
+            Ok(set) => Some(Arc::new(set)),
+            Err(e) => {
+                tracing::warn!("outfits did not load: {e}");
+                None
+            }
+        };
+        self.outfits = Some(set.clone());
+        set
+    }
+
+    /// What a creature (its name token) wears; None = nothing.
+    fn outfit(&mut self, creature: &str) -> Option<gs_puppet::Outfit> {
+        self.outfits()?.get(creature).filter(|o| !o.pieces.is_empty()).cloned()
     }
 
     /// `<weapon>[+<shield>]` for a creature by name, from its bestiary
@@ -876,8 +942,10 @@ impl PuppetCache {
         puppet.holding(&held)
     }
 
-    /// The parsed puppet for a family (parsed once; misses cached); for an
-    /// armed key, the family's puppet holding its props.
+    /// The parsed puppet for a family (parsed once; misses cached); for a
+    /// creature's key, the family's puppet in its outfit; for an armed key,
+    /// that holding its props (dressed first, so the garments are laid out
+    /// on the skin before anything held).
     pub fn puppet(&mut self, family: &Arc<str>) -> Option<Arc<Puppet>> {
         if let Some(hit) = self.puppets.get(family) {
             return hit.clone();
@@ -887,6 +955,15 @@ impl PuppetCache {
             let armed = bare.map(|p| Arc::new(self.arm(&p, arms)));
             self.puppets.insert(family.clone(), armed.clone());
             return armed;
+        }
+        if let Some((base, creature)) = family.split_once('#') {
+            let bare = self.puppet(&Arc::from(base));
+            let dressed = match self.outfit(creature) {
+                Some(outfit) => bare.map(|p| Arc::new(p.wearing(&outfit))),
+                None => bare,
+            };
+            self.puppets.insert(family.clone(), dressed.clone());
+            return dressed;
         }
         let rigs = self.rigs();
         let puppet = rigs.get(family).and_then(|rig| {
@@ -905,17 +982,36 @@ impl PuppetCache {
         puppet
     }
 
-    /// The family's painted texture, decoded once: the sheet must be the
-    /// size `UvLayout::fit(puppet, SHEET_SIDE)` lays out for THIS puppet (a
-    /// sheet painted for an older rig is refused with a warning).
+    /// The painted texture a key wears, decoded once: the creature's own
+    /// skin, else (undressed) its family's. The sheet must be the size
+    /// `UvLayout::fit(puppet, SHEET_SIDE)` lays out for THIS figure (a sheet
+    /// painted for an older rig or another outfit is refused with a
+    /// warning). A creature in an outfit with no skin of its own wears none:
+    /// the family's sheet has no garments on it.
     pub fn texture(&mut self, family: &Arc<str>) -> Option<Arc<gs_puppet::Texture>> {
         if let Some(hit) = self.textures.get(family) {
             return hit.clone();
         }
-        // An armed puppet wears its family's sheet: props are never on it.
-        let base: Arc<str> = Arc::from(base_family(family));
-        let puppet = self.puppet(&base);
-        let bytes = self.rigs().get(&base).and_then(|rig| rig.texture.clone());
+        // An armed puppet wears its unarmed figure's sheet: props are never
+        // on it.
+        let dressed = unarmed(family);
+        if dressed.len() < family.len() {
+            let texture = self.texture(&Arc::from(dressed));
+            self.textures.insert(family.clone(), texture.clone());
+            return texture;
+        }
+        let base = base_family(family);
+        let creature = creature_of(family);
+        let puppet = self.puppet(family);
+        let rigs = self.rigs();
+        let bytes = match creature {
+            Some(c) => match rigs.skin(base, c) {
+                Some(skin) => Some(skin.clone()),
+                None if self.outfit(c).is_some() => None,
+                None => rigs.get(base).and_then(|rig| rig.texture.clone()),
+            },
+            None => rigs.get(base).and_then(|rig| rig.texture.clone()),
+        };
         let texture = match (puppet, bytes) {
             (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(img) => {
@@ -1287,6 +1383,102 @@ mod tests {
         // A wolf attacks with its teeth: nothing to hold.
         cache.set_props(true);
         assert_eq!(&*cache.family_for("timber wolf", Some("wolf")).unwrap(), "canine");
+    }
+
+    /// A cache over `set` instead of the published one.
+    fn cache_over(set: PuppetRigs) -> PuppetCache {
+        let mut cache = cache();
+        cache.rigs = Some(Arc::new(set));
+        cache
+    }
+
+    /// A PNG sheet laid out for `puppet`, every pixel `rgba`.
+    fn sheet_for(puppet: &Puppet, rgba: [u8; 4]) -> Vec<u8> {
+        let layout = gs_puppet::UvLayout::fit(puppet, gs_puppet::SHEET_SIDE);
+        let img = image::RgbaImage::from_pixel(layout.w as u32, layout.h as u32, image::Rgba(rgba));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        png.into_inner()
+    }
+
+    #[test]
+    fn keys_name_the_family_the_creature_and_the_arms() {
+        assert_eq!(base_family("giant#grim_gigas_skald@staff"), "giant");
+        assert_eq!(base_family("troll@cudgel"), "troll");
+        assert_eq!(creature_of("giant#grim_gigas_skald@staff"), Some("grim_gigas_skald"));
+        assert_eq!(creature_of("giant#grim_gigas_skald"), Some("grim_gigas_skald"));
+        assert_eq!(creature_of("troll@cudgel"), None);
+        assert_eq!(unarmed("giant#grim_gigas_skald@staff"), "giant#grim_gigas_skald");
+        assert_eq!(creature_key("a Grim Gigas Skald"), "grim_gigas_skald");
+    }
+
+    /// A creature with an outfit (`outfits.toml` ships one for the skald)
+    /// is its family's puppet dressed, posed by the family's poses, and
+    /// wears no texture until it has a skin of its own.
+    #[test]
+    fn a_creature_in_an_outfit_is_dressed_on_the_stage() {
+        let published = gs_field::puppets::puppets();
+        let giant = Puppet::from_baked_toml(&published.get("giant").unwrap().baked).unwrap();
+        // The family's own sheet: the bare giant wears it, the dressed one cannot.
+        let rigs = published.families().map(|f| {
+            let mut rig = (**published.get(f).unwrap()).clone();
+            if f == "giant" {
+                rig.texture = Some(sheet_for(&giant, [9, 9, 9, 255]).into());
+            }
+            rig
+        });
+        let poses = published.body_types().map(|b| (**published.pose_file(b).unwrap()).clone());
+        let set = PuppetRigs::from_rigs(rigs, poses).with_props(published.props()).with_outfits(published.kit(), published.outfits());
+        let mut cache = cache_over(set);
+        cache.set_props(false);
+        let key = cache.family_for("grim gigas skald", Some("skald")).expect("a puppet");
+        assert_eq!(&*key, "giant#grim_gigas_skald");
+        let dressed = cache.puppet(&key).unwrap();
+        assert!(dressed.segments.iter().any(|s| s.kind.is_garment()), "wears its robe and hood");
+        assert_eq!(dressed.height, giant.height);
+        assert!(cache.texture(&Arc::from("giant")).is_some(), "the bare family wears its sheet");
+        assert!(cache.texture(&key).is_none(), "no skin of its own yet");
+        // Somebody with no outfit and no skin shares the bare family key.
+        assert!(!cache.family_for("forest troll", Some("troll")).unwrap().contains('#'));
+    }
+
+    /// A creature's own skin is laid out for its dressed figure; the armed
+    /// key wears it too; a sheet of the wrong size is refused.
+    #[test]
+    fn a_creature_wears_its_own_skin() {
+        let published = gs_field::puppets::puppets();
+        let mut cache = cache();
+        cache.set_props(false);
+        let dressed = cache.puppet(&Arc::from("giant#grim_gigas_skald")).unwrap();
+        let bare = cache.puppet(&Arc::from("giant")).unwrap();
+        let wolf_key = creature_key("timber wolf");
+        let set = (*published)
+            .clone()
+            .with_skin("giant", "grim_gigas_skald", &sheet_for(&dressed, [200, 10, 10, 255]))
+            .with_skin("canine", &wolf_key, &sheet_for(&bare, [1, 2, 3, 255]));
+        let mut cache = cache_over(set);
+        let key = cache.family_for("grim gigas skald", Some("skald")).unwrap();
+        let skin = cache.texture(&Arc::from(unarmed(&key))).expect("its skin");
+        assert_eq!(&skin.rgba[..4], &[200, 10, 10, 255]);
+        assert!(cache.texture(&Arc::from("giant#grim_gigas_skald@staff")).is_some(), "held things wear the same sheet");
+        // A wolf with a skin gets a key of its own; this one was painted
+        // for another figure, so it is refused rather than smeared.
+        let wolf = cache.family_for("timber wolf", Some("wolf")).unwrap();
+        assert_eq!(*wolf, *format!("canine#{wolf_key}"));
+        assert!(cache.texture(&wolf).is_none());
+        assert!(cache.pose_set(&wolf).is_some(), "poses as its family");
+    }
+
+    /// `gs_field` embeds a copy of the workspace's `data/outfits/`.
+    #[test]
+    fn the_embedded_outfits_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        let workspace = |f: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outfits").join(f)).unwrap();
+        assert!(norm(gs_field::puppets::EMBEDDED_KIT) == norm(&workspace("kit.toml")), "crates/gs_field/data/outfits/kit.toml differs from data/outfits/: re-copy it (or Publish)");
+        assert!(
+            norm(gs_field::puppets::EMBEDDED_OUTFITS) == norm(&workspace("outfits.toml")),
+            "crates/gs_field/data/outfits/outfits.toml differs from data/outfits/: re-copy it (or Publish)"
+        );
     }
 
     /// `gs_field` embeds a copy of the workspace's `data/props/weapons.toml`.

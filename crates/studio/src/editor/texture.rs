@@ -19,10 +19,11 @@
 //! | `sheet.png` | Build sheet, then the artist | the texture itself: the paintings projected onto the pattern, touched up by hand |
 //!
 //! Save installs the family's `sheet.png` as
-//! `<pool>/global/puppets/<family>.texture.png` and Publish ships it beside
-//! the puppet. The sheet's layout is rebuilt from the puppet wherever it is
-//! used, so a sheet painted for an older rig (another size) is refused rather
-//! than smeared.
+//! `<pool>/global/puppets/<family>.texture.png`, and each creature's as
+//! `<pool>/global/puppets/skins/<family>/<creature>.png` ([`ship_skins`]),
+//! and Publish ships them beside the puppet. The sheet's layout is rebuilt
+//! from the puppet wherever it is used, so a sheet painted for an older rig
+//! (another size) is refused rather than smeared.
 
 use std::path::{Path, PathBuf};
 
@@ -312,6 +313,100 @@ pub fn painted_creatures(data_root: &Path, family: &str) -> Vec<String> {
         .collect();
     out.sort();
     out
+}
+
+/// The creatures that can be shown on `family`'s puppet: every creature
+/// folder under its textures, and every creature `outfits.toml` dresses
+/// that the bestiary puts on this family (the doll cascade over the rigs
+/// saved in `<data>/rigs/`, as the stage resolves it).
+pub fn family_creatures(data_root: &Path, family: &str) -> Vec<String> {
+    let mut out: std::collections::BTreeSet<String> = std::fs::read_dir(dir(data_root, family))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|name| name != OUTFITS && name != PROJECTED)
+        .collect();
+    if let Ok((_, outfits)) = outfits(data_root) {
+        let saved: std::collections::BTreeSet<String> = std::fs::read_dir(data_root.join("rigs"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".rig.toml")).map(str::to_owned))
+            .collect();
+        for e in gs_field::bestiary::shared().entries() {
+            let key = gs_field::naming::name_token(&e.name);
+            if outfits.get(&key).is_some()
+                && gs_field::dolls::resolve_doll(e.family.as_deref(), e.creature_type.as_deref(), &|f| saved.contains(f)).is_some_and(|d| d.family == family)
+            {
+                out.insert(key);
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// The creatures of `family` with a built skin: `(creature, its sheet.png)`.
+pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = std::fs::read_dir(dir(data_root, family))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|name| name != OUTFITS)
+        .map(|name| {
+            let sheet = creature_dir(data_root, family, &name).join(SHEET);
+            (name, sheet)
+        })
+        .filter(|(_, sheet)| sheet.is_file())
+        .collect();
+    out.sort();
+    out
+}
+
+/// Put `family`'s creature skins into a puppets folder (the pool's
+/// `global/puppets/`, or the publish dir's `puppets/`) as
+/// `skins/<family>/<creature>.png` (`gs_field::puppets::skin_file_name`), and
+/// drop any there whose creature has no sheet any more. Returns how many
+/// were copied.
+pub fn ship_skins(data_root: &Path, family: &str, puppets: &Path) -> Result<usize, String> {
+    let sheets = creature_sheets(data_root, family);
+    let into = puppets.join(gs_field::puppets::SKINS_DIR).join(family);
+    for stale in std::fs::read_dir(&into).into_iter().flatten().flatten() {
+        let name = stale.file_name().to_string_lossy().into_owned();
+        let creature = name.strip_suffix(".png");
+        if creature.is_some_and(|c| !sheets.iter().any(|(s, _)| s == c)) {
+            std::fs::remove_file(stale.path()).map_err(|e| format!("{}: {e}", stale.path().display()))?;
+        }
+    }
+    if sheets.is_empty() {
+        let _ = std::fs::remove_dir(&into);
+        return Ok(0);
+    }
+    std::fs::create_dir_all(&into).map_err(|e| format!("{}: {e}", into.display()))?;
+    for (creature, sheet) in &sheets {
+        let to = puppets.join(gs_field::puppets::skin_file_name(family, creature));
+        std::fs::copy(sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
+    }
+    Ok(sheets.len())
+}
+
+/// Put `<data>/outfits/kit.toml` and `outfits.toml` into `into` (the pool's
+/// `global/outfits/`, or the publish dir's `outfits/`) -- only when both
+/// parse. Returns the files copied (none when the data root has none).
+pub fn ship_outfits(data_root: &Path, into: &Path) -> Result<Vec<&'static str>, String> {
+    outfits(data_root)?;
+    let mut shipped = Vec::new();
+    for name in ["kit.toml", "outfits.toml"] {
+        let from = data_root.join("outfits").join(name);
+        if from.is_file() {
+            std::fs::create_dir_all(into).map_err(|e| format!("{}: {e}", into.display()))?;
+            std::fs::copy(&from, into.join(name)).map_err(|e| format!("{} -> {}: {e}", from.display(), into.display()))?;
+            shipped.push(name);
+        }
+    }
+    Ok(shipped)
 }
 
 /// Build every creature's skin in `family` (see [`painted_creatures`]): each

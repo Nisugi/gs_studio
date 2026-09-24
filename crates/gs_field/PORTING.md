@@ -354,3 +354,27 @@ set. `with_props` for hosts building a set by hand.
 `BestiaryDb::entries()` (every entry, in file order): gs-studio's
 `--export-jobs` walks the whole bestiary and briefs a texture generator
 with each creature's description.
+
+`bestiary::TYPE_FILLS`: body types the bundled file leaves blank, filled on
+load where the owner has named the shape (the squamous reptilian mutant is
+a biped, so it resolves to the humanoid rather than the four-legged
+reptilian rig). A type the file gives always wins.
+
+### 6.15 Creature skins and outfits
+
+`PuppetRigs` carries, unparsed like the rest:
+
+* `kit()` / `outfits()` -- the clothing kit and who wears what
+  (`gs_puppet::Kit`, `gs_puppet::Outfits`): `data/outfits/{kit,outfits}.toml`
+  embedded (`EMBEDDED_KIT`, `EMBEDDED_OUTFITS`, published copies), each
+  overridden by the same file in `<base>/global/outfits/` (`outfits_dir`).
+* `skin(family, creature)` -- a creature's own pattern sheet, laid out for
+  the family's puppet in its outfit: `skins/<family>/<creature>.png`
+  (`skin_file_name`, `creature` = its bestiary name token) under
+  `data/puppets/` embedded (`embedded_skins`) and under
+  `<base>/global/puppets/` (`load_skins`), the pool's replacing or adding
+  per creature. `skins()` lists them.
+
+`with_outfits` / `with_skin` build a set by hand. Embedded skins grow the
+binary by one sheet per creature (a few hundred KB each), so a full set of
+627 belongs in the pool rather than compiled in.

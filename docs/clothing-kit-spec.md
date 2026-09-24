@@ -13,7 +13,7 @@ in `E:\Gemstone\dev\image-gen\`.
   hang down, or lie along the body. Hanging pieces flatten toward the floor
   as they lie down. Eye dots under a garment are hidden.
   `turnaround` shows an outfit (`TURNAROUND_WEAR=robe,hood`).
-- **C3 done, except the stage.** One difference from section 7: an
+- **C3 done.** One difference from section 7: an
   outfit's templates live in `textures/<family>/outfits/<outfit>/`. The
   extra `outfits/` level keeps outfit folders apart from creature folders.
   The outfit key is the pieces joined by `+`, plus `~<hash>` when a piece is
@@ -22,7 +22,10 @@ in `E:\Gemstone\dev\image-gen\`.
   Creature folders, per-creature skins and "Build every skin" are in
   (G1, studio side).
 - **C4 started:** `data/outfits/outfits.toml` holds 14 proposed outfits
-  from the ascension art, for review. The stage does not wear outfits yet.
+  from the ascension art, for review. The stage dresses each creature in its
+  outfit and its own skin (a dressed creature with no skin of its own wears
+  no texture). The squamous reptilian mutant is re-pointed to the humanoid
+  (`gs_field::bestiary::TYPE_FILLS`: the bestiary gave it no body type).
 - **Not done:** coats (an open-front hem), hats, cape, sleeves_wide, a
   mantle or sash.
 

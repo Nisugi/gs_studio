@@ -403,9 +403,11 @@ impl Session {
     }
 
     /// Ship the SAVED bake (`rigs/<family>.png` + `.toml`), the saved puppet
-    /// (`puppets/<family>.puppet.toml`), every pose set in `<data>/poses/`
-    /// (`poses/`) and the held-props file (`props/weapons.toml`) into the
-    /// publish directory. Never the
+    /// (`puppets/<family>.puppet.toml`), its painted textures (the family's
+    /// and its creatures', `puppets/skins/<family>/`), every pose set in
+    /// `<data>/poses/` (`poses/`), the held-props file (`props/weapons.toml`)
+    /// and the clothing kit and outfits (`outfits/`) into the publish
+    /// directory. Never the
     /// `.rig.toml` source. Publishes what is on disk: unsaved edits are not
     /// in it.
     pub fn publish(&mut self) -> Result<PathBuf, String> {
@@ -425,6 +427,13 @@ impl Session {
             std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
             std::fs::copy(&texture, &to).map_err(|e| format!("{} -> {}: {e}", texture.display(), to.display()))?;
             shipped.push(format!("puppets/{}", gs_field::puppets::texture_file_name(&family)));
+        }
+        let skins = super::texture::ship_skins(&self.data_root, &family, &dir.join("puppets"))?;
+        if skins > 0 {
+            shipped.push(format!("{skins} creature skin(s)"));
+        }
+        for name in super::texture::ship_outfits(&self.data_root, &dir.join("outfits"))? {
+            shipped.push(format!("outfits/{name}"));
         }
         let mut pose_count = 0;
         for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
@@ -510,8 +519,9 @@ impl Session {
     }
 
     /// Put every pose set in `<data>/poses/` into `<pool>/global/puppets/`,
-    /// where it replaces the built-in set of that body type on the stage, and
-    /// the held-props file into `<pool>/global/props/`; then drop gs_field's
+    /// where it replaces the built-in set of that body type on the stage, the
+    /// held-props file into `<pool>/global/props/`, and the clothing kit and
+    /// outfits into `<pool>/global/outfits/`; then drop gs_field's
     /// caches so the stage re-reads them. A file that does not parse is left
     /// out (the stage keeps what it had) and named in the error. Returns how
     /// many pose sets were installed.
@@ -541,6 +551,9 @@ impl Session {
                 Err(e) => broken.push(format!("props/weapons.toml: {e}")),
             }
         }
+        if let Err(e) = super::texture::ship_outfits(&self.data_root, &pool.join("global").join("outfits")) {
+            broken.push(e);
+        }
         crate::pool_dir::invalidate_caches();
         if broken.is_empty() {
             Ok(installed)
@@ -549,9 +562,10 @@ impl Session {
         }
     }
 
-    /// Copy the saved bake into `<pool>/global/rigs/` and the saved puppet
-    /// into `<pool>/global/puppets/` (removing a pool puppet this family no
-    /// longer has), then drop gs_field's caches so they are read again.
+    /// Copy the saved bake into `<pool>/global/rigs/` and the saved puppet,
+    /// its painted texture and its creatures' skins into
+    /// `<pool>/global/puppets/` (removing what this family no longer has),
+    /// then drop gs_field's caches so they are read again.
     fn install_in_pool(&self, family: &str, pool: &Path) -> Result<(), String> {
         let global = pool.join("global");
         let files = self.shipped_files(family);
@@ -561,7 +575,8 @@ impl Session {
         for (name, sub) in files {
             copy_into(&self.rigs_dir().join(&name), &global.join(sub))?;
         }
-        // The painted texture rides beside the puppet (or goes with it).
+        // The painted texture rides beside the puppet (or goes with it), and
+        // so do its creatures' skins.
         let texture = super::texture::sheet_path(&self.data_root, family);
         let installed = global.join("puppets").join(gs_field::puppets::texture_file_name(family));
         if texture.is_file() {
@@ -570,6 +585,7 @@ impl Session {
         } else {
             let _ = std::fs::remove_file(&installed);
         }
+        super::texture::ship_skins(&self.data_root, family, &global.join("puppets"))?;
         crate::pool_dir::invalidate_caches();
         Ok(())
     }
@@ -843,6 +859,66 @@ mod tests {
         assert!(s.status.contains("no puppet yet"), "{}", s.status);
         assert!(!data.0.join("rigs/humanoid.puppet.toml").exists());
         assert!(!pool.join("global/puppets/humanoid.puppet.toml").exists());
+    }
+
+    /// A creature painted in its outfit: Save installs its skin and the
+    /// outfit files beside the puppet, Publish ships them, and the stage
+    /// dresses the creature and wears the skin -- the studio's sheet fits
+    /// the stage's dressed figure, rebuilt from the bake.
+    #[test]
+    fn a_creature_skin_reaches_the_stage_on_its_dressed_puppet() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let data = TempData::new("skins");
+        std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
+        std::fs::create_dir_all(data.0.join("rigs")).unwrap();
+        std::fs::copy(repo.join("rigs/humanoid.rig.toml"), data.0.join("rigs/humanoid.rig.toml")).unwrap();
+        std::fs::create_dir_all(data.0.join("outfits")).unwrap();
+        std::fs::write(data.0.join("outfits/outfits.toml"), "[squamous_reptilian_mutant]\nwear = [\"robe\", \"hood\"]\n").unwrap();
+        let (pool, out) = (data.0.join("pool"), data.0.join("published"));
+        let mut s = Session::open(&data.0, out.clone(), Some(pool.clone())).unwrap();
+
+        // Paint the front flat red over its outfit's template, and build.
+        let creature = "squamous_reptilian_mutant";
+        let puppet = s.puppet().clone().unwrap();
+        let d = super::super::texture::Dressed::creature(&data.0, &puppet, &s.outlines, "humanoid", creature).unwrap();
+        let grid = d.front.as_ref().unwrap().grid;
+        let folder = super::super::texture::creature_dir(&data.0, "humanoid", creature);
+        std::fs::create_dir_all(&folder).unwrap();
+        let red: Vec<u8> = [220, 30, 30, 255].repeat(grid.w * grid.h);
+        super::super::texture::write_png(&folder.join("front.png"), grid.w, grid.h, &red).unwrap();
+        let (built, failed) = super::super::texture::build_every_skin(&data.0, "humanoid", &puppet, &s.outlines).unwrap();
+        assert_eq!((built.as_slice(), failed.len()), ([creature.to_string()].as_slice(), 0), "{failed:?}");
+
+        s.save().unwrap();
+        let skin = format!("skins/humanoid/{creature}.png");
+        assert!(pool.join("global/puppets").join(&skin).is_file(), "{}", s.status);
+        assert!(pool.join("global/outfits/outfits.toml").is_file());
+        assert!(out.join("puppets").join(&skin).is_file() && out.join("outfits/outfits.toml").is_file(), "{}", s.status);
+
+        // What the stage does with it (gs_field_egui's PuppetCache): the
+        // installed bake, dressed from the installed outfits, lays out a
+        // sheet exactly the size of the installed skin.
+        gs_field::data_dirs::set_base_dir(pool.clone());
+        crate::pool_dir::invalidate_caches();
+        let set = gs_field::puppets::puppets();
+        assert!(set.puppet_for("squamous reptilian mutant", Some("mutant")).is_some_and(|d| d.family == "humanoid"));
+        let kit = gs_puppet::Kit::from_toml(set.kit()).unwrap();
+        let outfit = gs_puppet::Outfits::from_toml(set.outfits(), &kit).unwrap().get(creature).cloned().unwrap();
+        let stage = Puppet::from_baked_toml(&set.get("humanoid").unwrap().baked).unwrap().wearing(&outfit);
+        let layout = gs_puppet::UvLayout::fit(&stage, gs_puppet::SHEET_SIDE);
+        let installed = std::fs::read(pool.join("global/puppets").join(&skin)).unwrap();
+        assert_eq!(set.skin("humanoid", creature).map(|b| b.to_vec()), Some(installed));
+        let (w, h, _) = super::super::texture::read_png(&pool.join("global/puppets").join(&skin)).unwrap();
+        assert_eq!((w, h), (layout.w, layout.h), "the studio's sheet fits the stage's dressed figure");
+        gs_field::data_dirs::clear_base_dir();
+        crate::pool_dir::invalidate_caches();
+
+        // No sheet any more: the next Save takes the skin off the stage.
+        std::fs::remove_file(folder.join("sheet.png")).unwrap();
+        s.save().unwrap();
+        assert!(!pool.join("global/puppets").join(&skin).exists());
+        assert!(!out.join("puppets").join(&skin).exists());
     }
 
     /// Reload poses puts the data root's pose sets where the stage reads

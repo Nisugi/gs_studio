@@ -75,6 +75,10 @@ impl StageTool {
             // A real creature the pool almost certainly has no art for:
             // exercises the non-humanoid puppet path.
             stage.spawn_named("timber wolf", Some("wolf".to_string()));
+            // Creatures in outfits (data/outfits/outfits.toml): the dressed
+            // puppet path.
+            stage.spawn_named("grim gigas skald", Some("skald".to_string()));
+            stage.spawn_named("squamous reptilian mutant", Some("mutant".to_string()));
             stage.set_status("studio-1", "stunned", true);
             stage.set_wound("studio-1", "head", 2);
             stage.set_health_bar("studio-1", true);

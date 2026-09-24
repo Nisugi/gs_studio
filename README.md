@@ -208,15 +208,16 @@ and a renamed or deleted bone takes its overrides with it.
 puppet, rebuilt live from the rig as it stands -- unsaved edits, depth
 overrides and all -- so a joint drag shows its effect on the 3D body at once.
 Its controls are three rows: **Pose** (the pose list, *Edit pose*, *Play
-death*, *Reload poses*), **View** (*Smooth skin*, *Texture*, *Reset view*)
-and **Hold** (a weapon or shield for each hand, from the props file -- see
+death*, *Reload poses*), **View** (*Smooth skin*, *Texture*, *Creature*,
+*Reset view*) and **Hold** (a weapon or shield for each hand, from the props file -- see
 *Held props* below), then a collapsed **Texture painting** section.
 Drag turns it, the wheel zooms; the pose list comes from
 `<data>/poses/<body_type>.toml` (else the built-in copy) with the family's
 own overrides applied, and *Reload poses* re-reads the file after an edit
 -- and installs every pose set that parses into the pool's
-`global/puppets/` (and `<data>/props/weapons.toml` into `global/props/`), so
-the STAGE uses the edited poses too (Save does the same). A file that does not parse is left out and named on the status line.
+`global/puppets/` (and `<data>/props/weapons.toml` into `global/props/`, and
+`<data>/outfits/kit.toml` + `outfits.toml` into `global/outfits/`), so the
+STAGE uses the edited poses too (Save does the same). A file that does not parse is left out and named on the status line.
 *Smooth skin* (on by default) draws the puppet as one continuous surface
 (`Posed::skin`: a depth test per pixel, joints blended, contours only where
 the depth steps), the way the stage draws it; off shows the older flat
@@ -243,7 +244,16 @@ A creature can have its own skin: paintings in
 in the creature's outfit (`<data>/outfits/outfits.toml`, see the clothing
 kit below). An outfit's templates are
 `<data>/textures/<family>/outfits/<outfit>/` -- the outline and depth with
-the garments on. The stage does not show per-creature skins or outfits yet.
+the garments on. *Creature* (in the View row) shows one: every creature
+folder of this family and every creature `outfits.toml` dresses that the
+bestiary puts on it. The preview then shows the puppet in that creature's
+outfit, in its own `sheet.png`; *Build sheet* and the projection buttons
+work in its folder. Save installs every creature sheet of the family as
+`<pool>/global/puppets/skins/<family>/<creature>.png` (dropping ones whose
+sheet is gone) and Publish ships them to `puppets/skins/`. On the stage a
+creature with an outfit or a skin draws as its family's puppet in its outfit,
+wearing its own skin. A creature in an outfit with no skin of its own wears
+no texture, because the family's sheet has no garments on it.
 
 *Projection-first* (`docs/projection-first-export-spec.md`): *front -> side*
 renders what `front.png` shows of the rest body from the side, framed
@@ -787,11 +797,13 @@ Hood and pauldrons ride their bone; a hem is aimed at the knees and then the
 ankles every pose (so it drapes over the lap sitting and follows the legs
 lying), a cloak hangs straight down, or along the body as it lies.
 
-What a creature wears is `outfits.toml`, one table per creature (not in use
-yet):
+What a creature wears is `outfits.toml`, one table per creature (its
+bestiary name token); the stage dresses it on its family's puppet:
 
     [grim_gigas_skald]
     wear = ["robe", "hood"]
     robe = { flare = 1.4 }   # its own tweaks of the kit's numbers
 
-`turnaround` shows an outfit with `TURNAROUND_WEAR=robe,hood`.
+`turnaround` shows an outfit with `TURNAROUND_WEAR=robe,hood`. Save and
+*Reload poses* install both files into the pool's `global/outfits/` (only
+when they parse); Publish ships them to `outfits/`, which `gs_field` embeds.

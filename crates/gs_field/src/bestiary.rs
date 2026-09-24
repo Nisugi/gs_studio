@@ -24,6 +24,16 @@ pub const EMBEDDED_JSON: &str = include_str!(concat!(
     "/data/bestiary.json"
 ));
 
+/// Body types the bundled file leaves blank, filled where the owner has
+/// named the creature's shape, so the rig cascade does not draw it on its
+/// family's rig when that rig is another shape. Keyed by lowercase name;
+/// a type the file does give always wins.
+pub const TYPE_FILLS: &[(&str, &str)] = &[
+    // Reptilian family, but it walks upright: the humanoid, not the
+    // four-legged reptilian rig.
+    ("squamous reptilian mutant", "Biped"),
+];
+
 /// One creature — only the fields the creature field reads. The JSON carries
 /// many more (level, offense, defense, treasure, spawns…); they are ignored.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
@@ -93,7 +103,13 @@ pub struct BestiaryDb {
 }
 
 impl BestiaryDb {
-    pub fn from_entries(entries: Vec<CreatureEntry>) -> Self {
+    pub fn from_entries(mut entries: Vec<CreatureEntry>) -> Self {
+        for e in entries.iter_mut().filter(|e| e.creature_type.as_deref().is_none_or(|t| t.trim().is_empty())) {
+            let name = e.name.to_ascii_lowercase();
+            if let Some((_, ty)) = TYPE_FILLS.iter().find(|(n, _)| *n == name) {
+                e.creature_type = Some((*ty).to_string());
+            }
+        }
         let mut db = BestiaryDb {
             entries,
             ..Default::default()
@@ -207,6 +223,15 @@ mod tests {
         assert!(db.len() > 100, "got {} entries", db.len());
         assert!(!db.by_noun("kobold").is_empty());
         assert!(!db.by_noun("  KOBOLD ").is_empty(), "trimmed, case-insensitive");
+    }
+
+    #[test]
+    fn a_filled_body_type_stands_the_reptilian_mutant_upright() {
+        let db = BestiaryDb::embedded().unwrap();
+        let mutant = db.entries().iter().find(|e| e.name == "Squamous reptilian mutant").unwrap();
+        assert_eq!(mutant.creature_type.as_deref(), Some("Biped"));
+        let doll = crate::dolls::resolve_doll(mutant.family.as_deref(), mutant.creature_type.as_deref(), &|_| true);
+        assert_eq!(doll.unwrap().family, "humanoid");
     }
 
     #[test]
