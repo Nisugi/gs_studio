@@ -355,10 +355,12 @@ set. `with_props` for hosts building a set by hand.
 `--export-jobs` walks the whole bestiary and briefs a texture generator
 with each creature's description.
 
-`bestiary::TYPE_FILLS`: body types the bundled file leaves blank, filled on
-load where the owner has named the shape (the squamous reptilian mutant is
-a biped, so it resolves to the humanoid rather than the four-legged
-reptilian rig). A type the file gives always wins.
+`bestiary::FILLS`: families and body types the bundled file leaves blank,
+filled on load where the owner has named the shape (the squamous reptilian
+mutant is a biped, so it resolves to the humanoid rather than the
+four-legged reptilian rig; the spectral black warhorse and the ki-lin are
+equine quadrupeds; the treekin sapling is a treekin). A value the file gives
+always wins. `dolls::FAMILY_ALIASES` gains `goliath -> giant`.
 
 ### 6.15 Creature skins and outfits
 

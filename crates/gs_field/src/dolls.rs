@@ -475,8 +475,10 @@ pub const FAMILY_ALIASES: &[(&str, &str)] = &[
     ("bird", "avian"),
     ("tree", "treekin"),
     ("crab", "crustacean"),
-    // Unambiguous biped look-alikes.
+    // Unambiguous biped look-alikes. Goliaths are rangier than the giant's
+    // silhouette, but the nearest rig until they have their own.
     ("gigas", "giant"),
+    ("goliath", "giant"),
     ("wraith", "ghost"),
 ];
 

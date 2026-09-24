@@ -24,14 +24,19 @@ pub const EMBEDDED_JSON: &str = include_str!(concat!(
     "/data/bestiary.json"
 ));
 
-/// Body types the bundled file leaves blank, filled where the owner has
-/// named the creature's shape, so the rig cascade does not draw it on its
-/// family's rig when that rig is another shape. Keyed by lowercase name;
-/// a type the file does give always wins.
-pub const TYPE_FILLS: &[(&str, &str)] = &[
+/// Families and body types the bundled file leaves blank, filled on load
+/// where the owner has named the creature's shape, so the rig cascade draws
+/// it on a rig of that shape: `(lowercase name, family, body type)`, ""
+/// leaving that one alone. A value the file does give always wins.
+pub const FILLS: &[(&str, &str, &str)] = &[
     // Reptilian family, but it walks upright: the humanoid, not the
     // four-legged reptilian rig.
-    ("squamous reptilian mutant", "Biped"),
+    ("squamous reptilian mutant", "", "Biped"),
+    // Four-legged. The ki-lin has a stag's body and a horse's hooves: the
+    // equine rig is the nearest.
+    ("spectral black warhorse", "Equine", "Quadruped"),
+    ("ki-lin", "Equine", "Quadruped"),
+    ("treekin sapling", "Treekin", "Plantlife"),
 ];
 
 /// One creature — only the fields the creature field reads. The JSON carries
@@ -104,9 +109,14 @@ pub struct BestiaryDb {
 
 impl BestiaryDb {
     pub fn from_entries(mut entries: Vec<CreatureEntry>) -> Self {
-        for e in entries.iter_mut().filter(|e| e.creature_type.as_deref().is_none_or(|t| t.trim().is_empty())) {
+        let blank = |v: &Option<String>| v.as_deref().is_none_or(|t| t.trim().is_empty());
+        for e in &mut entries {
             let name = e.name.to_ascii_lowercase();
-            if let Some((_, ty)) = TYPE_FILLS.iter().find(|(n, _)| *n == name) {
+            let Some((_, family, ty)) = FILLS.iter().find(|(n, _, _)| *n == name) else { continue };
+            if !family.is_empty() && blank(&e.family) {
+                e.family = Some((*family).to_string());
+            }
+            if !ty.is_empty() && blank(&e.creature_type) {
                 e.creature_type = Some((*ty).to_string());
             }
         }
@@ -225,13 +235,31 @@ mod tests {
         assert!(!db.by_noun("  KOBOLD ").is_empty(), "trimmed, case-insensitive");
     }
 
+    /// Creatures the bestiary leaves untyped (or without a family) land on
+    /// the rig of the shape the owner named.
     #[test]
-    fn a_filled_body_type_stands_the_reptilian_mutant_upright() {
+    fn filled_facts_put_untyped_creatures_on_the_right_rig() {
         let db = BestiaryDb::embedded().unwrap();
-        let mutant = db.entries().iter().find(|e| e.name == "Squamous reptilian mutant").unwrap();
-        assert_eq!(mutant.creature_type.as_deref(), Some("Biped"));
-        let doll = crate::dolls::resolve_doll(mutant.family.as_deref(), mutant.creature_type.as_deref(), &|_| true);
-        assert_eq!(doll.unwrap().family, "humanoid");
+        let rig = |name: &str| {
+            let e = db.entries().iter().find(|e| e.name.eq_ignore_ascii_case(name)).unwrap_or_else(|| panic!("{name}"));
+            crate::dolls::resolve_doll(e.family.as_deref(), e.creature_type.as_deref(), &|_| true).unwrap().family
+        };
+        assert_eq!(rig("squamous reptilian mutant"), "humanoid", "upright, not the four-legged reptilian");
+        assert_eq!(rig("spectral black warhorse"), "equine");
+        assert_eq!(rig("ki-lin"), "equine");
+        assert_eq!(rig("treekin sapling"), "treekin");
+        // Goliaths: the giant, through the family alias.
+        assert_eq!(rig("battle-worn empyrean captain"), "giant");
+        assert_eq!(rig("burly goliath engineer"), "giant");
+        // A value the file gives is never replaced.
+        let kept = BestiaryDb::from_entries(vec![CreatureEntry {
+            name: "ki-lin".into(),
+            noun: "ki-lin".into(),
+            family: Some("Feline".into()),
+            ..Default::default()
+        }]);
+        assert_eq!(kept.entries()[0].family.as_deref(), Some("Feline"));
+        assert_eq!(kept.entries()[0].creature_type.as_deref(), Some("Quadruped"));
     }
 
     #[test]
