@@ -8,6 +8,8 @@
 //! rewritten), then copy those into `<publish_dir>/rigs/` and
 //! `<publish_dir>/puppets/`, and every `data/poses/*.toml` into
 //! `<publish_dir>/poses/`. Default publish dir: `crates/gs_field/data`.
+//! `PUBLISH_ONLY=elephantid,canine` limits it to those families (poses are
+//! still copied).
 
 use std::path::{Path, PathBuf};
 
@@ -31,6 +33,10 @@ fn main() {
         .filter_map(|e| e.file_name().to_str()?.strip_suffix(".rig.toml").map(str::to_owned))
         .collect();
     families.sort();
+    if let Ok(only) = std::env::var("PUBLISH_ONLY") {
+        let only: Vec<&str> = only.split(',').map(str::trim).collect();
+        families.retain(|f| only.contains(&f.as_str()));
+    }
 
     let mut failed = Vec::new();
     for family in &families {

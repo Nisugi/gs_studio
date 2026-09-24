@@ -55,14 +55,14 @@ wrist_l = [-0.2, 0.6]
 wrist_r = [0.44, 0.6]
 
 [depth]
-tusk_base_l = 1.0
-tusk_base_r = -0.97
-tusk_bend_l = 1.05
-tusk_bend_r = -1.0
-tusk_curl_l = 0.99
-tusk_curl_r = -0.89
-tusk_tip_l = 0.84
-tusk_tip_r = -0.84
+tusk_base_l = 0.3
+tusk_base_r = -0.3
+tusk_bend_l = 0.6
+tusk_bend_r = -0.6
+tusk_curl_l = 0.9
+tusk_curl_r = -0.9
+tusk_tip_l = 0.85
+tusk_tip_r = -0.85
 
 [[bones]]
 name = "skull"
