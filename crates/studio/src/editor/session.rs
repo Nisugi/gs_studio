@@ -441,6 +441,9 @@ impl Session {
                 Ok(()) => notes.push("installed in the pool".into()),
                 Err(e) => notes.push(format!("NOT INSTALLED IN THE POOL: {e}")),
             }
+            if let Err(e) = self.install_poses() {
+                notes.push(e);
+            }
         }
 
         match self.publish_on_save.then(|| self.publish_target()) {
@@ -453,6 +456,38 @@ impl Session {
         }
         self.status = notes.join("; ");
         Ok(())
+    }
+
+    /// Put every pose set in `<data>/poses/` into `<pool>/global/puppets/`,
+    /// where it replaces the built-in set of that body type on the stage, and
+    /// drop gs_field's caches so the stage re-reads them. A file that does
+    /// not parse is left out (the stage keeps what it had) and named in the
+    /// error. Returns how many were installed.
+    pub fn install_poses(&mut self) -> Result<usize, String> {
+        let pool = self.pool.clone().ok_or("no pool to install poses into")?;
+        let into = pool.join("global").join("puppets");
+        let mut installed = 0;
+        let mut broken = Vec::new();
+        for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|e| e == "toml") {
+                continue;
+            }
+            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PoseSet::from_toml(&t)) {
+                Ok(_) => {
+                    copy_into(&path, &into)?;
+                    installed += 1;
+                }
+                Err(e) => broken.push(format!("{name}: {e}")),
+            }
+        }
+        crate::pool_dir::invalidate_caches();
+        if broken.is_empty() {
+            Ok(installed)
+        } else {
+            Err(format!("{installed} pose sets installed; NOT installed (fix and reload): {}", broken.join("; ")))
+        }
     }
 
     /// Copy the saved bake into `<pool>/global/rigs/` and the saved puppet
@@ -655,6 +690,41 @@ mod tests {
         assert!(s.status.contains("no puppet yet"), "{}", s.status);
         assert!(!data.0.join("rigs/humanoid.puppet.toml").exists());
         assert!(!pool.join("global/puppets/humanoid.puppet.toml").exists());
+    }
+
+    /// Reload poses puts the data root's pose sets where the stage reads
+    /// them; a file that does not parse stays out and is named.
+    #[test]
+    fn edited_poses_reach_the_stage_and_broken_ones_do_not() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let data = TempData::new("poses");
+        std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
+        std::fs::create_dir_all(data.0.join("poses")).unwrap();
+        let biped = std::fs::read_to_string(repo.join("poses/biped.toml")).unwrap();
+        let edited = biped.replace("[pose.kneel]", "[pose.bow]
+torso_upper = { rot = [40.0, 0.0, 0.0] }
+
+[pose.kneel]");
+        std::fs::write(data.0.join("poses/biped.toml"), &edited).unwrap();
+        std::fs::write(data.0.join("poses/avian.toml"), "this is not a pose file [").unwrap();
+        let pool = data.0.join("pool");
+        let mut s = Session::open(&data.0, data.0.join("published"), Some(pool.clone())).unwrap();
+
+        let err = s.install_poses().unwrap_err();
+        assert!(err.contains("1 pose sets installed") && err.contains("avian.toml"), "{err}");
+        assert_eq!(names(&pool.join("global/puppets")), ["biped.toml"]);
+
+        gs_field::data_dirs::set_base_dir(pool.clone());
+        crate::pool_dir::invalidate_caches();
+        let set = gs_field::puppets::puppets();
+        let file = set.pose_file("biped").unwrap();
+        assert_eq!(file.source, gs_field::puppets::PuppetSource::Override);
+        assert!(gs_puppet::PoseSet::from_toml(&file.toml).unwrap().get("bow").is_some());
+        // The broken avian file did not replace the built-in set.
+        assert_eq!(set.pose_file("avian").unwrap().source, gs_field::puppets::PuppetSource::Embedded);
+        gs_field::data_dirs::clear_base_dir();
+        crate::pool_dir::invalidate_caches();
     }
 
     #[test]

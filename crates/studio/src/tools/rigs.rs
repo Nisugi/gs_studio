@@ -431,6 +431,7 @@ impl RigTool {
         };
         let data_root = self.session.data_root.clone();
         let pv = &mut self.puppet_view;
+        let mut reload_stage = false;
 
         ui.horizontal_wrapped(|ui| {
             ui.strong("3D puppet");
@@ -445,8 +446,13 @@ impl RigTool {
                     ui.selectable_value(&mut pv.pose, name.clone(), name);
                 }
             });
-            if ui.button("Reload poses").on_hover_text("Read the pose files again after editing them").clicked() {
+            if ui
+                .button("Reload poses")
+                .on_hover_text("Read the pose files again after editing them, here AND on the stage")
+                .clicked()
+            {
                 pv.reload_poses();
+                reload_stage = true;
             }
             if ui.button("Reset view").clicked() {
                 pv.reset_camera();
@@ -460,6 +466,12 @@ impl RigTool {
                 (None, None) => ui.weak(""),
             };
         });
+        if reload_stage {
+            self.session.status = match self.session.install_poses() {
+                Ok(n) => format!("Poses reloaded: {n} pose sets now on the stage too"),
+                Err(e) => e,
+            };
+        }
         ui.weak("drag: turn   wheel: zoom");
 
         let pose = pv.current_pose(&data_root, &body_type, &family);
