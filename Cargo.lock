@@ -2654,6 +2654,7 @@ dependencies = [
  "gs_field",
  "gs_field_egui",
  "gs_puppet",
+ "png 0.17.16",
  "rig",
  "rig_bake",
  "serde",
