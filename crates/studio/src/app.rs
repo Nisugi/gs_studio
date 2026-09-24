@@ -198,6 +198,7 @@ impl StudioApp {
                 .on_disabled_hover_text(if dirty { "Save or discard the current rig first" } else { "Type the chart's path first" });
             if import.clicked() {
                 let chart = PathBuf::from(self.chart_edit.trim());
+                crate::perf_log::log(&format!("begin: import outlines from {}", chart.display()));
                 match data_root::import_outlines(&chart, &self.data.path) {
                     Ok(summary) => {
                         eprintln!("gs-studio: {summary}");
@@ -308,6 +309,7 @@ impl StudioApp {
             )
             .clicked()
         {
+            crate::perf_log::log(&format!("begin: set pool to {}", self.pool_edit.trim()));
             self.set_pool();
         }
         self.import_button(ui);
@@ -383,7 +385,9 @@ impl StudioApp {
             });
         });
         if go {
+            crate::perf_log::log(&format!("begin: import from VellumFE ({})", plan.summary()));
             let report = data_home::import(&source, &self.pool.path);
+            crate::perf_log::log(&format!("end: {}", report.summary()));
             if let Some(stage) = &mut self.stage {
                 stage.pool_changed();
                 stage.push_status(report.summary());
@@ -469,7 +473,20 @@ impl StudioApp {
 }
 
 impl eframe::App for StudioApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let started = std::time::Instant::now();
+        let tab = self.active;
+        self.frame(ui, frame);
+        let label = TOOLS.iter().find(|t| t.id == tab).map_or("?", |t| t.label);
+        if let Some(line) = crate::perf_log::slow_frame_line(started.elapsed(), label, "") {
+            crate::perf_log::log(&line);
+        }
+    }
+}
+
+impl StudioApp {
+    /// One frame of the app (timed by [`eframe::App::ui`]).
+    fn frame(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Closing the window with unsaved work goes through the same
         // discard prompt as everything else.
         if ui.ctx().input(|i| i.viewport().close_requested()) {

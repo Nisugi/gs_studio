@@ -28,6 +28,7 @@ mod cli;
 mod data_home;
 mod data_root;
 mod editor;
+mod perf_log;
 mod pool_dir;
 mod settings;
 mod stage;

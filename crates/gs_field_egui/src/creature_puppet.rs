@@ -50,6 +50,26 @@ pub fn is_forced_puppet(ctx: &egui::Context, exist_id: &str) -> bool {
     ids.is_some_and(|ids| !ids.is_empty() && ids.contains(exist_id.trim().trim_start_matches('#')))
 }
 
+/// Per-creature facings (exist id -> degrees) the HOST chooses: a studio's
+/// facing slider, or a client turning each creature toward the middle of
+/// the field. Kept per `egui::Context` like [`set_forced_puppets`]; a
+/// creature not in the map keeps the default quarter-turn.
+pub fn set_puppet_facings(ctx: &egui::Context, facings: impl IntoIterator<Item = (String, f32)>) {
+    let map: HashMap<String, f32> =
+        facings.into_iter().map(|(id, deg)| (id.trim().trim_start_matches('#').to_string(), deg)).collect();
+    ctx.data_mut(|d| d.insert_temp(facing_id(), Arc::new(map)));
+}
+
+/// The host's facing for this creature, if it set one.
+pub fn puppet_facing(ctx: &egui::Context, exist_id: &str) -> Option<f32> {
+    let map: Option<Arc<HashMap<String, f32>>> = ctx.data(|d| d.get_temp(facing_id()));
+    map.and_then(|m| m.get(exist_id.trim().trim_start_matches('#')).copied())
+}
+
+fn facing_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_facings")
+}
+
 fn forced_id() -> egui::Id {
     egui::Id::new("gs_field_egui::forced_puppets")
 }
@@ -178,7 +198,14 @@ pub struct PuppetKey {
     /// small figure into speckle. Quantizing keeps a room of same-sized
     /// creatures on one cache entry.
     pub height_px: u16,
+    /// A host-chosen facing in degrees (quantized to [`FACING_STEP_DEG`]),
+    /// replacing the default quarter-turn. None = the default.
+    pub facing: Option<i16>,
 }
+
+/// Facings are cached in steps this fine, so a slider does not make a new
+/// display list per pixel of drag.
+pub const FACING_STEP_DEG: f32 = 5.0;
 
 /// The drawn heights a display list is built for. A figure is drawn at the
 /// nearest step at or above its real height and scaled down to fit, so the
@@ -220,7 +247,18 @@ impl PuppetKey {
             body,
             mirror,
             height_px: size_step(height_px),
+            facing: None,
         }
+    }
+
+    /// The same key turned to `deg` (0 = facing the viewer, 90 = its front
+    /// to screen-right), quantized to [`FACING_STEP_DEG`].
+    pub fn with_facing(mut self, deg: f32) -> Self {
+        if deg.is_finite() {
+            let wrapped = (deg + 180.0).rem_euclid(360.0) - 180.0;
+            self.facing = Some(((wrapped / FACING_STEP_DEG).round() * FACING_STEP_DEG) as i16);
+        }
+        self
     }
 
     /// The wounds as `gs_puppet::Look` takes them: `(part, rank)`, in doll
@@ -236,6 +274,9 @@ impl PuppetKey {
 
     /// The yaw this key's figure is turned to.
     pub fn yaw(&self) -> f32 {
+        if let Some(f) = self.facing {
+            return f as f32;
+        }
         if self.mirror {
             -FIELD_YAW_DEG
         } else {
@@ -825,6 +866,21 @@ mod tests {
         assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
         let canine = cache.pose_set(&Arc::from("canine")).unwrap();
         assert_eq!(canine.get("sit"), shared.get("sit"));
+    }
+
+    #[test]
+    fn a_host_facing_turns_the_puppet_in_cached_steps() {
+        let ctx = egui::Context::default();
+        assert_eq!(puppet_facing(&ctx, "7"), None);
+        set_puppet_facings(&ctx, [("#7".to_string(), 92.4)]);
+        assert_eq!(puppet_facing(&ctx, "7"), Some(92.4));
+        let base = key(PoseChoice::Standing, &[]);
+        assert_eq!(base.yaw(), FIELD_YAW_DEG, "no facing: the default quarter-turn");
+        let turned = base.with_facing(92.4);
+        assert_eq!(turned.yaw(), 90.0, "quantized to the step");
+        assert_eq!(base.with_facing(91.0), turned, "one cache entry per step");
+        assert_eq!(base.with_facing(270.0).yaw(), -90.0, "wrapped");
+        assert_ne!(base.with_facing(95.0), turned);
     }
 
     #[test]

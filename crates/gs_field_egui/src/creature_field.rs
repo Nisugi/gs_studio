@@ -1279,6 +1279,10 @@ fn paint_creature_puppet(
         mirror,
         standing_px,
     );
+    let key = match crate::creature_puppet::puppet_facing(painter.ctx(), &creature.id) {
+        Some(deg) => key.with_facing(deg),
+        None => key,
+    };
     let posed = puppets.posed(&family, &key)?;
     // The parts this family's puppet actually carries, taken while the lock
     // is already held (the wound pass below needs it, and re-locking once

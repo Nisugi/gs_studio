@@ -742,6 +742,19 @@ fn simulator_ui(stage: &mut StageState, ui: &mut egui::Ui, id: &str) {
     {
         stage.set_forced_puppet(id, puppet);
     }
+    ui.horizontal(|ui| {
+        let custom = stage.facing(id);
+        let mut deg = custom.unwrap_or(gs_field_egui::creature_puppet::FIELD_YAW_DEG);
+        let slider = ui
+            .add(egui::Slider::new(&mut deg, -180.0..=180.0).step_by(5.0).suffix(" deg").text("Facing"))
+            .on_hover_text("Turns this creature's 3D puppet (0 = facing you, 90 = its front to the right). Sprites are flat and do not turn.");
+        if slider.changed() {
+            stage.set_facing(id, Some(deg));
+        }
+        if ui.add_enabled(custom.is_some(), egui::Button::new("Default")).on_hover_text("Back to the renderer's own quarter-turn").clicked() {
+            stage.set_facing(id, None);
+        }
+    });
 
     ui.label("Status");
     ui.horizontal_wrapped(|ui| {
@@ -819,6 +832,7 @@ fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, 
     // state: conditions go through the sandbox evaluator and no creature
     // has a derived-effect severity.
     gs_field_egui::creature_puppet::set_forced_puppets(ui.ctx(), stage.forced_puppets().cloned());
+    gs_field_egui::creature_puppet::set_puppet_facings(ui.ctx(), stage.facings().map(|(id, d)| (id.clone(), *d)));
     let click = {
         let view = CreatureFieldView {
             field: &stage.field,

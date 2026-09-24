@@ -104,6 +104,8 @@ pub struct StageState {
     /// Creatures drawn as their family's puppet even when sprite art
     /// resolves (the Puppets list, the simulator's "Draw as puppet").
     forced_puppets: std::collections::BTreeSet<String>,
+    /// Puppet facings the simulator set (degrees; absent = the default turn).
+    facings: std::collections::BTreeMap<String, f32>,
     pub show_grid: bool,
     pub show_order: bool,
     /// Currently applied rider/mount pair (first flagged rider + mount).
@@ -154,6 +156,7 @@ impl StageState {
             next_id: 0,
             selected: None,
             forced_puppets: Default::default(),
+            facings: Default::default(),
             show_grid: true,
             show_order: false,
             pair: None,
@@ -291,6 +294,28 @@ impl StageState {
         }
     }
 
+    /// The simulator's facing for this creature's puppet; None = default.
+    pub fn facing(&self, id: &str) -> Option<f32> {
+        self.facings.get(id).copied()
+    }
+
+    /// Turn this creature's puppet to `deg`, or back to the default.
+    pub fn set_facing(&mut self, id: &str, deg: Option<f32>) {
+        match deg.filter(|d| d.is_finite()) {
+            Some(d) => {
+                self.facings.insert(id.to_string(), d);
+            }
+            None => {
+                self.facings.remove(id);
+            }
+        }
+    }
+
+    /// Every facing set (for the renderer).
+    pub fn facings(&self) -> impl Iterator<Item = (&String, &f32)> {
+        self.facings.iter()
+    }
+
     /// Every creature drawn as its puppet regardless of art (for the renderer).
     pub fn forced_puppets(&self) -> impl Iterator<Item = &String> {
         self.forced_puppets.iter()
@@ -298,6 +323,7 @@ impl StageState {
 
     pub fn remove(&mut self, id: &str) {
         self.forced_puppets.remove(id);
+        self.facings.remove(id);
         self.creatures.retain(|c| c.id != id);
         if self.selected.as_deref() == Some(id) {
             self.selected = None;
@@ -311,6 +337,7 @@ impl StageState {
     pub fn clear(&mut self) {
         self.creatures.clear();
         self.forced_puppets.clear();
+        self.facings.clear();
         self.selected = None;
         self.current_target = String::new();
         self.resync();
