@@ -38,6 +38,8 @@ pub struct PuppetView {
     pub zoom: f32,
     /// The pose shown, by name; "" = the rest pose (as clicked).
     pub pose: String,
+    /// Draw the smooth skin (`Posed::skin`) instead of the shape list.
+    pub skin: bool,
     loaded: Option<Loaded>,
 }
 
@@ -46,7 +48,7 @@ pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.2..=4.0;
 
 impl Default for PuppetView {
     fn default() -> Self {
-        PuppetView { show: false, yaw: 35.0, pitch: 12.0, zoom: 1.0, pose: String::new(), loaded: None }
+        PuppetView { show: false, yaw: 35.0, pitch: 12.0, zoom: 1.0, pose: String::new(), skin: true, loaded: None }
     }
 }
 

@@ -44,9 +44,20 @@ pub struct RigTool {
     show_on_stage: Option<String>,
     /// The live 3D puppet panel.
     puppet_view: PuppetView,
+    /// Its last smooth skin, and what it was rendered from.
+    skin: Option<(SkinKey, egui::TextureHandle, Vec2)>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
     files: crate::fs_cache::Ttl<(String, PathBuf, bool), FileFacts>,
+}
+
+/// Everything a preview skin depends on; a new one is rendered only when
+/// this changes, not on every repaint.
+#[derive(Debug, Clone, PartialEq)]
+struct SkinKey {
+    revision: u64,
+    pose: String,
+    view: [u32; 5],
 }
 
 /// What the document controls need to know about files on disk.
@@ -79,6 +90,7 @@ impl RigTool {
             prompt: None,
             show_on_stage: None,
             puppet_view: PuppetView::default(),
+            skin: None,
             files: Default::default(),
         })
     }
@@ -439,6 +451,8 @@ impl RigTool {
             if ui.button("Reset view").clicked() {
                 pv.reset_camera();
             }
+            ui.checkbox(&mut pv.skin, "Smooth skin")
+                .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
             match (source, error) {
                 (Some(PoseSource::DataRoot), _) => ui.weak(format!("poses: data/poses/{body_type}.toml")),
                 (Some(PoseSource::Shipped), _) => ui.weak(format!("poses: built-in {body_type}")),
@@ -469,6 +483,7 @@ impl RigTool {
         };
         let painter = painter.with_clip_rect(rect);
         painter.rect_filled(rect, 0.0, bg);
+        let revision = self.session.editor.revision();
         match self.session.puppet() {
             Ok(puppet) => {
                 let mut cam = gs_puppet::Camera::framing(puppet.height.max(0.5), [rect.width(), rect.height()]);
@@ -480,7 +495,29 @@ impl RigTool {
                 let project = |p: gs_puppet::math::V3| cam.project(p);
                 gs_puppet::paint(&painter, Vec2::ZERO, &posed.ground_shadow(&project, &look, shadow));
                 gs_puppet::paint(&painter, Vec2::ZERO, &gs_puppet::ground_grid(&project, 5, grid, 1.0));
-                gs_puppet::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
+                if self.puppet_view.skin {
+                    // Rendered about the panel's own corner, so moving the
+                    // panel does not re-render it.
+                    let key = SkinKey {
+                        revision,
+                        pose: self.puppet_view.pose.clone(),
+                        view: [yaw, pitch, zoom, rect.width(), rect.height()].map(f32::to_bits),
+                    };
+                    if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
+                        let mut local = cam;
+                        local.center = [rect.width() * 0.5, rect.height() * 0.5];
+                        let skin = posed.skin(&|p| local.project(p), &look);
+                        let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
+                        let tex = ui.ctx().load_texture("rig_puppet_skin", image, egui::TextureOptions::LINEAR);
+                        self.skin = Some((key, tex, Vec2::new(skin.origin[0], skin.origin[1])));
+                    }
+                    if let Some((_, tex, origin)) = &self.skin {
+                        let at = egui::Rect::from_min_size(rect.min + *origin, tex.size_vec2());
+                        painter.image(tex.id(), at, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                    }
+                } else {
+                    gs_puppet::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
+                }
                 painter.text(
                     rect.left_bottom() + Vec2::new(8.0, -8.0),
                     egui::Align2::LEFT_BOTTOM,

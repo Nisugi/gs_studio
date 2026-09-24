@@ -28,7 +28,7 @@
 //! travel as plain `(part, rank)` pairs into `gs_puppet::Look`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use gs_field::puppets::PuppetRigs;
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
@@ -64,6 +64,22 @@ pub fn set_puppet_facings(ctx: &egui::Context, facings: impl IntoIterator<Item =
 pub fn puppet_facing(ctx: &egui::Context, exist_id: &str) -> Option<f32> {
     let map: Option<Arc<HashMap<String, f32>>> = ctx.data(|d| d.get_temp(facing_id()));
     map.and_then(|m| m.get(exist_id.trim().trim_start_matches('#')).copied())
+}
+
+/// Draw puppets as one smooth surface ([`Posed::skin`]: a depth test per
+/// pixel, blended joints) instead of the flat shape list. On unless the host
+/// turns it off; a context remembers the last call.
+pub fn set_puppet_skin(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(skin_id(), on));
+}
+
+/// See [`set_puppet_skin`].
+pub fn puppet_skin(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(skin_id())).unwrap_or(true)
+}
+
+fn skin_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_skin")
 }
 
 fn facing_id() -> egui::Id {
@@ -295,6 +311,11 @@ pub struct PosedPuppet {
     pub prims: Arc<[Prim]>,
     /// The same figure's ground shadow, in the same space.
     pub shadow: Arc<[Prim]>,
+    /// The same figure as one smooth surface, in the same space, when it was
+    /// posed with the skin on; `None` = paint `prims`.
+    pub skin: Option<Arc<gs_puppet::Skin>>,
+    /// The skin's texture, uploaded the first time it is painted.
+    skin_texture: SkinTexture,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
     /// The puppet's own standing height in feet (the bake's `height`), which
@@ -304,6 +325,16 @@ pub struct PosedPuppet {
     /// size over `standing_ft`). Placement divides by this to get back to
     /// feet before scaling to the card.
     pub px_per_ft: f32,
+}
+
+/// A skin's texture, shared by every clone of its `PosedPuppet`.
+#[derive(Clone, Default)]
+struct SkinTexture(Arc<OnceLock<egui::TextureHandle>>);
+
+impl std::fmt::Debug for SkinTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.get().is_some() { "SkinTexture(uploaded)" } else { "SkinTexture(pending)" })
+    }
 }
 
 impl PosedPuppet {
@@ -388,6 +419,30 @@ impl PuppetPlacement {
         PuppetPlacement { scale, foot, body }
     }
 
+    /// Paint the figure through this placement: its skin when it has one,
+    /// otherwise its display list.
+    pub fn paint_figure(&self, painter: &egui::Painter, posed: &PosedPuppet) {
+        let Some(skin) = posed.skin.as_ref().filter(|s| !s.is_empty()) else {
+            return self.paint(painter, &posed.prims);
+        };
+        let tex = posed.skin_texture.0.get_or_init(|| {
+            let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
+            // Placement only ever scales DOWN (see `fit`): mipmaps keep that clean.
+            let options = egui::TextureOptions {
+                mipmap_mode: Some(egui::TextureFilter::Linear),
+                ..egui::TextureOptions::LINEAR
+            };
+            painter.ctx().load_texture("gs_puppet_skin", image, options)
+        });
+        let min = egui::pos2(
+            self.foot.x + skin.origin[0] * self.scale,
+            self.foot.y + skin.origin[1] * self.scale,
+        );
+        let size = egui::vec2(skin.w as f32 * self.scale, skin.h as f32 * self.scale);
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, egui::Color32::WHITE);
+    }
+
     /// Paint a display list through this placement.
     pub fn paint(&self, painter: &egui::Painter, prims: &[Prim]) {
         use egui::{Color32, Pos2, Shape as EShape, Stroke};
@@ -436,6 +491,16 @@ fn unit_camera(height_ft: f32, px_per_ft: f32) -> gs_puppet::Camera {
 /// Build one posed display list, with no caching. Exposed for tests and
 /// tools; the field goes through [`PuppetCache`].
 pub fn pose_puppet(puppet: &Puppet, pose: &gs_puppet::Pose, key: &PuppetKey) -> PosedPuppet {
+    pose_puppet_with(puppet, pose, key, false)
+}
+
+/// [`pose_puppet`], plus the smooth skin when `skin` is set.
+pub fn pose_puppet_with(
+    puppet: &Puppet,
+    pose: &gs_puppet::Pose,
+    key: &PuppetKey,
+    skin: bool,
+) -> PosedPuppet {
     let posed: Posed<'_> = puppet.pose(pose);
     let wounds = key.wounds();
     // Build at the size it will be SEEN at, so `outline_px` and
@@ -462,9 +527,12 @@ pub fn pose_puppet(puppet: &Puppet, pose: &gs_puppet::Pose, key: &PuppetKey) -> 
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
+    let skin = skin.then(|| Arc::new(posed.skin(&project, &look)));
     PosedPuppet {
         prims: prims.into(),
         shadow: shadow.into(),
+        skin,
+        skin_texture: SkinTexture::default(),
         bounds,
         standing_ft: puppet.height.max(0.01),
         px_per_ft,
@@ -502,6 +570,7 @@ fn yawed_bounds(posed: &Posed<'_>, yaw_deg: f32) -> [[f32; 3]; 2] {
 struct PosedKey {
     family: Arc<str>,
     key: PuppetKey,
+    skin: bool,
 }
 
 /// Per-`egui::Context` puppet state: parsed puppets, the pose sets, the
@@ -663,11 +732,24 @@ impl PuppetCache {
     /// through `PoseChoice::Dead { variant }`, so it never splits the cache
     /// beyond the number of dead poses that exist.
     pub fn posed(&mut self, family: &Arc<str>, key: &PuppetKey) -> Option<Arc<PosedPuppet>> {
+        self.posed_with(family, key, false)
+    }
+
+    /// [`posed`](Self::posed), with the smooth skin built too when `skin` is
+    /// set (see [`set_puppet_skin`]). Skinned and plain entries are cached
+    /// apart.
+    pub fn posed_with(
+        &mut self,
+        family: &Arc<str>,
+        key: &PuppetKey,
+        skin: bool,
+    ) -> Option<Arc<PosedPuppet>> {
         self.tick += 1;
         let tick = self.tick;
         let cache_key = PosedKey {
             family: family.clone(),
             key: *key,
+            skin,
         };
         if let Some((posed, used)) = self.posed.get_mut(&cache_key) {
             *used = tick;
@@ -680,7 +762,7 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let posed = Arc::new(pose_puppet(&puppet, pose, key));
+        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin));
         self.builds += 1;
         if self.posed.len() >= POSE_CACHE_CAP {
             if let Some(oldest) = self

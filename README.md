@@ -189,6 +189,10 @@ overrides and all -- so a joint drag shows its effect on the 3D body at once.
 Drag turns it, the wheel zooms; the pose list comes from
 `<data>/poses/<body_type>.toml` (else the built-in copy) with the family's
 own overrides applied, and *Reload poses* re-reads the file after an edit.
+*Smooth skin* (on by default) draws the puppet as one continuous surface
+(`Posed::skin`: a depth test per pixel, joints blended, contours only where
+the depth steps), the way the stage draws it; off shows the older flat
+shape list, whose parts jump in front of each other as the figure turns.
 
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:

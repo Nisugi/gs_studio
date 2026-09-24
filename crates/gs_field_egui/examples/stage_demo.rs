@@ -26,6 +26,8 @@
 //! `STAGE_DEMO_SHOT=<path.png>` swaps in a showcase roster (healthy, arm
 //! rank 1, chest rank 2, leg rank 3 = severed, prone, dead, boss), saves one
 //! frame of the window to that PNG and exits.
+//! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
+//! smooth skin.
 
 use gs_field::solver::CreatureField;
 use gs_field::{Condition, Creature, CreatureFlags};
@@ -373,6 +375,9 @@ impl Demo {
 impl eframe::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if std::env::var_os("STAGE_DEMO_FLAT").is_some() {
+            gs_field_egui::creature_puppet::set_puppet_skin(&ctx, false);
+        }
         // Art prep FIRST, roster sync second (VellumFE studio.rs, finding 8).
         let wanted = self.wanted_art();
         if !wanted.is_empty() {

@@ -19,13 +19,13 @@ pub const WOUND_COLORS: [[u8; 3]; 3] = [[0x9a, 0x5f, 0x2a], [0xe0, 0x8a, 0x1e], 
 pub const BODY_DEFAULT: [u8; 3] = [0xc9, 0xa2, 0x7c];
 pub const BODY_DEAD: [u8; 3] = [0x86, 0x88, 0x8c];
 pub const BOSS_OUTLINE: [u8; 3] = [0xf2, 0xc1, 0x4e];
-const EYE: Rgba = [24, 18, 14, 255];
+pub(crate) const EYE: Rgba = [24, 18, 14, 255];
 /// How much of a severed limb's first segment stays as a stump.
 const STUMP_KEEP: f32 = 0.4;
 /// Depths closer than this (feet) are a tie, broken by tree order.
 const DEPTH_TIE_FT: f32 = 0.02;
 /// Far groups are darkened by up to this fraction.
-const DEPTH_SHADE: f32 = 0.2;
+pub(crate) const DEPTH_SHADE: f32 = 0.2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shape {
@@ -111,10 +111,10 @@ pub fn severed(posed: &Posed, look: &Look) -> (Vec<bool>, Vec<bool>) {
     (hidden, stump)
 }
 
-fn shade(c: [u8; 3], f: f32) -> [u8; 3] {
+pub(crate) fn shade(c: [u8; 3], f: f32) -> [u8; 3] {
     c.map(|v| (v as f32 * f).round().clamp(0.0, 255.0) as u8)
 }
-fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+pub(crate) fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     [0, 1, 2].map(|k| (a[k] as f32 + (b[k] as f32 - a[k] as f32) * t).round().clamp(0.0, 255.0) as u8)
 }
 fn opaque(c: [u8; 3]) -> Rgba {
@@ -190,12 +190,12 @@ impl Ring {
     }
 }
 
-struct View {
-    to_cam: V3,
-    light: V3,
+pub(crate) struct View {
+    pub to_cam: V3,
+    pub light: V3,
 }
 
-fn view_basis(project: &dyn Fn(V3) -> ([f32; 2], f32), at: V3) -> View {
+pub(crate) fn view_basis(project: &dyn Fn(V3) -> ([f32; 2], f32), at: V3) -> View {
     let eps = 0.05;
     let (p0, d0) = project(at);
     let (mut sx, mut sy, mut dz) = ([0.0; 3], [0.0; 3], [0.0; 3]);
@@ -217,8 +217,8 @@ fn view_basis(project: &dyn Fn(V3) -> ([f32; 2], f32), at: V3) -> View {
     View { to_cam, light }
 }
 
-const LIGHT_ABOVE: f32 = 0.62;
-const DARK_BELOW: f32 = -0.08;
+pub(crate) const LIGHT_ABOVE: f32 = 0.62;
+pub(crate) const DARK_BELOW: f32 = -0.08;
 
 /// The longest circular run of positive scores, as `(start, end)` angles in
 /// SAMPLE units with the ends interpolated to the zero crossing.
@@ -245,6 +245,110 @@ fn positive_arc(m: &[f32]) -> Option<(f32, f32)> {
     let s = start as f32 - first / (first - before).max(1e-6);
     let e = (start + n - 1) as f32 + last / (last - after).max(1e-6);
     Some((s, e))
+}
+
+/// One station of a visible segment, posed and turned into the world.
+#[derive(Clone, Copy)]
+pub(crate) struct SurfRing {
+    pub c: V3,
+    /// The ellipse's semi-axes, world vectors.
+    pub a: V3,
+    pub b: V3,
+    /// Wound tint strength here, 0..=1.
+    pub tint: f32,
+    /// Part of a severed stump's raw end.
+    pub red: bool,
+    /// Inside the trunk at rest: filled, not outlined.
+    pub bare: bool,
+}
+
+impl SurfRing {
+    /// This station's colour: the body, tinted toward the part's wound.
+    pub fn color(&self, body: [u8; 3], base: [u8; 3]) -> [u8; 3] {
+        if self.red {
+            WOUND_COLORS[2]
+        } else {
+            mix(body, base, self.tint)
+        }
+    }
+}
+
+/// A visible segment's surface: what both the shape list and the skin draw.
+pub(crate) struct Surface {
+    pub index: usize,
+    pub group: usize,
+    /// The part's wound colour (the body colour when unwounded or severed).
+    pub base: [u8; 3],
+    pub rings: Vec<SurfRing>,
+}
+
+/// Every segment that shows, with severed limbs cut to stumps, in the
+/// world `look.yaw` turns the figure into.
+pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
+    let puppet = posed.puppet;
+    let turn = rot_y(look.yaw);
+    let (hidden, stump) = severed(posed, look);
+    let body = if look.dead { BODY_DEAD } else { look.body };
+    let mut out = Vec::new();
+    for (i, (s, x)) in puppet.segments.iter().zip(&posed.xf).enumerate() {
+        if hidden[i] {
+            continue;
+        }
+        let (aw, ad) = (mul_mv(&turn, x.dir(s.axis_w)), mul_mv(&turn, x.dir(s.axis_d)));
+        let rank = look.rank(s.part.as_deref());
+        // Tint falls off toward an end that borders ANOTHER part, so a
+        // wounded chest is a patch, not a bib with a hard edge.
+        let same = |o: Option<&str>| o == s.part.as_deref();
+        let head_t = if s.parent.is_some_and(|p| !same(puppet.segments[p].part.as_deref())) { 0.45 } else { 1.0 };
+        let has_kids = puppet.segments.iter().any(|o| o.parent == Some(i));
+        let kid_same = puppet.segments.iter().any(|o| o.parent == Some(i) && same(o.part.as_deref()));
+        let tail_t = if has_kids && !kid_same { 0.45 } else { 1.0 };
+
+        let mut stations: Vec<(Station, bool)> = s.stations.iter().map(|st| (*st, false)).collect();
+        if stump[i] {
+            let head_caps = if s.chain_index == 0 { CAP_RINGS.min(stations.len()) } else { 0 };
+            let body_n = stations.len().saturating_sub(head_caps + CAP_RINGS);
+            let keep = head_caps + ((body_n as f32 * STUMP_KEEP).ceil() as usize).clamp(2, body_n.max(2));
+            stations.truncate(keep.min(stations.len()));
+            if let Some(&(end, _)) = stations.last() {
+                let a = norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0]);
+                let reach = end.w.min(end.d) * 0.8;
+                // A raw end: a red collar, then a red dome, real volume,
+                // so it shows from any angle.
+                stations.push((Station { c: add(end.c, scale(a, reach * 0.12)), w: end.w * 1.04, d: end.d * 1.04 }, true));
+                for k in 1..=3 {
+                    let phi = k as f32 / 3.0 * std::f32::consts::FRAC_PI_2 * 0.94;
+                    let c = add(end.c, scale(a, reach * (0.12 + phi.sin())));
+                    stations.push((Station { c, w: end.w * phi.cos(), d: end.d * phi.cos() }, true));
+                }
+            }
+        }
+
+        let n = stations.len();
+        let rings = stations
+            .iter()
+            .enumerate()
+            .map(|(k, (st, red))| {
+                let t = k as f32 / (n.max(2) - 1) as f32;
+                let ease = |e: f32, u: f32| e + (1.0 - e) * (u * 2.0).clamp(0.0, 1.0);
+                SurfRing {
+                    c: mul_mv(&turn, x.point(st.c)),
+                    a: scale(aw, st.w),
+                    b: scale(ad, st.d),
+                    tint: ease(head_t, t).min(ease(tail_t, 1.0 - t)),
+                    red: *red,
+                    bare: k < s.bare,
+                }
+            })
+            .collect();
+        let base = if rank == 0 || rank == 3 && is_severable(s.part.as_deref().unwrap_or("")) {
+            body
+        } else {
+            WOUND_COLORS[rank as usize - 1]
+        };
+        out.push(Surface { index: i, group: s.group, base, rings });
+    }
+    out
 }
 
 struct SegDraw {
@@ -275,68 +379,30 @@ impl Posed<'_> {
     pub fn draw_list(&self, project: &dyn Fn(V3) -> ([f32; 2], f32), look: &Look) -> Vec<Prim> {
         let puppet = self.puppet;
         let turn = rot_y(look.yaw);
-        let (hidden, stump) = severed(self, look);
         let body = if look.dead { BODY_DEAD } else { look.body };
         let line = shade(body, 0.3);
         let view = view_basis(project, [0.0, puppet.height * 0.5, 0.0]);
 
         let mut segs: Vec<SegDraw> = Vec::new();
-        for (i, (s, x)) in puppet.segments.iter().zip(&self.xf).enumerate() {
-            if hidden[i] {
-                continue;
-            }
-            let (aw, ad) = (mul_mv(&turn, x.dir(s.axis_w)), mul_mv(&turn, x.dir(s.axis_d)));
-            let rank = look.rank(s.part.as_deref());
-            // Tint falls off toward an end that borders ANOTHER part, so a
-            // wounded chest is a patch, not a bib with a hard edge.
-            let same = |o: Option<&str>| o == s.part.as_deref();
-            let head_t = if s.parent.is_some_and(|p| !same(puppet.segments[p].part.as_deref())) { 0.45 } else { 1.0 };
-            let has_kids = puppet.segments.iter().any(|o| o.parent == Some(i));
-            let kid_same = puppet.segments.iter().any(|o| o.parent == Some(i) && same(o.part.as_deref()));
-            let tail_t = if has_kids && !kid_same { 0.45 } else { 1.0 };
-
-            let mut stations: Vec<(Station, bool)> = s.stations.iter().map(|st| (*st, false)).collect();
-            if stump[i] {
-                let head_caps = if s.chain_index == 0 { CAP_RINGS.min(stations.len()) } else { 0 };
-                let body_n = stations.len().saturating_sub(head_caps + CAP_RINGS);
-                let keep = head_caps + ((body_n as f32 * STUMP_KEEP).ceil() as usize).clamp(2, body_n.max(2));
-                stations.truncate(keep.min(stations.len()));
-                if let Some(&(end, _)) = stations.last() {
-                    let a = norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0]);
-                    let reach = end.w.min(end.d) * 0.8;
-                    // A raw end: a red collar, then a red dome, real volume,
-                    // so it shows from any angle.
-                    stations.push((Station { c: add(end.c, scale(a, reach * 0.12)), w: end.w * 1.04, d: end.d * 1.04 }, true));
-                    for k in 1..=3 {
-                        let phi = k as f32 / 3.0 * std::f32::consts::FRAC_PI_2 * 0.94;
-                        let c = add(end.c, scale(a, reach * (0.12 + phi.sin())));
-                        stations.push((Station { c, w: end.w * phi.cos(), d: end.d * phi.cos() }, true));
-                    }
-                }
-            }
-
-            let n = stations.len();
+        for surf in surfaces(self, look) {
+            let i = surf.index;
+            let n = surf.rings.len();
             let mut rings: Vec<Ring> = Vec::with_capacity(n);
-            for (k, (st, red)) in stations.iter().enumerate() {
-                let c = mul_mv(&turn, x.point(st.c));
-                let (a, b) = (scale(aw, st.w), scale(ad, st.d));
-                let (p, depth) = project(c);
-                let (pa, _) = project(add(c, a));
-                let (pb, _) = project(add(c, b));
-                let t = k as f32 / (n.max(2) - 1) as f32;
-                let ease = |e: f32, u: f32| e + (1.0 - e) * (u * 2.0).clamp(0.0, 1.0);
-                let tint = ease(head_t, t).min(ease(tail_t, 1.0 - t));
+            for (k, sr) in surf.rings.iter().enumerate() {
+                let (p, depth) = project(sr.c);
+                let (pa, _) = project(add(sr.c, sr.a));
+                let (pb, _) = project(add(sr.c, sr.b));
                 let ring = Ring {
-                    c,
-                    a,
-                    b,
+                    c: sr.c,
+                    a: sr.a,
+                    b: sr.b,
                     p,
                     a2: [pa[0] - p[0], pa[1] - p[1]],
                     b2: [pb[0] - p[0], pb[1] - p[1]],
                     depth,
-                    tint,
-                    red: *red,
-                    bare: k < s.bare,
+                    tint: sr.tint,
+                    red: sr.red,
+                    bare: sr.bare,
                 };
                 // Level of detail: drop stations that land on the last one.
                 let last = k + 1 == n;
@@ -363,7 +429,7 @@ impl Posed<'_> {
             }
 
             let mut out = SegDraw {
-                group: s.group,
+                group: surf.group,
                 index: i,
                 depth: rings.iter().map(|r| r.depth).sum::<f32>() / rings.len() as f32,
                 weight: rings.len() as f32,
@@ -372,11 +438,7 @@ impl Posed<'_> {
                 fill: Vec::new(),
                 marks: Vec::new(),
             };
-            let base = if rank == 0 || rank == 3 && is_severable(s.part.as_deref().unwrap_or("")) {
-                body
-            } else {
-                WOUND_COLORS[rank as usize - 1]
-            };
+            let base = surf.base;
             for pair in rings.windows(2) {
                 let (r0, r1) = (&pair[0], &pair[1]);
                 let k = sample_count(r0.px().max(r1.px()));
@@ -457,6 +519,7 @@ impl Posed<'_> {
             }
 
             if !look.dead {
+                let x = &self.xf[i];
                 for eye in puppet.eyes.iter().filter(|e| e.segment == i) {
                     let pos = mul_mv(&turn, x.point(eye.pos));
                     let normal = mul_mv(&turn, x.dir(eye.normal));

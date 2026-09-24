@@ -36,7 +36,9 @@ Dependency chain (bottom up):
   `outlines.json` loader, bake-to-files.
 - `gs_puppet` -- measured 3D puppet from a rig + BOTH silhouettes (front and
   side), posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
-  drawn as 2D shapes. Everything except `paint.rs` is egui-free. The world
+  drawn either as 2D shapes (`draw.rs`) or as one smooth z-buffered surface
+  rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
+  compares the two). Everything except `paint.rs` is egui-free. The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must

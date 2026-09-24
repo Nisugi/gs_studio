@@ -390,3 +390,29 @@ puppet could be seen at all. A host can now ask for it per creature:
 Known limit: the no-art calibration feed (7.7) still runs only on a `bases`
 miss, so a forced creature that HAS art is placed with its sprite's
 envelope while drawing the puppet.
+
+### 7.10 The smooth skin -- puppets drawn as one surface
+
+`gs_puppet::Posed::skin` renders the same stations as `draw_list` into an
+RGBA image: one triangle mesh with a depth test per pixel, normals and
+colours blended across joints, contours from depth steps. The shape list's
+per-group paint order made a limb and the trunk swap in one jump as a figure
+turned; the skin decides what is in front per pixel.
+
+* **On by default** -- a behaviour change for any host. `creature_puppet::
+  set_puppet_skin(ctx, false)` / `puppet_skin(ctx)` (in `ctx.data`, so
+  `CreatureFieldView` is unchanged) bring back the shape list.
+* `PosedPuppet` gained `skin: Option<Arc<gs_puppet::Skin>>` (same build space
+  as `prims`) and a private, lazily uploaded texture. `prims` and `shadow`
+  are still always built, so `aspect` / `content_ratio` / `span` and every
+  calibration are unchanged.
+* `PuppetCache::posed_with(family, key, skin)`; `posed(family, key)` is
+  `posed_with(.., false)`. Skinned and plain entries are cached apart (the
+  internal `PosedKey` carries the flag). `pose_puppet_with(puppet, pose, key,
+  skin)`; `pose_puppet` is the unskinned one, as before.
+* `PuppetPlacement::paint_figure(painter, posed)`: the skin through the
+  placement (a mipmapped texture, only ever scaled down), else `paint(prims)`.
+* `creature_field.rs`: `paint_creature_puppet` (inside the existing
+  `>>>doll` region) reads `puppet_skin` and calls `posed_with` /
+  `paint_figure`. Nothing outside the marked regions changed.
+* `examples/stage_demo.rs`: `STAGE_DEMO_FLAT=1` turns the skin off.

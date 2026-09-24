@@ -1283,7 +1283,8 @@ fn paint_creature_puppet(
         Some(deg) => key.with_facing(deg),
         None => key,
     };
-    let posed = puppets.posed(&family, &key)?;
+    let skin = crate::creature_puppet::puppet_skin(ctx);
+    let posed = puppets.posed_with(&family, &key, skin)?;
     // The parts this family's puppet actually carries, taken while the lock
     // is already held (the wound pass below needs it, and re-locking once
     // per creature per frame would be the one avoidable cost here).
@@ -1293,7 +1294,7 @@ fn paint_creature_puppet(
     // The figure's own contact shadow, under it: the card's generic ellipse
     // is already down, and this one is shaped like the pose.
     place.paint(painter, &posed.shadow);
-    place.paint(painter, &posed.prims);
+    place.paint_figure(painter, &posed);
 
     // Skin status overlays ride the same code as sprite cards, over the
     // posed body rect. The puppet has no texture, so anchors come from the
