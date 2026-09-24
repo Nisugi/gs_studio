@@ -208,13 +208,15 @@ impl LightState {
         self.current.clone()
     }
 
-    /// A backdrop's auto scene colours, if its pixels are loaded.
-    pub fn auto_colours(&self, bg: &str) -> Option<SceneColours> {
-        if let Some(c) = self.auto.get(bg) {
-            return Some(c.clone());
-        }
-        let layer = self.layers.get(&Slot::Backdrop(bg.to_string()))?;
-        Some(auto_scene_light(&layer.px.rgba, layer.px.w, layer.px.h, 4, &Srgb8Lut::new()))
+    /// A backdrop's auto scene colours, if its pixels are loaded (read once
+    /// per backdrop).
+    pub fn auto_colours(&mut self, bg: &str) -> Option<SceneColours> {
+        self.backdrop_colours(bg)
+    }
+
+    /// A bake is running.
+    pub fn busy(&self) -> bool {
+        self.job.is_some()
     }
 
     /// The lights in force now, or None (unlit).

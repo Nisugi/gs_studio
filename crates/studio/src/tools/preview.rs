@@ -36,6 +36,8 @@ pub enum StagePanel {
 pub struct StageTool {
     stage: StageState,
     art: CreatureArtStore,
+    /// `global/lighting.toml` (time-of-day defaults), read once.
+    lighting: gs_field::lighting::GlobalLighting,
 }
 
 /// Art wanted for the current roster -- same recipe as the game's update
@@ -87,7 +89,9 @@ impl StageTool {
                 stage.scene_name
             );
         }
-        StageTool { stage, art }
+        let lighting = gs_field::lighting::GlobalLighting::load();
+        art.set_global_lighting(lighting.clone());
+        StageTool { stage, art, lighting }
     }
 
     /// A line for the stage's own status log (the import report, say).
@@ -170,13 +174,32 @@ impl StageTool {
         }
         stage.sync_field();
         stage.refresh_mounts();
+        // Lighting preview: the scrubbed hour, else the live Elanthian clock.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |d| d.as_secs_f64());
+        let game_hour = stage.light_hour.unwrap_or_else(|| crate::stage::elanthian_time::elanthian_hour_f(now));
+        self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
+            game_hour: Some(game_hour),
+            strength: stage.light_strength,
+            outdoor_guess: None,
+        });
         self.art.prepare_scene_art(&ctx, stage.scene());
+        if self.art.lighting_busy() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
+            // The live clock moves dawn and dusk along.
+            ctx.request_repaint_after(std::time::Duration::from_secs(20));
+        }
+        let auto = stage.scene().background.as_deref().and_then(|bg| self.art.scene_auto_colours(bg));
+        let lighting = &self.lighting;
         let art = self.art.creature_art();
 
         egui::Panel::right("stage_panel").default_size(300.0).min_size(240.0).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
                 StagePanel::Scenes => {
                     calibrate_scenery = scene_ui(stage, ui);
+                    light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
                     ui.separator();
                     camera_ui(stage, ui);
                     ui.separator();
@@ -195,6 +218,190 @@ impl StageTool {
 /// The Scene section: backdrop + scenery props, persisted whole-file to
 /// `global/scenes/<name>.toml`. Returns true when "Calibrate scenery..." was
 /// pressed.
+/// The scene's `[light]`: the scene light read from the backdrop (each value
+/// overridable), time-of-day overrides, and the preview clock. Niffy's
+/// "Stage editor: Light section".
+fn light_ui(
+    stage: &mut StageState,
+    ui: &mut egui::Ui,
+    auto: Option<&vellum_light::SceneColours>,
+    global: &gs_field::lighting::GlobalLighting,
+    game_hour: f32,
+) {
+    use gs_field::lighting::{LightChroma, SceneLight, SCENE_BOUNCE_STRENGTH, SCENE_STRENGTH};
+    use vellum_light::Phase;
+
+    ui.separator();
+    ui.heading("Light");
+    let mut on = stage.scene().light.is_some();
+    if ui
+        .checkbox(&mut on, "Light this scene")
+        .on_hover_text("Light creatures and props to match the backdrop, and apply dawn, dusk and night outdoors")
+        .changed()
+    {
+        stage.scene_mut().light = on.then(SceneLight::default);
+    }
+    let Some(light) = stage.scene().light.clone() else {
+        ui.weak("Unlit: creatures and props draw exactly as painted.");
+        return;
+    };
+    let mut edited = light.clone();
+    if auto.is_none() {
+        ui.weak("No backdrop to read: \"auto\" values use a neutral daylight.");
+    }
+    light_colour_row(ui, "Key", &mut edited.key, auto.map(|a| a.key.as_str()), "Main light: the faces turned toward it");
+    light_colour_row(ui, "Ambient", &mut edited.ambient, auto.map(|a| a.ambient.as_str()), "Fill light: the shadowed side (sky or ceiling)");
+    light_colour_row(ui, "Ground", &mut edited.bounce, auto.map(|a| a.bounce.as_str()), "Ground bounce: rises into the lower shadows");
+    ui.horizontal(|ui| {
+        ui.label("Saturation").on_hover_text("How colourful creatures stay: a misty backdrop mutes them to match");
+        let auto_c = auto.map_or(0.9, |a| a.chroma);
+        let mut v = match edited.chroma {
+            LightChroma::Auto => auto_c,
+            LightChroma::Value(v) => v,
+        };
+        if ui.add(egui::DragValue::new(&mut v).range(0.0..=1.2).speed(0.01)).changed() {
+            edited.chroma = LightChroma::Value(v);
+        }
+        if edited.chroma.is_auto() {
+            ui.weak("auto");
+        } else if ui.small_button("Reset to auto").clicked() {
+            edited.chroma = LightChroma::Auto;
+        }
+    });
+    ui.add(egui::Slider::new(&mut edited.intensity, 0.0..=1.0).text("Intensity"));
+    let mut outdoor = edited.outdoor.unwrap_or(true);
+    if ui.checkbox(&mut outdoor, "Outdoor").on_hover_text("Dawn, dusk and night apply").changed() {
+        edited.outdoor = Some(outdoor);
+    }
+    egui::CollapsingHeader::new("More").id_salt("light_more").show(ui, |ui| {
+        light_opt_slider(ui, "Strength", &mut edited.strength, SCENE_STRENGTH, 0.0..=1.0);
+        light_opt_slider(ui, "Ground bounce", &mut edited.bounce_strength, SCENE_BOUNCE_STRENGTH, 0.0..=1.0);
+        light_opt_slider(ui, "Exposure", &mut edited.exposure, 1.0, 0.2..=2.0);
+        light_opt_slider(ui, "Haze", &mut edited.haze, 0.0, 0.0..=0.5);
+    });
+    egui::CollapsingHeader::new("Time of day").id_salt("light_phases").show(ui, |ui| {
+        for (phase, label) in [(Phase::Dawn, "Dawn"), (Phase::Day, "Day"), (Phase::Dusk, "Dusk"), (Phase::Night, "Night")] {
+            let default = global.phase.get(phase).cloned().unwrap_or_default();
+            let slot = match phase {
+                Phase::Dawn => &mut edited.dawn,
+                Phase::Day => &mut edited.day,
+                Phase::Dusk => &mut edited.dusk,
+                Phase::Night => &mut edited.night,
+            };
+            light_phase_row(ui, label, slot, &default);
+        }
+    });
+    if edited != light {
+        stage.scene_mut().light = Some(edited);
+    }
+
+    ui.label("Preview");
+    ui.horizontal_wrapped(|ui| {
+        let mut live = stage.light_hour.is_none();
+        if ui.checkbox(&mut live, "Live clock").on_hover_text("The game's own time (Elanthian, US Eastern)").changed() {
+            stage.light_hour = (!live).then_some(game_hour);
+        }
+        for (label, hour) in [("Dawn", 7.0), ("Day", 12.0), ("Dusk", 19.0), ("Night", 23.0)] {
+            if ui.small_button(label).clicked() {
+                stage.light_hour = Some(hour);
+            }
+        }
+    });
+    let mut hour = game_hour;
+    let h = hour as u32;
+    let text = format!("{:02}:{:02}", h, ((hour - h as f32) * 60.0) as u32);
+    if ui.add(egui::Slider::new(&mut hour, 0.0..=24.0).step_by(0.05).text(text)).changed() {
+        stage.light_hour = Some(hour);
+    }
+    ui.add(egui::Slider::new(&mut stage.light_strength, 0.0..=1.0).text("Lighting strength"))
+        .on_hover_text("The player's setting: scales every light, scene and time of day alike");
+}
+
+fn light_colour_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: &mut gs_field::lighting::LightColour,
+    auto: Option<&str>,
+    hint: &str,
+) {
+    use gs_field::lighting::LightColour;
+    ui.horizontal(|ui| {
+        ui.label(label).on_hover_text(hint);
+        let shown = match value {
+            LightColour::Hex(h) => Some(h.clone()),
+            LightColour::Auto => auto.map(str::to_owned),
+        };
+        let mut rgb = shown.as_deref().and_then(parse_hex_rgb).unwrap_or(NEUTRAL_SLATE);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            *value = LightColour::Hex(hex_rgb(rgb));
+        }
+        match value {
+            LightColour::Auto => {
+                ui.weak("auto");
+            }
+            LightColour::Hex(_) => {
+                if ui.small_button("Reset to auto").clicked() {
+                    *value = LightColour::Auto;
+                }
+            }
+        }
+    });
+}
+
+/// An optional number: shows the default until touched; "x" drops it.
+fn light_opt_slider(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, default: f32, range: std::ops::RangeInclusive<f32>) {
+    ui.horizontal(|ui| {
+        let mut v = value.unwrap_or(default);
+        if ui.add(egui::Slider::new(&mut v, range).text(label)).changed() {
+            *value = Some(v);
+        }
+        if value.is_some() && ui.small_button("x").on_hover_text("Back to the default").clicked() {
+            *value = None;
+        }
+    });
+}
+
+/// One time-of-day row: the global default, or this scene's own key,
+/// ambient and intensity laid over it.
+fn light_phase_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    over: &mut Option<gs_field::lighting::LightFields>,
+    default: &gs_field::lighting::LightFields,
+) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let mut use_default = over.is_none();
+        if ui.checkbox(&mut use_default, "Use default").changed() {
+            *over = (!use_default).then(Default::default);
+        }
+    });
+    let enabled = over.is_some();
+    let mut fields = over.clone().unwrap_or_default();
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.horizontal(|ui| {
+            for (name, value, fallback) in [
+                ("Key", &mut fields.key, default.key.clone()),
+                ("Ambient", &mut fields.ambient, default.ambient.clone()),
+            ] {
+                ui.label(name);
+                let mut rgb = value.clone().or(fallback).as_deref().and_then(parse_hex_rgb).unwrap_or(NEUTRAL_SLATE);
+                if ui.color_edit_button_srgb(&mut rgb).changed() {
+                    *value = Some(hex_rgb(rgb));
+                }
+            }
+        });
+        let mut v = fields.intensity.or(default.intensity).unwrap_or(if default.key.is_some() { 1.0 } else { 0.0 });
+        if ui.add(egui::Slider::new(&mut v, 0.0..=1.0).text("Intensity")).changed() {
+            fields.intensity = Some(v);
+        }
+    });
+    if enabled && over.as_ref() != Some(&fields) {
+        *over = Some(fields);
+    }
+}
+
+
 fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
     ui.heading("Scene");
     // The scene FILENAME is the binding: leading room uid binds that room,

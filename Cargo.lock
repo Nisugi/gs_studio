@@ -2659,6 +2659,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "vellum_light",
 ]
 
 [[package]]

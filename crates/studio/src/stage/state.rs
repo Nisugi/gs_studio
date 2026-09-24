@@ -123,6 +123,10 @@ pub struct StageState {
     pub show_solver_tuning: bool,
     /// Scenery-pool filter box.
     pub prop_filter: String,
+    /// Lighting preview: the game hour shown (None = the live Elanthian
+    /// clock) and the Lighting strength (the player's setting, 0..1).
+    pub light_hour: Option<f32>,
+    pub light_strength: f32,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
     /// Creature exist id being dragged on the stage (grabbed by its card).
@@ -168,6 +172,8 @@ impl StageState {
             scene_filter: String::new(),
             show_solver_tuning: false,
             prop_filter: String::new(),
+            light_hour: None,
+            light_strength: 1.0,
             selected_prop: None,
             dragging_creature: None,
             obstacle_scene: None,

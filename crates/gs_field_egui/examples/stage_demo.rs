@@ -28,6 +28,11 @@
 //! frame of the window to that PNG and exits.
 //! `STAGE_DEMO_STATUSES=1` (with `STAGE_DEMO_SHOT`) shows the status poses
 //! and body effects instead: webbed, sleeping, disoriented, calmed, frozen.
+//! `STAGE_DEMO_LIGHT=<backdrop pool path>` (e.g. `scenes/desert.jpg`) puts
+//! the field in front of that backdrop with scene lighting on (every value
+//! auto), at game hour `STAGE_DEMO_HOUR` (default 12) and Lighting strength
+//! `STAGE_DEMO_STRENGTH` (default 1). The art stays the real pool unless
+//! `STAGE_DEMO_NO_ART` is set, so sprites and puppets are lit together.
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -225,6 +230,10 @@ struct Demo {
     /// `STAGE_DEMO_SHOT`: where to write the frame, and whether it was asked for.
     shot: Option<std::path::PathBuf>,
     shot_requested: bool,
+    /// `STAGE_DEMO_LIGHT`: a lit scene in front of that backdrop.
+    scene: Option<gs_field::scenes::StageScene>,
+    /// Frames since the lighting bake settled.
+    light_settled: u64,
 }
 
 impl Demo {
@@ -235,7 +244,8 @@ impl Demo {
         let shot = std::env::var_os("STAGE_DEMO_SHOT").map(std::path::PathBuf::from);
         // The showcase shot is about the no-art path, so it must not find a
         // sprite: re-point the resolve root at an empty directory.
-        if shot.is_some() || std::env::var_os("STAGE_DEMO_NO_ART").is_some() {
+        let light_bg = std::env::var("STAGE_DEMO_LIGHT").ok();
+        if (shot.is_some() && light_bg.is_none()) || std::env::var_os("STAGE_DEMO_NO_ART").is_some() {
             // The whole data dir, not just the resolve root: the pool
             // cascade and its caches key on the base dir.
             let empty = std::env::temp_dir().join("stage_demo_no_art");
@@ -279,6 +289,12 @@ impl Demo {
             last_stage_pos: None,
             shot,
             shot_requested: false,
+            scene: light_bg.map(|bg| gs_field::scenes::StageScene {
+                background: Some(bg),
+                light: Some(gs_field::lighting::SceneLight::default()),
+                ..Default::default()
+            }),
+            light_settled: 0,
         }
     }
 
@@ -357,7 +373,7 @@ impl Demo {
         let Some(path) = self.shot.clone() else {
             return;
         };
-        if !self.shot_requested && self.frames >= 20 {
+        if !self.shot_requested && self.frames >= 20 && (self.scene.is_none() || self.light_settled >= 10) {
             self.shot_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
@@ -414,6 +430,21 @@ impl eframe::App for Demo {
         if !wanted.is_empty() {
             self.art.prepare_creature_art(&ctx, &wanted);
         }
+        if let Some(scene) = &self.scene {
+            let env = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+            self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
+                game_hour: Some(env("STAGE_DEMO_HOUR", 12.0)),
+                strength: env("STAGE_DEMO_STRENGTH", 1.0),
+                outdoor_guess: None,
+            });
+            self.art.prepare_scene_art(&ctx, scene);
+            if self.art.lighting_busy() {
+                self.light_settled = 0;
+                ctx.request_repaint();
+            } else {
+                self.light_settled += 1;
+            }
+        }
         gs_field::cards::sync_field(
             &mut self.field,
             &mut self.synced_gen,
@@ -468,7 +499,7 @@ impl eframe::App for Demo {
                 show_grid: self.show_grid,
                 show_order: self.show_order,
                 creature_art: Some(&art),
-                scene: None,
+                scene: self.scene.as_ref(),
             };
             let click = render_creature_field_content(&view, ui);
             drop(view);

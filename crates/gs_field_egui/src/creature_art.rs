@@ -730,6 +730,12 @@ impl CreatureArtStore {
     pub fn scene_auto_colours(&self, background: &str) -> Option<vellum_light::SceneColours> {
         self.shared.lock().expect("creature art lock").light.auto_colours(background)
     }
+
+    /// ADDITION (not in VellumFE): a lighting bake is in progress (keep
+    /// repainting so its result is picked up).
+    pub fn lighting_busy(&self) -> bool {
+        self.shared.lock().expect("creature art lock").light.busy()
+    }
 }
 
 /// Decode one creature-card base image and derive its anchors from the

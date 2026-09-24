@@ -107,6 +107,15 @@ pub fn elanthian_hour(unix_seconds: i64) -> u32 {
     ((unix_seconds - offset * 3600).rem_euclid(DAY_SECS) / 3600) as u32
 }
 
+/// The in-game hour as a fraction (0.0 up to 24.0), for lighting's gradual
+/// dawn and dusk. Same clock as [`elanthian_hour`].
+pub fn elanthian_hour_f(unix_seconds: f64) -> f32 {
+    let whole = unix_seconds.floor() as i64;
+    let hour = elanthian_hour(whole) as f64;
+    let within = (whole.rem_euclid(3600) as f64 + (unix_seconds - whole as f64)) / 3600.0;
+    (hour + within) as f32
+}
+
 /// The phase of the in-game day for a UTC timestamp.
 pub fn phase_at(unix_seconds: i64, bounds: PhaseBoundaries) -> DayPhase {
     phase_for_hour(elanthian_hour(unix_seconds), bounds)
@@ -216,6 +225,15 @@ mod tests {
         let unix = 1_786_394_661_i64;
         assert_eq!(elanthian_hour(unix), 16);
         assert_eq!(phase_at(unix, PhaseBoundaries::default()), DayPhase::Day);
+    }
+
+    #[test]
+    fn the_fractional_hour_runs_between_the_whole_ones() {
+        let t = utc(7, 1, 16) as f64; // 16:00 UTC in July = 12:00 Eastern (EDT)
+        assert_eq!(elanthian_hour_f(t), 12.0);
+        assert!((elanthian_hour_f(t + 1800.0) - 12.5).abs() < 1e-4);
+        assert!((elanthian_hour_f(t + 3599.0) - (12.0 + 3599.0 / 3600.0)).abs() < 1e-4);
+        assert_eq!(elanthian_hour_f(t + 3600.0), 13.0);
     }
 
     #[test]

@@ -24,6 +24,8 @@ gs_puppet = { path = "../gs_puppet" }
 gs_field = { path = "../gs_field" }
 # ... and the renderer + art cache the clients draw with.
 gs_field_egui = { path = "../gs_field_egui" }
+# Scene lighting types for the Stage editor.
+vellum_light = { path = "../vellum_light" }
 # The five art calibrators, hosted as tabs through `ui_contents`.
 gs_calibrators = { path = "../gs_calibrators" }
 # gs-studio's own data home (`data_home.rs`): the platform config directory,

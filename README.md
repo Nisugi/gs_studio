@@ -332,6 +332,17 @@ across -- and differ only in the right-hand panel:
   dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
   and, behind a checkbox, the Solver tunables.
+- **Light** (Scenes, under Backdrop and Color): *Light this scene* adds the
+  scene file's `[light]` table (Niffy's creature-field lighting,
+  `gs_field::lighting` + `vellum_light`). Key, Ambient and Ground swatches and
+  Saturation show the values read from the backdrop ("auto") and can each be
+  overridden or reset; Intensity; Outdoor (time of day applies); *More*
+  (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
+  / Night rows over `global/lighting.toml`, "Use default" per row). *Preview*
+  picks the hour: the live Elanthian clock, the Dawn / Day / Dusk / Night
+  buttons or the slider, plus the player's Lighting strength. Creatures,
+  props, puppets and the backdrop are re-lit on a worker thread and swapped
+  in when ready (`gs_field_egui::creature_light`).
 - **Preview**: the Cast (creature-pool base art grouped by bestiary area,
   filter, *Add generic*), **Spawn by name**, the Roster, and for the selected
   creature the simulator: Target, the crtrStatus flags, dead / boss / mini
