@@ -478,6 +478,36 @@ fn a_zero_length_first_pair_does_not_shift_the_chain() {
     assert!((rest[2] - swung[2]).abs() > 0.5, "the bone's rotation moves it: {rest:?} vs {swung:?}");
 }
 
+/// A leg bent at the knee: a slice across the shin just below the knee cuts
+/// the thigh's end on the slant and reads far wider than the thigh is. The
+/// shin's first ring is open (hidden in the thigh's rounded end), so a wide
+/// one stood out of the joint as a sharp flange -- the canine's hocks. It
+/// must start as the thigh ends: no wider, and where the thigh's end sits.
+#[test]
+fn a_limb_past_a_bend_starts_where_the_segment_above_ends() {
+    let (hip, knee) = ([-0.6f32, 2.2f32], [0.8f32, 1.5f32]);
+    let thigh = move |x: f32, y: f32| {
+        let (e, p) = ([knee[0] - hip[0], knee[1] - hip[1]], [x - hip[0], y - hip[1]]);
+        let t = ((p[0] * e[0] + p[1] * e[1]) / (e[0] * e[0] + e[1] * e[1])).clamp(0.0, 1.0);
+        let (dx, dy) = (p[0] - t * e[0], p[1] - t * e[1]);
+        (dx * dx + dy * dy).sqrt() <= 0.3
+    };
+    let side = mask_from(move |x, y| trunk(x, y) || thigh(x, y) || ((x - knee[0]).abs() <= 0.1 && y <= knee[1]));
+    let front = buried_masks().0;
+    let rig = plain_rig(
+        View::Side,
+        &[("top", [0.0, 4.0]), ("hip", hip), ("knee", knee), ("foot", [knee[0], 0.2])],
+        vec![bone("spine", "chest", None, &["top", "hip"]), bone("leg", "leftLeg", Some("spine"), &["hip", "knee", "foot"])],
+    );
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).expect("builds");
+    let (upper, lower) = (segment(&p, "leg.0"), segment(&p, "leg.1"));
+    let end = upper.stations[upper.stations.len() - CAP_RINGS - 1];
+    let start = lower.stations[0];
+    assert!(start.w <= end.w + 0.01, "the shin starts {:.3} ft wide where the thigh ends {:.3} ft wide", start.w, end.w);
+    let gap = (0..3).map(|i| (start.c[i] - end.c[i]).abs()).fold(0.0f32, f32::max);
+    assert!(gap < 0.01, "the shin starts {gap:.3} ft from where the thigh ends");
+}
+
 /// A parent loop that does not pass through the bone being built (A hangs
 /// off B, B and C point at each other) must end the build, not hang it.
 #[test]

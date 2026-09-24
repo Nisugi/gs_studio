@@ -557,6 +557,20 @@ impl Puppet {
             let n = m.w.len();
             let a = norm_or(sub(r.tail, r.head), [0.0, 1.0, 0.0]);
             let ds = len(sub(r.tail, r.head)) / (n - 1) as f32;
+            // A limb continuing past a bend (a hock, a knee) starts with no
+            // cap: its first ring is open, hidden inside the rounded end of
+            // the segment above. But its slices nearest the joint cross the
+            // bend and read the segment above as well -- wide, and off to
+            // the outside of the angle -- and that open ring stood out
+            // behind the hock as a thin, sharp flange. Within reach of the
+            // parent's end, ease from the parent's end section to this
+            // segment's own readings.
+            let joint = r.parent.filter(|_| r.k > 0 && kind != Kind::Trunk).map(|p| {
+                let s = &segments[p].stations;
+                let end = s[s.len() - CAP_RINGS - 1];
+                let reach = end.w.max(end.d);
+                (end, reach, ((reach / ds.max(1e-4)).ceil() as usize).min(n - 1))
+            });
 
             // Depth, from the view the segment was NOT measured in.
             let oa = off_axis(m.view);
@@ -712,6 +726,14 @@ impl Puppet {
                     *x = base + (tip - base) * t;
                 }
             }
+            if let Some((end, reach, kj)) = joint {
+                let (wj, dj) = (w[kj], d[kj]);
+                for k in 0..kj {
+                    let t = k as f32 * ds / reach;
+                    w[k] = w[k].min(end.w + (wj - end.w) * t);
+                    d[k] = d[k].min(end.d + (dj - end.d) * t);
+                }
+            }
             limit_taper(&mut w, ds);
             limit_taper(&mut d, ds);
 
@@ -728,6 +750,12 @@ impl Puppet {
                     Station { c, w: wk, d: d[k].max(MIN_HALF_FT) }
                 })
                 .collect();
+            // ...and from where the parent's end sits to its own line.
+            if let Some((end, reach, kj)) = joint {
+                for (k, st) in body.iter_mut().enumerate().take(kj) {
+                    st.c = lerp(end.c, st.c, k as f32 * ds / reach);
+                }
+            }
 
             // Rounded ends: shrinking rings past the last station.
             let cap = |end: Station, dir: V3| -> Vec<Station> {
@@ -1101,7 +1129,28 @@ fn measure_segment<'m>(
                     // The midpoint: far enough from either joint that a
                     // neighbouring bone's mass is not what gets measured.
                     let p = flat(view, lerp(o.head, o.tail, 0.5));
-                    run_along(mask, p, across, MERGE_GAP_FT, 0.12).map(|(lo, hi)| (hi - lo) * 0.5)
+                    let (mut lo, mut hi) = run_along(mask, p, across, MERGE_GAP_FT, 0.12)?;
+                    // A bone alongside it shares the run, as in the slices
+                    // above: in a side view the far foreleg overlaps the
+                    // near one, and the pair read as one leg twice as thick
+                    // let the near leg's buried shoulder swell out past the
+                    // chest. Split it halfway.
+                    let shares = |x: &Raw| [&x.head_joint, &x.tail_joint].iter().any(|j| **j == o.head_joint || **j == o.tail_joint);
+                    for x in raws.iter().filter(|x| x.bone != o.bone && !shares(x)) {
+                        let (a, b) = (flat(view, x.head), flat(view, x.tail));
+                        let e = [b[0] - a[0], b[1] - a[1]];
+                        let el = (e[0] * e[0] + e[1] * e[1]).sqrt();
+                        if el < 0.05 || ((e[0] * dir[0] + e[1] * dir[1]) / (el * dl)).abs() < 0.5 {
+                            continue;
+                        }
+                        let Some(s) = crossing(p, across, a, b).filter(|s| s.abs() > 0.03) else { continue };
+                        if s > 0.0 {
+                            hi = hi.min((s * 0.5).max(lo));
+                        } else {
+                            lo = lo.max((s * 0.5).min(hi));
+                        }
+                    }
+                    Some((hi - lo) * 0.5)
                 })
                 .fold(f32::INFINITY, f32::min)
         })
