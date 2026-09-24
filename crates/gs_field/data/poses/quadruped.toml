@@ -60,6 +60,40 @@ tail = { rot = [-28.0, 0.0, 0.0] }
 foreleg = { rot = [-6.0, 0.0, 9.0] }
 hindleg = { rot = [6.0, 0.0, 9.0] }
 
+# Status poses (the stage picks these from crtrStatus; a missing one falls
+# back to its nearest: sleep -> lie, disoriented -> stunned).
+
+# Asleep: lying down, head resting low, tail tucked.
+[pose.sleep]
+neck = { rot = [24.0, 0.0, 0.0] }
+skull = { rot = [-4.0, 0.0, 0.0] }
+tail = { rot = [30.0, 0.0, 0.0] }
+foreleg = { rot = [-72.0, 0.0, 0.0], bend = [4.0] }
+forepaw = { rot = [66.0, 0.0, 0.0] }
+hindleg = { rot = [44.0, 0.0, 0.0], bend = [128.0, -86.0] }
+
+# Webbed: legs drawn in under the body, head up and straining.
+[pose.webbed]
+neck = { rot = [-12.0, 0.0, 0.0] }
+tail = { rot = [30.0, 0.0, 0.0] }
+foreleg = { rot = [12.0, 0.0, -7.0] }
+hindleg = { rot = [-12.0, 0.0, -7.0] }
+
+# Disoriented: head swinging low and to one side, legs splayed for balance.
+[pose.disoriented]
+neck = { rot = [30.0, 18.0, 0.0] }
+skull = { rot = [10.0, 0.0, 16.0] }
+tail = { rot = [-20.0, 14.0, 0.0] }
+foreleg_l = { rot = [-10.0, 0.0, 14.0] }
+foreleg_r = { rot = [4.0, 0.0, 4.0] }
+hindleg = { rot = [6.0, 0.0, 10.0], bend = [10.0, -6.0] }
+
+# Calmed: at rest on its feet, head lowered, tail down.
+[pose.calm]
+neck = { rot = [18.0, 0.0, 0.0] }
+skull = { rot = [8.0, 0.0, 0.0] }
+tail = { rot = [-12.0, 0.0, 0.0] }
+
 [pose.dead]
 root = [0.0, 0.0, 90.0]
 neck = { rot = [30.0, 0.0, 0.0] }

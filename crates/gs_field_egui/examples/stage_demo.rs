@@ -26,6 +26,8 @@
 //! `STAGE_DEMO_SHOT=<path.png>` swaps in a showcase roster (healthy, arm
 //! rank 1, chest rank 2, leg rank 3 = severed, prone, dead, boss), saves one
 //! frame of the window to that PNG and exits.
+//! `STAGE_DEMO_STATUSES=1` (with `STAGE_DEMO_SHOT`) shows the status poses
+//! and body effects instead: webbed, sleeping, disoriented, calmed, frozen.
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -166,6 +168,35 @@ fn showcase_roster() -> Vec<Creature> {
     ]
 }
 
+/// `STAGE_DEMO_STATUSES`: each status pose and body effect, on both
+/// published body types.
+fn status_roster() -> Vec<Creature> {
+    let with = |id: &str, name: &str, status: &str| {
+        creature(
+            id,
+            name,
+            CreatureFlags {
+                hostile: true,
+                health: Some(100),
+                max_health: Some(100),
+                statuses: vec![status.to_string()],
+                ..Default::default()
+            },
+        )
+    };
+    vec![
+        with("#3001", "webbed bandit", "webbed"),
+        with("#3002", "sleeping bandit", "sleeping"),
+        with("#3003", "disoriented bandit", "disoriented"),
+        with("#3004", "calmed bandit", "calmed"),
+        with("#3005", "frozen bandit", "frozen"),
+        with("#3006", "webbed wolf", "webbed"),
+        with("#3007", "sleeping wolf", "sleeping"),
+        with("#3008", "disoriented wolf", "disoriented"),
+        with("#3009", "frozen wolf", "frozen"),
+    ]
+}
+
 /// The host owns condition evaluation. The demo has no game state, so only
 /// creature-side leaves can hold (same shape as gs_field's test evaluator).
 fn eval(cond: &Condition, flags: &CreatureFlags) -> bool {
@@ -217,7 +248,7 @@ impl Demo {
         }
         eprintln!("stage_demo: art root {}", art.root().display());
         let creatures = if shot.is_some() {
-            showcase_roster()
+            if std::env::var_os("STAGE_DEMO_STATUSES").is_some() { status_roster() } else { showcase_roster() }
         } else {
             roster()
         };

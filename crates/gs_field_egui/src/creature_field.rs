@@ -1283,6 +1283,7 @@ fn paint_creature_puppet(
         Some(deg) => key.with_facing(deg),
         None => key,
     };
+    let key = key.with_effects(PuppetKey::effects_of(&has));
     let skin = crate::creature_puppet::puppet_skin(ctx);
     let posed = puppets.posed_with(&family, &key, skin)?;
     // The parts this family's puppet actually carries, taken while the lock

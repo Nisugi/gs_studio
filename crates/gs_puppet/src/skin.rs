@@ -24,7 +24,7 @@
 use crate::draw::{surfaces, view_basis, Look, BOSS_OUTLINE, BODY_DEAD, DARK_BELOW, DEPTH_SHADE, EYE, LIGHT_ABOVE};
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
-use crate::uv::Texture;
+use crate::uv::{Texture, UvLayout};
 
 /// Samples per pixel along each axis while rasterising.
 const SS: usize = 2;
@@ -47,6 +47,72 @@ const DARK_TONE: f32 = 0.8;
 const LAMBERT: f32 = 0.08;
 /// Extra width of the boss contour past the ordinary one, pixels.
 const BOSS_EXTRA_PX: f32 = 2.5;
+
+/// Things a status does to the body itself, drawn onto the skin.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Effects {
+    /// Wrapped in web: strands round every limb, following the surface
+    /// through any pose, and threads bridging limb to body.
+    pub webbed: bool,
+    /// Iced over: a cold tint with glints.
+    pub frozen: bool,
+}
+
+impl Effects {
+    pub fn any(&self) -> bool {
+        self.webbed || self.frozen
+    }
+}
+
+const WEB_RGB: [f32; 3] = [236.0, 236.0, 226.0];
+const FROST_RGB: [f32; 3] = [138.0, 190.0, 240.0];
+/// Strand spacing on the surface, feet.
+const WEB_SPACING_FT: f32 = 0.42;
+/// Threads bridging limb to body on a webbed figure.
+const BIND_THREADS: u32 = 7;
+
+fn hash(a: i32, b: u32) -> f32 {
+    let mut x = (a as u32).wrapping_mul(0x9E37_79B9) ^ b.wrapping_mul(0x85EB_CA6B);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x2C1B_3C6D);
+    x ^= x >> 12;
+    (x & 0xFFFF) as f32 / 65535.0
+}
+
+/// How much web covers a surface point (surface feet, from a 1 px-per-foot
+/// layout): three families of wavering strands, some missing, crossing.
+fn web_alpha(at: [f32; 2], half_width: f32) -> f32 {
+    let mut a = 0.0f32;
+    for (k, (dx, dy, sp)) in [(0.8f32, 0.6f32, 1.0f32), (-0.6, 0.8, 1.13), (0.0, 1.0, 1.7)].into_iter().enumerate() {
+        let sp = sp * WEB_SPACING_FT;
+        let across = (at[0] * dx + at[1] * dy) / sp;
+        let along = (-at[0] * dy + at[1] * dx) / sp;
+        let cell = across.floor();
+        if hash(cell as i32, k as u32 + 11) < 0.22 {
+            continue;
+        }
+        let wobble = 0.18 * (along * 1.9 + hash(cell as i32, k as u32) * std::f32::consts::TAU).sin();
+        let d = (across - cell - 0.5 - wobble).abs() * sp;
+        a = a.max(1.0 - smoothstep(half_width * 0.5, half_width, d));
+    }
+    a
+}
+
+/// A glint on frost: sparse bright cells.
+fn frost_glint(at: [f32; 2]) -> bool {
+    let (cx, cy) = ((at[0] / 0.07).floor() as i32, (at[1] / 0.07).floor() as i32);
+    hash(cx.wrapping_mul(7919) ^ cy, 3) > 0.965
+}
+
+/// What the rasteriser paints a sample with, beyond the body colour.
+struct Paint<'a> {
+    tex: Option<&'a Texture>,
+    /// A 1 px-per-foot layout of the surface, for effects measured in feet.
+    surface: Option<&'a UvLayout>,
+    effects: Effects,
+    /// Half a web strand's width, feet.
+    strand_ft: f32,
+}
 
 /// A rendered figure.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -103,13 +169,16 @@ impl Samples {
         Samples { w, h, z: vec![f32::INFINITY; n], n: vec![[0.0; 3]; n], col: vec![[0.0; 3]; n], seg: vec![u32::MAX; n] }
     }
 
-    fn tri(&mut self, v: [&Vert; 3], tex: Option<&Texture>) {
+    fn tri(&mut self, v: [&Vert; 3], paint: &Paint) {
         // A textured triangle interpolates its corners' ADDRESSES and looks
-        // each sample up on the sheet. Angles are unwrapped first, so a
-        // triangle straddling angle 0 does not sweep the whole ring.
-        let tex = tex.filter(|_| v.iter().all(|c| c.addr[0].is_finite() && c.addr[1].is_finite()));
+        // each sample up on the sheet (effects do the same on a feet-scaled
+        // layout). Angles are unwrapped first, so a triangle straddling
+        // angle 0 does not sweep the whole ring.
+        let addressed = v.iter().all(|c| c.addr[0].is_finite() && c.addr[1].is_finite());
+        let tex = paint.tex.filter(|_| addressed);
+        let surface = paint.surface.filter(|_| addressed);
         let mut theta = [v[0].addr[1], v[1].addr[1], v[2].addr[1]];
-        if tex.is_some() {
+        if tex.is_some() || surface.is_some() {
             let lo = theta.iter().copied().fold(f32::MAX, f32::min);
             for t in &mut theta {
                 if *t - lo > std::f32::consts::PI {
@@ -151,12 +220,11 @@ impl Samples {
                 self.z[i] = z;
                 self.n[i] = add(add(scale(v[0].n, w0), scale(v[1].n, w1)), scale(v[2].n, w2));
                 let lerp = |f: fn(&Vert) -> f32| w0 * f(v[0]) + w1 * f(v[1]) + w2 * f(v[2]);
-                let painted = tex.and_then(|t| {
-                    let station = lerp(|c| c.addr[0]);
-                    let angle = w0 * theta[0] + w1 * theta[1] + w2 * theta[2];
-                    t.sample(t.layout.locate(v[0].seg as usize, station, angle)?)
-                });
-                self.col[i] = match painted {
+                let station = lerp(|c| c.addr[0]);
+                let angle = w0 * theta[0] + w1 * theta[1] + w2 * theta[2];
+                let seg = v[0].seg as usize;
+                let painted = tex.and_then(|t| t.sample(t.layout.locate(seg, station, angle)?));
+                let mut col = match painted {
                     Some(rgb) => {
                         let wound = [lerp(|c| c.wound[0]), lerp(|c| c.wound[1]), lerp(|c| c.wound[2])];
                         let a = lerp(|c| c.wound[3]);
@@ -164,6 +232,20 @@ impl Samples {
                     }
                     None => [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]),
                 };
+                let feet = surface.and_then(|l| l.locate(seg, station, angle));
+                if paint.effects.frozen {
+                    col = [0, 1, 2].map(|k| col[k] + (FROST_RGB[k] - col[k]) * 0.62);
+                    if feet.is_some_and(frost_glint) {
+                        col = [0, 1, 2].map(|k| col[k] + (255.0 - col[k]) * 0.85);
+                    }
+                }
+                if paint.effects.webbed {
+                    if let Some(at) = feet {
+                        let a = web_alpha(at, paint.strand_ft) * 0.92;
+                        col = [0, 1, 2].map(|k| col[k] + (WEB_RGB[k] - col[k]) * a);
+                    }
+                }
+                self.col[i] = col;
                 // The segment of the corner this sample is closest to.
                 self.seg[i] = if w0 >= w1 && w0 >= w2 { v[0].seg } else if w1 >= w2 { v[1].seg } else { v[2].seg };
             }
@@ -393,6 +475,17 @@ impl Posed<'_> {
         look: &Look,
         texture: Option<&Texture>,
     ) -> Skin {
+        self.skin_with(project, look, texture, Effects::default())
+    }
+
+    /// [`Posed::skin_textured`] with status [`Effects`] drawn onto the body.
+    pub fn skin_with(
+        &self,
+        project: &dyn Fn(V3) -> ([f32; 2], f32),
+        look: &Look,
+        texture: Option<&Texture>,
+        effects: Effects,
+    ) -> Skin {
         // A sheet laid out for another puppet would put paint anywhere.
         let texture = texture.filter(|t| t.layout.patches.len() == self.puppet.segments.len());
         let puppet = self.puppet;
@@ -515,23 +608,31 @@ impl Posed<'_> {
         }
 
         // ---- rasterise, resolve, smooth
-        let mut samples = Samples::new(w * SS, h * SS);
-        for t in &tris {
-            let v = t.map(|i| &verts[i as usize]);
-            if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
-                samples.tri(v, texture);
-            }
-        }
-        let mut px = Pixels::resolve(&samples, w, h);
-        drop(samples);
         let px_per_ft = {
             let mid = [0.0, height * 0.5, 0.0];
             let (a, _) = project(mid);
             let (b, _) = project(add(mid, [0.0, 1.0, 0.0]));
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
+        let surface = effects.any().then(|| UvLayout::new(puppet, 1.0));
+        let paint = Paint {
+            tex: texture,
+            surface: surface.as_ref(),
+            effects,
+            // At least about a pixel wide, however small the figure.
+            strand_ft: (0.9 / px_per_ft.max(1e-3)).max(0.018),
+        };
+        let mut samples = Samples::new(w * SS, h * SS);
+        for t in &tris {
+            let v = t.map(|i| &verts[i as usize]);
+            if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
+                samples.tri(v, &paint);
+            }
+        }
+        let mut px = Pixels::resolve(&samples, w, h);
+        drop(samples);
         let radius = (SMOOTH_OF_HEIGHT * height * px_per_ft).round().clamp(0.0, 16.0) as usize;
-        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none());
+        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any());
 
         // ---- shade and composite
         let (near, far) =
@@ -571,6 +672,10 @@ impl Posed<'_> {
             let o = i * 4;
             rgba[o..o + 3].copy_from_slice(&c.map(|v| v.round().clamp(0.0, 255.0) as u8));
             rgba[o + 3] = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+
+        if effects.webbed {
+            bind_threads(&mut rgba, &px, &puppet.family, (px_per_ft * 0.012).max(0.7));
         }
 
         // ---- eyes, where the surface they sit on is the one that shows
@@ -618,5 +723,78 @@ impl Posed<'_> {
             }
         }
         Skin { origin, w, h, rgba }
+    }
+}
+
+/// Threads across a webbed figure, each spanning from where it first meets
+/// the body to where it last leaves it: over the gaps between an arm and
+/// the chest, or between the legs, they bind limb to body. Placement is
+/// fixed per family, so the web does not crawl between frames.
+fn bind_threads(rgba: &mut [u8], px: &Pixels, family: &str, half_width: f32) {
+    let (w, h) = (px.w, px.h);
+    let seed = family.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+    let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for y in 0..h {
+        for x in 0..w {
+            if px.cov[y * w + x] >= 0.5 {
+                lo = [lo[0].min(x as f32), lo[1].min(y as f32)];
+                hi = [hi[0].max(x as f32), hi[1].max(y as f32)];
+            }
+        }
+    }
+    if lo[0] > hi[0] {
+        return;
+    }
+    let (cx, cy) = ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5);
+    let reach = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+    for k in 0..BIND_THREADS {
+        let angle = hash(k as i32, seed) * std::f32::consts::PI;
+        let offset = (hash(k as i32, seed ^ 0xA5A5) - 0.5) * 0.7;
+        let (dx, dy) = angle.sin_cos();
+        // A point on the line: the box centre, shifted across the line.
+        let (ox, oy) = (cx - dy * offset * (hi[0] - lo[0]), cy + dx * offset * (hi[1] - lo[1]));
+        // Walk the line; keep the first and last covered pixel.
+        let steps = (reach * 2.0) as i32;
+        let (mut first, mut last, mut covered) = (None, None, 0u32);
+        for s in -steps..=steps {
+            let t = s as f32 * 0.5;
+            let (x, y) = (ox + dx * t, oy + dy * t);
+            if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
+                continue;
+            }
+            if px.cov[y as usize * w + x as usize] >= 0.5 {
+                first.get_or_insert(t);
+                last = Some(t);
+                covered += 1;
+            }
+        }
+        let (Some(t0), Some(t1)) = (first, last) else { continue };
+        // A thread that is mostly air (tail tip to snout over the back) reads
+        // as a tripwire, not a binding: only short bridges over gaps.
+        if t1 - t0 < 4.0 || (covered as f32 * 0.5) < (t1 - t0) * 0.6 {
+            continue;
+        }
+        let (ax, ay, bx, by) = (ox + dx * t0, oy + dy * t0, ox + dx * t1, oy + dy * t1);
+        let x0 = (ax.min(bx) - half_width - 1.0).max(0.0) as usize;
+        let x1 = ((ax.max(bx) + half_width + 1.0) as usize).min(w - 1);
+        let y0 = (ay.min(by) - half_width - 1.0).max(0.0) as usize;
+        let y1 = ((ay.max(by) + half_width + 1.0) as usize).min(h - 1);
+        let len2 = ((bx - ax).powi(2) + (by - ay).powi(2)).max(1e-6);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                let (qx, qy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let t = (((qx - ax) * (bx - ax) + (qy - ay) * (by - ay)) / len2).clamp(0.0, 1.0);
+                let d = (qx - (ax + (bx - ax) * t)).hypot(qy - (ay + (by - ay) * t));
+                let a = (half_width + 0.5 - d).clamp(0.0, 1.0) * 0.8;
+                if a <= 0.0 {
+                    continue;
+                }
+                let o = (y * w + x) * 4;
+                let under = ([0, 1, 2].map(|c| rgba[o + c] as f32), rgba[o + 3] as f32 / 255.0);
+                let (col, alpha) = over((WEB_RGB, a), under);
+                rgba[o..o + 3].copy_from_slice(&col.map(|v| v.round().clamp(0.0, 255.0) as u8));
+                rgba[o + 3] = (alpha * 255.0).round() as u8;
+            }
+        }
     }
 }

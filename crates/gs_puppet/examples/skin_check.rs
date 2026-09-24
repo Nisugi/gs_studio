@@ -4,13 +4,14 @@
 //!
 //! Per family, `<family>_skin.png`: the top row is `draw_list`, the bottom
 //! row `skin`, at yaws 0, 20, 45, 70, 90, 135 and 180. Prints how long each
-//! skin took. `SKIN_CHECK_TILE=<px>` sets the tile size (default 260). With no families, every `data/rigs/<family>.rig.toml`.
+//! skin took. `SKIN_CHECK_EFFECTS=webbed,frozen` draws the skin with those
+//! status effects. `SKIN_CHECK_TILE=<px>` sets the tile size (default 260). With no families, every `data/rigs/<family>.rig.toml`.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use gs_puppet::raster::Canvas;
-use gs_puppet::{Camera, Look, Pose, PoseSet, Puppet, Skin, MASK_PX};
+use gs_puppet::{Camera, Effects, Look, Pose, PoseSet, Puppet, Skin, MASK_PX};
 use rig::{Outlines, Rig, View};
 
 const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
@@ -64,6 +65,8 @@ fn main() {
     let out = PathBuf::from(args.first().expect("usage: skin_check <out_dir> [family ...]"));
     std::fs::create_dir_all(&out).expect("out dir");
     let tile: usize = std::env::var("SKIN_CHECK_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(260);
+    let wanted = std::env::var("SKIN_CHECK_EFFECTS").unwrap_or_default();
+    let effects = Effects { webbed: wanted.contains("web"), frozen: wanted.contains("froz") };
     let data = data_dir();
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");
     let mut families: Vec<String> = args[1..].to_vec();
@@ -118,7 +121,7 @@ fn main() {
             paste(&mut sheet, sheet_w, col, 0, &c.to_rgba8(), tile);
 
             let t = Instant::now();
-            let skin = posed.skin(&project, &look);
+            let skin = posed.skin_with(&project, &look, None, effects);
             times.push(t.elapsed().as_secs_f32() * 1000.0);
             let mut px = Canvas::new(tile, tile, 1, BACKGROUND).to_rgba8();
             composite(&mut px, &skin, tile);

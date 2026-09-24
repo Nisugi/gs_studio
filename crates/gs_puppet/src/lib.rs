@@ -63,7 +63,7 @@ pub use fit::{rest_iou, rest_prims};
 pub use paint::paint;
 pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use prefill::{prefill, Painting, Paintings};
-pub use skin::Skin;
+pub use skin::{Effects, Skin};
 pub use uv::{Texture, UvLayout};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 

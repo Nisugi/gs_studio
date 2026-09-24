@@ -62,6 +62,42 @@ skull = { rot = [22.0, 0.0, 0.0] }
 arm = { rot = [-44.0, 0.0, 3.0], bend = [-10.0] }
 leg = { rot = [-16.0, 0.0, 2.0], bend = [30.0, -12.0] }
 
+# Status poses (the stage picks these from crtrStatus; a missing one falls
+# back to its nearest: sleep -> fallen_side, disoriented -> stunned).
+
+# Asleep: curled on its side, knees drawn up, hands by the face.
+[pose.sleep]
+root = [0.0, 0.0, 90.0]
+torso_upper = { rot = [22.0, 0.0, 0.0] }
+neck = { rot = [22.0, 0.0, 0.0] }
+leg = { rot = [-78.0, 0.0, 0.0], bend = [104.0] }
+arm = { rot = [-62.0, 0.0, 0.0], bend = [-96.0] }
+
+# Webbed: arms pinned to the body, legs bound together, head straining up.
+[pose.webbed]
+torso_upper = { rot = [0.0, 8.0, 0.0] }
+neck = { rot = [-10.0, 0.0, 0.0] }
+arm = { rot = [-4.0, 0.0, -6.0], bend = [-6.0] }
+leg = { rot = [0.0, 0.0, -4.0] }
+
+# Disoriented: head lolling to one side, an arm thrown out for balance,
+# weight on one leg.
+[pose.disoriented]
+torso_upper = { rot = [6.0, 10.0, -8.0] }
+neck = { rot = [14.0, 0.0, 14.0] }
+skull = { rot = [8.0, 0.0, 12.0] }
+arm_l = { rot = [-18.0, 0.0, 34.0], bend = [-30.0] }
+arm_r = { rot = [12.0, 0.0, -4.0], bend = [-24.0] }
+leg_l = { rot = [-8.0, 0.0, 9.0], bend = [16.0, -6.0] }
+leg_r = { rot = [4.0, 0.0, -3.0], bend = [6.0] }
+
+# Calmed: at ease, head lowered a little, arms loose.
+[pose.calm]
+neck = { rot = [10.0, 0.0, 0.0] }
+skull = { rot = [8.0, 0.0, 0.0] }
+arm = { rot = [-4.0, 0.0, -2.0], bend = [-14.0] }
+leg = { bend = [4.0, -2.0] }
+
 # Two ways to lie dead; a client picks one per creature by a stable hash
 # (PoseSet::dead_name).
 [pose.dead]

@@ -119,6 +119,14 @@ pub enum PoseChoice {
     Kneeling,
     Sitting,
     Stunned,
+    /// Asleep (crtrStatus `sleeping`).
+    Sleeping,
+    /// Wrapped in web (`webbed`); the web itself is a body effect.
+    Webbed,
+    /// Reeling (`disoriented`).
+    Disoriented,
+    /// At ease (`calmed`).
+    Calmed,
     /// Prone, fallen on its face / back / side — which one is the
     /// creature's own stable variety bit.
     Prone { on_side: bool },
@@ -144,8 +152,16 @@ impl PoseChoice {
             PoseChoice::Kneeling
         } else if has("sitting") {
             PoseChoice::Sitting
+        } else if has("sleeping") {
+            PoseChoice::Sleeping
+        } else if has("webbed") {
+            PoseChoice::Webbed
         } else if has("stunned") {
             PoseChoice::Stunned
+        } else if has("disoriented") {
+            PoseChoice::Disoriented
+        } else if has("calmed") {
+            PoseChoice::Calmed
         } else {
             PoseChoice::Standing
         }
@@ -161,6 +177,10 @@ impl PoseChoice {
             PoseChoice::Kneeling => &["kneel", "lie", "sit", "stand"],
             PoseChoice::Sitting => &["sit", "lie", "kneel", "stand"],
             PoseChoice::Stunned => &["stunned", "stand"],
+            PoseChoice::Sleeping => &["sleep", "lie", "fallen_side", "stand"],
+            PoseChoice::Webbed => &["webbed", "stand"],
+            PoseChoice::Disoriented => &["disoriented", "stunned", "stand"],
+            PoseChoice::Calmed => &["calm", "stand"],
             PoseChoice::Prone { on_side: true } => &["fallen_side", "prone", "lie", "stand"],
             PoseChoice::Prone { on_side: false } => &["prone", "supine", "fallen_side", "stand"],
             // `dead` / `dead_2` / ... are picked by hash below; these are the
@@ -217,6 +237,9 @@ pub struct PuppetKey {
     /// A host-chosen facing in degrees (quantized to [`FACING_STEP_DEG`]),
     /// replacing the default quarter-turn. None = the default.
     pub facing: Option<i16>,
+    /// Status effects drawn on the body (web, frost). Only the smooth skin
+    /// draws them.
+    pub effects: gs_puppet::Effects,
 }
 
 /// Facings are cached in steps this fine, so a slider does not make a new
@@ -264,7 +287,21 @@ impl PuppetKey {
             mirror,
             height_px: size_step(height_px),
             facing: None,
+            effects: gs_puppet::Effects::default(),
         }
+    }
+
+    /// The same key with these body effects.
+    pub fn with_effects(mut self, effects: gs_puppet::Effects) -> Self {
+        self.effects = effects;
+        self
+    }
+
+    /// The body effects a creature's statuses ask for: `webbed`, and
+    /// `frozen` (not a crtrStatus the table knows, but the feed's open
+    /// vocabulary passes any flag through).
+    pub fn effects_of(has: &dyn Fn(&str) -> bool) -> gs_puppet::Effects {
+        gs_puppet::Effects { webbed: has("webbed"), frozen: has("frozen") }
     }
 
     /// The same key turned to `deg` (0 = facing the viewer, 90 = its front
@@ -527,7 +564,7 @@ pub fn pose_puppet_with(
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
-    let skin = skin.then(|| Arc::new(posed.skin(&project, &look)));
+    let skin = skin.then(|| Arc::new(posed.skin_with(&project, &look, None, key.effects)));
     PosedPuppet {
         prims: prims.into(),
         shadow: shadow.into(),
@@ -1002,6 +1039,15 @@ mod tests {
             PoseChoice::of(false, &flags(&["stunned"]), false, 0),
             PoseChoice::Stunned
         );
+        assert_eq!(PoseChoice::of(false, &flags(&["sleeping"]), false, 0), PoseChoice::Sleeping);
+        assert_eq!(PoseChoice::of(false, &flags(&["webbed"]), false, 0), PoseChoice::Webbed);
+        assert_eq!(PoseChoice::of(false, &flags(&["disoriented"]), false, 0), PoseChoice::Disoriented);
+        assert_eq!(PoseChoice::of(false, &flags(&["calmed"]), false, 0), PoseChoice::Calmed);
+        // Lying down beats a standing status; a web holds even a stunned
+        // creature upright; stunned beats merely reeling.
+        assert_eq!(PoseChoice::of(false, &flags(&["prone", "webbed"]), false, 0), PoseChoice::Prone { on_side: false });
+        assert_eq!(PoseChoice::of(false, &flags(&["webbed", "stunned"]), false, 0), PoseChoice::Webbed);
+        assert_eq!(PoseChoice::of(false, &flags(&["disoriented", "stunned"]), false, 0), PoseChoice::Stunned);
         // Dead wins over every status.
         assert_eq!(
             PoseChoice::of(true, &flags(&["prone", "stunned"]), false, 1),
@@ -1017,6 +1063,10 @@ mod tests {
                 PoseChoice::Kneeling,
                 PoseChoice::Sitting,
                 PoseChoice::Stunned,
+                PoseChoice::Sleeping,
+                PoseChoice::Webbed,
+                PoseChoice::Disoriented,
+                PoseChoice::Calmed,
                 PoseChoice::Prone { on_side: true },
                 PoseChoice::Prone { on_side: false },
                 PoseChoice::Dead { variant: 0 },

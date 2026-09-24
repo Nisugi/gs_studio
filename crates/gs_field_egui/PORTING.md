@@ -416,3 +416,20 @@ turned; the skin decides what is in front per pixel.
   `>>>doll` region) reads `puppet_skin` and calls `posed_with` /
   `paint_figure`. Nothing outside the marked regions changed.
 * `examples/stage_demo.rs`: `STAGE_DEMO_FLAT=1` turns the skin off.
+
+### 7.11 Status poses and body effects
+
+* `PoseChoice` gained `Sleeping`, `Webbed`, `Disoriented`, `Calmed` (from
+  crtrStatus `sleeping`, `webbed`, `disoriented`, `calmed`). `of` checks, in
+  order: dead, prone, kneeling, sitting, sleeping, webbed, stunned,
+  disoriented, calmed. Fallback chains: `sleep` -> `lie` -> `fallen_side`;
+  `webbed`; `disoriented` -> `stunned`; `calm`; all end at `stand`. A host
+  matching `PoseChoice` exhaustively needs the four new arms.
+* `PuppetKey` gained `effects: gs_puppet::Effects` (web, frost), set with
+  `with_effects`; `PuppetKey::effects_of(has)` reads `webbed` and `frozen`
+  (the latter arrives through the feed's open vocabulary). Only the smooth
+  skin draws effects (`Posed::skin_with`).
+* `paint_creature_puppet` (inside the `>>>doll` region) sets the effects.
+* `examples/stage_demo.rs`: `STAGE_DEMO_STATUSES=1` swaps the shot roster
+  for one creature per status.
+
