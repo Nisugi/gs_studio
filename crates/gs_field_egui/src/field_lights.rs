@@ -15,8 +15,11 @@
 //! frame: no re-baking.
 //!
 //! Hooks in `creature_field.rs` (marked regions): [`set_creature`] as a
-//! card starts, [`paint_sprite_glow`] after its base art, [`paint_back`] /
-//! [`paint_front`] around the cards (ground pools, flames).
+//! card starts, [`paint_sprite_glow`] after its base art,
+//! [`paint_prop_glow`] after a scenery prop's, [`paint_back`] before the
+//! cards (ground pools), [`paint_lamps_behind`] before each card or prop
+//! (the flames farther away than it, so a lamp sits in depth order among
+//! them) and [`paint_front`] after the last (the lamps nearer than all).
 
 use std::cell::RefCell;
 
@@ -40,6 +43,11 @@ pub struct FireGlow {
 
 thread_local! {
     static CURRENT: RefCell<Option<FireGlow>> = const { RefCell::new(None) };
+    /// Which of the scene's lamps this frame has drawn already.
+    static DRAWN: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
+    /// The scene's lights this frame (set by [`paint_back`]): a prop's
+    /// draw has no scene of its own to ask.
+    static LIGHTS: RefCell<Vec<PointLight>> = const { RefCell::new(Vec::new()) };
 }
 
 fn hex(c: &str) -> [u8; 3] {
@@ -76,27 +84,28 @@ pub fn set_creature(
     unit: &gs_field::solver::Unit,
     now_ms: f64,
 ) {
-    let t = now_ms as f32 / 1000.0;
-    let glow = scene.and_then(|s| {
-        let (fx, _) = field.foot(unit);
-        let z = field.ground_z(unit);
-        let (mut left, mut right, mut rgb, mut best) = (0.0f32, 0.0f32, [255u8; 3], 0.0f32);
-        for (i, light) in s.lights.iter().enumerate() {
-            let (c, side) = reach(field, light, fx, z);
-            if c <= 0.0 {
-                continue;
-            }
-            let c = c * flicker(light, i, t) * MAX_GLOW;
-            left += c * (0.6 - 0.4 * side);
-            right += c * (0.6 + 0.4 * side);
-            if c > best {
-                best = c;
-                rgb = hex(&light.color);
-            }
-        }
-        (left.max(right) > 0.01).then_some(FireGlow { rgb, left: left.min(MAX_GLOW), right: right.min(MAX_GLOW) })
-    });
+    let (fx, _) = field.foot(unit);
+    let glow = scene.and_then(|s| glow_at(&s.lights, field, fx, field.ground_z(unit), now_ms as f32 / 1000.0));
     CURRENT.with(|g| *g.borrow_mut() = glow);
+}
+
+/// The fire glow on something standing at floor point (x, z) at time `t`.
+fn glow_at(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Option<FireGlow> {
+    let (mut left, mut right, mut rgb, mut best) = (0.0f32, 0.0f32, [255u8; 3], 0.0f32);
+    for (i, light) in lights.iter().enumerate() {
+        let (c, side) = reach(field, light, x, z);
+        if c <= 0.0 {
+            continue;
+        }
+        let c = c * flicker(light, i, t) * MAX_GLOW;
+        left += c * (0.6 - 0.4 * side);
+        right += c * (0.6 + 0.4 * side);
+        if c > best {
+            best = c;
+            rgb = hex(&light.color);
+        }
+    }
+    (left.max(right) > 0.01).then_some(FireGlow { rgb, left: left.min(MAX_GLOW), right: right.min(MAX_GLOW) })
 }
 
 /// The fire glow on the creature being drawn.
@@ -135,6 +144,23 @@ pub fn paint_sprite_glow(
     let Some(glow) = current() else { return };
     let Some(original) = cache.light.original_of(drawn.id()) else { return };
     paint_glow_texture(painter, original.id(), dest, glow);
+}
+
+/// After a scenery prop's art: the fire's copy over it, as for a sprite.
+pub fn paint_prop_glow(
+    painter: &egui::Painter,
+    cache: &crate::creature_art::CreatureArtCache,
+    field: &gs_field::solver::CreatureField,
+    prop: &gs_field::scenes::SceneProp,
+    drawn: &egui::TextureHandle,
+    dest: egui::Rect,
+) {
+    let Some(original) = cache.light.original_of(drawn.id()) else { return };
+    let t = painter.ctx().input(|i| i.time) as f32;
+    let glow = LIGHTS.with(|l| glow_at(&l.borrow(), field, prop.x, prop.z.max(0.4), t));
+    if let Some(glow) = glow {
+        paint_glow_texture(painter, original.id(), dest, glow);
+    }
 }
 
 /// Screen pixels per world unit at a floor point, and the point on screen.
@@ -232,10 +258,9 @@ fn lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_scr
     }
 }
 
-/// Before the cards: every light's ground pool, and the lamps no creature
-/// stands in front of... drawn in [`paint_front`] instead when a light is
-/// nearer the viewer than every creature. Returns true when there are
-/// lights (the field keeps repainting for the flicker).
+/// Before the cards: every light's ground pool. The lamps themselves wait
+/// for [`paint_lamps_behind`] / [`paint_front`]. Returns true when there
+/// are lights (the field keeps repainting for the flicker).
 pub fn paint_back(
     painter: &egui::Painter,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
@@ -244,21 +269,47 @@ pub fn paint_back(
     scene: Option<&gs_field::scenes::StageScene>,
     ctx: &egui::Context,
 ) -> bool {
-    let Some(scene) = scene.filter(|s| !s.lights.is_empty()) else { return false };
-    let t = ctx.input(|i| i.time) as f32;
-    let nearest = nearest_creature_z(field);
-    for (i, light) in scene.lights.iter().enumerate() {
-        ground_pool(painter, field, to_screen, scale, light, flicker(light, i, t));
-    }
-    for (i, light) in scene.lights.iter().enumerate() {
-        if light.z >= nearest {
-            lamp(painter, field, to_screen, scale, light, i, t);
+    let lights = scene.map(|s| s.lights.as_slice()).unwrap_or_default();
+    LIGHTS.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.as_slice() != lights {
+            *l = lights.to_vec();
         }
+    });
+    DRAWN.with(|d| {
+        let mut d = d.borrow_mut();
+        d.clear();
+        d.resize(lights.len(), false);
+    });
+    if lights.is_empty() {
+        return false;
+    }
+    let t = ctx.input(|i| i.time) as f32;
+    for (i, light) in lights.iter().enumerate() {
+        ground_pool(painter, field, to_screen, scale, light, flicker(light, i, t));
     }
     true
 }
 
-/// After the cards: lamps nearer the viewer than every creature.
+/// Just before a card or prop standing at depth `z`: the lamps not yet
+/// drawn that stand at least as far away, so it covers them.
+pub fn paint_lamps_behind(
+    painter: &egui::Painter,
+    to_screen: &dyn Fn(f32, f32) -> Pos2,
+    scale: f32,
+    field: &gs_field::solver::CreatureField,
+    scene: Option<&gs_field::scenes::StageScene>,
+    z: f32,
+    ctx: &egui::Context,
+) {
+    let Some(scene) = scene.filter(|s| !s.lights.is_empty()) else { return };
+    let t = ctx.input(|i| i.time) as f32;
+    for k in lamps_due(&scene.lights, z) {
+        lamp(painter, field, to_screen, scale, &scene.lights[k], k, t);
+    }
+}
+
+/// After the cards: the lamps nearer the viewer than everything.
 pub fn paint_front(
     painter: &egui::Painter,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
@@ -268,18 +319,26 @@ pub fn paint_front(
     ctx: &egui::Context,
 ) {
     let Some(scene) = scene.filter(|s| !s.lights.is_empty()) else { return };
-    let t = ctx.input(|i| i.time) as f32;
-    let nearest = nearest_creature_z(field);
-    for (i, light) in scene.lights.iter().enumerate() {
-        if light.z < nearest {
-            lamp(painter, field, to_screen, scale, light, i, t);
-        }
-    }
+    paint_lamps_behind(painter, to_screen, scale, field, Some(scene), f32::NEG_INFINITY, ctx);
     ctx.request_repaint_after(std::time::Duration::from_millis(40));
 }
 
-fn nearest_creature_z(field: &gs_field::solver::CreatureField) -> f32 {
-    field.units().iter().map(|u| field.ground_z(u)).fold(f32::INFINITY, f32::min)
+/// The lamps not yet drawn this frame at depth >= `z`, far to near, marked
+/// drawn.
+fn lamps_due(lights: &[PointLight], z: f32) -> Vec<usize> {
+    DRAWN.with(|d| {
+        let mut d = d.borrow_mut();
+        if d.len() != lights.len() {
+            d.clear();
+            d.resize(lights.len(), false);
+        }
+        let mut due: Vec<usize> = (0..lights.len()).filter(|&k| !d[k] && lights[k].z >= z).collect();
+        due.sort_by(|&a, &b| lights[b].z.total_cmp(&lights[a].z));
+        for &k in &due {
+            d[k] = true;
+        }
+        due
+    })
 }
 
 #[cfg(test)]
@@ -299,5 +358,20 @@ mod tests {
         let steady = PointLight { flicker: 0.0, ..light.clone() };
         assert_eq!(flicker(&steady, 0, 1.23), 1.0);
         assert!((0..50).map(|k| flicker(&light, 0, k as f32 * 0.07)).any(|f| f < 0.97), "a fire flickers");
+    }
+
+    #[test]
+    fn lamps_slot_between_the_cards_by_depth() {
+        let lights = vec![
+            PointLight::new(LampKind::Campfire, 400.0, 3.0),
+            PointLight::new(LampKind::Torch, 300.0, 5.0),
+            PointLight::new(LampKind::Torch, 500.0, 1.0),
+        ];
+        DRAWN.with(|d| d.borrow_mut().clear());
+        // Cards at z 4 then 2 (far to near), then the front pass.
+        assert_eq!(lamps_due(&lights, 4.0), vec![1], "the far torch goes behind the first card");
+        assert_eq!(lamps_due(&lights, 2.0), vec![0], "the fire between the two cards");
+        assert_eq!(lamps_due(&lights, 2.0), Vec::<usize>::new(), "each lamp once");
+        assert_eq!(lamps_due(&lights, f32::NEG_INFINITY), vec![2], "the near torch in front of all");
     }
 }

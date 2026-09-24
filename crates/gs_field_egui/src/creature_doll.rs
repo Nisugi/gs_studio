@@ -853,8 +853,9 @@ mod tests {
         // and the three wound draws -- and the status icons: the text
         // badges skip iconed statuses, and a block draws the icons -- and
         // the weather (and point lights), behind the creatures and in front
-        // of them -- and the firelight laid over a sprite's base art.
-        assert_eq!(regions, 14, "exactly the fourteen documented additions");
+        // of them -- and the firelight laid over a sprite's base art and a
+        // prop's; lamps drawn in depth order between the cards.
+        assert_eq!(regions, 16, "exactly the sixteen documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

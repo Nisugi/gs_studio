@@ -516,3 +516,9 @@ block region also calls `set_creature`; one new region after the sprite's
 base draw (fourteen now); the weather regions also paint the pools and
 lamps (lamps nearer the viewer than every creature draw in front). Dead
 creatures take no firelight.
+
+Later: lamps are drawn in depth order among the cards -- a new block region
+at the top of the draw loop calls `paint_lamps_behind(z)` before each card
+or prop, drawing the lamps not yet drawn that stand at least as far away,
+and `paint_front` draws what is left. Props take firelight too (a region
+after `paint_scene_prop`'s draw calls `paint_prop_glow`). Sixteen regions.

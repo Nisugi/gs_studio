@@ -357,8 +357,9 @@ across -- and differ only in the right-hand panel:
   in when ready (`gs_field_egui::creature_light`).
 - **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*; select
   one to set its kind, colour, reach, brightness and flicker, or drag it on
-  the stage. It lights a pool of ground and the creatures within reach, most
-  on the side facing it; best seen at night (`[[lights]]` in the scene file,
+  the stage. It lights a pool of ground and the creatures and props within
+  reach, most on the side facing it, and its flame stands in depth order
+  among them; best seen at night (`[[lights]]` in the scene file,
   `gs_field_egui::field_lights`).
 - **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
   Sleet, Blood rain or Fog, with Amount and Wind -- a preview of what the

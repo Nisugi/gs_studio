@@ -274,6 +274,14 @@ pub fn render_creature_field_content(
     // Stable: units keep the solver's order on equal depth.
     items.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (_, item) in &items {
+// >>>doll
+        // Lamps farther away than this item stand behind it.
+        let item_z = match item {
+            DrawItem::Unit(i) => field.ground_z(&field.units()[*i]),
+            DrawItem::Prop(k) => props[*k].z.max(0.4),
+        };
+        crate::field_lights::paint_lamps_behind(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, item_z, ui.ctx());
+// <<<doll
         let i = match item {
             DrawItem::Prop(k) => {
                 paint_scene_prop(&painter, &map, field, &props[*k], art_cache);
@@ -459,6 +467,12 @@ fn paint_scene_prop(
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         Color32::WHITE,
     );
+// >>>doll
+    // Firelight on the prop, as on a creature.
+    if let Some(cache) = art_cache {
+        crate::field_lights::paint_prop_glow(painter, cache, field, prop, &art.texture, dest);
+    }
+// <<<doll
 }
 
 fn paint_field_floor(
