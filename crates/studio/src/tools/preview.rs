@@ -205,7 +205,14 @@ impl StageTool {
                     ui.separator();
                     solver_ui(stage, ui);
                 }
-                StagePanel::Preview => cast_ui(stage, ui),
+                StagePanel::Preview => {
+                    if stage.scene().light.is_some() {
+                        ui.heading("Light");
+                        light_preview_ui(stage, ui, game_hour);
+                        ui.separator();
+                    }
+                    cast_ui(stage, ui)
+                }
             });
         });
         egui::CentralPanel::default().show(ui, |ui| field_ui(stage, ui, &art, panel));
@@ -295,7 +302,13 @@ fn light_ui(
         stage.scene_mut().light = Some(edited);
     }
 
-    ui.label("Preview");
+    light_preview_ui(stage, ui, game_hour);
+}
+
+/// The lighting preview: which game hour the stage shows, and the player's
+/// Lighting strength. On the Scenes panel's Light section and on Preview.
+fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
+    ui.label("Time of day");
     ui.horizontal_wrapped(|ui| {
         let mut live = stage.light_hour.is_none();
         if ui.checkbox(&mut live, "Live clock").on_hover_text("The game's own time (Elanthian, US Eastern)").changed() {
