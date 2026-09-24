@@ -207,6 +207,13 @@ refused with a note. Save installs it beside the puppet as
 `<pool>/global/puppets/<family>.texture.png` and Publish ships it to
 `puppets/`; the stage's puppets wear it.
 
+**Play death** makes the preview fall down dead from the shown pose into
+the body type's dead pose (`gs_puppet::Fall`, a procedural ragdoll: the
+body topples like a falling pole and bounces once, each limb follows on
+its own spring and swings past before settling), exactly as the stage does
+when a puppet it saw alive dies; the dead pose is held a second, then the
+shown pose comes back.
+
 **Edit pose** (in the 3D panel's top row) opens the pose editor under the
 puppet, on the pose in the list (*rest* becomes `stand`). Click a bone on
 the puppet, or its name in the row list, and its sliders appear: *swing

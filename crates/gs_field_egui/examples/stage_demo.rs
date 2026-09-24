@@ -36,6 +36,9 @@
 //! `STAGE_DEMO_WEATHER=rain|storm|snow|sleet|blood|fog` adds weather.
 //! `STAGE_DEMO_FIRE=1` (with `STAGE_DEMO_LIGHT`) puts a campfire mid-field
 //! and a torch to one side.
+//! `STAGE_DEMO_KILL=<frame>` kills the targeted creature at that frame, so
+//! a shot catches its puppet falling down dead; `STAGE_DEMO_SHOT_FRAME=<n>`
+//! takes the shot at frame n instead of 20.
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -385,7 +388,8 @@ impl Demo {
         let Some(path) = self.shot.clone() else {
             return;
         };
-        if !self.shot_requested && self.frames >= 20 && (self.scene.is_none() || self.light_settled >= 10) {
+        let at = std::env::var("STAGE_DEMO_SHOT_FRAME").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
+        if !self.shot_requested && self.frames >= at && (self.scene.is_none() || self.light_settled >= 10) {
             self.shot_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
@@ -482,6 +486,14 @@ impl eframe::App for Demo {
         let art = self.art.creature_art();
 
         self.frames += 1;
+        let kill = std::env::var("STAGE_DEMO_KILL").ok().and_then(|v| v.parse::<u64>().ok());
+        if kill == Some(self.frames as u64) {
+            let target = self.current_target.clone();
+            if let Some(flags) = self.creatures.iter_mut().find(|c| c.id == target).and_then(|c| c.flags.as_mut()) {
+                flags.dead = true;
+                self.creatures_generation += 1;
+            }
+        }
         if self.frames == 1 || self.frames == 60 {
             eprintln!(
                 "stage_demo: frame {} ok, {} creatures -> {} units",

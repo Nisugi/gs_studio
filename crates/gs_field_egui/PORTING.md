@@ -522,3 +522,14 @@ at the top of the draw loop calls `paint_lamps_behind(z)` before each card
 or prop, drawing the lamps not yet drawn that stand at least as far away,
 and `paint_front` draws what is left. Props take firelight too (a region
 after `paint_scene_prop`'s draw calls `paint_prop_glow`). Sixteen regions.
+
+### 7.17 Falling down dead
+
+A puppet seen alive that dies falls into its dead pose instead of snapping
+to it: `PuppetCache::falling(id, choice, now)` remembers each creature's last
+pose choice (forgotten after 3600 frames unseen) and, on the frame it turns
+`Dead`, starts a `gs_puppet::Fall` from that pose; `posed_falling` poses each
+frame of it uncached, and the card keeps repainting until it settles
+(`gs_puppet::fall::FALL_SECS`). A creature already dead when first drawn
+does not fall. Wired inside `paint_creature_puppet` (already a marked
+region); sprites keep their own death art.

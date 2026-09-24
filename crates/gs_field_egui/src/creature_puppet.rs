@@ -669,6 +669,9 @@ pub struct PuppetCache {
     tick: u64,
     /// The scene light in force (see [`PuppetCache::set_light`]).
     light: Option<Arc<crate::creature_light::ResolvedLight>>,
+    /// Per creature id: what it was last drawn doing, and when it died in
+    /// view (see [`PuppetCache::falling`]).
+    lives: HashMap<String, Life>,
     /// Display lists posed since this cache was created (tests, diagnostics).
     pub builds: u64,
     /// Baked puppets parsed since this cache was created.
@@ -676,6 +679,19 @@ pub struct PuppetCache {
 }
 
 pub type SharedPuppetCache = Arc<Mutex<PuppetCache>>;
+
+/// One creature as the cache last saw it.
+#[derive(Debug, Clone, Copy)]
+struct Life {
+    last: PoseChoice,
+    /// The pose it was in when it died, and when (seconds), if it died in
+    /// view. A creature first seen dead has none: it does not fall.
+    fell: Option<(PoseChoice, f64)>,
+    seen: u64,
+}
+
+/// A creature not drawn for this many frames is forgotten.
+const LIFE_FRAMES: u64 = 3600;
 
 impl PuppetCache {
     /// The cache that lives in this egui context (created on first use).
@@ -707,6 +723,7 @@ impl PuppetCache {
             self.posed.clear();
         }
         self.rigs = Some(rigs);
+        self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
     }
 
     fn rigs(&self) -> Arc<PuppetRigs> {
@@ -905,6 +922,48 @@ impl PuppetCache {
         }
         self.posed.insert(cache_key, (posed.clone(), tick));
         Some(posed)
+    }
+
+    /// Track creature `id`, drawn this frame in `choice`: while it is
+    /// falling down dead -- it was seen alive, and died under
+    /// `gs_puppet::fall::FALL_SECS` ago -- the pose it fell from and the
+    /// seconds since. None otherwise (alive, settled, or already dead when
+    /// first seen).
+    pub fn falling(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Option<(PoseChoice, f32)> {
+        let frame = self.frame.unwrap_or(0);
+        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, fell: None, seen: frame });
+        life.seen = frame;
+        let dead = matches!(choice, PoseChoice::Dead { .. });
+        if !dead {
+            *life = Life { last: choice, fell: None, seen: frame };
+            return None;
+        }
+        if !matches!(life.last, PoseChoice::Dead { .. }) {
+            life.fell = Some((life.last, now_s));
+            life.last = choice;
+        }
+        let (from, at) = life.fell?;
+        let t = (now_s - at).max(0.0) as f32;
+        (!gs_puppet::Fall::done(t)).then_some((from, t))
+    }
+
+    /// The figure `t` seconds into falling dead from `from` into `key`'s
+    /// dead pose (`gs_puppet::Fall`). Built every call, never cached: each
+    /// frame of a fall is drawn once.
+    pub fn posed_falling(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32) -> Option<Arc<PosedPuppet>> {
+        let puppet = self.puppet(family)?;
+        let set = self.pose_set(family)?;
+        let variant = match key.pose {
+            PoseChoice::Dead { variant } => variant as u64,
+            _ => 0,
+        };
+        let (_, to) = key.pose.resolve(&set, variant)?;
+        let (_, start) = from.resolve(&set, 0)?;
+        let pose = gs_puppet::Fall::new(&puppet, start, to, variant).at(t);
+        let light = self.light.clone().filter(|_| skin);
+        let texture = if skin { self.texture(family) } else { None };
+        self.builds += 1;
+        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
     }
 
     pub fn posed_count(&self) -> usize {
@@ -1396,6 +1455,27 @@ mod tests {
 
     /// The LRU: same key = same list, never rebuilt; a changed key builds
     /// once; the cap evicts the least recently used.
+    #[test]
+    fn a_creature_seen_alive_falls_when_it_dies_and_a_corpse_does_not() {
+        let mut cache = cache();
+        cache.begin_frame(1);
+        let dead = PoseChoice::Dead { variant: 0 };
+        assert_eq!(cache.falling("a", PoseChoice::Stunned, 10.0), None);
+        assert_eq!(cache.falling("a", dead, 11.0), Some((PoseChoice::Stunned, 0.0)));
+        let (from, t) = cache.falling("a", dead, 11.5).unwrap();
+        assert_eq!(from, PoseChoice::Stunned);
+        assert!((t - 0.5).abs() < 1e-4);
+        assert_eq!(cache.falling("a", dead, 11.0 + gs_puppet::fall::FALL_SECS as f64 + 0.1), None, "settled");
+        assert_eq!(cache.falling("b", dead, 11.0), None, "already dead when first seen");
+        // A fall poses the real puppet.
+        let family: Arc<str> = "humanoid".into();
+        let posed = cache.posed_falling(&family, &key(dead, &[]), true, PoseChoice::Standing, 0.3);
+        assert!(posed.is_some_and(|p| p.skin.is_some()));
+        // Revived (the host cleared dead): alive again, and can fall again.
+        assert_eq!(cache.falling("a", PoseChoice::Standing, 20.0), None);
+        assert!(cache.falling("a", dead, 21.0).is_some());
+    }
+
     #[test]
     fn pose_cache_builds_once_per_key_and_is_capped() {
         // Other tests re-point VELLUM_FE_DIR, which reloads the puppet set.

@@ -45,7 +45,8 @@ Dependency chain (bottom up):
   (`UvLayout`) that `Posed::skin_textured` reads paint from
   (`examples/uv_sheet` writes a template and a checker check); `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
-  that sheet (`uv_sheet --demo` shows it). Everything
+  that sheet (`uv_sheet --demo` shows it). `fall.rs` is the procedural
+  death fall (`examples/fall_strip` films it). Everything
   except `paint.rs` is egui-free. The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,

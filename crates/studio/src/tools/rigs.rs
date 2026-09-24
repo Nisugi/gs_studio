@@ -63,6 +63,9 @@ pub struct RigTool {
     new_pose_name: String,
     /// Closing with unsaved poses: asking, or answered.
     pose_quit: PoseQuit,
+    /// "Play death" was pressed at this moment: the preview falls from the
+    /// shown pose into the dead one (`gs_puppet::Fall`).
+    death: Option<std::time::Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +136,7 @@ impl RigTool {
             pose_row: None,
             new_pose_name: String::new(),
             pose_quit: PoseQuit::No,
+            death: None,
         })
     }
 
@@ -535,6 +539,9 @@ impl RigTool {
             if ui.button("Reset view").clicked() {
                 pv.reset_camera();
             }
+            if ui.button("Play death").on_hover_text("Fall down dead from this pose, as the stage does when a creature dies").clicked() {
+                self.death = Some(std::time::Instant::now());
+            }
             if ui
                 .toggle_value(&mut self.pose_edit, "Edit pose")
                 .on_hover_text("Change the shown pose's angles: pick a bone (click it, or its name), then its sliders")
@@ -622,18 +629,32 @@ impl RigTool {
         ui.weak(if self.pose_edit { "drag: turn   wheel: zoom   click: pick a bone" } else { "drag: turn   wheel: zoom" });
 
         let pv = &mut self.puppet_view;
+        let dead_of = |set: &gs_puppet::PoseSet| set.dead_name(1).and_then(|n| set.get(n)).cloned().unwrap_or_default();
         let from_doc = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type).map(|d| {
             let revision = d.revision();
-            let pose = match d.set_for(&family) {
-                Ok(set) if !pv.pose.is_empty() => set.get(&pv.pose).cloned().unwrap_or_default(),
-                _ => gs_puppet::Pose::default(),
+            let (pose, dead) = match d.set_for(&family) {
+                Ok(set) if !pv.pose.is_empty() => (set.get(&pv.pose).cloned().unwrap_or_default(), dead_of(set)),
+                Ok(set) => (gs_puppet::Pose::default(), dead_of(set)),
+                _ => Default::default(),
             };
-            (pose, revision + 1)
+            (pose, dead, revision + 1)
         });
-        let (pose, poses_revision) = match from_doc {
+        let (pose, dead, poses_revision) = match from_doc {
             Some(p) => p,
-            None => (pv.current_pose(&data_root, &body_type, &family), 0),
+            None => {
+                let dead = pv.poses(&data_root, &body_type, &family).as_ref().map(|(set, _)| dead_of(set)).unwrap_or_default();
+                (pv.current_pose(&data_root, &body_type, &family), dead, 0)
+            }
         };
+        // Playing a death: the fall, then the dead pose held a moment.
+        let falling = self.death.map(|start| start.elapsed().as_secs_f32());
+        if falling.is_some_and(|t| t > gs_puppet::fall::FALL_SECS + 1.0) {
+            self.death = None;
+        }
+        let falling = falling.filter(|_| self.death.is_some());
+        if falling.is_some() {
+            ui.ctx().request_repaint();
+        }
         let (yaw, pitch, zoom) = (pv.yaw, pv.pitch, pv.zoom);
         let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
         let rect = response.rect;
@@ -690,7 +711,11 @@ impl RigTool {
                 cam.focal *= zoom;
                 cam.pitch_deg = pitch;
                 let look = gs_puppet::Look { yaw, outline_px: 1.5, ..gs_puppet::Look::default() };
-                let posed = puppet.pose(&pose);
+                let shown = match falling {
+                    Some(t) => gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t),
+                    None => pose.clone(),
+                };
+                let posed = puppet.pose(&shown);
                 let project = |p: gs_puppet::math::V3| cam.project(p);
                 gs_puppet::paint(&painter, Vec2::ZERO, &posed.ground_shadow(&project, &look, shadow));
                 gs_puppet::paint(&painter, Vec2::ZERO, &gs_puppet::ground_grid(&project, 5, grid, 1.0));
@@ -699,7 +724,10 @@ impl RigTool {
                     // panel does not re-render it.
                     let key = SkinKey {
                         revision,
-                        pose: self.puppet_view.pose.clone(),
+                        pose: match falling {
+                            Some(t) => format!("{}@{:.3}", self.puppet_view.pose, t.min(gs_puppet::fall::FALL_SECS)),
+                            None => self.puppet_view.pose.clone(),
+                        },
                         view: [yaw, pitch, zoom, rect.width(), rect.height()].map(f32::to_bits),
                         texture: texture_serial,
                         poses: poses_revision,
