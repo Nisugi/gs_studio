@@ -11,6 +11,7 @@ pub mod puppet_view;
 pub mod session;
 pub mod state;
 pub mod structure;
+pub mod texture;
 pub mod undo;
 pub mod view;
 pub mod warnings;

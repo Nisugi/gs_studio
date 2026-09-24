@@ -46,6 +46,10 @@ pub struct RigTool {
     puppet_view: PuppetView,
     /// Its last smooth skin, and what it was rendered from.
     skin: Option<(SkinKey, egui::TextureHandle, Vec2)>,
+    /// The painted sheet, and the texture it makes for the current rig.
+    sheet: Option<SheetFile>,
+    sheet_serial: u64,
+    sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
     files: crate::fs_cache::Ttl<(String, PathBuf, bool), FileFacts>,
@@ -58,6 +62,15 @@ struct SkinKey {
     revision: u64,
     pose: String,
     view: [u32; 5],
+    /// The texture worn (its load serial), if any.
+    texture: Option<u64>,
+}
+
+/// The family's `sheet.png`, as read from disk (re-read on `serial`).
+struct SheetFile {
+    family: String,
+    serial: u64,
+    pixels: Result<Option<(usize, usize, std::sync::Arc<Vec<u8>>)>, String>,
 }
 
 /// What the document controls need to know about files on disk.
@@ -91,6 +104,9 @@ impl RigTool {
             show_on_stage: None,
             puppet_view: PuppetView::default(),
             skin: None,
+            sheet: None,
+            sheet_serial: 0,
+            sheet_texture: None,
             files: Default::default(),
         })
     }
@@ -432,6 +448,7 @@ impl RigTool {
         let data_root = self.session.data_root.clone();
         let pv = &mut self.puppet_view;
         let mut reload_stage = false;
+        let (mut export, mut build, mut reload_sheet) = (false, false, false);
 
         ui.horizontal_wrapped(|ui| {
             ui.strong("3D puppet");
@@ -459,6 +476,8 @@ impl RigTool {
             }
             ui.checkbox(&mut pv.skin, "Smooth skin")
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
+            ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.texture, "Texture"))
+                .on_hover_text("Dress the skin in data/textures/<family>/sheet.png");
             match (source, error) {
                 (Some(PoseSource::DataRoot), _) => ui.weak(format!("poses: data/poses/{body_type}.toml")),
                 (Some(PoseSource::Shipped), _) => ui.weak(format!("poses: built-in {body_type}")),
@@ -466,6 +485,50 @@ impl RigTool {
                 (None, None) => ui.weak(""),
             };
         });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Texture:");
+            export = ui
+                .button("Export templates")
+                .on_hover_text("Write the front / side / back paint-over silhouettes and the pattern sheet to data/textures/<family>/")
+                .clicked();
+            build = ui
+                .button("Build sheet from paintings")
+                .on_hover_text("Project front.png / side.png / back.png from that folder onto the pattern: writes sheet.png")
+                .clicked();
+            reload_sheet = ui.button("Reload").on_hover_text("Read sheet.png again after painting on it").clicked();
+            match self.sheet.as_ref().map(|s| &s.pixels) {
+                Some(Err(e)) => {
+                    ui.colored_label(ui.visuals().warn_fg_color, e);
+                }
+                Some(Ok(None)) | None => {
+                    ui.weak("no sheet.png yet");
+                }
+                Some(Ok(Some(_))) => {}
+            }
+            if let Some((_, _, Err(e))) = &self.sheet_texture {
+                ui.colored_label(ui.visuals().warn_fg_color, e);
+            }
+        });
+        if export || build {
+            let outcome = match self.session.puppet().clone() {
+                Err(why) => Err(format!("no puppet to texture yet: {why}")),
+                Ok(puppet) => {
+                    let outlines = &self.session.outlines;
+                    if export {
+                        crate::editor::texture::export_templates(&data_root, &family, &puppet, outlines)
+                            .map(|dir| format!("Templates written to {}", dir.display()))
+                    } else {
+                        crate::editor::texture::build_sheet(&data_root, &family, &puppet, outlines)
+                            .map(|(path, n)| format!("{} built from {n} painting(s); Save puts it on the stage", path.display()))
+                    }
+                }
+            };
+            self.session.status = outcome.unwrap_or_else(|e| e);
+            reload_sheet |= build;
+        }
+        if reload_sheet {
+            self.sheet_serial += 1;
+        }
         if reload_stage {
             self.session.status = match self.session.install_poses() {
                 Ok(n) => format!("Poses reloaded: {n} pose sets now on the stage too"),
@@ -496,6 +559,34 @@ impl RigTool {
         let painter = painter.with_clip_rect(rect);
         painter.rect_filled(rect, 0.0, bg);
         let revision = self.session.editor.revision();
+        // The sheet on disk, read once per family / reload; the texture it
+        // makes, rebuilt when the rig changes (its layout follows the rig).
+        let want_texture = self.puppet_view.skin && self.puppet_view.texture;
+        if want_texture && self.sheet.as_ref().is_none_or(|s| s.family != family || s.serial != self.sheet_serial) {
+            let path = crate::editor::texture::sheet_path(&data_root, &family);
+            let pixels = if path.is_file() {
+                crate::editor::texture::read_png(&path).map(|(w, h, px)| Some((w, h, std::sync::Arc::new(px))))
+            } else {
+                Ok(None)
+            };
+            self.sheet = Some(SheetFile { family: family.clone(), serial: self.sheet_serial, pixels });
+            self.sheet_texture = None;
+        }
+        if want_texture && self.sheet_texture.as_ref().is_none_or(|(r, s, _)| *r != revision || *s != self.sheet_serial) {
+            let made = match (self.sheet.as_ref().map(|s| &s.pixels), self.session.puppet()) {
+                (Some(Ok(Some((w, h, px)))), Ok(puppet)) => {
+                    crate::editor::texture::sheet_texture(puppet, *w, *h, px.as_ref().clone()).map(|t| Some(std::sync::Arc::new(t)))
+                }
+                _ => Ok(None),
+            };
+            self.sheet_texture = Some((revision, self.sheet_serial, made));
+        }
+        let texture = if want_texture {
+            self.sheet_texture.as_ref().and_then(|(_, _, t)| t.as_ref().ok().cloned().flatten())
+        } else {
+            None
+        };
+        let texture_serial = texture.as_ref().map(|_| self.sheet_serial);
         match self.session.puppet() {
             Ok(puppet) => {
                 let mut cam = gs_puppet::Camera::framing(puppet.height.max(0.5), [rect.width(), rect.height()]);
@@ -514,11 +605,12 @@ impl RigTool {
                         revision,
                         pose: self.puppet_view.pose.clone(),
                         view: [yaw, pitch, zoom, rect.width(), rect.height()].map(f32::to_bits),
+                        texture: texture_serial,
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let mut local = cam;
                         local.center = [rect.width() * 0.5, rect.height() * 0.5];
-                        let skin = posed.skin(&|p| local.project(p), &look);
+                        let skin = posed.skin_textured(&|p| local.project(p), &look, texture.as_deref());
                         let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
                         let tex = ui.ctx().load_texture("rig_puppet_skin", image, egui::TextureOptions::LINEAR);
                         self.skin = Some((key, tex, Vec2::new(skin.origin[0], skin.origin[1])));

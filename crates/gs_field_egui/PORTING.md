@@ -482,3 +482,11 @@ two regions (now eleven): the text-badge filter skips iconed statuses
 (`has_icon`), and a block after the badges draws the icon row and moves
 `top_y` up, so the stun swirl and the target reticule stack above it.
 Unknown statuses keep their text badge; a dead creature shows no icons.
+
+### 7.14 Puppet textures on the stage
+
+`PuppetCache::texture(family)` decodes a puppet's `<family>.texture.png`
+once per puppet-set generation and checks it against
+`UvLayout::fit(puppet, SHEET_SIDE)` (a sheet painted for another rig is
+refused with a warning); `pose_puppet_with` takes it and the skin wears it
+(`Posed::skin_with`). Lighting and effects apply on top.

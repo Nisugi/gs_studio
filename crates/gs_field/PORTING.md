@@ -323,3 +323,10 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   gathers the scene light and the time-of-day keyframes at a game hour.
 
 Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`.
+
+### 6.11 Puppet textures
+
+`PuppetRig.texture: Option<Arc<[u8]>>`: the undecoded
+`<family>.texture.png` beside a puppet, embedded (`data/puppets/`) or in
+`<base>/global/puppets/`; `texture_file_name(family)`. gs_field does not
+decode it (no image dependency); the frontend does.

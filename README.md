@@ -196,6 +196,16 @@ same). A file that does not parse is left out and named on the status line.
 (`Posed::skin`: a depth test per pixel, joints blended, contours only where
 the depth steps), the way the stage draws it; off shows the older flat
 shape list, whose parts jump in front of each other as the figure turns.
+*Texture* dresses the skin in `<data>/textures/<family>/sheet.png`. The row
+below: *Export templates* writes the front / side / back paint-over
+silhouettes (`*_paint.png`) and the pattern (`pattern.png`, `patches.txt`:
+the skin cut open, `gs_puppet::uv`); *Build sheet from paintings* projects
+`front.png` / `side.png` / `back.png` from that folder onto the pattern as
+`sheet.png` (`gs_puppet::prefill`), which can then be touched up by hand;
+*Reload* re-reads it. A sheet laid out for an older rig (another size) is
+refused with a note. Save installs it beside the puppet as
+`<pool>/global/puppets/<family>.texture.png` and Publish ships it to
+`puppets/`; the stage's puppets wear it.
 
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:

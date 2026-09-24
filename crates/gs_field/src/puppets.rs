@@ -87,6 +87,15 @@ pub struct PuppetRig {
     /// The whole `<family>.puppet.toml`, for `Puppet::from_baked_toml`.
     pub baked: Arc<str>,
     pub source: PuppetSource,
+    /// `<family>.texture.png` beside it, undecoded: the painted pattern
+    /// sheet the frontend's smooth skin wears (`gs_puppet::uv`). None =
+    /// the plain body colour.
+    pub texture: Option<Arc<[u8]>>,
+}
+
+/// The texture file name for a family: `<family>.texture.png`.
+pub fn texture_file_name(family: &str) -> String {
+    format!("{family}.texture.png")
 }
 
 /// One pose set: the UNPARSED `<body_type>.toml`.
@@ -253,6 +262,7 @@ pub fn load_dir(dir: &std::path::Path) -> (Vec<PuppetRig>, Vec<PoseFile>) {
                 body_type: scan_body_type(&text),
                 baked: text.into(),
                 source: PuppetSource::Override,
+                texture: std::fs::read(dir.join(texture_file_name(family))).ok().map(Into::into),
             }),
             None => poses.push(PoseFile {
                 body_type: stem.to_ascii_lowercase(),
@@ -297,6 +307,7 @@ pub fn puppets() -> Arc<PuppetRigs> {
         set.by_family.insert(
             family.clone(),
             Arc::new(PuppetRig {
+                texture: EMBEDDED_PUPPETS.get_file(texture_file_name(&family)).map(|f| f.contents().into()),
                 family,
                 body_type: scan_body_type(text),
                 baked: text.into(),

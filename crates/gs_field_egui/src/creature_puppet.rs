@@ -528,7 +528,7 @@ fn unit_camera(height_ft: f32, px_per_ft: f32) -> gs_puppet::Camera {
 /// Build one posed display list, with no caching. Exposed for tests and
 /// tools; the field goes through [`PuppetCache`].
 pub fn pose_puppet(puppet: &Puppet, pose: &gs_puppet::Pose, key: &PuppetKey) -> PosedPuppet {
-    pose_puppet_with(puppet, pose, key, false, None)
+    pose_puppet_with(puppet, pose, key, false, None, None)
 }
 
 /// [`pose_puppet`], plus the smooth skin when `skin` is set.
@@ -538,6 +538,7 @@ pub fn pose_puppet_with(
     key: &PuppetKey,
     skin: bool,
     light: Option<&crate::creature_light::ResolvedLight>,
+    texture: Option<&gs_puppet::Texture>,
 ) -> PosedPuppet {
     let posed: Posed<'_> = puppet.pose(pose);
     let wounds = key.wounds();
@@ -566,7 +567,7 @@ pub fn pose_puppet_with(
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
     let skin = skin.then(|| {
-        let mut skin = posed.skin_with(&project, &look, None, key.effects);
+        let mut skin = posed.skin_with(&project, &look, texture, key.effects);
         // Scene lighting: the skin is its own standing base, lit exactly as
         // a sprite would be.
         if let Some(light) = light.filter(|_| !skin.is_empty()) {
@@ -631,6 +632,8 @@ pub struct PuppetCache {
     frame: Option<u64>,
     rigs: Option<Arc<PuppetRigs>>,
     puppets: HashMap<Arc<str>, Option<Arc<Puppet>>>,
+    /// Decoded `<family>.texture.png` sheets (None = none, or unusable).
+    textures: HashMap<Arc<str>, Option<Arc<gs_puppet::Texture>>>,
     parts: HashMap<Arc<str>, Arc<[String]>>,
     pose_sets: HashMap<Arc<str>, Option<Arc<PoseSet>>>,
     resolved: HashMap<u64, Option<Arc<str>>>,
@@ -669,6 +672,7 @@ impl PuppetCache {
         if self.rigs.is_none() || self.generation != rigs.generation() {
             self.generation = rigs.generation();
             self.puppets.clear();
+            self.textures.clear();
             self.parts.clear();
             self.pose_sets.clear();
             self.resolved.clear();
@@ -721,6 +725,44 @@ impl PuppetCache {
         }
         self.puppets.insert(family.clone(), puppet.clone());
         puppet
+    }
+
+    /// The family's painted texture, decoded once: the sheet must be the
+    /// size `UvLayout::fit(puppet, SHEET_SIDE)` lays out for THIS puppet (a
+    /// sheet painted for an older rig is refused with a warning).
+    pub fn texture(&mut self, family: &Arc<str>) -> Option<Arc<gs_puppet::Texture>> {
+        if let Some(hit) = self.textures.get(family) {
+            return hit.clone();
+        }
+        let puppet = self.puppet(family);
+        let bytes = self.rigs().get(family).and_then(|rig| rig.texture.clone());
+        let texture = match (puppet, bytes) {
+            (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
+                Ok(img) => {
+                    let img = img.to_rgba8();
+                    let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
+                    if (img.width() as usize, img.height() as usize) == (layout.w, layout.h) {
+                        Some(Arc::new(gs_puppet::Texture { layout, rgba: img.into_raw() }))
+                    } else {
+                        tracing::warn!(
+                            "puppet '{family}': texture is {}x{}, this puppet's sheet is {}x{} (painted for an older rig?)",
+                            img.width(),
+                            img.height(),
+                            layout.w,
+                            layout.h
+                        );
+                        None
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("puppet '{family}': texture did not decode: {e}");
+                    None
+                }
+            },
+            _ => None,
+        };
+        self.textures.insert(family.clone(), texture.clone());
+        texture
     }
 
     /// The doll parts this family's puppet has segments for (computed once).
@@ -820,7 +862,8 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref()));
+        let texture = if skin { self.texture(family) } else { None };
+        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref(), texture.as_deref()));
         self.builds += 1;
         if self.posed.len() >= POSE_CACHE_CAP {
             if let Some(oldest) = self
@@ -995,6 +1038,7 @@ mod tests {
             body_type: "quadruped".into(),
             baked: canine.into(),
             source: PuppetSource::Embedded,
+            texture: None,
         };
         let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
         let mut cache = PuppetCache {

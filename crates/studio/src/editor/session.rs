@@ -390,6 +390,13 @@ impl Session {
             copy_into(&self.rigs_dir().join(&name), &dir.join(sub))?;
             shipped.push(format!("{sub}/{name}"));
         }
+        let texture = super::texture::sheet_path(&self.data_root, &family);
+        if texture.is_file() {
+            let to = dir.join("puppets").join(gs_field::puppets::texture_file_name(&family));
+            std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
+            std::fs::copy(&texture, &to).map_err(|e| format!("{} -> {}: {e}", texture.display(), to.display()))?;
+            shipped.push(format!("puppets/{}", gs_field::puppets::texture_file_name(&family)));
+        }
         let mut pose_count = 0;
         for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
             let path = entry.path();
@@ -501,6 +508,15 @@ impl Session {
         }
         for (name, sub) in files {
             copy_into(&self.rigs_dir().join(&name), &global.join(sub))?;
+        }
+        // The painted texture rides beside the puppet (or goes with it).
+        let texture = super::texture::sheet_path(&self.data_root, family);
+        let installed = global.join("puppets").join(gs_field::puppets::texture_file_name(family));
+        if texture.is_file() {
+            std::fs::create_dir_all(global.join("puppets")).map_err(|e| e.to_string())?;
+            std::fs::copy(&texture, &installed).map_err(|e| format!("{} -> {}: {e}", texture.display(), installed.display()))?;
+        } else {
+            let _ = std::fs::remove_file(&installed);
         }
         crate::pool_dir::invalidate_caches();
         Ok(())

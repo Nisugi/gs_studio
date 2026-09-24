@@ -64,7 +64,7 @@ pub use paint::paint;
 pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use prefill::{prefill, Painting, Paintings};
 pub use skin::{Effects, Skin};
-pub use uv::{Texture, UvLayout};
+pub use uv::{silhouette_template, Texture, UvLayout, SHEET_SIDE};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]
