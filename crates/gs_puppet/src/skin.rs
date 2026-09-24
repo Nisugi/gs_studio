@@ -24,6 +24,7 @@
 use crate::draw::{surfaces, view_basis, Look, BOSS_OUTLINE, BODY_DEAD, DARK_BELOW, DEPTH_SHADE, EYE, LIGHT_ABOVE};
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
+use crate::uv::Texture;
 
 /// Samples per pixel along each axis while rasterising.
 const SS: usize = 2;
@@ -74,6 +75,11 @@ struct Vert {
     n: V3,
     col: [f32; 3],
     seg: u32,
+    /// Surface address for a texture: (station, ring angle); NaN = none
+    /// (a fan centre, a stump's raw end).
+    addr: [f32; 2],
+    /// A wound's colour and how strongly it shows over a texture here.
+    wound: [f32; 4],
 }
 
 /// Samples round a ring for a figure whose largest ring is `px` across.
@@ -97,7 +103,20 @@ impl Samples {
         Samples { w, h, z: vec![f32::INFINITY; n], n: vec![[0.0; 3]; n], col: vec![[0.0; 3]; n], seg: vec![u32::MAX; n] }
     }
 
-    fn tri(&mut self, v: [&Vert; 3]) {
+    fn tri(&mut self, v: [&Vert; 3], tex: Option<&Texture>) {
+        // A textured triangle interpolates its corners' ADDRESSES and looks
+        // each sample up on the sheet. Angles are unwrapped first, so a
+        // triangle straddling angle 0 does not sweep the whole ring.
+        let tex = tex.filter(|_| v.iter().all(|c| c.addr[0].is_finite() && c.addr[1].is_finite()));
+        let mut theta = [v[0].addr[1], v[1].addr[1], v[2].addr[1]];
+        if tex.is_some() {
+            let lo = theta.iter().copied().fold(f32::MAX, f32::min);
+            for t in &mut theta {
+                if *t - lo > std::f32::consts::PI {
+                    *t -= std::f32::consts::TAU;
+                }
+            }
+        }
         let p = [v[0].p, v[1].p, v[2].p];
         let area = (p[1][0] - p[0][0]) * (p[2][1] - p[0][1]) - (p[1][1] - p[0][1]) * (p[2][0] - p[0][0]);
         if area.abs() < 1e-6 || !area.is_finite() {
@@ -131,7 +150,20 @@ impl Samples {
                 }
                 self.z[i] = z;
                 self.n[i] = add(add(scale(v[0].n, w0), scale(v[1].n, w1)), scale(v[2].n, w2));
-                self.col[i] = [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]);
+                let lerp = |f: fn(&Vert) -> f32| w0 * f(v[0]) + w1 * f(v[1]) + w2 * f(v[2]);
+                let painted = tex.and_then(|t| {
+                    let station = lerp(|c| c.addr[0]);
+                    let angle = w0 * theta[0] + w1 * theta[1] + w2 * theta[2];
+                    t.sample(t.layout.locate(v[0].seg as usize, station, angle)?)
+                });
+                self.col[i] = match painted {
+                    Some(rgb) => {
+                        let wound = [lerp(|c| c.wound[0]), lerp(|c| c.wound[1]), lerp(|c| c.wound[2])];
+                        let a = lerp(|c| c.wound[3]);
+                        [0, 1, 2].map(|k| rgb[k] + (wound[k] - rgb[k]) * a)
+                    }
+                    None => [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]),
+                };
                 // The segment of the corner this sample is closest to.
                 self.seg[i] = if w0 >= w1 && w0 >= w2 { v[0].seg } else if w1 >= w2 { v[1].seg } else { v[2].seg };
             }
@@ -196,9 +228,11 @@ impl Pixels {
         out
     }
 
-    /// Average normals and colours over a `2r + 1` window (one axis per
-    /// pass), only between pixels whose depths are within `tol`.
-    fn smooth(&mut self, r: usize, tol: f32) {
+    /// Average normals (and, with `colours`, colours) over a `2r + 1`
+    /// window (one axis per pass), only between pixels whose depths are
+    /// within `tol`. A texture's colours are left sharp: blending is for
+    /// the shape, and for softening flat wound tints.
+    fn smooth(&mut self, r: usize, tol: f32, colours: bool) {
         if r == 0 {
             return;
         }
@@ -228,7 +262,9 @@ impl Pixels {
                         k += 1.0;
                     }
                     n2[i] = norm_or(n, self.n[i]);
-                    c2[i] = col.map(|c| c / k.max(1.0));
+                    if colours {
+                        c2[i] = col.map(|c| c / k.max(1.0));
+                    }
                 }
             }
             self.n = n2;
@@ -344,6 +380,21 @@ impl Posed<'_> {
     /// `look` as [`Posed::draw_list`] does, except `min_station_px`: the skin
     /// keeps every station.
     pub fn skin(&self, project: &dyn Fn(V3) -> ([f32; 2], f32), look: &Look) -> Skin {
+        self.skin_textured(project, look, None)
+    }
+
+    /// [`Posed::skin`] wearing a painted sheet (see [`crate::uv`]): each
+    /// pixel takes its colour from where its surface point lies on the
+    /// sheet; unpainted parts of the sheet fall back to the body colour.
+    /// Wounds tint over the paint; a dead body's paint is greyed.
+    pub fn skin_textured(
+        &self,
+        project: &dyn Fn(V3) -> ([f32; 2], f32),
+        look: &Look,
+        texture: Option<&Texture>,
+    ) -> Skin {
+        // A sheet laid out for another puppet would put paint anywhere.
+        let texture = texture.filter(|t| t.layout.patches.len() == self.puppet.segments.len());
         let puppet = self.puppet;
         let body = if look.dead { BODY_DEAD } else { look.body };
         let line = body.map(|c| c as f32 * 0.3);
@@ -383,8 +434,19 @@ impl Posed<'_> {
                 .collect();
             let middle = scale(surf.rings.iter().fold([0.0; 3], |acc, r| add(acc, r.c)), 1.0 / n as f32);
             let base = verts.len() as u32;
+            let measured = puppet.segments[surf.index].stations.len();
             for (k, ring) in surf.rings.iter().enumerate() {
                 let col = ring.color(body, surf.base).map(|c| c as f32);
+                let wound = if ring.red {
+                    [col[0], col[1], col[2], 1.0]
+                } else if look.dead {
+                    [BODY_DEAD[0] as f32, BODY_DEAD[1] as f32, BODY_DEAD[2] as f32, 0.7]
+                } else if surf.base != body {
+                    [surf.base[0] as f32, surf.base[1] as f32, surf.base[2] as f32, ring.tint * 0.75]
+                } else {
+                    [0.0; 4]
+                };
+                let addressed = !ring.red && k < measured;
                 let (prev, next) = (k.saturating_sub(2), (k + 2).min(n - 1));
                 for j in 0..m {
                     let p = pts[k][j];
@@ -397,7 +459,9 @@ impl Posed<'_> {
                         nrm = scale(nrm, -1.0);
                     }
                     let (sp, z) = project(p);
-                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, col, seg: surf.index as u32 });
+                    let theta = j as f32 / m as f32 * std::f32::consts::TAU;
+                    let addr = if addressed { [k as f32, theta] } else { [f32::NAN; 2] };
+                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, col, seg: surf.index as u32, addr, wound });
                 }
             }
             let at = |k: usize, j: usize| base + (k * m + j % m) as u32;
@@ -419,6 +483,8 @@ impl Posed<'_> {
                     n: out,
                     col: ring.color(body, surf.base).map(|c| c as f32),
                     seg: surf.index as u32,
+                    addr: [f32::NAN; 2],
+                    wound: [0.0; 4],
                 });
                 for j in 0..m {
                     tris.push([centre, at(k, j), at(k, j + 1)]);
@@ -453,7 +519,7 @@ impl Posed<'_> {
         for t in &tris {
             let v = t.map(|i| &verts[i as usize]);
             if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
-                samples.tri(v);
+                samples.tri(v, texture);
             }
         }
         let mut px = Pixels::resolve(&samples, w, h);
@@ -465,7 +531,7 @@ impl Posed<'_> {
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
         let radius = (SMOOTH_OF_HEIGHT * height * px_per_ft).round().clamp(0.0, 16.0) as usize;
-        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height);
+        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none());
 
         // ---- shade and composite
         let (near, far) =

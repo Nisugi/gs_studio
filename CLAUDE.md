@@ -38,7 +38,10 @@ Dependency chain (bottom up):
   side), posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
   drawn either as 2D shapes (`draw.rs`) or as one smooth z-buffered surface
   rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
-  compares the two). Everything except `paint.rs` is egui-free. The world
+  compares the two). `uv.rs` cuts the skin open into a flat pattern sheet
+  (`UvLayout`) that `Posed::skin_textured` reads paint from
+  (`examples/uv_sheet` writes a template and a checker check). Everything
+  except `paint.rs` is egui-free. The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must

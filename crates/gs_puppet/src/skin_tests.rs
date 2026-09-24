@@ -96,3 +96,81 @@ fn a_boss_gets_its_gold_contour_and_the_dead_lose_their_eyes() {
     assert!(count(&plain, eye, 6) > 0, "the living look out");
     assert_eq!(count(&dead, eye, 6), 0);
 }
+
+#[test]
+fn every_surface_point_lands_in_its_own_patch() {
+    let p = humanoid();
+    let layout = crate::UvLayout::new(&p, 60.0);
+    assert_eq!(layout.patches.len(), p.segments.len());
+    for (i, s) in p.segments.iter().enumerate() {
+        let q = &layout.patches[i];
+        for k in 0..s.stations.len() {
+            for j in 0..16 {
+                let theta = j as f32 / 16.0 * std::f32::consts::TAU;
+                let at = layout.locate(i, k as f32, theta).expect("addressable");
+                let inside = |v: f32, lo: f32, size: f32| v >= lo - 0.5 && v <= lo + size + 0.5;
+                assert!(
+                    inside(at[0], q.origin[0], q.size[0]) && inside(at[1], q.origin[1], q.size[1]),
+                    "{} station {k} angle {theta}: {at:?} outside its patch",
+                    s.name
+                );
+            }
+        }
+    }
+    // Patches never overlap.
+    for (a, qa) in layout.patches.iter().enumerate() {
+        for qb in &layout.patches[a + 1..] {
+            let apart = qa.origin[0] + qa.size[0] <= qb.origin[0]
+                || qb.origin[0] + qb.size[0] <= qa.origin[0]
+                || qa.origin[1] + qa.size[1] <= qb.origin[1]
+                || qb.origin[1] + qb.size[1] <= qa.origin[1];
+            assert!(apart, "patches {} and {} overlap", qa.segment, qb.segment);
+        }
+    }
+}
+
+#[test]
+fn a_limbs_seam_runs_down_its_inside() {
+    let p = humanoid();
+    let layout = crate::UvLayout::new(&p, 60.0);
+    for (i, s) in p.segments.iter().enumerate() {
+        let side = (s.head[0] + s.tail[0]) * 0.5;
+        if !matches!(s.part.as_deref(), Some("rightArm" | "leftArm" | "rightLeg" | "leftLeg")) || side.abs() < 0.1 {
+            continue;
+        }
+        let seam = layout.patches[i].seam;
+        let dir = crate::math::add(crate::math::scale(s.axis_w, seam.cos()), crate::math::scale(s.axis_d, seam.sin()));
+        assert!(dir[0] * side < 0.0, "{}: seam faces {dir:?}, not toward the midline", s.name);
+    }
+}
+
+#[test]
+fn paint_on_a_patch_shows_on_its_segment_only() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let cam = camera(&p);
+    let project = |q| cam.project(q);
+    let layout = crate::UvLayout::new(&p, 40.0);
+    let chest = p.segments.iter().position(|s| s.part.as_deref() == Some("chest")).expect("a chest");
+    let head = p.segments.iter().position(|s| s.part.as_deref() == Some("head")).expect("a head");
+    // Paint the chest patch pure blue; leave the rest of the sheet blank.
+    let mut rgba = vec![0u8; layout.w * layout.h * 4];
+    let q = &layout.patches[chest];
+    for y in q.origin[1] as usize..(q.origin[1] + q.size[1]) as usize {
+        for x in q.origin[0] as usize..(q.origin[0] + q.size[0]) as usize {
+            rgba[(y * layout.w + x) * 4..][..4].copy_from_slice(&[0, 0, 255, 255]);
+        }
+    }
+    let tex = crate::Texture { layout, rgba };
+    let look = Look { outline_px: 0.0, ..Look::default() };
+    let skin = posed.skin_textured(&project, &look, Some(&tex));
+    let at = |seg: usize| {
+        let s = &p.segments[seg];
+        let st = s.stations[s.stations.len() / 2];
+        // The front of the ring: toward the camera.
+        project(posed.point(seg, crate::math::add(st.c, [0.0, 0.0, st.d.max(st.w) * 0.5])))
+    };
+    let blue = |c: [u8; 4]| c[2] as i32 > c[0] as i32 + 60;
+    assert!(blue(pixel(&skin, at(chest).0).unwrap()), "the chest wears its paint");
+    assert!(!blue(pixel(&skin, at(head).0).unwrap()), "the head does not");
+}

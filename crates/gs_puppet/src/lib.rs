@@ -52,6 +52,7 @@ pub mod pose;
 pub mod puppet;
 pub mod raster;
 pub mod skin;
+pub mod uv;
 
 pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};
 pub use camera::Camera;
@@ -61,6 +62,7 @@ pub use fit::{rest_iou, rest_prims};
 pub use paint::paint;
 pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use skin::Skin;
+pub use uv::{Texture, UvLayout};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]
