@@ -644,3 +644,23 @@ fn a_humanoid_arm_is_its_own_and_the_shoulder_goes_with_it() {
     let root = upper.stations[CAP_RINGS];
     assert!(end.d <= root.d.max(root.w) * 1.1, "the clavicle ends {:.3} ft deep at a {:.3} ft shoulder", end.d, root.d.max(root.w));
 }
+
+/// A severed limb's stump wears its wound colour like any wounded part (it
+/// was left the plain body colour, the one untinted piece of a wounded
+/// figure), and its cut end a darker raw red, so the cut still reads.
+#[test]
+fn a_severed_stump_wears_its_wound_colour() {
+    let p = shipped_humanoid();
+    let posed = p.pose(&crate::Pose::default());
+    let wounds = [("rightArm", 3u8)];
+    let look = crate::Look { wounds: &wounds, ..crate::Look::default() };
+    let surfaces = crate::draw::surfaces(&posed, &look);
+    let arm = p.segments.iter().position(|s| s.part.as_deref() == Some("rightArm")).expect("an arm");
+    let stump = surfaces.iter().find(|s| s.index == arm).expect("the stump shows");
+    assert_eq!(stump.base, crate::draw::WOUND_COLORS[2]);
+    let end = stump.rings.last().expect("rings");
+    assert!(end.red, "the stump ends in a raw cut");
+    assert_eq!(end.color(look.body, stump.base), crate::draw::RAW_END);
+    let forearm = p.segments.iter().rposition(|s| s.part.as_deref() == Some("rightArm")).expect("a forearm");
+    assert!(forearm != arm && !surfaces.iter().any(|s| s.index == forearm), "the rest of the arm is gone");
+}

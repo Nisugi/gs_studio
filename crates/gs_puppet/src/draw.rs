@@ -17,6 +17,9 @@ pub type Rgba = [u8; 4];
 /// Rank 1, 2, 3.
 pub const WOUND_COLORS: [[u8; 3]; 3] = [[0x9a, 0x5f, 0x2a], [0xe0, 0x8a, 0x1e], [0xd2, 0x3c, 0x2c]];
 pub const BODY_DEFAULT: [u8; 3] = [0xc9, 0xa2, 0x7c];
+/// A severed stump's raw end: darker than a rank-3 wound, which the stump
+/// itself wears, so the cut still reads.
+pub const RAW_END: [u8; 3] = [0x7a, 0x16, 0x14];
 pub const BODY_DEAD: [u8; 3] = [0x86, 0x88, 0x8c];
 pub const BOSS_OUTLINE: [u8; 3] = [0xf2, 0xc1, 0x4e];
 pub(crate) const EYE: Rgba = [24, 18, 14, 255];
@@ -266,7 +269,7 @@ impl SurfRing {
     /// This station's colour: the body, tinted toward the part's wound.
     pub fn color(&self, body: [u8; 3], base: [u8; 3]) -> [u8; 3] {
         if self.red {
-            WOUND_COLORS[2]
+            RAW_END
         } else {
             mix(body, base, self.tint)
         }
@@ -277,7 +280,8 @@ impl SurfRing {
 pub(crate) struct Surface {
     pub index: usize,
     pub group: usize,
-    /// The part's wound colour (the body colour when unwounded or severed).
+    /// The part's wound colour (the body colour when unwounded); a severed
+    /// limb's stump wears its rank-3 colour like any other wound.
     pub base: [u8; 3],
     pub rings: Vec<SurfRing>,
 }
@@ -343,7 +347,7 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
             .collect();
         let base = if let Kind::Prop { color } = s.kind {
             color
-        } else if rank == 0 || rank == 3 && is_severable(s.part.as_deref().unwrap_or("")) {
+        } else if rank == 0 {
             body
         } else {
             WOUND_COLORS[rank as usize - 1]
@@ -476,7 +480,7 @@ impl Posed<'_> {
                 }
                 let red = r0.red || r1.red;
                 let tint = (r0.tint + r1.tint) * 0.5;
-                let mid = if red { WOUND_COLORS[2] } else { mix(body, base, tint) };
+                let mid = if red { RAW_END } else { mix(body, base, tint) };
                 out.fill.push((Shape::Poly(fill_hull), mid));
 
                 // Tone bands.

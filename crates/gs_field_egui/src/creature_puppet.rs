@@ -1655,9 +1655,10 @@ mod tests {
             severed.prims.len(),
             healthy.prims.len()
         );
-        // The cut end is painted in the rank-3 wound colour. The draw list
-        // dims and tone-bands every fill by the group's depth, so match the
-        // hue (dominantly red) rather than the exact triple.
+        // The stump wears the rank-3 wound colour (its cut end a darker raw
+        // red). The draw list dims and tone-bands every fill by the group's
+        // depth, so match the hue (dominantly red) rather than the exact
+        // triple.
         let red = gs_puppet::WOUND_COLORS[2];
         let reddish = |c: &[u8; 4]| {
             c[0] > 120 && c[0] > c[1] + 30 && c[0] > c[2] + 30 && c[3] == 255
@@ -1665,7 +1666,7 @@ mod tests {
         assert!(reddish(&[red[0], red[1], red[2], 255]), "the rank-3 colour is red");
         assert!(
             severed.prims.iter().any(|p| reddish(&p.color)),
-            "the cut end is painted"
+            "the stump is painted"
         );
         assert!(
             !healthy.prims.iter().any(|p| reddish(&p.color)),
