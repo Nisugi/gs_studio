@@ -594,3 +594,46 @@ fn a_limb_in_front_of_the_trunk_does_not_take_the_trunks_depth() {
     let deepest = arm.stations.iter().map(|s| s.d).fold(0.0f32, f32::max);
     assert!(deepest < 0.2, "the arm is as deep as the torso: {deepest}");
 }
+
+/// The humanoid as the repo rigs it, against its own silhouettes.
+fn shipped_humanoid() -> Puppet {
+    let rig = Rig::from_toml(include_str!("../../../data/rigs/humanoid.rig.toml")).expect("humanoid rig");
+    let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+    Puppet::build(&rig, &outlines).expect("builds")
+}
+
+/// A crown narrows faster than a width may shrink, so the last rings stayed
+/// wide and the end cap stood a small dome on top of them: a crest a painted
+/// head's hair followed. The head is round and ends at its outline.
+#[test]
+fn a_humanoid_head_is_round_to_its_outline() {
+    let p = shipped_humanoid();
+    let skull = segment(&p, "skull");
+    let top = skull.stations.iter().map(|s| s.c[1]).fold(f32::MIN, f32::max);
+    // The front silhouette's crown is at 6.03 ft.
+    assert!(top < 6.06, "the head rises to {top:.3} ft, past its outline");
+    // Round: a ring a tenth of a foot below the top is still well over half
+    // as wide as the head at its widest.
+    let widest = skull.stations.iter().map(|s| s.w).fold(0.0f32, f32::max);
+    let near_top = skull.stations.iter().filter(|s| s.c[1] <= top - 0.1).last().expect("a ring below the top");
+    assert!(near_top.w > 0.6 * widest, "{:.3} ft wide 0.1 ft below the top of a {widest:.3} ft head: a crest", near_top.w);
+}
+
+/// An upper arm hanging against the chest is one mass with it in the front
+/// silhouette. Split halfway to the spine it came out a 7-inch arm on a
+/// pinched chest, and the chest flared into a yoke at the shoulders that the
+/// raised arm left behind. The arm is round about its own bone, and the
+/// shoulder goes with it.
+#[test]
+fn a_humanoid_arm_is_its_own_and_the_shoulder_goes_with_it() {
+    let p = shipped_humanoid();
+    let (upper, fore) = (segment(&p, "arm_r.0"), segment(&p, "arm_r.1"));
+    let upper_max = upper.stations.iter().map(|s| s.w).fold(0.0f32, f32::max);
+    let fore_max = fore.stations.iter().map(|s| s.w).fold(0.0f32, f32::max);
+    assert!(upper_max < 1.6 * fore_max, "upper arm {upper_max:.3} ft thick on a {fore_max:.3} ft forearm");
+    let chest = segment(&p, "torso_upper");
+    let body = &chest.stations[CAP_RINGS..chest.stations.len() - CAP_RINGS];
+    let widest = body.iter().map(|s| s.w).fold(0.0f32, f32::max);
+    let neck_base = body.last().expect("rings");
+    assert!(neck_base.w < widest, "the chest ends {:.3} ft wide at the shoulders, wider than its {widest:.3}: a yoke", neck_base.w);
+}

@@ -570,6 +570,10 @@ impl Puppet {
             let m = measured[i].take().expect("measured");
             let kind = kinds[i];
             let leaf = !rig.bones.iter().any(|b| b.parent.as_deref() == Some(bone.name.as_str()));
+            let part_is_head = bone.part.as_deref() == Some("head");
+            // Nothing hangs off this segment's far end (its own chain's next
+            // segment, or another bone).
+            let has_child_segment = raws.iter().any(|o| o.parent == Some(i));
             let n = m.w.len();
             let a = norm_or(sub(r.tail, r.head), [0.0, 1.0, 0.0]);
             let ds = len(sub(r.tail, r.head)) / (n - 1) as f32;
@@ -774,8 +778,8 @@ impl Puppet {
             }
 
             // Rounded ends: shrinking rings past the last station.
-            let cap = |end: Station, dir: V3| -> Vec<Station> {
-                let mut reach = 0.9 * end.w.min(end.d);
+            let cap = |end: Station, dir: V3, reach: Option<f32>| -> Vec<Station> {
+                let mut reach = reach.unwrap_or(0.9 * end.w.min(end.d));
                 if dir[1] < -1e-3 {
                     reach = reach.min((end.c[1] / -dir[1]).max(0.0));
                 }
@@ -790,13 +794,37 @@ impl Puppet {
                     })
                     .collect()
             };
+            // A crown lies at the silhouette's edge, where the head narrows
+            // faster than a width may shrink: the last rings stayed wide and
+            // the cap stood a small dome on top of them, a crest above the
+            // outline. End the head instead at the last ring from which a
+            // round cap just reaches that edge, and let the cap be the dome.
+            // (An upright figure's only: a snout is not round, and a crab's
+            // head is a bump its rig sizes by hand.)
+            let mut tail_reach = None;
+            if part_is_head && !has_child_segment && rig.body_type == "biped" && a[1] > 0.7 {
+                let view_mask = mask_of(m.view);
+                let dir = flat(m.view, a);
+                let dl = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+                if let (Some(mask), true) = (view_mask, dl > 0.5) {
+                    let dir = [dir[0] / dl, dir[1] / dl];
+                    let edge = |st: &Station| run_along(mask, flat(m.view, st.c), dir, MERGE_GAP_FT, 0.12).map(|(_, hi)| hi / dl);
+                    if let Some(k0) = (1..n).rev().find(|&k| edge(&body[k]).is_some_and(|e| e >= 0.9 * body[k].w.min(body[k].d))) {
+                        if k0 < n - 1 {
+                            tail_reach = edge(&body[k0]);
+                            body.truncate(k0 + 1);
+                        }
+                    }
+                }
+            }
+            let n_body = body.len();
             let mut stations = Vec::with_capacity(n + 2 * CAP_RINGS);
             if r.k == 0 {
-                let mut head_cap = cap(body[0], scale(a, -1.0));
+                let mut head_cap = cap(body[0], scale(a, -1.0), None);
                 head_cap.reverse();
                 stations.extend(head_cap);
             }
-            let tail_cap = cap(body[n - 1], a);
+            let tail_cap = cap(body[n_body - 1], a, tail_reach);
             stations.append(&mut body);
             stations.extend(tail_cap);
             for s in &mut stations {
@@ -991,12 +1019,17 @@ fn measure_segment<'m>(
     let n = ((length / STATION_STEP_FT).ceil() as usize + 1).clamp(MIN_STATIONS, MAX_STATIONS);
     let ds = length / (n - 1) as f32;
 
+    // An upright figure's arm (not a quadruped's foreleg, a bird's wing or a
+    // crab's claw, which the rules for arms below would thin).
+    let biped_arm = |bone: usize| rig.body_type == "biped" && rig.bones[bone].part.as_deref().is_some_and(|p| p.ends_with("Arm"));
     // Bones running roughly alongside this one share the silhouette with it.
     struct Clip {
         a: [f32; 2],
         b: [f32; 2],
         limb_r: Option<f32>,
         trunk: bool,
+        /// This is a limb and that the trunk beside it: see below.
+        beside_trunk: bool,
     }
     // Two bones of the body's barrel (back, chest, belly). A neck reaching
     // down to the brisket stood up off the withers as a fin, and a skull
@@ -1017,7 +1050,16 @@ fn measure_segment<'m>(
                 return None;
             }
             let trunk_stops_at_limb = kind == Kind::Trunk && kinds[o] != Kind::Trunk;
-            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]), trunk: body(i) && body(o) })
+            let beside_trunk = kind != Kind::Trunk && kinds[o] == Kind::Trunk && biped_arm(r.bone);
+            // An arm's root sits inside the ball of the shoulder: the torso
+            // stops there too, so the shoulder is the arm's and goes up with
+            // it (not a yoke on the torso the raised arm leaves behind).
+            let a = if trunk_stops_at_limb && biped_arm(other.bone) && other.k == 0 {
+                [a[0] - e[0] / el * limb_r[o], a[1] - e[1] / el * limb_r[o]]
+            } else {
+                a
+            };
+            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]), trunk: body(i) && body(o), beside_trunk })
         })
         .collect();
 
@@ -1073,60 +1115,6 @@ fn measure_segment<'m>(
     } else {
         Vec::new()
     };
-    let mut off: Vec<Option<f32>> = Vec::with_capacity(n);
-    let mut half: Vec<Option<f32>> = Vec::with_capacity(n);
-    let mut unsplit = vec![0.0f32; n];
-    for k in 0..n {
-        let p = flat(view, lerp(r.head, r.tail, k as f32 / (n - 1) as f32));
-        let Some((mut lo, mut hi)) = run_along(mask, p, n2, MERGE_GAP_FT, 0.12) else {
-            off.push(None);
-            half.push(None);
-            continue;
-        };
-        unsplit[k] = (hi - lo) * 0.5;
-        for c in &clips {
-            let Some(s) = crossing(p, n2, c.a, c.b).filter(|s| s.abs() > 0.03) else { continue };
-            let stop = match c.limb_r {
-                Some(lr) => (s.abs() - lr).max(s.abs() * 0.5),
-                None if c.trunk => s.abs() * TRUNK_OVERLAP,
-                None => s.abs() * 0.5,
-            };
-            if s > 0.0 {
-                hi = hi.min(stop.max(lo));
-            } else {
-                lo = lo.max((-stop).min(hi));
-            }
-        }
-        for (j, lr, paw) in &limb_joints {
-            let d = [j[0] - p[0], j[1] - p[1]];
-            if (d[0] * u[0] + d[1] * u[1]).abs() > lr + LIMB_JOINT_REACH_FT {
-                continue;
-            }
-            let s = d[0] * n2[0] + d[1] * n2[1];
-            // Toward the paw only: the joint and the paw on the same side of
-            // this slice's bone, the paw the farther.
-            let s_paw = (paw[0] - p[0]) * n2[0] + (paw[1] - p[1]) * n2[1];
-            if s * s_paw <= 0.0 || s_paw.abs() < s.abs() {
-                continue;
-            }
-            if s > 0.03 && s < hi {
-                hi = s.max(lo);
-            } else if s < -0.03 && s > lo {
-                lo = s.min(hi);
-            }
-        }
-        if hi - lo < 2.0 * MIN_HALF_FT {
-            off.push(None);
-            half.push(None);
-        } else {
-            off.push(Some((lo + hi) * 0.5));
-            half.push(Some((hi - lo) * 0.5));
-        }
-    }
-
-    // Which stations to believe.
-    let mut known: Vec<f32> = half.iter().flatten().copied().collect();
-    let med = median(&mut known);
     let chain: Vec<&Raw> = raws.iter().filter(|o| o.bone == r.bone && o.chain == r.chain).collect();
     let chain_len: f32 = chain.iter().map(|o| len(sub(o.tail, o.head))).sum();
     // The chain's true calibre. A segment buried in the trunk along its
@@ -1172,6 +1160,73 @@ fn measure_segment<'m>(
                 .fold(f32::INFINITY, f32::min)
         })
         .filter(|c| c.is_finite() && *c > MIN_HALF_FT);
+    let mut off: Vec<Option<f32>> = Vec::with_capacity(n);
+    let mut half: Vec<Option<f32>> = Vec::with_capacity(n);
+    let mut unsplit = vec![0.0f32; n];
+    for k in 0..n {
+        let p = flat(view, lerp(r.head, r.tail, k as f32 / (n - 1) as f32));
+        let Some((mut lo, mut hi)) = run_along(mask, p, n2, MERGE_GAP_FT, 0.12) else {
+            off.push(None);
+            half.push(None);
+            continue;
+        };
+        unsplit[k] = (hi - lo) * 0.5;
+        // How far the run reaches on each side of the bone, before any bone
+        // alongside takes its share.
+        let (free_lo, free_hi) = (-lo, hi);
+        for c in &clips {
+            let Some(s) = crossing(p, n2, c.a, c.b).filter(|s| s.abs() > 0.03) else { continue };
+            let stop = match c.limb_r {
+                Some(lr) => (s.abs() - lr).max(s.abs() * 0.5),
+                None if c.trunk => s.abs() * TRUNK_OVERLAP,
+                // An upper arm hanging against the chest is one mass with it
+                // in the silhouette. Halfway to the spine made it a 7-inch
+                // arm on a pinched chest; the arm is as deep on the chest's
+                // side as its free side is wide (round about its own bone).
+                // Not less than the limb measures where it hangs free (a
+                // golem's arm bone runs near its outer edge).
+                None if c.beside_trunk => {
+                    let free = if s > 0.0 { free_lo } else { free_hi };
+                    (s.abs() * 0.5).min(free.max(calibre.unwrap_or(0.0)).max(MIN_HALF_FT))
+                }
+                None => s.abs() * 0.5,
+            };
+            if s > 0.0 {
+                hi = hi.min(stop.max(lo));
+            } else {
+                lo = lo.max((-stop).min(hi));
+            }
+        }
+        for (j, lr, paw) in &limb_joints {
+            let d = [j[0] - p[0], j[1] - p[1]];
+            if (d[0] * u[0] + d[1] * u[1]).abs() > lr + LIMB_JOINT_REACH_FT {
+                continue;
+            }
+            let s = d[0] * n2[0] + d[1] * n2[1];
+            // Toward the paw only: the joint and the paw on the same side of
+            // this slice's bone, the paw the farther.
+            let s_paw = (paw[0] - p[0]) * n2[0] + (paw[1] - p[1]) * n2[1];
+            if s * s_paw <= 0.0 || s_paw.abs() < s.abs() {
+                continue;
+            }
+            if s > 0.03 && s < hi {
+                hi = s.max(lo);
+            } else if s < -0.03 && s > lo {
+                lo = s.min(hi);
+            }
+        }
+        if hi - lo < 2.0 * MIN_HALF_FT {
+            off.push(None);
+            half.push(None);
+        } else {
+            off.push(Some((lo + hi) * 0.5));
+            half.push(Some((hi - lo) * 0.5));
+        }
+    }
+
+    // Which stations to believe.
+    let mut known: Vec<f32> = half.iter().flatten().copied().collect();
+    let med = median(&mut known);
     for k in 0..n {
         let bad = match (kind, half[k]) {
             (_, None) => true,

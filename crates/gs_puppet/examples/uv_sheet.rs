@@ -24,7 +24,9 @@
 //! `--side`, `--back <png>` (paintings over those templates, any size with
 //! their aspect), the sheet is PRE-FILLED from them (`<family>_prefilled.png`)
 //! and worn as `<family>_projected.png`. `--demo` paints a test outfit onto
-//! the three templates itself and does the same.
+//! the three templates itself and does the same. `UV_SHEET_SHOTS=<pose>[@<yaw>],...`
+//! picks the tiles of the worn strip (`rest` = as clicked; default: rest
+//! from four sides, then kneel, sit).
 
 use std::path::{Path, PathBuf};
 
@@ -325,6 +327,17 @@ fn main() {
                 break;
             }
         }
+    }
+    if let Ok(list) = std::env::var("UV_SHEET_SHOTS") {
+        shots = list
+            .split(',')
+            .filter(|s| !s.trim().is_empty())
+            .map(|shot| {
+                let (name, yaw) = shot.trim().split_once('@').unwrap_or((shot.trim(), "30"));
+                let pose = if name == "rest" { Pose::default() } else { poses.get(name).unwrap_or_else(|| panic!("no pose '{name}'")).clone() };
+                (pose, yaw.parse().unwrap_or_else(|_| panic!("'{yaw}' is not a yaw")))
+            })
+            .collect();
     }
     let sheet_w = TILE * shots.len();
     let mut strip = vec![0u8; sheet_w * TILE * 4];
