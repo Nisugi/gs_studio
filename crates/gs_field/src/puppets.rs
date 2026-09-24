@@ -136,6 +136,9 @@ fn scan_body_type(text: &str) -> String {
 pub struct PuppetRigs {
     by_family: BTreeMap<String, Arc<PuppetRig>>,
     poses: BTreeMap<String, Arc<PoseFile>>,
+    /// The UNPARSED held-props file (`gs_puppet::PropSet`): which weapons a
+    /// puppet can hold and their shapes. Empty = none.
+    props: Arc<str>,
     /// Identity of this load: changes whenever the set is rebuilt, so a
     /// frontend can key parsed puppets / posed caches on it.
     generation: u64,
@@ -190,6 +193,18 @@ impl PuppetRigs {
         self.generation
     }
 
+    /// The held-props file in force (see [`props_dir`]); "" when none.
+    pub fn props(&self) -> &str {
+        &self.props
+    }
+
+    /// This set with `props` as its held-props file (tests, hosts with their
+    /// own source).
+    pub fn with_props(mut self, props: &str) -> Self {
+        self.props = props.into();
+        self
+    }
+
     /// The puppet for a creature, against THIS set: the doll cascade, run
     /// with "has a PUPPET" as the test, so a family without a puppet falls
     /// through to the body type's default family and finally to the generic
@@ -223,6 +238,16 @@ pub fn embedded_poses() -> impl Iterator<Item = (&'static str, &'static str)> {
         let text = file.contents_utf8()?;
         Some((body_type, text))
     })
+}
+
+/// The held-props file compiled into this crate (a READ-ONLY copy of the
+/// workspace's `data/props/weapons.toml`, published beside the puppets).
+pub const EMBEDDED_PROPS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/data/props/weapons.toml"));
+
+/// `<base dir>/global/props/` — where a `weapons.toml` overrides the
+/// embedded one.
+pub fn props_dir() -> anyhow::Result<PathBuf> {
+    Ok(crate::data_dirs::global_dir()?.join("props"))
 }
 
 /// `<base dir>/global/puppets/` — the runtime override layer. Holds both
@@ -315,6 +340,7 @@ pub fn puppets() -> Arc<PuppetRigs> {
             }),
         );
     }
+    set.props = EMBEDDED_PROPS.into();
     for (body_type, text) in embedded_poses() {
         let body_type = body_type.to_ascii_lowercase();
         set.poses.insert(
@@ -333,6 +359,9 @@ pub fn puppets() -> Arc<PuppetRigs> {
         }
         for pose in poses {
             set.poses.insert(pose.body_type.clone(), Arc::new(pose));
+        }
+        if let Ok(text) = std::fs::read_to_string(base.join("global").join("props").join("weapons.toml")) {
+            set.props = text.into();
         }
     }
     set.generation = GENERATION.fetch_add(1, Ordering::Relaxed);

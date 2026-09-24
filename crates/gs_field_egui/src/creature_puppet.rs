@@ -78,6 +78,21 @@ pub fn puppet_skin(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(skin_id())).unwrap_or(true)
 }
 
+/// Puppets hold the weapon their bestiary entry attacks with (see
+/// [`PuppetCache::family_for`]). On unless the host turns it off.
+pub fn set_puppet_props(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(props_id(), on));
+}
+
+/// See [`set_puppet_props`].
+pub fn puppet_props(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(props_id())).unwrap_or(true)
+}
+
+fn props_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_props")
+}
+
 fn skin_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_skin")
 }
@@ -616,8 +631,10 @@ pub fn pose_puppet_with(
 
 /// [`Posed::bounds`] with the draw list's yaw applied, so the reported box
 /// is the box the viewer sees.
+/// Held props are left out: a creature is placed and sized by its body, so
+/// arming it never moves it in its card.
 fn yawed_bounds(posed: &Posed<'_>, yaw_deg: f32) -> [[f32; 3]; 2] {
-    let b = posed.bounds();
+    let b = posed.bounds_where(|s| !s.kind.is_prop());
     let (s, c) = yaw_deg.to_radians().sin_cos();
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     // Every corner of the rest box, turned about y.
@@ -640,6 +657,12 @@ fn yawed_bounds(posed: &Posed<'_>, yaw_deg: f32) -> [[f32; 3]; 2] {
 }
 
 // ---- the cache ----------------------------------------------------------
+
+/// The family of a puppet key: the key itself, or what comes before an
+/// armed key's `@` (see [`PuppetCache::family_for`]).
+pub fn base_family(key: &str) -> &str {
+    key.split_once('@').map_or(key, |(family, _)| family)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PosedKey {
@@ -666,6 +689,11 @@ pub struct PuppetCache {
     pose_sets: HashMap<Arc<str>, Option<Arc<PoseSet>>>,
     resolved: HashMap<u64, Option<Arc<str>>>,
     posed: HashMap<PosedKey, (Arc<PosedPuppet>, u64)>,
+    /// The held-props file of this puppet set, parsed once (inner None:
+    /// none, or it did not parse).
+    props: Option<Option<Arc<gs_puppet::PropSet>>>,
+    /// Hold props at all ([`set_puppet_props`]; see [`PuppetCache::set_props`]).
+    hide_props: bool,
     tick: u64,
     /// The scene light in force (see [`PuppetCache::set_light`]).
     light: Option<Arc<crate::creature_light::ResolvedLight>>,
@@ -743,6 +771,7 @@ impl PuppetCache {
             self.pose_sets.clear();
             self.resolved.clear();
             self.posed.clear();
+            self.props = None;
         }
         self.rigs = Some(rigs);
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
@@ -754,8 +783,21 @@ impl PuppetCache {
             .unwrap_or_else(gs_field::puppets::puppets)
     }
 
-    /// The puppet family a creature draws with (cached cascade result), or
-    /// `None` when no puppet resolves — the caller then draws the doll.
+    /// Hold props or not (the host's [`set_puppet_props`]); a change
+    /// re-resolves every creature.
+    pub fn set_props(&mut self, on: bool) {
+        if self.hide_props == on {
+            self.hide_props = !on;
+            self.resolved.clear();
+        }
+    }
+
+    /// The puppet a creature draws with (cached cascade result), or `None`
+    /// when no puppet resolves — the caller then draws the doll. Armed, the
+    /// key is `<family>@<weapon>[+<shield>]`: the family's puppet holding the
+    /// first weapon its bestiary entry attacks with (and a shield if it
+    /// bashes with one). Everything that takes the key reads the family's
+    /// rig, poses and texture through [`base_family`].
     pub fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>> {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -764,18 +806,87 @@ impl PuppetCache {
         if let Some(hit) = self.resolved.get(&key) {
             return hit.clone();
         }
-        let family = self
-            .rigs()
-            .puppet_for(name, noun)
-            .map(|d| Arc::<str>::from(d.family.as_str()));
-        self.resolved.insert(key, family.clone());
-        family
+        let family = self.rigs().puppet_for(name, noun).map(|d| d.family);
+        let armed = family.map(|family| match self.arms_for(name) {
+            Some(arms) => Arc::<str>::from(format!("{family}@{arms}")),
+            None => Arc::<str>::from(family.as_str()),
+        });
+        self.resolved.insert(key, armed.clone());
+        armed
     }
 
-    /// The parsed puppet for a family (parsed once; misses cached).
+    /// The held-props file of the current set, parsed once.
+    pub fn props(&mut self) -> Option<Arc<gs_puppet::PropSet>> {
+        if let Some(hit) = &self.props {
+            return hit.clone();
+        }
+        let rigs = self.rigs();
+        let set = if rigs.props().trim().is_empty() {
+            None
+        } else {
+            match gs_puppet::PropSet::from_toml(rigs.props()) {
+                Ok(set) => Some(Arc::new(set)),
+                Err(e) => {
+                    tracing::warn!("held props file did not load: {e}");
+                    None
+                }
+            }
+        };
+        self.props = Some(set.clone());
+        set
+    }
+
+    /// `<weapon>[+<shield>]` for a creature by name, from its bestiary
+    /// attacks: the first one the props file knows, and a medium shield if
+    /// it also bashes with one. None = empty-handed (or props are off).
+    fn arms_for(&mut self, name: &str) -> Option<String> {
+        if self.hide_props {
+            return None;
+        }
+        let props = self.props()?;
+        let attacks = gs_field::bestiary::shared().attacks_for_name(name);
+        let weapon = attacks.iter().find_map(|a| props.weapon(a).filter(|w| !w.base.contains("shield")));
+        let shield = attacks
+            .iter()
+            .any(|a| a.to_ascii_lowercase().contains("shield"))
+            .then(|| props.weapon("medium shield"))
+            .flatten();
+        match (weapon, shield) {
+            (Some(w), Some(s)) => Some(format!("{}+{}", w.key, s.key)),
+            (Some(w), None) => Some(w.key.clone()),
+            (None, Some(s)) => Some(format!("+{}", s.key)),
+            (None, None) => None,
+        }
+    }
+
+    /// `puppet` holding `arms` (`<weapon>[+<shield>]`): the weapon in the
+    /// right hand (a two-handed one too), the shield on the left arm.
+    fn arm(&mut self, puppet: &Puppet, arms: &str) -> Puppet {
+        let Some(props) = self.props() else { return puppet.clone() };
+        let (weapon, shield) = arms.split_once('+').unwrap_or((arms, ""));
+        let prop = |key: &str| props.weapons.get(key).and_then(|w| props.prop(w));
+        let (weapon, shield) = (prop(weapon), prop(shield));
+        let mut held = Vec::new();
+        if let Some(w) = &weapon {
+            held.push((gs_puppet::Hand::Right, w));
+        }
+        if let Some(s) = &shield {
+            held.push((gs_puppet::Hand::Left, s));
+        }
+        puppet.holding(&held)
+    }
+
+    /// The parsed puppet for a family (parsed once; misses cached); for an
+    /// armed key, the family's puppet holding its props.
     pub fn puppet(&mut self, family: &Arc<str>) -> Option<Arc<Puppet>> {
         if let Some(hit) = self.puppets.get(family) {
             return hit.clone();
+        }
+        if let Some((base, arms)) = family.split_once('@') {
+            let bare = self.puppet(&Arc::from(base));
+            let armed = bare.map(|p| Arc::new(self.arm(&p, arms)));
+            self.puppets.insert(family.clone(), armed.clone());
+            return armed;
         }
         let rigs = self.rigs();
         let puppet = rigs.get(family).and_then(|rig| {
@@ -801,8 +912,10 @@ impl PuppetCache {
         if let Some(hit) = self.textures.get(family) {
             return hit.clone();
         }
-        let puppet = self.puppet(family);
-        let bytes = self.rigs().get(family).and_then(|rig| rig.texture.clone());
+        // An armed puppet wears its family's sheet: props are never on it.
+        let base: Arc<str> = Arc::from(base_family(family));
+        let puppet = self.puppet(&base);
+        let bytes = self.rigs().get(&base).and_then(|rig| rig.texture.clone());
         let texture = match (puppet, bytes) {
             (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(img) => {
@@ -862,7 +975,8 @@ impl PuppetCache {
             return hit.clone();
         }
         let rigs = self.rigs();
-        let set = rigs.get(family).and_then(|rig| {
+        let base = base_family(family);
+        let set = rigs.get(base).and_then(|rig| {
             let Some(file) = rigs.pose_file(&rig.body_type) else {
                 tracing::warn!(
                     "puppet '{family}': no pose set for body type '{}' -- drawing the flat doll instead",
@@ -871,7 +985,7 @@ impl PuppetCache {
                 return None;
             };
             match PoseSet::from_toml(&file.toml) {
-                Ok(set) => Some(Arc::new(set.for_family(family).into_owned())),
+                Ok(set) => Some(Arc::new(set.for_family(base).into_owned())),
                 Err(e) => {
                     tracing::warn!(
                         "puppet '{family}': pose set '{}' did not load: {e}",
@@ -1135,12 +1249,13 @@ mod tests {
     #[test]
     fn baked_puppets_load_from_the_embedded_bake_only() {
         let mut cache = cache();
-        for (name, noun, family, body_type) in [
-            ("forest troll", "troll", "troll", "biped"),
-            ("timber wolf", "wolf", "canine", "quadruped"),
+        for (name, noun, family, key, body_type) in [
+            // The bestiary's forest troll swings a cudgel: it holds one.
+            ("forest troll", "troll", "troll", "troll@cudgel", "biped"),
+            ("timber wolf", "wolf", "canine", "canine", "quadruped"),
         ] {
             let resolved = cache.family_for(name, Some(noun)).expect("a puppet");
-            assert_eq!(&*resolved, family);
+            assert_eq!(&*resolved, key);
             let puppet = cache.puppet(&resolved).expect("baked toml parses");
             assert_eq!(puppet.family, family);
             assert_eq!(puppet.body_type, body_type);
@@ -1155,6 +1270,33 @@ mod tests {
         let humanoid = cache.family_for("forest troll", Some("troll")).unwrap();
         cache.puppet(&humanoid);
         assert_eq!(cache.parses, 2);
+    }
+
+    #[test]
+    fn a_creature_holds_its_weapon_until_props_are_off() {
+        let mut cache = cache();
+        let key = cache.family_for("forest troll", Some("troll")).unwrap();
+        let armed = cache.puppet(&key).unwrap();
+        let bare = cache.puppet(&Arc::from("troll")).unwrap();
+        assert!(armed.segments.len() > bare.segments.len() && armed.segments.iter().any(|s| s.kind.is_prop()));
+        assert_eq!(armed.height, bare.height, "props never change the figure's size");
+        let set = cache.pose_set(&key).unwrap();
+        assert_eq!(set.body_type, bare.body_type, "the armed key poses as its family");
+        cache.set_props(false);
+        assert_eq!(&*cache.family_for("forest troll", Some("troll")).unwrap(), "troll");
+        // A wolf attacks with its teeth: nothing to hold.
+        cache.set_props(true);
+        assert_eq!(&*cache.family_for("timber wolf", Some("wolf")).unwrap(), "canine");
+    }
+
+    /// `gs_field` embeds a copy of the workspace's `data/props/weapons.toml`.
+    #[test]
+    fn the_embedded_props_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        assert!(
+            norm(gs_field::puppets::EMBEDDED_PROPS) == norm(gs_puppet::SHIPPED_PROPS),
+            "crates/gs_field/data/props/weapons.toml differs from data/props/weapons.toml: re-copy it (or Publish)"
+        );
     }
 
     /// `gs_field` embeds copies of the workspace's `data/poses/`; they must

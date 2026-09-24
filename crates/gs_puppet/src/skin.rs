@@ -70,7 +70,8 @@ pub(crate) fn joined(puppet: &crate::Puppet) -> Vec<bool> {
     for i in 0..n {
         for j in 0..n {
             let (a, b) = (&segs[i], &segs[j]);
-            let chain = i == j || a.parent == Some(j) || b.parent == Some(i);
+            // A prop is not flesh: it keeps its line against the hand.
+            let chain = i == j || (a.parent == Some(j) || b.parent == Some(i)) && a.kind.is_prop() == b.kind.is_prop();
             let related = a.group == b.group && body(a.group) && {
                 let (pa, pb) = (bone_parent(i), bone_parent(j));
                 a.bone == b.bone
@@ -532,7 +533,9 @@ impl Posed<'_> {
         effects: Effects,
     ) -> Skin {
         // A sheet laid out for another puppet would put paint anywhere.
-        let texture = texture.filter(|t| t.layout.patches.len() == self.puppet.segments.len());
+        // Held props come after the body and are never on the sheet.
+        let body_segments = self.puppet.segments.iter().take_while(|s| !s.kind.is_prop()).count();
+        let texture = texture.filter(|t| t.layout.patches.len() == body_segments);
         let puppet = self.puppet;
         let body = if look.dead { BODY_DEAD } else { look.body };
         let line = body.map(|c| c as f32 * 0.3);
@@ -584,7 +587,7 @@ impl Posed<'_> {
                 } else {
                     [0.0; 4]
                 };
-                let addressed = !ring.red && k < measured;
+                let addressed = !ring.red && k < measured && surf.index < body_segments;
                 let (prev, next) = (k.saturating_sub(2), (k + 2).min(n - 1));
                 for j in 0..m {
                     let p = pts[k][j];

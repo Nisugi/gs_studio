@@ -336,3 +336,14 @@ decode it (no image dependency); the frontend does.
 `StageScene.lights: Vec<PointLight>` (`[[lights]]`, skip-serialized when
 empty): kind (campfire / torch / glow), floor position (stage x, world z, as
 a prop), colour, radius (world units), intensity, flicker.
+
+### 6.13 Held props
+
+`CreatureEntry.offense.physical[].name` (serde-defaulted; `attack_names()`),
+`BestiaryDb::entry_for_name` (the exact-name-then-lone-noun rule
+`areas_for_name` already used, now shared) and `attacks_for_name`: which
+weapons a creature attacks with. `PuppetRigs::props()` carries the UNPARSED
+held-props file (`gs_puppet::PropSet`): `data/props/weapons.toml` embedded
+(`EMBEDDED_PROPS`, a published copy), overridden by
+`<base>/global/props/weapons.toml` (`props_dir`); it reloads with the puppet
+set. `with_props` for hosts building a set by hand.

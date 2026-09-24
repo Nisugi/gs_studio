@@ -114,6 +114,15 @@ pub enum Kind {
     Limb,
     /// A hand held off the ground: a mitten, wide and flat.
     Hand,
+    /// Something held, not body ([`crate::prop`]): drawn in its own colour,
+    /// never textured, never baked, and left out of grounding.
+    Prop { color: [u8; 3] },
+}
+
+impl Kind {
+    pub fn is_prop(self) -> bool {
+        matches!(self, Kind::Prop { .. })
+    }
 }
 
 pub fn is_limb_part(part: Option<&str>) -> bool {
@@ -578,7 +587,8 @@ impl Puppet {
                     Kind::Limb => {
                         run.is_some() && half <= LIMB_DEPTH_MAX * ref_w && half >= LIMB_DEPTH_MIN * ref_w
                     }
-                    Kind::Hand => false,
+                    // (The builder never makes a prop.)
+                    Kind::Hand | Kind::Prop { .. } => false,
                 };
                 // Over the trunk the row still says where the limb sits (it
                 // is tucked into the body there -- shifting it to the run's
@@ -591,7 +601,7 @@ impl Puppet {
                 shift.push(if ok { mid } else { 0.0 });
             }
             let mut d: Vec<f32> = match kind {
-                Kind::Hand => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
+                Kind::Hand | Kind::Prop { .. } => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
                 Kind::Limb => interpolate_depth(&depth, &m.w),
                 Kind::Trunk => fill_gaps(&depth, ds, 0.0).unwrap_or_else(|| m.w.clone()),
             };

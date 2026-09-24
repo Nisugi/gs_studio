@@ -1,5 +1,7 @@
 //! The rig editor's 3D puppet preview, without the drawing: the orbit
-//! camera, which pose is shown, and the pose sets it comes from.
+//! camera, which pose is shown, the pose sets it comes from, and what the
+//! puppet is holding (`<data>/props/weapons.toml`, else the copy compiled
+//! into `gs_puppet`, re-read with the poses).
 //!
 //! Poses are read from `<data>/poses/<body_type>.toml` -- the files Publish
 //! ships, so an edit there shows here on *Reload poses* -- falling back to
@@ -9,7 +11,7 @@
 
 use std::path::Path;
 
-use gs_puppet::{Pose, PoseSet};
+use gs_puppet::{Hand, Pose, PoseSet, Prop, PropSet};
 
 /// Where the shown pose set came from, for the panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +44,12 @@ pub struct PuppetView {
     pub skin: bool,
     /// Dress the skin in the family's painted texture (`editor::texture`).
     pub texture: bool,
+    /// What the right hand holds, by weapon key; "" = nothing.
+    pub hold: String,
+    /// What the left hand holds (a shield, a second weapon); "" = nothing.
+    pub hold_left: String,
     loaded: Option<Loaded>,
+    props: Option<Result<(PropSet, PoseSource), String>>,
 }
 
 pub const PITCH_RANGE: std::ops::RangeInclusive<f32> = -10.0..=70.0;
@@ -50,7 +57,19 @@ pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.2..=4.0;
 
 impl Default for PuppetView {
     fn default() -> Self {
-        PuppetView { show: false, yaw: 35.0, pitch: 12.0, zoom: 1.0, pose: String::new(), skin: true, texture: true, loaded: None }
+        PuppetView {
+            show: false,
+            yaw: 35.0,
+            pitch: 12.0,
+            zoom: 1.0,
+            pose: String::new(),
+            skin: true,
+            texture: true,
+            hold: String::new(),
+            hold_left: String::new(),
+            loaded: None,
+            props: None,
+        }
     }
 }
 
@@ -74,9 +93,37 @@ impl PuppetView {
         }
     }
 
-    /// Read the pose files again on next use (they were edited on disk).
+    /// Read the pose files (and the props file) again on next use: they
+    /// were edited on disk.
     pub fn reload_poses(&mut self) {
         self.loaded = None;
+        self.props = None;
+    }
+
+    /// The held-props file, loaded once.
+    pub fn props(&mut self, data_root: &Path) -> &Result<(PropSet, PoseSource), String> {
+        self.props.get_or_insert_with(|| {
+            let path = data_root.join("props").join("weapons.toml");
+            if path.is_file() {
+                std::fs::read_to_string(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))
+                    .and_then(|t| PropSet::from_toml(&t).map_err(|e| format!("{}: {e}", path.display())))
+                    .map(|s| (s, PoseSource::DataRoot))
+            } else {
+                Ok((PropSet::shipped().clone(), PoseSource::Shipped))
+            }
+        })
+    }
+
+    /// The props [`PuppetView::hold`] and [`PuppetView::hold_left`] name, in
+    /// their hands (unknown names hold nothing).
+    pub fn held(&mut self, data_root: &Path) -> Vec<(Hand, Prop)> {
+        let picks = [(Hand::Right, self.hold.clone()), (Hand::Left, self.hold_left.clone())];
+        let Ok((set, _)) = self.props(data_root) else { return Vec::new() };
+        picks
+            .into_iter()
+            .filter_map(|(hand, key)| set.weapons.get(&key).and_then(|w| set.prop(w)).map(|p| (hand, p)))
+            .collect()
     }
 
     /// The pose set for this body type as `family` sees it, loaded once.
@@ -156,5 +203,24 @@ mod tests {
         v.pose = "wag".into();
         assert_ne!(v.current_pose(dir.path(), "quadruped", "canine"), Pose::default());
         assert!(v.poses(dir.path(), "tentacled", "x").is_err());
+    }
+
+    #[test]
+    fn held_props_come_from_the_data_root_else_the_shipped_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut v = PuppetView::default();
+        assert!(v.held(dir.path()).is_empty(), "empty hands by default");
+        v.hold = "broadsword".into();
+        v.hold_left = "medium_shield".into();
+        let held = v.held(dir.path());
+        assert_eq!(held.iter().map(|(h, _)| *h).collect::<Vec<_>>(), [Hand::Right, Hand::Left]);
+        assert_eq!(v.props(dir.path()).as_ref().unwrap().1, PoseSource::Shipped);
+
+        // A data-root file wins once reloaded; one that does not parse says so.
+        std::fs::create_dir_all(dir.path().join("props")).unwrap();
+        std::fs::write(dir.path().join("props/weapons.toml"), "[shape.x]\ngrip = \"sideways\"\n").unwrap();
+        v.reload_poses();
+        assert!(v.props(dir.path()).is_err());
+        assert!(v.held(dir.path()).is_empty());
     }
 }

@@ -1322,6 +1322,7 @@ fn paint_creature_puppet(
     let shared = PuppetCache::shared(ctx);
     let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
     puppets.begin_frame(ctx.cumulative_frame_nr());
+    puppets.set_props(crate::creature_puppet::puppet_props(ctx));
     let family = puppets.family_for(&creature.name, creature.noun.as_deref())?;
 
     // Stable per-creature variety, the doll's own bits: which way the

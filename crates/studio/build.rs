@@ -8,7 +8,7 @@
 //!                         the injury dolls, ~720 MB of overlays),
 //!                         global/scenes and global/skins are packed.
 //!                         Required with the feature.
-//!   GS_STUDIO_EMBED_DATA  a data root: outlines.json, rigs/, poses/.
+//!   GS_STUDIO_EMBED_DATA  a data root: outlines.json, rigs/, poses/, props/.
 //!                         Default: the workspace's data/.
 //! Backups (`*.bak` files and directories) are skipped.
 //!
@@ -23,7 +23,7 @@ const POOL_PARTS: &[&str] = &["global/images", "global/scenes", "global/skins"];
 /// Left out of those, relative to the pool root.
 const POOL_EXCLUDED: &[&str] = &["global/images/dolls"];
 /// Data-root entries packed, relative to the data root.
-const DATA_PARTS: &[&str] = &["outlines.json", "rigs", "poses"];
+const DATA_PARTS: &[&str] = &["outlines.json", "rigs", "poses", "props"];
 
 fn main() {
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));

@@ -563,7 +563,8 @@ pub struct Posed<'a> {
 
 impl Puppet {
     /// Forward kinematics, then drop (or raise) the figure so its lowest
-    /// station surface touches y = 0.
+    /// station surface touches y = 0. Held props do not count: a staff's
+    /// butt may reach the ground, it never lifts the body.
     pub fn pose(&self, pose: &Pose) -> Posed<'_> {
         let mut xf: Vec<Xf> = Vec::with_capacity(self.segments.len());
         let root_pivot = self.segments.first().map(|s| s.head).unwrap_or([0.0; 3]);
@@ -584,7 +585,7 @@ impl Puppet {
             xf.push(parent.then_inner(&local));
         }
         let mut posed = Posed { puppet: self, xf, lift: 0.0 };
-        let low = posed.bounds()[0][1];
+        let low = posed.bounds_where(|s| !s.kind.is_prop())[0][1];
         if low.is_finite() {
             posed.lift = -low;
             for x in &mut posed.xf {
@@ -599,8 +600,13 @@ impl Posed<'_> {
     /// World axis-aligned box `[min, max]` of every station surface: what a
     /// client places the figure by (a standing and a prone box differ).
     pub fn bounds(&self) -> [V3; 2] {
+        self.bounds_where(|_| true)
+    }
+
+    /// [`Posed::bounds`] of the segments `keep` accepts.
+    pub fn bounds_where(&self, keep: impl Fn(&crate::Segment) -> bool) -> [V3; 2] {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for (s, x) in self.puppet.segments.iter().zip(&self.xf) {
+        for (s, x) in self.puppet.segments.iter().zip(&self.xf).filter(|(s, _)| keep(s)) {
             let (aw, ad) = (x.dir(s.axis_w), x.dir(s.axis_d));
             for st in &s.stations {
                 let c = x.point(st.c);

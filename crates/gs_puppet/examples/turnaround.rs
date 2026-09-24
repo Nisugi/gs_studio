@@ -6,12 +6,14 @@
 //!
 //! Yaws default to 0 45 90 135 180 225 270 315. The pose (default `stand`;
 //! `rest` = as clicked) comes from the family's body type, family overrides
-//! and limits applied. `TURNAROUND_TILE=<px>` sets the tile size (default 320).
+//! and limits applied. `TURNAROUND_TILE=<px>` sets the tile size (default 320);
+//! `TURNAROUND_HOLD=<weapon>[,<left-hand weapon>]` puts props in its hands
+//! (any name `data/props/weapons.toml` knows).
 
 use std::path::Path;
 
 use gs_puppet::raster::Canvas;
-use gs_puppet::{ground_grid, Camera, Look, Pose, PoseSet, Puppet, MASK_PX};
+use gs_puppet::{ground_grid, Camera, Hand, Look, Pose, PoseSet, PropSet, Puppet, MASK_PX};
 use rig::{Outlines, Rig, View};
 
 const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
@@ -35,6 +37,15 @@ fn main() {
     let rig = Rig::load(&data.join("rigs").join(Rig::file_name(family))).expect("rig loads");
     let mask = |v: View| outlines.get(family, v).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
     let puppet = Puppet::build_masks(&rig, mask(View::Front).as_ref(), mask(View::Side).as_ref()).expect("puppet builds");
+    let props = PropSet::from_toml(&std::fs::read_to_string(data.join("props/weapons.toml")).expect("weapons.toml")).expect("props parse");
+    let hold: Vec<_> = std::env::var("TURNAROUND_HOLD")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|n| !n.trim().is_empty())
+        .map(|n| props.prop(props.weapon(n).unwrap_or_else(|| panic!("no weapon '{n}'"))).expect("its shape"))
+        .collect();
+    let held: Vec<(Hand, &gs_puppet::Prop)> = hold.iter().zip([Hand::Right, Hand::Left]).map(|(p, h)| (h, p)).collect();
+    let puppet = puppet.holding(&held);
     let set = PoseSet::load(&data.join("poses"), &rig.body_type).expect("pose set").for_family(family).into_owned();
     let pose = if pose_name == "rest" { Pose::default() } else { set.clamp(set.get(pose_name).expect("no such pose")) };
     let posed = puppet.pose(&pose);

@@ -193,6 +193,7 @@ impl StageTool {
         });
         set_weather(&ctx, weather);
         gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
+        gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -955,6 +956,10 @@ fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 /// art.
 fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new("Puppets").default_open(true).show(ui, |ui| {
+        ui.checkbox(&mut stage.show_props, "Held weapons").on_hover_text(
+            "A puppet holds the first weapon its bestiary entry attacks with (a forest troll its cudgel), \
+             shaped by props/weapons.toml",
+        );
         let set = gs_field::puppets::puppets();
         let mut spawn: Option<String> = None;
         for family in set.families() {

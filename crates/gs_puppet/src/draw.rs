@@ -10,7 +10,7 @@
 
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
-use crate::puppet::{Station, CAP_RINGS};
+use crate::puppet::{Kind, Station, CAP_RINGS};
 
 pub type Rgba = [u8; 4];
 
@@ -341,11 +341,18 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
                 }
             })
             .collect();
-        let base = if rank == 0 || rank == 3 && is_severable(s.part.as_deref().unwrap_or("")) {
+        let base = if let Kind::Prop { color } = s.kind {
+            color
+        } else if rank == 0 || rank == 3 && is_severable(s.part.as_deref().unwrap_or("")) {
             body
         } else {
             WOUND_COLORS[rank as usize - 1]
         };
+        let mut rings: Vec<SurfRing> = rings;
+        if s.kind.is_prop() {
+            // Its own colour all over, not a tint fading at the ends.
+            rings.iter_mut().for_each(|r| r.tint = 1.0);
+        }
         out.push(Surface { index: i, group: s.group, base, rings });
     }
     out

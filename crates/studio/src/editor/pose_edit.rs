@@ -637,7 +637,8 @@ impl PoseDoc {
 /// pose spells the sides out.
 pub fn rows(puppet: &Puppet, split: &dyn Fn(&str) -> bool) -> Vec<Row> {
     let mut bones: Vec<(String, usize)> = Vec::new();
-    for s in &puppet.segments {
+    // Held props are not bones a pose moves.
+    for s in puppet.segments.iter().filter(|s| !s.kind.is_prop()) {
         match bones.iter_mut().find(|(b, _)| *b == s.bone) {
             Some((_, n)) => *n = (*n).max(s.chain_index),
             None => bones.push((s.bone.clone(), s.chain_index)),

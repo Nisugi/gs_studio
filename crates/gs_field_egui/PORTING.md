@@ -569,3 +569,14 @@ from the old pose into the new over `CHANGE_SECS` (0.35 s; getting up from
 dead, `RISE_SECS` 0.8 s), drawn uncached by `posed_changing` (angle-by-angle
 blend, clamped to the joint limits). Wired in `paint_creature_puppet` (a
 marked region already).
+
+### 7.21 Held props
+
+`PuppetCache::family_for` returns an ARMED key, `<family>@<weapon>[+<shield>]`,
+when the creature's bestiary attacks name a weapon the props file knows (and
+`+medium_shield` when one attack is a shield bash); `puppet()` builds that
+key as the family's puppet `holding` the props, and `pose_set`, `texture`
+read the family through `base_family`. `set_puppet_props(ctx, on)` (default
+on) turns it off; `paint_creature_puppet` passes it to the cache each frame
+(one line inside its marked region). `yawed_bounds` measures the body only,
+so a weapon never moves or resizes a creature in its card.

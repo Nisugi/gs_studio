@@ -88,6 +88,8 @@ struct SkinKey {
     texture: Option<u64>,
     /// The pose file's edit revision (the pose changes under one name).
     poses: u64,
+    /// What each hand holds.
+    hold: [String; 2],
 }
 
 /// The family's `sheet.png`, as read from disk (re-read on `serial`).
@@ -596,9 +598,37 @@ impl RigTool {
                 pv.reset_camera();
             }
         });
+        // What it holds: any weapon or shield the props file knows.
+        let weapons: Vec<(String, String)> = match pv.props(&data_root) {
+            Ok((set, _)) => {
+                let mut w: Vec<(String, String)> = set.weapons.values().map(|w| (w.key.clone(), w.base.clone())).collect();
+                w.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+                w
+            }
+            Err(e) => {
+                ui.colored_label(ui.visuals().warn_fg_color, e.clone());
+                Vec::new()
+            }
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Hold").on_hover_text(
+                "Preview a weapon or shield in its hands (data/props/weapons.toml). On the stage a creature holds \
+                 the first weapon its bestiary entry attacks with.",
+            );
+            for (id, label, pick) in [("hold_right", "right", &mut pv.hold), ("hold_left", "left", &mut pv.hold_left)] {
+                let shown = weapons.iter().find(|(k, _)| k == pick).map_or("(nothing)".to_owned(), |(_, b)| b.clone());
+                ui.label(label);
+                egui::ComboBox::from_id_salt(id).selected_text(shown).height(400.0).show_ui(ui, |ui| {
+                    ui.selectable_value(pick, String::new(), "(nothing)");
+                    for (key, base) in &weapons {
+                        ui.selectable_value(pick, key.clone(), base);
+                    }
+                });
+            }
+        });
         egui::CollapsingHeader::new("Texture painting").id_salt("rig_texture_tools").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                    export = ui
+                export = ui
                     .button("Export templates")
                     .on_hover_text("Write the front / side / back paint-over silhouettes and the pattern sheet to data/textures/<family>/")
                     .clicked();
@@ -756,8 +786,12 @@ impl RigTool {
             let _t = crate::perf_log::span("rigs: build puppet");
             let _ = self.session.puppet();
         }
+        let held = self.puppet_view.held(&data_root);
+        let hold = [self.puppet_view.hold.clone(), self.puppet_view.hold_left.clone()];
         match self.session.puppet() {
             Ok(puppet) => {
+                let armed = (!held.is_empty()).then(|| puppet.holding(&held.iter().map(|(h, p)| (*h, p)).collect::<Vec<_>>()));
+                let puppet = armed.as_ref().unwrap_or(puppet);
                 let mut cam = gs_puppet::Camera::framing(puppet.height.max(0.5), [rect.width(), rect.height()]);
                 cam.center = [rect.center().x, rect.center().y];
                 cam.focal *= zoom;
@@ -784,6 +818,7 @@ impl RigTool {
                         view: [yaw, pitch, zoom, rect.width(), rect.height()].map(f32::to_bits),
                         texture: texture_serial,
                         poses: poses_revision,
+                        hold: hold.clone(),
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let mut local = cam;

@@ -48,6 +48,29 @@ pub struct CreatureEntry {
     /// Area names authored in the template (kept even without spawn data).
     #[serde(default)]
     pub areas: Vec<String>,
+    /// Its attacks, as far as the field cares: their names ("broadsword",
+    /// "claw", "shield strike"). A puppet holds the weapon one names.
+    #[serde(default)]
+    pub offense: Offense,
+}
+
+/// The attack names of an entry's `offense` block (the values are ignored).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct Offense {
+    #[serde(default)]
+    pub physical: Vec<Attack>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+pub struct Attack {
+    pub name: String,
+}
+
+impl CreatureEntry {
+    /// Its physical attacks' names, in the template's order.
+    pub fn attack_names(&self) -> impl Iterator<Item = &str> {
+        self.offense.physical.iter().map(|a| a.name.as_str())
+    }
 }
 
 /// The bundled file: a version header plus the entries.
@@ -111,17 +134,28 @@ impl BestiaryDb {
     /// name is unknown or the noun is ambiguous — callers group those
     /// under their own fallback bucket.
     pub fn areas_for_name(&self, name: &str) -> Vec<String> {
+        self.entry_for_name(name)
+            .map(|e| e.areas.iter().map(|a| a.trim().to_string()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The entry a display name means: the exact name, else the lone entry
+    /// with its noun. None when unknown or the noun is ambiguous.
+    pub fn entry_for_name(&self, name: &str) -> Option<&CreatureEntry> {
         let name = name.trim().to_ascii_lowercase();
-        let Some(noun) = name.split_whitespace().last() else {
-            return Vec::new();
-        };
+        let noun = name.split_whitespace().last()?;
         let entries = self.by_noun(noun);
-        let entry = entries
+        entries
             .iter()
             .find(|e| e.name.eq_ignore_ascii_case(&name))
-            .or_else(|| (entries.len() == 1).then(|| &entries[0]));
-        entry
-            .map(|e| e.areas.iter().map(|a| a.trim().to_string()).collect())
+            .or_else(|| (entries.len() == 1).then(|| &entries[0]))
+            .copied()
+    }
+
+    /// A creature's attack names by display name (see [`entry_for_name`](Self::entry_for_name)).
+    pub fn attacks_for_name(&self, name: &str) -> Vec<String> {
+        self.entry_for_name(name)
+            .map(|e| e.attack_names().map(str::to_owned).collect())
             .unwrap_or_default()
     }
 }

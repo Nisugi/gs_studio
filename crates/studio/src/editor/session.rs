@@ -382,8 +382,9 @@ impl Session {
     }
 
     /// Ship the SAVED bake (`rigs/<family>.png` + `.toml`), the saved puppet
-    /// (`puppets/<family>.puppet.toml`) and every pose set in
-    /// `<data>/poses/` (`poses/`) into the publish directory. Never the
+    /// (`puppets/<family>.puppet.toml`), every pose set in `<data>/poses/`
+    /// (`poses/`) and the held-props file (`props/weapons.toml`) into the
+    /// publish directory. Never the
     /// `.rig.toml` source. Publishes what is on disk: unsaved edits are not
     /// in it.
     pub fn publish(&mut self) -> Result<PathBuf, String> {
@@ -414,6 +415,11 @@ impl Session {
         }
         if pose_count > 0 {
             shipped.push(format!("{pose_count} pose sets"));
+        }
+        let props = self.props_path();
+        if props.is_file() {
+            copy_into(&props, &dir.join("props"))?;
+            shipped.push("props/weapons.toml".into());
         }
         self.status = format!("Published {} to {}", shipped.join(", "), dir.display());
         Ok(dir)
@@ -477,11 +483,17 @@ impl Session {
         Ok(())
     }
 
+    /// `<data>/props/weapons.toml`: what puppets can hold, and its shapes.
+    pub fn props_path(&self) -> PathBuf {
+        self.data_root.join("props").join("weapons.toml")
+    }
+
     /// Put every pose set in `<data>/poses/` into `<pool>/global/puppets/`,
     /// where it replaces the built-in set of that body type on the stage, and
-    /// drop gs_field's caches so the stage re-reads them. A file that does
-    /// not parse is left out (the stage keeps what it had) and named in the
-    /// error. Returns how many were installed.
+    /// the held-props file into `<pool>/global/props/`; then drop gs_field's
+    /// caches so the stage re-reads them. A file that does not parse is left
+    /// out (the stage keeps what it had) and named in the error. Returns how
+    /// many pose sets were installed.
     pub fn install_poses(&mut self) -> Result<usize, String> {
         let pool = self.pool.clone().ok_or("no pool to install poses into")?;
         let into = pool.join("global").join("puppets");
@@ -499,6 +511,13 @@ impl Session {
                     installed += 1;
                 }
                 Err(e) => broken.push(format!("{name}: {e}")),
+            }
+        }
+        let props = self.props_path();
+        if props.is_file() {
+            match std::fs::read_to_string(&props).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PropSet::from_toml(&t)) {
+                Ok(_) => copy_into(&props, &pool.join("global").join("props"))?,
+                Err(e) => broken.push(format!("props/weapons.toml: {e}")),
             }
         }
         crate::pool_dir::invalidate_caches();

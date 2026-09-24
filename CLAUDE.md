@@ -46,7 +46,9 @@ Dependency chain (bottom up):
   rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
   compares the two). `uv.rs` cuts the skin open into a flat pattern sheet
   (`UvLayout`) that `Posed::skin_textured` reads paint from
-  (`examples/uv_sheet` writes a template and a checker check); `prefill.rs`
+  (`examples/uv_sheet` writes a template and a checker check); `prop.rs`
+  builds held weapons and shields onto a hand from `data/props/weapons.toml`
+  (`turnaround` with `TURNAROUND_HOLD` shows them); `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
   that sheet (`uv_sheet --demo` shows it). `fall.rs` is the procedural
   death fall (`examples/fall_strip` films it). Everything

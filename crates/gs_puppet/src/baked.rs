@@ -85,14 +85,18 @@ impl Puppet {
         format!("{family}.puppet.toml")
     }
 
+    /// The puppet as baked. Held props ([`crate::prop`]) are not part of
+    /// it: they come last, so dropping them leaves every index valid.
     pub fn to_baked(&self) -> BakedPuppet {
+        let body = self.segments.iter().take_while(|s| !s.kind.is_prop()).count();
+        let groups = self.segments[..body].iter().map(|s| s.group + 1).max().unwrap_or(0);
         BakedPuppet {
             version: BAKED_VERSION,
             family: self.family.clone(),
             body_type: self.body_type.clone(),
             view: self.view,
             height: wide(self.height),
-            groups: self.groups.clone(),
+            groups: self.groups[..groups.min(self.groups.len())].to_vec(),
             eyes: self
                 .eyes
                 .iter()
@@ -103,8 +107,7 @@ impl Puppet {
                     radius: wide(e.radius),
                 })
                 .collect(),
-            segments: self
-                .segments
+            segments: self.segments[..body]
                 .iter()
                 .map(|s| BakedSegment {
                     name: s.name.clone(),
@@ -116,6 +119,7 @@ impl Puppet {
                         Kind::Trunk => "trunk",
                         Kind::Limb => "limb",
                         Kind::Hand => "hand",
+                        Kind::Prop { .. } => unreachable!("props are not baked"),
                     }
                     .to_owned(),
                     chain_index: s.chain_index as u32,
