@@ -1,0 +1,570 @@
+//! ADDITION (not in VellumFE): creature-field lighting, applied as LIT TWINS
+//! of the art cache's textures.
+//!
+//! Niffy's "Creature Field Environment Lighting" request, route A: every
+//! layer is re-lit on the CPU (`vellum_light`), off the UI thread, and the
+//! lit texture is swapped into the SAME cache slot the renderer already
+//! reads -- `bases`, `variant_bases`, `overlays`, `scenery`,
+//! `scene_backgrounds`. The draw code in `creature_field.rs` is untouched:
+//! it draws whatever handle the slot holds. Turning lighting off (a scene
+//! without `[light]`, player strength 0) puts the original handles back, so
+//! the field is byte-identical to unlit.
+//!
+//! Per layer, as `relight.py`'s pipeline: the scene light with the frame of
+//! the creature's STANDING base (value range) and the active art's rows;
+//! then each time-of-day keyframe on the scene-lit pixels, the frame
+//! re-measured from the scene-lit standing base; the keyframes are blended
+//! by their clock weights INTO the one texture (the weights are quantized,
+//! so a transition re-bakes a few dozen times per game hour, never per
+//! frame). The backdrop takes the time-of-day passes only.
+//!
+//! Frames, per the request's layer rules:
+//! * base art, scenery props: their own;
+//! * prone art: value range from the standing base, rows its own;
+//! * tier wound art: the wearer's (standing base's value range, the
+//!   wearing art's rows), canvas-matched or anchored as it is drawn;
+//! * shared overlays (manifest part art, `creatures/wounds/`, card
+//!   overlays): the cache cannot know the wearer, so a fixed mid-range
+//!   frame. KNOWN DEVIATION from the request, whose layer rules want the
+//!   wearer's frame; it shows most on pale overlays (web).
+
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
+
+use gs_field::lighting::{GlobalLighting, SceneLight, SceneLighting};
+use vellum_light::{
+    apply, apply_backdrop, auto_scene_light, with_intensity, LightEnv, LightFrame, SceneColours, Srgb8Lut, YMap,
+};
+
+/// Clock weights are baked in steps of 1/QUANTUM.
+const WEIGHT_QUANTUM: f32 = 32.0;
+/// Frame used for overlays shared between creatures (OKLab L).
+const SHARED_FRAME_L: (f32, f32) = (0.30, 0.80);
+
+/// Decoded pixels kept for re-lighting: straight RGBA8.
+#[derive(Debug)]
+pub struct Px {
+    pub w: usize,
+    pub h: usize,
+    pub rgba: Vec<u8>,
+}
+
+impl Px {
+    pub fn from_image(img: &image::RgbaImage) -> Arc<Px> {
+        Arc::new(Px { w: img.width() as usize, h: img.height() as usize, rgba: img.as_raw().clone() })
+    }
+}
+
+/// A cache slot a texture lives in.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Slot {
+    Base(String),
+    Variant(String),
+    Overlay(String),
+    Scenery(String),
+    Backdrop(String),
+}
+
+/// How a layer is framed (see the module docs).
+#[derive(Debug, Clone)]
+pub enum Role {
+    /// Its own standing base (creature bases, props, unowned pose art).
+    Own,
+    /// Pose art of a standing base: the base's value range, its own rows.
+    Pose { standing: Slot },
+    /// A tier wound worn by `wearer` (a base or its prone art), drawn over
+    /// the whole art (`anchored` None) or centred on an anchor at a
+    /// calibrated fraction of the art's width.
+    Wound { standing: Slot, wearer: Slot, anchored: Option<(f32, f32)> },
+    /// Shared between creatures.
+    Shared,
+    Backdrop,
+}
+
+struct Layer {
+    px: Arc<Px>,
+    original: egui::TextureHandle,
+    role: Role,
+    name: String,
+}
+
+/// The host's side of the light: clock, strength, global defaults.
+#[derive(Debug, Clone)]
+pub struct LightClock {
+    /// Game hour, 0..24; None = no time of day (the scene light only).
+    pub game_hour: Option<f32>,
+    /// The player's Lighting strength, 0..1 (0 = off).
+    pub strength: f32,
+    /// The room's indoor/outdoor guess when the scene does not say.
+    pub outdoor_guess: Option<bool>,
+}
+
+impl Default for LightClock {
+    fn default() -> Self {
+        LightClock { game_hour: None, strength: 1.0, outdoor_guess: None }
+    }
+}
+
+/// What a bake needs besides pixels: every light, at intensity x strength.
+#[derive(Debug, Clone)]
+struct Plan {
+    key: u64,
+    scene: (LightEnv, vellum_light::Derived),
+    keyframes: Vec<((LightEnv, vellum_light::Derived), f32)>,
+}
+
+struct Job {
+    key: u64,
+    rx: Receiver<Vec<(Slot, Vec<u8>)>>,
+}
+
+/// Lighting state, one per art cache.
+#[derive(Default)]
+pub struct LightState {
+    layers: HashMap<Slot, Layer>,
+    clock: LightClock,
+    global: Option<GlobalLighting>,
+    scene: Option<(SceneLight, Option<String>)>,
+    auto: HashMap<String, SceneColours>,
+    /// The plan whose lit textures are in the slots now (None = originals).
+    applied: Option<u64>,
+    lit: HashSet<Slot>,
+    job: Option<Job>,
+    /// Bumped whenever the lit set changes; puppets key on it.
+    generation: u64,
+    current: Option<Arc<ResolvedLight>>,
+}
+
+/// The lights in force, for whoever lights something the cache does not
+/// hold (the puppets).
+#[derive(Debug, Clone)]
+pub struct ResolvedLight {
+    pub key: u64,
+    pub scene: (LightEnv, vellum_light::Derived),
+    pub keyframes: Vec<((LightEnv, vellum_light::Derived), f32)>,
+}
+
+impl ResolvedLight {
+    /// Light a whole standalone image (it is its own standing base).
+    pub fn light_image(&self, rgba: &mut [u8], w: usize) {
+        let lut = Srgb8Lut::new();
+        let plan = Plan { key: self.key, scene: self.scene.clone(), keyframes: self.keyframes.clone() };
+        let px = Px { w, h: rgba.len() / (w * 4).max(1), rgba: rgba.to_vec() };
+        let out = bake_one(&plan, &px, None, None, YMap::IDENTITY, &lut);
+        rgba.copy_from_slice(&out);
+    }
+}
+
+impl std::fmt::Debug for LightState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LightState").field("layers", &self.layers.len()).field("applied", &self.applied).finish()
+    }
+}
+
+fn light_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::creature_light")
+}
+
+/// Share the lights in force with the rest of the renderer (the puppets).
+pub fn publish(ctx: &egui::Context, light: Option<Arc<ResolvedLight>>) {
+    ctx.data_mut(|d| d.insert_temp(light_id(), light));
+}
+
+/// The lights the art cache last put in force (None = unlit).
+pub fn current_light(ctx: &egui::Context) -> Option<Arc<ResolvedLight>> {
+    ctx.data(|d| d.get_temp::<Option<Arc<ResolvedLight>>>(light_id())).flatten()
+}
+
+fn env_hash(h: &mut impl Hasher, e: &LightEnv) {
+    format!("{e:?}").hash(h);
+}
+
+impl LightState {
+    /// Keep a loaded layer's pixels for re-lighting.
+    pub fn register(&mut self, slot: Slot, px: Arc<Px>, original: egui::TextureHandle, role: Role, name: String) {
+        self.lit.remove(&slot);
+        self.layers.insert(slot, Layer { px, original, role, name });
+    }
+
+    pub fn set_clock(&mut self, clock: LightClock) {
+        self.clock = clock;
+    }
+
+    pub fn set_global(&mut self, global: GlobalLighting) {
+        self.global = Some(global);
+    }
+
+    pub fn set_scene(&mut self, light: Option<SceneLight>, background: Option<String>) {
+        self.scene = light.map(|l| (l, background));
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn current(&self) -> Option<Arc<ResolvedLight>> {
+        self.current.clone()
+    }
+
+    /// A backdrop's auto scene colours, if its pixels are loaded.
+    pub fn auto_colours(&self, bg: &str) -> Option<SceneColours> {
+        if let Some(c) = self.auto.get(bg) {
+            return Some(c.clone());
+        }
+        let layer = self.layers.get(&Slot::Backdrop(bg.to_string()))?;
+        Some(auto_scene_light(&layer.px.rgba, layer.px.w, layer.px.h, 4, &Srgb8Lut::new()))
+    }
+
+    /// The lights in force now, or None (unlit).
+    fn plan(&mut self) -> Option<Plan> {
+        let (light, background) = self.scene.clone()?;
+        if self.clock.strength <= 0.0 {
+            return None;
+        }
+        let auto = match background.as_deref().and_then(|bg| self.backdrop_colours(bg)) {
+            Some(c) => c,
+            // No backdrop to read: a neutral daylight.
+            None => SceneColours { key: "#c8b89c".into(), ambient: "#a4b0c0".into(), bounce: "#a89880".into(), chroma: 0.9 },
+        };
+        let global = self.global.get_or_insert_with(GlobalLighting::load).clone();
+        let scene = gs_field::scenes::StageScene { light: Some(light), background, ..Default::default() };
+        // Quantize the hour so the weights move in 1/QUANTUM steps.
+        let hour = self.clock.game_hour.map(|h| (h * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM);
+        let lit = SceneLighting::resolve(&scene, &auto, &global, hour, self.clock.outdoor_guess)?;
+        let strength = self.clock.strength.clamp(0.0, 1.0);
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        env_hash(&mut h, &lit.scene);
+        strength.to_bits().hash(&mut h);
+        let keyframes: Vec<_> = lit
+            .keyframes
+            .iter()
+            .map(|(p, env, w)| {
+                format!("{p:?}").hash(&mut h);
+                if let Some(e) = env {
+                    env_hash(&mut h, e);
+                }
+                let w = (w * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM;
+                w.to_bits().hash(&mut h);
+                (with_intensity(env.as_ref(), strength), w)
+            })
+            .filter(|(_, w)| *w > 0.0)
+            .collect();
+        Some(Plan { key: h.finish(), scene: with_intensity(Some(&lit.scene), strength), keyframes })
+    }
+
+    fn backdrop_colours(&mut self, bg: &str) -> Option<SceneColours> {
+        if let Some(c) = self.auto.get(bg) {
+            return Some(c.clone());
+        }
+        let layer = self.layers.get(&Slot::Backdrop(bg.to_string()))?;
+        let c = auto_scene_light(&layer.px.rgba, layer.px.w, layer.px.h, 4, &Srgb8Lut::new());
+        self.auto.insert(bg.to_string(), c.clone());
+        Some(c)
+    }
+
+    /// Once per frame: start a bake when the light or the layer set changed,
+    /// and hand back finished textures to swap in (slot, texture). Also the
+    /// slots to restore to their originals when lighting turned off.
+    pub fn update(&mut self, ctx: &egui::Context) -> Vec<(Slot, egui::TextureHandle)> {
+        let plan = self.plan();
+        let mut swaps = Vec::new();
+
+        // A finished bake: upload and hand over, if it is still wanted.
+        if let Some(job) = &self.job {
+            match job.rx.try_recv() {
+                Ok(results) => {
+                    let key = job.key;
+                    self.job = None;
+                    if plan.as_ref().is_some_and(|p| p.key == key) {
+                        if self.applied != Some(key) {
+                            self.lit.clear();
+                        }
+                        self.applied = Some(key);
+                        for (slot, rgba) in results {
+                            let Some(layer) = self.layers.get(&slot) else { continue };
+                            let image = egui::ColorImage::from_rgba_unmultiplied([layer.px.w, layer.px.h], &rgba);
+                            let tex = ctx.load_texture(format!("{}#light", layer.name), image, egui::TextureOptions::LINEAR);
+                            self.lit.insert(slot.clone());
+                            swaps.push((slot, tex));
+                        }
+                        self.generation += 1;
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return swaps,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.job = None,
+            }
+        }
+
+        let Some(plan) = plan else {
+            // Unlit: put every original back.
+            if self.applied.take().is_some() || !self.lit.is_empty() {
+                for slot in self.lit.drain() {
+                    if let Some(layer) = self.layers.get(&slot) {
+                        swaps.push((slot, layer.original.clone()));
+                    }
+                }
+                self.generation += 1;
+            }
+            self.current = None;
+            return swaps;
+        };
+        if self.current.as_ref().is_none_or(|c| c.key != plan.key) {
+            self.current = Some(Arc::new(ResolvedLight { key: plan.key, scene: plan.scene.clone(), keyframes: plan.keyframes.clone() }));
+            self.generation += 1;
+        }
+
+        // What still needs this light: everything when the light changed
+        // (the old lit textures stay up until the new ones arrive), else
+        // only layers loaded since.
+        let todo: Vec<Slot> = if self.applied == Some(plan.key) {
+            self.layers.keys().filter(|s| !self.lit.contains(*s)).cloned().collect()
+        } else {
+            self.layers.keys().cloned().collect()
+        };
+        if todo.is_empty() || self.job.is_some() {
+            return swaps;
+        }
+        let work: Vec<(Slot, Arc<Px>, Role, Option<Arc<Px>>, Option<Arc<Px>>)> = todo
+            .into_iter()
+            .filter_map(|slot| {
+                let layer = self.layers.get(&slot)?;
+                let get = |s: &Slot| self.layers.get(s).map(|l| l.px.clone());
+                let (standing, wearer) = match &layer.role {
+                    Role::Pose { standing } => (get(standing), None),
+                    Role::Wound { standing, wearer, .. } => (get(standing), get(wearer)),
+                    _ => (None, None),
+                };
+                Some((slot, layer.px.clone(), layer.role.clone(), standing, wearer))
+            })
+            .collect();
+        let (tx, rx) = channel();
+        let key = plan.key;
+        let spawned = std::thread::Builder::new().name("creature-light".into()).spawn(move || {
+            let lut = Srgb8Lut::new();
+            let out: Vec<(Slot, Vec<u8>)> = work
+                .into_iter()
+                .map(|(slot, px, role, standing, wearer)| {
+                    let rgba = match role {
+                        Role::Backdrop => bake_backdrop(&plan, &px, &lut),
+                        Role::Own => bake_one(&plan, &px, None, None, YMap::IDENTITY, &lut),
+                        Role::Pose { .. } => bake_one(&plan, &px, standing.as_deref(), None, YMap::IDENTITY, &lut),
+                        Role::Wound { anchored, .. } => {
+                            let rows = wearer.as_deref().unwrap_or(&px);
+                            let ymap = match anchored {
+                                None => YMap::canvas(px.h, rows.h),
+                                Some((fy, scale)) => YMap::anchored(fy, rows.w, rows.h, scale, px.w, px.h),
+                            };
+                            bake_one(&plan, &px, standing.as_deref(), wearer.as_deref(), ymap, &lut)
+                        }
+                        Role::Shared => bake_shared(&plan, &px, &lut),
+                    };
+                    (slot, rgba)
+                })
+                .collect();
+            let _ = tx.send(out);
+        });
+        match spawned {
+            Ok(_) => self.job = Some(Job { key, rx }),
+            Err(e) => tracing::warn!("creature lighting: cannot start a bake thread: {e}"),
+        }
+        swaps
+    }
+}
+
+/// One layer through the scene pass and the time-of-day keyframes.
+/// `standing` supplies the value range (None = the layer itself), `rows`
+/// the active art's content rows (None = `standing`, else the layer).
+fn bake_one(plan: &Plan, px: &Px, standing: Option<&Px>, rows: Option<&Px>, ymap: YMap, lut: &Srgb8Lut) -> Vec<u8> {
+    let base = standing.unwrap_or(px);
+    let row_src = rows.unwrap_or(base);
+    let frame_of = |range_src: &[u8]| {
+        let (l_lo, l_hi) = LightFrame::value_range(range_src, lut);
+        let (y_top, y_bot) = LightFrame::content_rows(&row_src.rgba, row_src.w);
+        LightFrame { l_lo, l_hi, y_top, y_bot }
+    };
+    let (se, sd) = &plan.scene;
+    let fr1 = frame_of(&base.rgba);
+    let mut lit = px.rgba.clone();
+    apply(&mut lit, px.w, se, sd, &fr1, ymap, lut);
+    if plan.keyframes.is_empty() {
+        return lit;
+    }
+    // The second pass's value range comes from the SCENE-LIT standing base.
+    let fr2 = if standing.is_none() {
+        frame_of(&lit)
+    } else {
+        let mut b = base.rgba.clone();
+        apply(&mut b, base.w, se, sd, &frame_of(&base.rgba), YMap::IDENTITY, lut);
+        frame_of(&b)
+    };
+    blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr2, ymap, lut))
+}
+
+fn bake_shared(plan: &Plan, px: &Px, lut: &Srgb8Lut) -> Vec<u8> {
+    let (y_top, y_bot) = LightFrame::content_rows(&px.rgba, px.w);
+    let fr = LightFrame { l_lo: SHARED_FRAME_L.0, l_hi: SHARED_FRAME_L.1, y_top, y_bot };
+    let (se, sd) = &plan.scene;
+    let mut lit = px.rgba.clone();
+    apply(&mut lit, px.w, se, sd, &fr, YMap::IDENTITY, lut);
+    if plan.keyframes.is_empty() {
+        return lit;
+    }
+    blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr, YMap::IDENTITY, lut))
+}
+
+fn bake_backdrop(plan: &Plan, px: &Px, lut: &Srgb8Lut) -> Vec<u8> {
+    if plan.keyframes.is_empty() {
+        return px.rgba.clone();
+    }
+    blend_keyframes(plan, &px.rgba, |k, (e, d)| apply_backdrop(k, px.w, e, d, lut, 1))
+}
+
+/// Each keyframe applied to a copy of `lit`, blended by weight (straight
+/// sRGB bytes, as the reference pipeline does); alpha kept.
+fn blend_keyframes(
+    plan: &Plan,
+    lit: &[u8],
+    pass: impl Fn(&mut Vec<u8>, &(LightEnv, vellum_light::Derived)),
+) -> Vec<u8> {
+    if let [(only, _)] = plan.keyframes.as_slice() {
+        let mut k = lit.to_vec();
+        pass(&mut k, only);
+        return k;
+    }
+    // Quantizing can leave the weights a hair off 1: renormalize.
+    let total: f32 = plan.keyframes.iter().map(|(_, w)| w).sum::<f32>().max(1e-6);
+    let mut acc = vec![0f32; lit.len()];
+    for (light, w) in &plan.keyframes {
+        let mut k = lit.to_vec();
+        pass(&mut k, light);
+        for (a, v) in acc.iter_mut().zip(&k) {
+            *a += w / total * *v as f32;
+        }
+    }
+    let mut out = lit.to_vec();
+    for (i, o) in out.iter_mut().enumerate() {
+        if i % 4 != 3 {
+            *o = acc[i].round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn golden(case: &str, file: &str) -> Vec<u8> {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../vellum_light/golden/");
+        std::fs::read(format!("{dir}{case}/{file}")).expect("golden file")
+    }
+
+    fn oklab(p: &[u8]) -> [f64; 3] {
+        let s = |c: u8| {
+            let c = c as f64 / 255.0;
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        let (r, g, b) = (s(p[0]), s(p[1]), s(p[2]));
+        let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
+        let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
+        let q = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
+        [
+            0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * q,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * q,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * q,
+        ]
+    }
+
+    /// The bake path (scene pass, then the clock's keyframes blended) is
+    /// the reference pipeline: Niffy's golden bandit at 19:30, strength 0.6.
+    #[test]
+    fn the_bake_is_the_reference_pipeline() {
+        let case = "pipe_bandit_h19.5_s0.6";
+        let scene = LightEnv {
+            bounce: Some("#d4a070".into()),
+            strength: 0.6,
+            bounce_strength: 0.45,
+            chroma: Some(0.95),
+            ..LightEnv::from_key("#e0ae7c")
+        };
+        let strength = 0.6;
+        let keyframes = vellum_light::phase_keyframes(19.5, vellum_light::PhaseBoundaries::default())
+            .into_iter()
+            .map(|(p, w)| (with_intensity(vellum_light::default_phase_light(p).as_ref(), strength), w))
+            .collect();
+        let plan = Plan { key: 1, scene: with_intensity(Some(&scene), strength), keyframes };
+        let input = golden(case, "input.rgba");
+        let expected = golden(case, "expected.rgba");
+        let px = Px { w: 159, h: 281, rgba: input };
+        let out = bake_one(&plan, &px, None, None, YMap::IDENTITY, &Srgb8Lut::new());
+        let worst = out
+            .chunks_exact(4)
+            .zip(expected.chunks_exact(4))
+            .filter(|(a, _)| a[3] > 0)
+            .map(|(a, b)| {
+                let (x, y) = (oklab(a), oklab(b));
+                ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()
+            })
+            .fold(0.0f64, f64::max);
+        assert!(worst <= 0.01, "worst dE {worst}");
+    }
+
+    fn tex(ctx: &egui::Context, name: &str) -> egui::TextureHandle {
+        ctx.load_texture(name, egui::ColorImage::filled([2, 2], egui::Color32::GRAY), egui::TextureOptions::LINEAR)
+    }
+
+    fn bake(state: &mut LightState, ctx: &egui::Context) -> Vec<(Slot, egui::TextureHandle)> {
+        for _ in 0..500 {
+            let swaps = state.update(ctx);
+            if !swaps.is_empty() {
+                return swaps;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("no bake arrived");
+    }
+
+    /// Lit twins arrive for every layer; turning the light off hands every
+    /// original back; no [light] means no bake at all.
+    #[test]
+    fn lit_twins_come_and_go_with_the_scene_light() {
+        let ctx = egui::Context::default();
+        let mut state = LightState::default();
+        let backdrop: Vec<u8> = (0..16 * 8).flat_map(|i| [(i * 2) as u8, 120, 200 - i as u8, 255]).collect();
+        let body: Vec<u8> = (0..8 * 8).flat_map(|i| [140, (i * 3) as u8, 60, if i % 5 == 0 { 0 } else { 255 }]).collect();
+        let (bg_tex, base_tex) = (tex(&ctx, "bg"), tex(&ctx, "base"));
+        state.register(
+            Slot::Backdrop("scenes/test.png".into()),
+            Arc::new(Px { w: 16, h: 8, rgba: backdrop }),
+            bg_tex.clone(),
+            Role::Backdrop,
+            "bg".into(),
+        );
+        state.register(Slot::Base("bandit".into()), Arc::new(Px { w: 8, h: 8, rgba: body }), base_tex.clone(), Role::Own, "base".into());
+
+        // No [light]: nothing to do.
+        state.set_scene(None, Some("scenes/test.png".into()));
+        assert!(state.update(&ctx).is_empty());
+        assert!(state.current().is_none());
+
+        state.set_scene(Some(SceneLight::default()), Some("scenes/test.png".into()));
+        state.set_clock(LightClock { game_hour: Some(23.0), strength: 1.0, outdoor_guess: None });
+        let swaps = bake(&mut state, &ctx);
+        let slots: HashSet<Slot> = swaps.iter().map(|(s, _)| s.clone()).collect();
+        assert_eq!(slots.len(), 2, "both layers lit");
+        assert!(swaps.iter().all(|(s, t)| t.id() != if matches!(s, Slot::Backdrop(_)) { bg_tex.id() } else { base_tex.id() }));
+        assert!(state.current().is_some());
+
+        // Light off: originals back, at once.
+        state.set_scene(None, Some("scenes/test.png".into()));
+        let back = state.update(&ctx);
+        assert_eq!(back.len(), 2);
+        for (slot, t) in back {
+            let want = if matches!(slot, Slot::Backdrop(_)) { bg_tex.id() } else { base_tex.id() };
+            assert_eq!(t.id(), want);
+        }
+        assert!(state.current().is_none());
+    }
+}

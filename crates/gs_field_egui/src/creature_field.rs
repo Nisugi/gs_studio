@@ -1285,6 +1285,7 @@ fn paint_creature_puppet(
     };
     let key = key.with_effects(PuppetKey::effects_of(&has));
     let skin = crate::creature_puppet::puppet_skin(ctx);
+    puppets.set_light(crate::creature_light::current_light(ctx));
     let posed = puppets.posed_with(&family, &key, skin)?;
     // The parts this family's puppet actually carries, taken while the lock
     // is already held (the wound pass below needs it, and re-locking once

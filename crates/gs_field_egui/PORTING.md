@@ -433,3 +433,34 @@ turned; the skin decides what is in front per pixel.
 * `examples/stage_demo.rs`: `STAGE_DEMO_STATUSES=1` swaps the shot roster
   for one creature per status.
 
+
+### 7.12 Creature-field lighting: lit twins in the art cache
+
+Niffy's "Creature Field Environment Lighting" request (route A), without
+touching the draw code: `src/creature_light.rs` (new) re-lights layers on a
+worker thread (`vellum_light`) and swaps the lit texture into the SAME slot
+the renderer reads (`bases`, `variant_bases`, `overlays`, `scenery`,
+`scene_backgrounds`). `creature_field.rs` draws what the slot holds; the port
+test is unchanged apart from the puppet region.
+
+* `creature_art.rs`: loaders keep decoded pixels (`load_creature_art_px`,
+  `image_store::load_texture_file_px`) and register each layer's role --
+  base, pose art (standing base's value range), tier wound (wearer's frame,
+  canvas or anchored), shared overlay, prop, backdrop -- in the cache's
+  `light: LightState`. `prepare_scene_art` ends by setting the scene's
+  `[light]`, running `LightState::update` and swapping textures; a scene
+  without `[light]` (or strength 0) restores the original handles.
+* Host API on `CreatureArtStore`: `set_light_clock(LightClock { game_hour,
+  strength, outdoor_guess })`, `set_global_lighting`, `scene_auto_colours`.
+* Time-of-day keyframes are blended INTO the lit texture (weights quantized
+  to 1/32), not cross-faded at draw time: no second draw per layer.
+* KNOWN DEVIATION: shared overlays (manifest part art, `creatures/wounds/`,
+  card overlays) are lit with a fixed mid-range frame, not the wearer's --
+  the cache cannot know who wears them. The request's dead-tint fix (wounds
+  and overlays of a corpse) needs draw-site changes and is not done yet.
+* Puppets: `PuppetCache::set_light` (from `creature_light::current_light`,
+  published by the art cache each frame); a skin is lit as its own standing
+  base; the light's key is part of the cache key.
+* Tests: the bake path equals the reference pipeline on Niffy's golden
+  bandit (19:30, strength 0.6, dE <= 0.01); lit twins arrive and the
+  originals come back when the light goes.

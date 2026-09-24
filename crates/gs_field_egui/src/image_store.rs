@@ -169,6 +169,23 @@ pub fn load_texture_file(
     ))
 }
 
+/// ADDITION (not in VellumFE): `load_texture_file`, also handing back the
+/// decoded pixels, which creature lighting keeps to re-light from.
+pub fn load_texture_file_px(
+    ctx: &egui::Context,
+    path: &Path,
+    texture_name: &str,
+    label: &str,
+) -> Option<(egui::TextureHandle, std::sync::Arc<crate::creature_light::Px>)> {
+    let rgba = decode_rgba_logged(path, label)?;
+    let tex = ctx.load_texture(
+        texture_name.to_owned(),
+        to_color_image(&rgba),
+        egui::TextureOptions::LINEAR,
+    );
+    Some((tex, crate::creature_light::Px::from_image(&rgba)))
+}
+
 /// Luminance recolor, alpha preserved (barbar's gs variant).
 fn desaturate_in_place(rgba: &mut image::RgbaImage) {
     for px in rgba.pixels_mut() {

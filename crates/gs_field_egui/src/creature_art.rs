@@ -109,6 +109,8 @@ pub struct CreatureArtCache {
     /// the published puppet and rig set generations.
     doll_calibrations: HashMap<String, Option<gs_field::geometry::ArtCalibration>>,
     doll_generation: u64,
+    /// ADDITION (not in VellumFE): lighting -- kept pixels, lit twins.
+    pub(crate) light: crate::creature_light::LightState,
 }
 
 // TextureHandle has no Debug; summarize (WidgetRenderSettings derives it).
@@ -248,6 +250,39 @@ impl CreatureArtCache {
     }
 
     /// Scene background texture for a pool path, if prepared.
+    /// ADDITION (not in VellumFE): put `tex` into `slot` (a lit twin, or
+    /// the original back).
+    pub(crate) fn swap_texture(&mut self, slot: &crate::creature_light::Slot, tex: egui::TextureHandle) {
+        use crate::creature_light::Slot;
+        match slot {
+            Slot::Base(k) => {
+                if let Some(Some(art)) = self.bases.get_mut(k) {
+                    art.texture = tex;
+                }
+            }
+            Slot::Variant(k) => {
+                if let Some(Some(art)) = self.variant_bases.get_mut(k) {
+                    art.texture = tex;
+                }
+            }
+            Slot::Scenery(k) => {
+                if let Some(Some(art)) = self.scenery.get_mut(k) {
+                    art.texture = tex;
+                }
+            }
+            Slot::Overlay(k) => {
+                if let Some(entry) = self.overlays.get_mut(k) {
+                    *entry = Some(tex);
+                }
+            }
+            Slot::Backdrop(k) => {
+                if let Some(entry) = self.scene_backgrounds.get_mut(k) {
+                    *entry = Some(tex);
+                }
+            }
+        }
+    }
+
     pub fn scene_background(&self, pool_path: &str) -> Option<&egui::TextureHandle> {
         self.scene_backgrounds
             .get(pool_path)
@@ -405,7 +440,13 @@ impl CreatureArtStore {
                     want.noun.as_deref(),
                     want.family.as_deref(),
                 )
-                .and_then(|tier| load_creature_art(ctx, &tier.base, &cache.skin_name));
+                .and_then(|tier| load_creature_art_px(ctx, &tier.base, &cache.skin_name));
+                let art = art.map(|(art, px)| {
+                    let slot = crate::creature_light::Slot::Base(token.clone());
+                    let role = crate::creature_light::Role::Own;
+                    cache.light.register(slot, px, art.texture.clone(), role, format!("creature:{token}"));
+                    art
+                });
                 cache.bases.insert(token.clone(), art);
             }
             // The tier's prone pose loads as full creature art (own
@@ -426,18 +467,28 @@ impl CreatureArtStore {
                 continue;
             };
             let prone = art.extra("prone").cloned();
-            let mut wounds: Vec<PathBuf> = want
+            // ADDITION (not in VellumFE): each wound remembers who wears it
+            // and whether it is drawn anchored, for lighting.
+            let standing_slot = crate::creature_light::Slot::Base(token.clone());
+            let anchor_of = |a: &CreatureArt, part: &str| a.anchor(part).map(|p| p[1]);
+            let mut worn: Vec<(PathBuf, crate::creature_light::Slot, Option<f32>)> = want
                 .injuries
                 .iter()
                 .filter_map(|(part, rank)| {
                     art.extra(&format!("{}{rank}", part.to_ascii_lowercase()))
-                        .cloned()
+                        .map(|p| (p.clone(), standing_slot.clone(), anchor_of(art, part)))
                 })
                 .collect();
+            let mut wounds: Vec<PathBuf> = worn.iter().map(|(p, _, _)| p.clone()).collect();
             if let Some(path) = prone {
                 let key = path.to_string_lossy().into_owned();
                 if !cache.variant_bases.contains_key(&key) {
-                    let art = load_creature_art(ctx, &path, &cache.skin_name);
+                    let art = load_creature_art_px(ctx, &path, &cache.skin_name).map(|(art, px)| {
+                        let role = crate::creature_light::Role::Pose { standing: standing_slot.clone() };
+                        let slot = crate::creature_light::Slot::Variant(key.clone());
+                        cache.light.register(slot, px, art.texture.clone(), role, format!("creature:{key}"));
+                        art
+                    });
                     cache.variant_bases.insert(key.clone(), art);
                 }
                 // Prone wound layers ({token}_prone_{loc}{rank}) are the
@@ -445,11 +496,17 @@ impl CreatureArtStore {
                 // downed creature's wounds draw pose-matched art instead
                 // of standing layers on a sprawled body.
                 if let Some(Some(prone_art)) = cache.variant_bases.get(&key) {
-                    wounds.extend(want.injuries.iter().filter_map(|(part, rank)| {
-                        prone_art
-                            .extra(&format!("{}{rank}", part.to_ascii_lowercase()))
-                            .cloned()
-                    }));
+                    let prone_worn: Vec<_> = want
+                        .injuries
+                        .iter()
+                        .filter_map(|(part, rank)| {
+                            prone_art
+                                .extra(&format!("{}{rank}", part.to_ascii_lowercase()))
+                                .map(|p| (p.clone(), crate::creature_light::Slot::Variant(key.clone()), anchor_of(prone_art, part)))
+                        })
+                        .collect();
+                    wounds.extend(prone_worn.iter().map(|(p, _, _)| p.clone()));
+                    worn.extend(prone_worn);
                 }
             }
             // Refine the core geometry-calibration store with the decoded
@@ -486,12 +543,25 @@ impl CreatureArtStore {
                     {
                         cache.overlay_scales.insert(key.clone(), scale);
                     }
-                    let tex = crate::image_store::load_texture_file(
+                    let loaded = crate::image_store::load_texture_file_px(
                         ctx,
                         &path,
                         &format!("wound:{key}"),
                         &name,
                     );
+                    let tex = loaded.map(|(tex, px)| {
+                        if let Some((_, wearer, anchor)) = worn.iter().find(|(p, _, _)| *p == path) {
+                            let scale = cache.overlay_scales.get(&key).copied().unwrap_or(1.0);
+                            let role = crate::creature_light::Role::Wound {
+                                standing: standing_slot.clone(),
+                                wearer: wearer.clone(),
+                                anchored: anchor.map(|fy| (fy, scale)),
+                            };
+                            let slot = crate::creature_light::Slot::Overlay(key.clone());
+                            cache.light.register(slot, px, tex.clone(), role, format!("wound:{key}"));
+                        }
+                        tex
+                    });
                     cache.overlays.insert(key, tex);
                 }
             }
@@ -515,8 +585,14 @@ impl CreatureArtStore {
             let abs = skins::resolve_image_path(&cache.root, &path);
             let art = abs
                 .is_file()
-                .then(|| load_creature_art(ctx, &abs, &cache.skin_name))
-                .flatten();
+                .then(|| load_creature_art_px(ctx, &abs, &cache.skin_name))
+                .flatten()
+                .map(|(art, px)| {
+                    let slot = crate::creature_light::Slot::Variant(path.clone());
+                    let role = crate::creature_light::Role::Own;
+                    cache.light.register(slot, px, art.texture.clone(), role, format!("creature:{path}"));
+                    art
+                });
             if art.is_none() {
                 tracing::warn!(
                     "Skin '{}': variant base '{}' missing or unloadable",
@@ -578,12 +654,12 @@ impl CreatureArtStore {
             {
                 cache.overlay_scales.insert(path.clone(), scale);
             }
-            let tex = crate::image_store::load_texture_file(
-                ctx,
-                &abs,
-                &format!("skin:{}:{}", cache.skin_name, path),
-                &cache.skin_name,
-            );
+            let name = format!("skin:{}:{}", cache.skin_name, path);
+            let tex = crate::image_store::load_texture_file_px(ctx, &abs, &name, &cache.skin_name).map(|(tex, px)| {
+                let slot = crate::creature_light::Slot::Overlay(path.clone());
+                cache.light.register(slot, px, tex.clone(), crate::creature_light::Role::Shared, name.clone());
+                tex
+            });
             cache.overlays.insert(path, tex);
         }
     }
@@ -598,12 +674,12 @@ impl CreatureArtStore {
         if let Some(bg) = &scene.background {
             if !cache.scene_backgrounds.contains_key(bg) {
                 let abs = skins::resolve_image_path(&cache.root, bg);
-                let tex = crate::image_store::load_texture_file(
-                    ctx,
-                    &abs,
-                    &format!("scene-bg:{bg}"),
-                    "scene",
-                );
+                let name = format!("scene-bg:{bg}");
+                let tex = crate::image_store::load_texture_file_px(ctx, &abs, &name, "scene").map(|(tex, px)| {
+                    let slot = crate::creature_light::Slot::Backdrop(bg.clone());
+                    cache.light.register(slot, px, tex.clone(), crate::creature_light::Role::Backdrop, name.clone());
+                    tex
+                });
                 cache.scene_backgrounds.insert(bg.clone(), tex);
             }
         }
@@ -614,13 +690,45 @@ impl CreatureArtStore {
             let abs = skins::resolve_image_path(&cache.root, &prop.image);
             let art = abs
                 .is_file()
-                .then(|| load_creature_art(ctx, &abs, "scene"))
-                .flatten();
+                .then(|| load_creature_art_px(ctx, &abs, "scene"))
+                .flatten()
+                .map(|(art, px)| {
+                    let slot = crate::creature_light::Slot::Scenery(prop.image.clone());
+                    let role = crate::creature_light::Role::Own;
+                    cache.light.register(slot, px, art.texture.clone(), role, format!("scenery:{}", prop.image));
+                    art
+                });
             if art.is_none() {
                 tracing::warn!("scene prop '{}' missing or unloadable", prop.image);
             }
             cache.scenery.insert(prop.image.clone(), art);
         }
+        // ADDITION (not in VellumFE): light the scene. A scene without
+        // [light] puts every original texture back.
+        cache.light.set_scene(scene.light.clone(), scene.background.clone());
+        let swaps = cache.light.update(ctx);
+        for (slot, tex) in swaps {
+            cache.swap_texture(&slot, tex);
+        }
+        crate::creature_light::publish(ctx, cache.light.current());
+    }
+
+    /// ADDITION (not in VellumFE): the game clock, the player's Lighting
+    /// strength and the room's indoor/outdoor guess, for scene lighting.
+    pub fn set_light_clock(&mut self, clock: crate::creature_light::LightClock) {
+        self.shared.lock().expect("creature art lock").light.set_clock(clock);
+    }
+
+    /// ADDITION (not in VellumFE): replace the time-of-day defaults
+    /// (`global/lighting.toml`, loaded on first use otherwise).
+    pub fn set_global_lighting(&mut self, global: gs_field::lighting::GlobalLighting) {
+        self.shared.lock().expect("creature art lock").light.set_global(global);
+    }
+
+    /// ADDITION (not in VellumFE): the backdrop's auto scene colours, if
+    /// its pixels are loaded (the Stage editor shows them).
+    pub fn scene_auto_colours(&self, background: &str) -> Option<vellum_light::SceneColours> {
+        self.shared.lock().expect("creature art lock").light.auto_colours(background)
     }
 }
 
@@ -629,7 +737,15 @@ impl CreatureArtStore {
 /// common case comes free from the art itself; a `<image>.toml` sidecar
 /// (anchors + footprint) overrides the derivation per image, so pose art
 /// grounds itself (manifest anchors still win when authored).
-fn load_creature_art(ctx: &egui::Context, path: &Path, skin_name: &str) -> Option<CreatureArt> {
+///
+/// ADDITION (not in VellumFE): also hands back the decoded pixels, which
+/// creature lighting keeps to re-light from (VellumFE's `load_creature_art`
+/// dropped them).
+fn load_creature_art_px(
+    ctx: &egui::Context,
+    path: &Path,
+    skin_name: &str,
+) -> Option<(CreatureArt, std::sync::Arc<crate::creature_light::Px>)> {
     let rgba = crate::image_store::decode_rgba_logged(path, skin_name)?;
     let (w, h) = (rgba.width(), rgba.height());
     if w == 0 || h == 0 {
@@ -728,7 +844,8 @@ fn load_creature_art(ctx: &egui::Context, path: &Path, skin_name: &str) -> Optio
         (bbox[3] - bbox[1]) * h as f32 / ppf * gs_field::cards::UNITS_PER_FOOT
     });
     let template_feet = template_ppf.map(|_| [mid_x, 1.0]);
-    Some(CreatureArt {
+    let px = crate::creature_light::Px::from_image(&rgba);
+    Some((CreatureArt {
         texture,
         head: sidecar_pt("head").unwrap_or([mid_x, bbox[1]]),
         feet: sidecar_pt("feet")
@@ -741,7 +858,7 @@ fn load_creature_art(ctx: &egui::Context, path: &Path, skin_name: &str) -> Optio
         lift: sidecar.lift,
         alpha_px,
         extras,
-    })
+    }, px))
 }
 
 #[cfg(test)]

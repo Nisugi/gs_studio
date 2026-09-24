@@ -1054,6 +1054,7 @@ dependencies = [
  "image",
  "tempfile",
  "tracing",
+ "vellum_light",
 ]
 
 [[package]]

@@ -528,7 +528,7 @@ fn unit_camera(height_ft: f32, px_per_ft: f32) -> gs_puppet::Camera {
 /// Build one posed display list, with no caching. Exposed for tests and
 /// tools; the field goes through [`PuppetCache`].
 pub fn pose_puppet(puppet: &Puppet, pose: &gs_puppet::Pose, key: &PuppetKey) -> PosedPuppet {
-    pose_puppet_with(puppet, pose, key, false)
+    pose_puppet_with(puppet, pose, key, false, None)
 }
 
 /// [`pose_puppet`], plus the smooth skin when `skin` is set.
@@ -537,6 +537,7 @@ pub fn pose_puppet_with(
     pose: &gs_puppet::Pose,
     key: &PuppetKey,
     skin: bool,
+    light: Option<&crate::creature_light::ResolvedLight>,
 ) -> PosedPuppet {
     let posed: Posed<'_> = puppet.pose(pose);
     let wounds = key.wounds();
@@ -564,7 +565,15 @@ pub fn pose_puppet_with(
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
-    let skin = skin.then(|| Arc::new(posed.skin_with(&project, &look, None, key.effects)));
+    let skin = skin.then(|| {
+        let mut skin = posed.skin_with(&project, &look, None, key.effects);
+        // Scene lighting: the skin is its own standing base, lit exactly as
+        // a sprite would be.
+        if let Some(light) = light.filter(|_| !skin.is_empty()) {
+            light.light_image(&mut skin.rgba, skin.w);
+        }
+        Arc::new(skin)
+    });
     PosedPuppet {
         prims: prims.into(),
         shadow: shadow.into(),
@@ -608,6 +617,8 @@ struct PosedKey {
     family: Arc<str>,
     key: PuppetKey,
     skin: bool,
+    /// The scene light's key (0 = unlit); only skins are lit.
+    light: u64,
 }
 
 /// Per-`egui::Context` puppet state: parsed puppets, the pose sets, the
@@ -625,6 +636,8 @@ pub struct PuppetCache {
     resolved: HashMap<u64, Option<Arc<str>>>,
     posed: HashMap<PosedKey, (Arc<PosedPuppet>, u64)>,
     tick: u64,
+    /// The scene light in force (see [`PuppetCache::set_light`]).
+    light: Option<Arc<crate::creature_light::ResolvedLight>>,
     /// Display lists posed since this cache was created (tests, diagnostics).
     pub builds: u64,
     /// Baked puppets parsed since this cache was created.
@@ -775,6 +788,12 @@ impl PuppetCache {
     /// [`posed`](Self::posed), with the smooth skin built too when `skin` is
     /// set (see [`set_puppet_skin`]). Skinned and plain entries are cached
     /// apart.
+    /// The scene light skins are lit with from now on (None = unlit):
+    /// `creature_light::current_light`, once per frame.
+    pub fn set_light(&mut self, light: Option<Arc<crate::creature_light::ResolvedLight>>) {
+        self.light = light;
+    }
+
     pub fn posed_with(
         &mut self,
         family: &Arc<str>,
@@ -783,10 +802,12 @@ impl PuppetCache {
     ) -> Option<Arc<PosedPuppet>> {
         self.tick += 1;
         let tick = self.tick;
+        let light = self.light.clone().filter(|_| skin);
         let cache_key = PosedKey {
             family: family.clone(),
             key: *key,
             skin,
+            light: light.as_ref().map_or(0, |l| l.key),
         };
         if let Some((posed, used)) = self.posed.get_mut(&cache_key) {
             *used = tick;
@@ -799,7 +820,7 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin));
+        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref()));
         self.builds += 1;
         if self.posed.len() >= POSE_CACHE_CAP {
             if let Some(oldest) = self
