@@ -10,7 +10,7 @@
 //! `GS_STUDIO_TAB` is the env form of `--tab`;
 //! `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs);
 //! `GS_STUDIO_SHOT=<path.png>` saves one frame of the window there and
-//! closes; `GS_STUDIO_POSE_EDIT=<pose>[:<bone>]` opens the Rigs tab's 3D
+//! closes; `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs tab's 3D
 //! preview with the pose editor on that pose (and row) -- visual checks.
 //!
 //! gs-studio is a STANDALONE app: with no `--pool` / `GS_STUDIO_POOL` the

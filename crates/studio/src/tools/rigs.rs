@@ -8,7 +8,7 @@ use rig::{templates, View, AXES, PARTS};
 
 use crate::editor::depth::{axis_label, other_view};
 use crate::editor::palette::{label_rgba, LABEL_RGB};
-use crate::editor::pose_edit::{self, Origin, PairState, PoseDoc, Scope, ROOT};
+use crate::editor::pose_edit::{self, Origin, PairState, PoseDoc, Row, Scope, FREE, ROOT};
 use crate::editor::prompt::{NamePrompt, PromptKind};
 use crate::editor::puppet_view::{PoseSource, PuppetView};
 use crate::editor::state::Editor;
@@ -39,6 +39,8 @@ pub struct RigTool {
     eye_drag: bool,
     /// A depth DragValue in the joint list is being dragged.
     depth_value_drag: bool,
+    /// A bone's depth / tip thickness box is being dragged.
+    thickness_drag: bool,
     /// The open Add / Rename prompt, and whether its text box still needs focus.
     prompt: Option<(NamePrompt, bool)>,
     /// "Show on stage" was pressed for this family; the app takes it.
@@ -122,6 +124,7 @@ impl RigTool {
             radius_drag: false,
             eye_drag: false,
             depth_value_drag: false,
+            thickness_drag: false,
             prompt: None,
             show_on_stage: None,
             puppet_view: PuppetView::default(),
@@ -151,14 +154,22 @@ impl RigTool {
         self.session.pool = Some(pool);
     }
 
-    /// Open the 3D preview with the pose editor on `<pose>[:<row>]`
-    /// (`GS_STUDIO_POSE_EDIT`, for visual checks).
+    /// Open the 3D preview with the pose editor on `[<family>/]<pose>[:<row>]`
+    /// (`GS_STUDIO_POSE_EDIT`, for visual checks); the row's bone is
+    /// selected in the bone list too.
     pub fn open_pose_editor(&mut self, spec: &str) {
+        let (family, spec) = spec.split_once('/').unwrap_or(("", spec));
+        if !family.is_empty() {
+            self.session.request(DocAction::OpenFamily(family.to_owned()));
+        }
         let (pose, row) = spec.split_once(':').unwrap_or((spec, ""));
         self.puppet_view.show = true;
         self.pose_edit = true;
         self.puppet_view.pose = if pose.is_empty() { "stand".into() } else { pose.to_owned() };
         self.pose_row = (!row.is_empty()).then(|| row.to_owned());
+        let bones = &self.session.editor.rig().bones;
+        let bone = [row.to_owned(), format!("{row}_l")].iter().find_map(|name| bones.iter().position(|b| &b.name == name));
+        self.session.editor.select_bone(bone);
     }
 
     /// The family whose puppet "Show on stage" asked for, once.
@@ -222,7 +233,8 @@ impl RigTool {
             || self.session.editor.is_depth_dragging()
             || self.radius_drag
             || self.eye_drag
-            || self.depth_value_drag;
+            || self.depth_value_drag
+            || self.thickness_drag;
         {
             let _t = crate::perf_log::span("rigs: bake");
             self.session.baked(interactive);
@@ -530,77 +542,84 @@ impl RigTool {
         let mut reload_stage = false;
         let (mut export, mut build, mut reload_sheet) = (false, false, false);
 
+        let (names, source, error) = match pv.poses(&data_root, &body_type, &family) {
+            Ok((set, source)) => (set.names().into_iter().map(str::to_owned).collect::<Vec<_>>(), Some(*source), None),
+            Err(e) => (Vec::new(), None, Some(e.clone())),
+        };
+        let names = doc_names.unwrap_or(names);
+        let file = match source {
+            Some(PoseSource::DataRoot) => format!("data/poses/{body_type}.toml"),
+            _ => format!("the built-in {body_type} poses"),
+        };
+        // The pose: which one, edit it, kill it, re-read the files.
         ui.horizontal_wrapped(|ui| {
-            ui.strong("3D puppet");
-            let (names, source, error) = match pv.poses(&data_root, &body_type, &family) {
-                Ok((set, source)) => (set.names().into_iter().map(str::to_owned).collect::<Vec<_>>(), Some(*source), None),
-                Err(e) => (Vec::new(), None, Some(e.clone())),
-            };
-            let names = doc_names.unwrap_or(names);
+            ui.strong("Pose");
             let shown = if pv.pose.is_empty() { "rest (as clicked)".to_owned() } else { pv.pose.clone() };
-            egui::ComboBox::from_id_salt("puppet_pose").selected_text(shown).show_ui(ui, |ui| {
-                ui.selectable_value(&mut pv.pose, String::new(), "rest (as clicked)");
-                for name in &names {
-                    ui.selectable_value(&mut pv.pose, name.clone(), name);
-                }
-            });
-            if ui
-                .button("Reload poses")
-                .on_hover_text("Read the pose files again after editing them, here AND on the stage")
-                .clicked()
-            {
-                pv.reload_poses();
-                reload_stage = true;
-            }
-            if ui.button("Reset view").clicked() {
-                pv.reset_camera();
-            }
-            if ui.button("Play death").on_hover_text("Fall down dead from this pose, as the stage does when a creature dies").clicked() {
-                self.death = Some(std::time::Instant::now());
-            }
+            egui::ComboBox::from_id_salt("puppet_pose")
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut pv.pose, String::new(), "rest (as clicked)");
+                    for name in &names {
+                        ui.selectable_value(&mut pv.pose, name.clone(), name);
+                    }
+                })
+                .response
+                .on_hover_text(format!("Poses from {file}"));
             if ui
                 .toggle_value(&mut self.pose_edit, "Edit pose")
-                .on_hover_text("Change the shown pose's angles: pick a bone (click it, or its name), then its sliders")
+                .on_hover_text("Change the shown pose's angles and joint limits: pick a bone (click it, or its name), then its sliders")
                 .clicked()
                 && self.pose_edit
                 && pv.pose.is_empty()
             {
                 pv.pose = "stand".into();
             }
+            if ui.button("Play death").on_hover_text("Fall down dead from this pose, as the stage does when a creature dies").clicked() {
+                self.death = Some(std::time::Instant::now());
+            }
+            if ui.button("Reload poses").on_hover_text(format!("Read {file} again after editing it by hand, here AND on the stage")).clicked() {
+                pv.reload_poses();
+                reload_stage = true;
+            }
+        });
+        if let Some(e) = error {
+            ui.colored_label(ui.visuals().warn_fg_color, e);
+        }
+        // How it is drawn.
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("View");
             ui.checkbox(&mut pv.skin, "Smooth skin")
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
             ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.texture, "Texture"))
                 .on_hover_text("Dress the skin in data/textures/<family>/sheet.png");
-            match (source, error) {
-                (Some(PoseSource::DataRoot), _) => ui.weak(format!("poses: data/poses/{body_type}.toml")),
-                (Some(PoseSource::Shipped), _) => ui.weak(format!("poses: built-in {body_type}")),
-                (None, Some(e)) => ui.colored_label(ui.visuals().warn_fg_color, e),
-                (None, None) => ui.weak(""),
-            };
+            if ui.button("Reset view").on_hover_text("Face front, default zoom").clicked() {
+                pv.reset_camera();
+            }
         });
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Texture:");
-            export = ui
-                .button("Export templates")
-                .on_hover_text("Write the front / side / back paint-over silhouettes and the pattern sheet to data/textures/<family>/")
-                .clicked();
-            build = ui
-                .button("Build sheet from paintings")
-                .on_hover_text("Project front.png / side.png / back.png from that folder onto the pattern: writes sheet.png")
-                .clicked();
-            reload_sheet = ui.button("Reload").on_hover_text("Read sheet.png again after painting on it").clicked();
-            match self.sheet.as_ref().map(|s| &s.pixels) {
-                Some(Err(e)) => {
+        egui::CollapsingHeader::new("Texture painting").id_salt("rig_texture_tools").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                    export = ui
+                    .button("Export templates")
+                    .on_hover_text("Write the front / side / back paint-over silhouettes and the pattern sheet to data/textures/<family>/")
+                    .clicked();
+                build = ui
+                    .button("Build sheet from paintings")
+                    .on_hover_text("Project front.png / side.png / back.png from that folder onto the pattern: writes sheet.png")
+                    .clicked();
+                reload_sheet = ui.button("Reload").on_hover_text("Read sheet.png again after painting on it").clicked();
+                match self.sheet.as_ref().map(|s| &s.pixels) {
+                    Some(Err(e)) => {
+                        ui.colored_label(ui.visuals().warn_fg_color, e);
+                    }
+                    Some(Ok(None)) | None => {
+                        ui.weak("no sheet.png yet");
+                    }
+                    Some(Ok(Some(_))) => {}
+                }
+                if let Some((_, _, Err(e))) = &self.sheet_texture {
                     ui.colored_label(ui.visuals().warn_fg_color, e);
                 }
-                Some(Ok(None)) | None => {
-                    ui.weak("no sheet.png yet");
-                }
-                Some(Ok(Some(_))) => {}
-            }
-            if let Some((_, _, Err(e))) = &self.sheet_texture {
-                ui.colored_label(ui.visuals().warn_fg_color, e);
-            }
+            });
         });
         if export || build {
             let outcome = match self.session.puppet().clone() {
@@ -636,7 +655,8 @@ impl RigTool {
         if self.pose_edit {
             egui::Panel::bottom("pose_editor")
                 .resizable(true)
-                .default_size(250.0)
+                // Half the panel: sliders and limits need the room.
+                .default_size((ui.available_height() * 0.5).max(250.0))
                 .min_size(120.0)
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.pose_editor(ui, &family, &body_type));
@@ -946,9 +966,8 @@ impl RigTool {
         // Both ways: the grid is as wide as its widest row wants to be.
         egui::ScrollArea::both().id_salt("bones").auto_shrink([false, false]).show(ui, |ui| {
             self.bone_grid(ui);
-            if let Some(bone) = self.session.editor.selected_bone() {
-                ui.separator();
-                self.bone_details(ui, bone);
+            if self.session.editor.selected_bone().is_none() {
+                ui.weak("Click a bone's name: its details open on the right.");
             }
         });
     }
@@ -965,6 +984,11 @@ impl RigTool {
         let mut released = false;
 
         egui::Grid::new("rig_bones").num_columns(4).striped(true).show(ui, |ui| {
+            ui.weak("Bone").on_hover_text("Click a bone for its parent, pivot, thickness and chain");
+            ui.weak("Part").on_hover_text("Which body part its pixels are labelled");
+            ui.weak("Width").on_hover_text("Half its thickness across the silhouette. Auto measures it; untick to set it");
+            ui.label("");
+            ui.end_row();
             for (i, depth) in editor.rig().hierarchy_order() {
                 let bone = editor.rig().bones[i].clone();
                 let is_selected = editor.selected_bone() == Some(i);
@@ -1026,152 +1050,232 @@ impl RigTool {
         self.radius_drag = dragging;
     }
 
-    /// The selected bone: parent, pivot, and its joint chain.
+    /// The selected bone (the right panel's inspector), in collapsible
+    /// sections: parent and pivot, its thickness overrides, its joint chain.
     fn bone_details(&mut self, ui: &mut egui::Ui, index: usize) {
-        let pixels = self.session.last_bake().and_then(|b| b.baked.bone_pixels.get(index).copied());
-        let editor = &mut self.session.editor;
-        let Some(bone) = editor.rig().bones.get(index).cloned() else {
+        let (pixels, width_used) = self
+            .session
+            .last_bake()
+            .map(|b| (b.baked.bone_pixels.get(index).copied(), b.baked.bone_radii_ft.get(index).copied().flatten()))
+            .unwrap_or_default();
+        // The depth the builder measured, read off the puppet: rebuilt when
+        // idle, the last one built while something is being dragged.
+        if !self.thickness_drag && !self.radius_drag && !self.session.editor.is_dragging() {
+            let _ = self.session.puppet();
+        }
+        let Some(bone) = self.session.editor.rig().bones.get(index).cloned() else {
             return;
         };
-        ui.horizontal(|ui| {
-            ui.strong(&bone.name);
-            if let Some(n) = pixels {
-                ui.weak(format!("{n} px"));
-            }
+        let depth_used = self.session.last_puppet().and_then(|p| {
+            p.segments.iter().filter(|s| s.bone == bone.name).flat_map(|s| s.stations.iter().map(|st| st.d)).reduce(f32::max)
         });
-        egui::Grid::new("rig_bone_details").num_columns(2).show(ui, |ui| {
-            ui.label("Parent").on_hover_text("The bone this one hangs off. Its own children are not offered.");
-            let shown = bone.parent.as_deref().unwrap_or("(root)");
-            egui::ComboBox::from_id_salt("bone_parent").selected_text(shown).width(150.0).show_ui(ui, |ui| {
-                if ui.selectable_label(bone.parent.is_none(), "(root)").clicked() {
-                    editor.set_bone_parent(index, None);
-                }
-                for choice in editor.parent_choices(index) {
-                    if ui.selectable_label(bone.parent.as_deref() == Some(choice.as_str()), &choice).clicked() {
-                        editor.set_bone_parent(index, Some(&choice));
-                    }
-                }
-            });
-            ui.end_row();
+        let editor = &mut self.session.editor;
+        let depth_set = editor.rig().radius_depth_ft.get(&bone.name).copied();
+        let tip_set = editor.rig().radius_tip_ft.get(&bone.name).copied();
+        let off_plane = match editor.rig().view {
+            View::Front => "front-to-back",
+            View::Side => "side-to-side",
+        };
 
-            ui.label("Pivot").on_hover_text("The joint this bone's piece will rotate about when posed");
-            let first = bone.joints.first().map_or("(first joint)".to_owned(), |j| format!("(first: {j})"));
-            let shown = bone.pivot.clone().unwrap_or_else(|| first.clone());
-            egui::ComboBox::from_id_salt("bone_pivot").selected_text(shown).width(150.0).show_ui(ui, |ui| {
-                if ui.selectable_label(bone.pivot.is_none(), first).clicked() {
-                    editor.set_bone_pivot(index, None);
-                }
-                for joint in &bone.joints {
-                    if ui.selectable_label(bone.pivot.as_deref() == Some(joint.as_str()), joint).clicked() {
-                        editor.set_bone_pivot(index, Some(joint));
+        if let Some(n) = pixels {
+            ui.weak(format!("{n} px of the silhouette"));
+        }
+
+        egui::CollapsingHeader::new("Parent and pivot").id_salt("bone_sec_hierarchy").default_open(true).show(ui, |ui| {
+            egui::Grid::new("rig_bone_details").num_columns(2).show(ui, |ui| {
+                ui.label("Parent").on_hover_text("The bone this one hangs off. Its own children are not offered.");
+                let shown = bone.parent.as_deref().unwrap_or("(root)");
+                egui::ComboBox::from_id_salt("bone_parent").selected_text(shown).width(150.0).show_ui(ui, |ui| {
+                    if ui.selectable_label(bone.parent.is_none(), "(root)").clicked() {
+                        editor.set_bone_parent(index, None);
                     }
-                }
+                    for choice in editor.parent_choices(index) {
+                        if ui.selectable_label(bone.parent.as_deref() == Some(choice.as_str()), &choice).clicked() {
+                            editor.set_bone_parent(index, Some(&choice));
+                        }
+                    }
+                });
+                ui.end_row();
+
+                ui.label("Pivot").on_hover_text("The joint this bone's piece will rotate about when posed");
+                let first = bone.joints.first().map_or("(first joint)".to_owned(), |j| format!("(first: {j})"));
+                let shown = bone.pivot.clone().unwrap_or_else(|| first.clone());
+                egui::ComboBox::from_id_salt("bone_pivot").selected_text(shown).width(150.0).show_ui(ui, |ui| {
+                    if ui.selectable_label(bone.pivot.is_none(), first).clicked() {
+                        editor.set_bone_pivot(index, None);
+                    }
+                    for joint in &bone.joints {
+                        if ui.selectable_label(bone.pivot.as_deref() == Some(joint.as_str()), joint).clicked() {
+                            editor.set_bone_pivot(index, Some(joint));
+                        }
+                    }
+                });
+                ui.end_row();
             });
-            ui.end_row();
         });
 
-        ui.label("Chain");
-        egui::Grid::new("rig_bone_chain").num_columns(5).show(ui, |ui| {
-            for (k, joint) in bone.joints.iter().enumerate() {
-                ui.weak(format!("{}.", k + 1));
-                let mut text = egui::RichText::new(joint);
-                if !editor.is_placed(joint) {
-                    text = text.weak();
-                }
-                ui.label(text);
-                if ui.add_enabled(k > 0, egui::Button::new("Up").small()).clicked() {
-                    editor.chain_move(index, k, true);
-                }
-                if ui.add_enabled(k + 1 < bone.joints.len(), egui::Button::new("Down").small()).clicked() {
-                    editor.chain_move(index, k, false);
-                }
-                if ui.add(egui::Button::new("Remove").small()).clicked() {
-                    editor.chain_remove(index, k);
+        let mut drag = DragState::default();
+        egui::CollapsingHeader::new("Thickness").id_salt("bone_sec_thickness").default_open(true).show(ui, |ui| {
+            egui::Grid::new("rig_bone_thickness").num_columns(2).show(ui, |ui| {
+                ui.label("Width").on_hover_text(
+                    "Half the bone's thickness across this silhouette, in feet (the same as its row in the list above).\n\
+                     Auto measures it from the silhouette.",
+                );
+                if let Some(v) = thickness_row(ui, bone.radius_ft, width_used, Toggle::Auto, 0.25, &mut drag) {
+                    editor.set_bone_radius(index, v);
                 }
                 ui.end_row();
-            }
+
+                ui.label("Depth").on_hover_text(format!(
+                    "Half the bone's thickness {off_plane}, the direction this silhouette cannot show, in feet.\n\
+                     Auto measures it from the family's other silhouette. Set it for something the other view \
+                     hides or gets wrong: a wing that is a thin blade, a flat tail, a tusk."
+                ));
+                if let Some(v) = thickness_row(ui, depth_set, depth_used, Toggle::Auto, 0.1, &mut drag) {
+                    editor.set_bone_depth_radius(index, v);
+                }
+                ui.end_row();
+
+                ui.label("Tip width").on_hover_text(
+                    "Narrow the bone from its width at the first joint to this at the last, in feet, \
+                     along its whole chain: a feather blade to its point, a horn, a tail.\n\
+                     Off = no taper (the measured width all along).",
+                );
+                let start = bone.radius_ft.or(width_used).unwrap_or(0.1);
+                if let Some(v) = thickness_row(ui, tip_set, None, Toggle::Taper, (start * 0.25).max(0.01), &mut drag) {
+                    editor.set_bone_tip_radius(index, v);
+                }
+                ui.end_row();
+            });
+            ui.weak("The 3D preview shows the change as you drag.");
         });
-        if bone.joints.is_empty() {
-            ui.weak("No joints yet.");
+        if drag.released {
+            editor.end_continuous_edit();
         }
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("bone_chain_add").selected_text("Append joint...").width(150.0).show_ui(ui, |ui| {
-                for joint in editor.chain_choices(index) {
-                    if ui.selectable_label(false, &joint).clicked() {
-                        editor.chain_insert(index, usize::MAX, &joint);
+        self.thickness_drag = drag.dragging;
+        let editor = &mut self.session.editor;
+
+        let chain_title = format!("Chain ({} joints)", bone.joints.len());
+        egui::CollapsingHeader::new(chain_title).id_salt("bone_sec_chain").default_open(true).show(ui, |ui| {
+            egui::Grid::new("rig_bone_chain").num_columns(5).show(ui, |ui| {
+                for (k, joint) in bone.joints.iter().enumerate() {
+                    ui.weak(format!("{}.", k + 1));
+                    let mut text = egui::RichText::new(joint);
+                    if !editor.is_placed(joint) {
+                        text = text.weak();
                     }
+                    ui.label(text);
+                    if ui.add_enabled(k > 0, egui::Button::new("Up").small()).clicked() {
+                        editor.chain_move(index, k, true);
+                    }
+                    if ui.add_enabled(k + 1 < bone.joints.len(), egui::Button::new("Down").small()).clicked() {
+                        editor.chain_move(index, k, false);
+                    }
+                    if ui.add(egui::Button::new("Remove").small()).clicked() {
+                        editor.chain_remove(index, k);
+                    }
+                    ui.end_row();
                 }
             });
-            let picking = editor.chain_pick() == Some(index);
-            let pick = ui
-                .add(egui::Button::selectable(picking, "Pick on canvas"))
-                .on_hover_text("While on, clicking a placed joint on the canvas appends it to this chain (Esc ends)");
-            if pick.clicked() {
-                editor.set_chain_pick((!picking).then_some(index));
+            if bone.joints.is_empty() {
+                ui.weak("No joints yet.");
             }
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("bone_chain_add").selected_text("Append joint...").width(150.0).show_ui(ui, |ui| {
+                    for joint in editor.chain_choices(index) {
+                        if ui.selectable_label(false, &joint).clicked() {
+                            editor.chain_insert(index, usize::MAX, &joint);
+                        }
+                    }
+                });
+                let picking = editor.chain_pick() == Some(index);
+                let pick = ui
+                    .add(egui::Button::selectable(picking, "Pick on canvas"))
+                    .on_hover_text("While on, clicking a placed joint on the canvas appends it to this chain (Esc ends)");
+                if pick.clicked() {
+                    editor.set_chain_pick((!picking).then_some(index));
+                }
+            });
         });
     }
 
     // --------------------------------------------------------------- right
 
+    /// Collapsible sections, what needs attention first: warnings, part
+    /// shares, anchors and eyes, depth, then the map's numbers (closed).
     fn right_panel(&mut self, ui: &mut egui::Ui) {
         let Some(bake) = self.session.last_bake() else {
             ui.label("No silhouette for this family / view.");
             return;
         };
-        let baked = &bake.baked;
-        ui.strong("Parts");
-        egui::Grid::new("rig_shares").num_columns(3).show(ui, |ui| {
-            for (k, part) in PARTS.iter().enumerate() {
-                let share = baked.share(part);
-                let assigned = self.session.editor.rig().bones.iter().any(|b| b.part.as_deref() == Some(part));
-                if share == 0.0 && !assigned {
-                    continue;
-                }
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
-                ui.painter().rect_filled(rect, 2.0, label_color(k + 1));
-                ui.label(*part);
-                let text = format!("{:5.1}%", share * 100.0);
-                if share < MIN_SHARE {
-                    ui.colored_label(ui.visuals().warn_fg_color, text);
-                } else {
-                    ui.monospace(text);
-                }
-                ui.end_row();
+        // Depth warnings sit with the rest rather than in their own corner.
+        let mut all = bake.warnings.clone();
+        all.extend(self.session.depth().warnings(self.session.editor.rig()));
+        let warn = ui.visuals().warn_fg_color;
+        let title = egui::RichText::new(format!("Warnings ({})", all.len()));
+        let title = if all.is_empty() { title } else { title.color(warn) };
+        egui::CollapsingHeader::new(title).id_salt("rig_sec_warnings").default_open(true).show(ui, |ui| {
+            if all.is_empty() {
+                ui.weak("none");
+            }
+            for w in &all {
+                ui.horizontal_wrapped(|ui| ui.colored_label(warn, format!("\u{26A0} {w}")));
             }
         });
 
-        ui.separator();
-        let eye_used = baked.eye_radius_ft;
-        self.anchors_and_eyes(ui, eye_used);
-
-        ui.separator();
-        self.depth_panel(ui);
+        if let Some(index) = self.session.editor.selected_bone() {
+            let name = self.session.editor.rig().bones.get(index).map(|b| b.name.clone()).unwrap_or_default();
+            egui::CollapsingHeader::new(egui::RichText::new(format!("Bone: {name}")).strong())
+                .id_salt("rig_sec_bone")
+                .default_open(true)
+                .show(ui, |ui| self.bone_details(ui, index));
+        }
 
         let Some(bake) = self.session.last_bake() else {
             return;
         };
         let baked = &bake.baked;
+        egui::CollapsingHeader::new("Parts").id_salt("rig_sec_parts").default_open(true).show(ui, |ui| {
+            egui::Grid::new("rig_shares").num_columns(3).show(ui, |ui| {
+                for (k, part) in PARTS.iter().enumerate() {
+                    let share = baked.share(part);
+                    let assigned = self.session.editor.rig().bones.iter().any(|b| b.part.as_deref() == Some(part));
+                    if share == 0.0 && !assigned {
+                        continue;
+                    }
+                    let (rect, _) = ui.allocate_exact_size(Vec2::splat(12.0), Sense::hover());
+                    ui.painter().rect_filled(rect, 2.0, label_color(k + 1));
+                    ui.label(*part);
+                    let text = format!("{:5.1}%", share * 100.0);
+                    if share < MIN_SHARE {
+                        ui.colored_label(warn, text).on_hover_text("Hardly any of the silhouette: is a bone missing its part?");
+                    } else {
+                        ui.monospace(text);
+                    }
+                    ui.end_row();
+                }
+            });
+        });
 
-        ui.separator();
-        ui.strong("Map");
-        let grid = baked.map.grid;
-        ui.label(format!("{} x {} px at {:.1} px/ft", grid.w, grid.h, baked.px_per_ft));
-        ui.label(format!("aspect {:.3}   span {:.3}", baked.metrics.aspect, baked.metrics.span));
-        ui.label(format!("ground at {:.1}% down", baked.ground_frac * 100.0));
-        ui.label(format!("orphan pixels: {}", baked.map.orphans));
+        let eye_used = baked.eye_radius_ft;
+        egui::CollapsingHeader::new("Anchors and eyes")
+            .id_salt("rig_sec_anchors")
+            .default_open(true)
+            .show(ui, |ui| self.anchors_and_eyes(ui, eye_used));
 
-        // Depth warnings sit with the rest rather than in their own corner.
-        let mut all = bake.warnings.clone();
-        all.extend(self.session.depth().warnings(self.session.editor.rig()));
-        ui.separator();
-        ui.strong(format!("Warnings ({})", all.len()));
-        if all.is_empty() {
-            ui.weak("none");
-        }
-        for w in &all {
-            ui.horizontal_wrapped(|ui| ui.colored_label(ui.visuals().warn_fg_color, format!("\u{26A0} {w}")));
-        }
+        egui::CollapsingHeader::new("Depth").id_salt("rig_sec_depth").default_open(true).show(ui, |ui| self.depth_panel(ui));
+
+        let Some(bake) = self.session.last_bake() else {
+            return;
+        };
+        let baked = &bake.baked;
+        egui::CollapsingHeader::new("Map").id_salt("rig_sec_map").default_open(false).show(ui, |ui| {
+            let grid = baked.map.grid;
+            ui.label(format!("{} x {} px at {:.1} px/ft", grid.w, grid.h, baked.px_per_ft));
+            ui.label(format!("aspect {:.3}   span {:.3}", baked.metrics.aspect, baked.metrics.span));
+            ui.label(format!("ground at {:.1}% down", baked.ground_frac * 100.0));
+            ui.label(format!("orphan pixels: {}", baked.map.orphans));
+        });
     }
 
     /// Depth: how many joints are corrected, the resets, and the selected
@@ -1180,7 +1284,6 @@ impl RigTool {
         let model = self.session.depth().clone();
         let editor = &mut self.session.editor;
         let rig_view = editor.rig().view;
-        ui.strong("Depth");
         if !model.available() {
             ui.weak("Not available for this family.");
             ui.horizontal_wrapped(|ui| ui.weak(model.unavailable_reason(editor.rig())));
@@ -1269,7 +1372,6 @@ impl RigTool {
         let editor = &mut self.session.editor;
         let joints = editor.joint_order();
         let side = editor.rig().view == View::Side;
-        ui.strong("Anchors and eyes");
         let mut dragging = false;
         let mut released = false;
         egui::Grid::new("rig_anchors").num_columns(2).show(ui, |ui| {
@@ -1356,7 +1458,7 @@ impl RigTool {
         let mut fit = std::mem::take(&mut self.session.fit_requested);
         // A new document reframes DEPTH too, next time it is shown.
         self.depth_fit |= fit;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             fit |= ui.button("Fit").clicked();
             ui.weak(format!("{:.0} px/ft", self.view.zoom));
             ui.separator();
@@ -1394,7 +1496,7 @@ impl RigTool {
         // A fit asked for by the document (a new family) reframes both views.
         fit |= std::mem::replace(&mut self.session.fit_requested, false);
         let rig_view = self.session.editor.rig().view;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             fit |= ui.button("Fit").clicked();
             ui.weak(format!("{:.0} px/ft", self.depth_view.zoom));
             ui.separator();
@@ -2003,6 +2105,9 @@ impl RigTool {
             }
         });
         if row.key != ROOT {
+            limits_editor(ui, doc, scope, family, row);
+        }
+        if row.key != ROOT {
             ui.weak("A hanging limb: +swing takes it back, -swing forward; +spread lifts a left limb out. Knees bend +, elbows -.");
         }
     }
@@ -2102,6 +2207,122 @@ impl RigTool {
 /// The joint list's placed / unplaced marker: a filled or a hollow dot,
 /// PAINTED. (U+25CF / U+25CB are not in egui's default fonts; as text they
 /// drew as empty boxes.)
+/// The picked row's joint limits, collapsed until wanted: `[low, high]`
+/// degrees per turn angle and per bend, written to `[limits]` (every
+/// family) or `[family_limits.<family>]` as the pose scope says. A mirror
+/// pair's limits are its stem's, for the left side.
+fn limits_editor(ui: &mut egui::Ui, doc: &mut PoseDoc, scope: Scope, family: &str, row: &Row) {
+    let key = match row.pair {
+        Some(PairState::Split) => row.key.trim_end_matches("_l").trim_end_matches("_r").to_owned(),
+        _ => row.key.clone(),
+    };
+    let (now, origin) = doc.limits(scope, family, &key);
+    let title = if now.is_some() { "Joint limits" } else { "Joint limits (none: turns freely)" };
+    egui::CollapsingHeader::new(title).id_salt("pose_limits").show(ui, |ui| {
+        let mut l = now.clone().unwrap_or_default();
+        let range = |ui: &mut egui::Ui, name: &str, r: &mut [f32; 2]| {
+            ui.label(name);
+            let [lo, hi] = *r;
+            ui.add(egui::DragValue::new(&mut r[0]).speed(0.5).range(-180.0..=hi).prefix("from ").suffix(" deg"));
+            ui.add(egui::DragValue::new(&mut r[1]).speed(0.5).range(lo..=180.0).prefix("to ").suffix(" deg"));
+            ui.end_row();
+        };
+        let mut turn = l.rot.is_some();
+        if ui.checkbox(&mut turn, "Limit its turn").on_hover_text("Bound swing, twist and spread (all three, or none)").changed() {
+            l.rot = turn.then_some([FREE; 3]);
+        }
+        let mut bends = !l.bend.is_empty();
+        if row.bends > 0 && ui.checkbox(&mut bends, "Limit its bends").on_hover_text("Bound how far each joint along the chain folds").changed() {
+            l.bend = if bends { vec![FREE; row.bends] } else { Vec::new() };
+        }
+        egui::Grid::new("pose_limits_grid").num_columns(3).show(ui, |ui| {
+            if let Some(rot) = l.rot.as_mut() {
+                for (r, name) in rot.iter_mut().zip(["swing (x)", "twist (y)", "spread (z)"]) {
+                    range(ui, name, r);
+                }
+            }
+            for (i, r) in l.bend.iter_mut().enumerate() {
+                range(ui, &format!("bend {}", i + 1), r);
+            }
+        });
+        if !l.bend.is_empty() && l.bend.len() < row.bends && ui.small_button("Limit the next bend too").clicked() {
+            l.bend.push(FREE);
+        }
+        if l != now.clone().unwrap_or_default() {
+            let empty = l.rot.is_none() && l.bend.is_empty();
+            doc.set_limits(scope, family, &key, (!empty).then_some(&l));
+        }
+        ui.horizontal_wrapped(|ui| {
+            match (origin, scope) {
+                (Origin::Here, Scope::Shared) => ui.weak("every family of this body type"),
+                (Origin::Here, Scope::Family) => ui.weak(format!("{family}'s own limits")),
+                (Origin::Shared, _) => ui.weak(format!("the shared limits; changing them gives {family} its own")),
+                (Origin::Rest, _) => ui.weak("not in the file"),
+            };
+            if ui
+                .add_enabled(origin == Origin::Here, egui::Button::new("Clear limits"))
+                .on_hover_text("Remove this key's limits from this section")
+                .clicked()
+            {
+                doc.set_limits(scope, family, &key, None);
+            }
+        });
+        if row.pair.is_some() {
+            ui.weak(format!("Limits are the left side's ({key}); the right side mirrors them."));
+        }
+    });
+}
+
+/// What a thickness row's checkbox says: "Auto" (ticked = measured) or
+/// "Taper" (ticked = set by hand).
+#[derive(Clone, Copy, PartialEq)]
+enum Toggle {
+    Auto,
+    Taper,
+}
+
+/// Drags in progress / released across a panel's value boxes.
+#[derive(Default)]
+struct DragState {
+    dragging: bool,
+    released: bool,
+}
+
+/// One thickness override: its checkbox, then the value box when set or
+/// the measured value, greyed, when not. Some(new value) on a change; a
+/// value switched on starts from what was measured (or `fallback`).
+fn thickness_row(ui: &mut egui::Ui, set: Option<f32>, measured: Option<f32>, toggle: Toggle, fallback: f32, drag: &mut DragState) -> Option<Option<f32>> {
+    let mut out = None;
+    ui.horizontal(|ui| {
+        let (mut ticked, text) = match toggle {
+            Toggle::Auto => (set.is_none(), "Auto"),
+            Toggle::Taper => (set.is_some(), "Taper"),
+        };
+        if ui.checkbox(&mut ticked, text).changed() {
+            let on = if toggle == Toggle::Auto { !ticked } else { ticked };
+            out = Some(on.then(|| measured.unwrap_or(fallback)));
+        }
+        match set {
+            Some(mut r) => {
+                let d = ui.add(egui::DragValue::new(&mut r).speed(0.005).range(0.01..=30.0).fixed_decimals(2).suffix(" ft"));
+                if d.changed() {
+                    out = Some(Some(r));
+                }
+                drag.dragging |= d.dragged();
+                drag.released |= d.drag_stopped() || d.lost_focus();
+            }
+            None => {
+                match (toggle, measured) {
+                    (Toggle::Taper, _) => ui.weak("off"),
+                    (Toggle::Auto, Some(r)) => ui.weak(format!("{r:.2} ft")),
+                    (Toggle::Auto, None) => ui.weak("--").on_hover_text("Not measured yet: needs a part, placed joints and a puppet"),
+                };
+            }
+        }
+    });
+    out
+}
+
 fn placed_marker(ui: &mut egui::Ui, placed: bool) {
     let height = ui.text_style_height(&egui::TextStyle::Body);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(10.0, height), Sense::hover());

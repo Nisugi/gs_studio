@@ -154,20 +154,31 @@ all editable afterwards.
     column shows each placed joint's off-plane coordinate -- weak = a guess,
     bold with an *x* to reset = set by hand.
   - **Bones** are listed as a tree (children indented under their parent),
-    each with a part dropdown and radius (Auto = measured by `rig_bake`; the
-    radius actually used is always shown). *Add*, *Rename*, *Delete* act on
-    the selected bone. Clicking a bone's name selects it and opens its
-    details under the list: **Parent**, **Pivot**, its pixel count, and its
-    joint **Chain** (Up / Down / Remove per joint, *Append joint...*, *Pick on
-    canvas*).
+    under *Bone / Part / Width* headings: a part dropdown and the width
+    (Auto = measured by `rig_bake`; the width actually used is always
+    shown). *Add*, *Rename*, *Delete* act on the selected bone. Clicking a
+    bone's name selects it and opens it in the right panel's **Bone**
+    section.
 - **Centre**: silhouette, live label map (one colour per part, eye discs
   included), bones, joints, a faint link from each parent's pivot to its
   child's, eye-disc outlines; the selected bone is highlighted and its pivot
   boxed.
-- **Right**: legend with per-part pixel share; **Anchors and eyes** (which
-  joint is head / mouth / saddle / left eye / right eye, and the eye radius:
-  Auto or a value); **Depth** (below); map size / aspect / span, orphan
-  count; warnings.
+- **Right**: collapsible sections, what needs attention first.
+  **Warnings** (orange when there are any); **Bone: <name>** when a bone is
+  selected -- its pixel count, *Parent and pivot*, **Thickness** (below) and
+  its joint **Chain** (Up / Down / Remove per joint, *Append joint...*, *Pick
+  on canvas*); **Parts** (legend with per-part pixel share); **Anchors and
+  eyes** (which joint is head / mouth / saddle / left eye / right eye, and
+  the eye radius: Auto or a value); **Depth** (below); **Map** (size /
+  aspect / span, orphan count; closed by default).
+
+**Thickness** (the selected bone): *Width* is the same value as the bone
+list's; *Depth* is its half-thickness in the direction the silhouette cannot
+show (Auto = measured from the other silhouette, the value shown greyed);
+*Tip width* with *Taper* ticked narrows the bone from its width at the first
+joint to this at the last (a feather blade, a horn). Each is written to the
+rig file (see *Thickness overrides* below); the 3D preview follows a drag,
+and a renamed or deleted bone takes its overrides with it.
 
 | Input | Does |
 |---|---|
@@ -186,6 +197,9 @@ all editable afterwards.
 **3D preview** (the toggle beside Undo / Redo) opens a panel with the rig's
 puppet, rebuilt live from the rig as it stands -- unsaved edits, depth
 overrides and all -- so a joint drag shows its effect on the 3D body at once.
+Its controls are three rows: **Pose** (the pose list, *Edit pose*, *Play
+death*, *Reload poses*), **View** (*Smooth skin*, *Texture*, *Reset view*)
+and a collapsed **Texture painting** section.
 Drag turns it, the wheel zooms; the pose list comes from
 `<data>/poses/<body_type>.toml` (else the built-in copy) with the family's
 own overrides applied, and *Reload poses* re-reads the file after an edit
@@ -196,8 +210,8 @@ same). A file that does not parse is left out and named on the status line.
 (`Posed::skin`: a depth test per pixel, joints blended, contours only where
 the depth steps), the way the stage draws it; off shows the older flat
 shape list, whose parts jump in front of each other as the figure turns.
-*Texture* dresses the skin in `<data>/textures/<family>/sheet.png`. The row
-below: *Export templates* writes the front / side / back paint-over
+*Texture* dresses the skin in `<data>/textures/<family>/sheet.png`. Under
+*Texture painting*: *Export templates* writes the front / side / back paint-over
 silhouettes (`*_paint.png`) and the pattern (`pattern.png`, `patches.txt`:
 the skin cut open, `gs_puppet::uv`); *Build sheet from paintings* projects
 `front.png` / `side.png` / `back.png` from that folder onto the pattern as
@@ -214,7 +228,7 @@ its own spring and swings past before settling), exactly as the stage does
 when a puppet it saw alive dies; the dead pose is held a second, then the
 shown pose comes back.
 
-**Edit pose** (in the 3D panel's top row) opens the pose editor under the
+**Edit pose** (in the 3D panel's Pose row) opens the pose editor under the
 puppet, on the pose in the list (*rest* becomes `stand`). Click a bone on
 the puppet, or its name in the row list, and its sliders appear: *swing
 (x)*, *twist (y)*, *spread (z)* and one *bend* per inner joint (for `root`:
@@ -225,7 +239,12 @@ wins). The sliders stop at the joint's limits -- the `[limits]` table in
 the pose file (per bone or pair stem, `[low, high]` degrees per Euler angle
 and per bend; `[family_limits.<family>]` replaces keys for one family),
 which every pose, blend and death fall on the stage is held inside; a value
-written outside them by hand is flagged. *edits every <body type>* writes the shared `[pose.<name>]`;
+written outside them by hand is flagged. The **Joint limits** section under
+the sliders (collapsed) edits them: *Limit its turn* bounds all three angles,
+*Limit its bends* each bend, each as a *from* / *to* pair; they are written
+to `[limits]` or, in the *<family> only* scope, `[family_limits.<family>]`
+(which replaces the shared key whole), and *Clear limits* removes the key. A
+pair's limits are its stem's, for the left side; the right mirrors them. *edits every <body type>* writes the shared `[pose.<name>]`;
 *<family> only* writes that family's sparse correction
 `[family.<family>.<name>]`: rows it does not name show the shared value in
 italics, and moving one adds it to the correction. *Clear* removes a key,

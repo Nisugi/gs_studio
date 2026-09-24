@@ -318,7 +318,7 @@ impl Editor {
         Ok(index)
     }
 
-    /// Rename a bone; its children follow.
+    /// Rename a bone; its children and its thickness overrides follow.
     pub fn rename_bone(&mut self, bone: usize, new: &str) -> Result<(), String> {
         let Some(old) = self.rig.bones.get(bone).map(|b| b.name.clone()) else {
             return Err("No such bone".to_owned());
@@ -334,6 +334,11 @@ impl Editor {
         for b in rig.bones.iter_mut().filter(|b| b.parent.as_deref() == Some(old.as_str())) {
             b.parent = Some(new.clone());
         }
+        for map in [&mut rig.radius_depth_ft, &mut rig.radius_tip_ft] {
+            if let Some(v) = map.remove(&old) {
+                map.insert(new.clone(), v);
+            }
+        }
         rig.bones[bone].name = new;
         Ok(())
     }
@@ -346,6 +351,8 @@ impl Editor {
         };
         let rig = self.edit(None);
         rig.bones.remove(bone);
+        rig.radius_depth_ft.remove(&gone.name);
+        rig.radius_tip_ft.remove(&gone.name);
         for b in rig.bones.iter_mut().filter(|b| b.parent.as_deref() == Some(gone.name.as_str())) {
             b.parent = gone.parent.clone();
         }

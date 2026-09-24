@@ -21,7 +21,7 @@ window by itself and prints what the stage / calibrators hold;
 `GS_STUDIO_SMOKE=1` pre-populates the stage. Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
-closes (read the PNG); `GS_STUDIO_POSE_EDIT=<pose>[:<bone>]` opens the Rigs
+closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs
 tab's 3D preview with the pose editor (`editor/pose_edit.rs`) on that pose.
 
 Crate examples (`cargo run -p <crate> --example <name>`) are the visual test

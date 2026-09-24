@@ -3,6 +3,8 @@
 //! re-ordering joints and bones, the hierarchy, anchors, eyes) are in
 //! `structure.rs`.
 
+use std::collections::BTreeMap;
+
 use rig::{mirror_name, Pt, Rig, Template, View};
 
 use super::depth::{DepthDrag, EditView};
@@ -11,6 +13,11 @@ use super::view::{Canvas, ViewTransform};
 
 /// How close (screen px) a click must be to grab a joint.
 pub const HIT_RADIUS_PX: f32 = 9.0;
+
+/// Undo tags for a bone's depth and tip thickness drags (plus the bone's
+/// index): apart from its width's (the bare index) and from each other.
+const DEPTH_RADIUS_TAG: u64 = 1 << 32;
+const TIP_RADIUS_TAG: u64 = 2 << 32;
 
 #[derive(Debug, Clone)]
 pub(super) struct Drag {
@@ -294,6 +301,35 @@ impl Editor {
         }
     }
 
+    /// The bone's off-plane half-thickness (`Rig::radius_depth_ft`); None
+    /// is Auto (measured from the other silhouette). Drags coalesce as
+    /// [`Editor::set_bone_radius`].
+    pub fn set_bone_depth_radius(&mut self, bone: usize, radius_ft: Option<f32>) {
+        self.set_bone_map(bone, radius_ft, DEPTH_RADIUS_TAG, |r| &mut r.radius_depth_ft);
+    }
+
+    /// The width the bone tapers to at its last joint
+    /// (`Rig::radius_tip_ft`); None is no taper.
+    pub fn set_bone_tip_radius(&mut self, bone: usize, radius_ft: Option<f32>) {
+        self.set_bone_map(bone, radius_ft, TIP_RADIUS_TAG, |r| &mut r.radius_tip_ft);
+    }
+
+    fn set_bone_map(&mut self, bone: usize, radius_ft: Option<f32>, tag: u64, map: fn(&mut Rig) -> &mut BTreeMap<String, f32>) {
+        let Some(name) = self.rig.bones.get(bone).map(|b| b.name.clone()) else {
+            return;
+        };
+        // Zero means "not set" to the builder: keep a set value above it.
+        let radius_ft = radius_ft.map(|r| r.max(0.01));
+        if map(&mut self.rig).get(&name).copied() == radius_ft {
+            return;
+        }
+        let m = map(self.edit(Some(tag + bone as u64)));
+        match radius_ft {
+            Some(r) => m.insert(name, r),
+            None => m.remove(&name),
+        };
+    }
+
     /// A slider / drag-value was released.
     pub fn end_continuous_edit(&mut self) {
         self.history.seal();
@@ -569,6 +605,32 @@ mod tests {
         assert_eq!(e.rig().bones[0].part.as_deref(), Some("head"));
         assert!(!e.is_dirty());
         assert!(e.redo() && e.is_dirty());
+    }
+
+    #[test]
+    fn depth_and_tip_thickness_set_undo_and_follow_a_rename() {
+        let mut e = biped();
+        let name = e.rig().bones[1].name.clone();
+        for r in [0.1, 0.2] {
+            e.set_bone_depth_radius(1, Some(r));
+        }
+        e.end_continuous_edit();
+        e.set_bone_tip_radius(1, Some(0.0));
+        assert_eq!(e.rig().radius_depth_ft.get(&name), Some(&0.2));
+        assert_eq!(e.rig().radius_tip_ft.get(&name), Some(&0.01), "a set value stays above zero");
+        assert!(e.undo());
+        assert!(e.rig().radius_tip_ft.is_empty());
+        assert!(e.undo(), "one drag, one step");
+        assert!(e.rig().radius_depth_ft.is_empty());
+        assert!(e.redo());
+        e.rename_bone(1, "spine_x").unwrap();
+        assert_eq!(e.rig().radius_depth_ft.get("spine_x"), Some(&0.2), "the override follows the rename");
+        assert!(!e.rig().radius_depth_ft.contains_key(&name));
+        e.set_bone_depth_radius(1, None);
+        assert!(e.rig().radius_depth_ft.is_empty());
+        e.set_bone_tip_radius(1, Some(0.05));
+        e.delete_bone(1);
+        assert!(e.rig().radius_tip_ft.is_empty(), "a deleted bone takes its overrides");
     }
 
     #[test]

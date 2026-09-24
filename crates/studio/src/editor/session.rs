@@ -325,6 +325,12 @@ impl Session {
         &self.puppet.as_ref().expect("just built").1
     }
 
+    /// The puppet [`Session::puppet`] last built, even if the rig has moved
+    /// on since: for readouts that must not rebuild it mid-drag.
+    pub fn last_puppet(&self) -> Option<&Puppet> {
+        self.puppet.as_ref().and_then(|(_, p)| p.as_ref().ok())
+    }
+
     /// The depth guesses as [`Session::refresh_depth`] last took them. An
     /// empty model (no guesses, no mask) until the first refresh.
     pub fn depth(&self) -> &DepthModel {

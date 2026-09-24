@@ -35,6 +35,17 @@ pub struct Entry {
     pub bend: Vec<f32>,
 }
 
+/// One key's joint limits as the file writes them, `[low, high]` degrees:
+/// all three Euler angles or none, and the first `bend.len()` bends.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Limits {
+    pub rot: Option<[[f32; 2]; 3]>,
+    pub bend: Vec<[f32; 2]>,
+}
+
+/// The widest range an angle can have.
+pub const FREE: [f32; 2] = [-180.0, 180.0];
+
 /// Where a row's value comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
@@ -128,6 +139,50 @@ fn entry_value(e: &Entry) -> Value {
     }
     if !e.bend.is_empty() {
         t.insert("bend", Value::Array(array(e.bend.iter().copied())));
+    }
+    t.fmt();
+    Value::InlineTable(t)
+}
+
+fn ranges(v: Option<&Value>) -> Vec<[f32; 2]> {
+    v.and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|r| r.as_array().map(|r| r.iter().filter_map(num).collect::<Vec<_>>())).filter(|r| r.len() == 2).map(|r| [r[0], r[1]]).collect())
+        .unwrap_or_default()
+}
+
+fn limits_of(item: &Item) -> Option<Limits> {
+    let get = |k: &str| -> Option<Value> {
+        match item {
+            Item::Value(Value::InlineTable(t)) => t.get(k).cloned(),
+            Item::Table(t) => t.get(k).and_then(Item::as_value).cloned(),
+            _ => None,
+        }
+    };
+    if !item.is_inline_table() && !item.is_table() {
+        return None;
+    }
+    let rot = ranges(get("rot").as_ref());
+    Some(Limits { rot: (rot.len() == 3).then(|| [rot[0], rot[1], rot[2]]), bend: ranges(get("bend").as_ref()) })
+}
+
+fn limits_value(l: &Limits) -> Value {
+    let pairs = |rs: &[[f32; 2]]| {
+        let mut a: Array = rs
+            .iter()
+            .map(|[lo, hi]| {
+                let (lo, hi) = (lo.min(*hi), hi.max(*lo));
+                Value::Array(array([lo, hi]))
+            })
+            .collect();
+        a.fmt();
+        Value::Array(a)
+    };
+    let mut t = InlineTable::new();
+    if let Some(rot) = &l.rot {
+        t.insert("rot", pairs(rot));
+    }
+    if !l.bend.is_empty() {
+        t.insert("bend", pairs(&l.bend));
     }
     t.fmt();
     Value::InlineTable(t)
@@ -351,6 +406,88 @@ impl PoseDoc {
         }
         if families.is_empty() {
             self.doc.remove("family");
+        }
+    }
+
+    fn limits_table(&self, scope: Scope, family: &str) -> Option<&Table> {
+        match scope {
+            Scope::Shared => self.doc.get("limits")?.as_table(),
+            Scope::Family => self.doc.get("family_limits")?.as_table()?.get(&family.to_ascii_lowercase())?.as_table(),
+        }
+    }
+
+    /// `key`'s joint limits in `scope` (a pair's limits are its stem's, for
+    /// the left side), and where they come from: the family scope shows the
+    /// shared limits until it names the key. None = no limit.
+    pub fn limits(&self, scope: Scope, family: &str, key: &str) -> (Option<Limits>, Origin) {
+        let get = |s: Scope| self.limits_table(s, family).and_then(|t| t.get(key)).and_then(limits_of);
+        if let Some(l) = get(scope) {
+            return (Some(l), Origin::Here);
+        }
+        if scope == Scope::Family {
+            if let Some(l) = get(Scope::Shared) {
+                return (Some(l), Origin::Shared);
+            }
+        }
+        (None, Origin::Rest)
+    }
+
+    /// Write `key`'s limits (None removes them) under `[limits]`, or this
+    /// family's `[family_limits.<family>]` (which replaces the shared key
+    /// whole). A drag on one key is one undo step.
+    pub fn set_limits(&mut self, scope: Scope, family: &str, key: &str, limits: Option<&Limits>) {
+        let now = self.limits_table(scope, family).and_then(|t| t.get(key)).and_then(limits_of);
+        if now.as_ref() == limits {
+            return;
+        }
+        self.checkpoint(Some((scope, family.to_owned(), "\0limits".to_owned(), key.to_owned())));
+        let fam = family.to_ascii_lowercase();
+        let root = self.doc.as_table_mut();
+        let table = match scope {
+            Scope::Shared => {
+                let item = root.entry("limits").or_insert(Item::None);
+                if !item.is_table() {
+                    *item = Item::Table(Table::new());
+                }
+                item.as_table_mut().expect("table")
+            }
+            Scope::Family => {
+                let top = root.entry("family_limits").or_insert(Item::None);
+                if !top.is_table() {
+                    let mut t = Table::new();
+                    t.set_implicit(true);
+                    *top = Item::Table(t);
+                }
+                let item = top.as_table_mut().expect("table").entry(&fam).or_insert(Item::None);
+                if !item.is_table() {
+                    *item = Item::Table(Table::new());
+                }
+                item.as_table_mut().expect("table")
+            }
+        };
+        match limits {
+            Some(l) => {
+                let mut v = limits_value(l);
+                match table.get(key).and_then(Item::as_value) {
+                    Some(old) => *v.decor_mut() = old.decor().clone(),
+                    None => v.decor_mut().set_prefix(" "),
+                }
+                table.insert(key, Item::Value(v));
+            }
+            None => {
+                table.remove(key);
+            }
+        }
+        // An emptied family table goes, so the file only says what differs.
+        if scope == Scope::Family {
+            if let Some(top) = self.doc.get_mut("family_limits").and_then(Item::as_table_mut) {
+                if top.get(&fam).and_then(Item::as_table).is_some_and(Table::is_empty) {
+                    top.remove(&fam);
+                }
+                if top.is_empty() {
+                    self.doc.remove("family_limits");
+                }
+            }
         }
     }
 
@@ -669,6 +806,41 @@ mod tests {
         assert!(d.pose_names("ogre").contains(&"crouch".to_owned()));
         assert!(d.delete_pose("kneel"));
         assert!(!d.text().contains("kneel") && !d.delete_pose("stand"), "{}", d.text());
+    }
+
+    #[test]
+    fn limits_edit_in_place_per_scope_and_bound_the_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut d = doc(dir.path());
+        assert_eq!(d.limits(Scope::Shared, "", "leg"), (None, Origin::Rest));
+        let leg = Limits { rot: Some([[-120.0, 40.0], [-40.0, 40.0], [-30.0, 70.0]]), bend: vec![[0.0, 150.0]] };
+        for hi in [30.0, 35.0, 40.0] {
+            let mut l = leg.clone();
+            l.rot.as_mut().unwrap()[0][1] = hi;
+            d.set_limits(Scope::Shared, "", "leg", Some(&l));
+        }
+        assert!(d.text().contains("[limits]\nleg = { rot = [[-120.0, 40.0], [-40.0, 40.0], [-30.0, 70.0]], bend = [[0.0, 150.0]] }"), "{}", d.text());
+        assert!(d.text().contains("# Knees bent."), "comments survive");
+        let set = PoseSet::from_toml(&d.text()).unwrap();
+        assert_eq!(set.limit("leg_l").unwrap().rot[0], Some([-120.0, 40.0]));
+        d.undo();
+        assert_eq!(d.text(), FILE, "one drag, one undo step");
+        d.redo();
+
+        // The family inherits, then replaces the key whole.
+        assert_eq!(d.limits(Scope::Family, "ogre", "leg"), (Some(leg.clone()), Origin::Shared));
+        let ogre = Limits { rot: None, bend: vec![[0.0, 90.0]] };
+        d.set_limits(Scope::Family, "ogre", "leg", Some(&ogre));
+        assert!(d.text().contains("[family_limits.ogre]\nleg = { bend = [[0.0, 90.0]] }"), "{}", d.text());
+        let ogres = PoseSet::from_toml(&d.text()).unwrap().for_family("ogre").into_owned();
+        assert_eq!(ogres.limit("leg").unwrap().rot, [None; 3]);
+        d.set_limits(Scope::Family, "ogre", "leg", None);
+        assert!(!d.text().contains("family_limits"), "{}", d.text());
+        // A range typed high-low is written low-high.
+        d.set_limits(Scope::Shared, "", "arm", Some(&Limits { rot: None, bend: vec![[10.0, -150.0]] }));
+        assert!(d.text().contains("arm = { bend = [[-150.0, 10.0]] }"), "{}", d.text());
+        d.set_limits(Scope::Shared, "", "leg", None);
+        assert!(PoseSet::from_toml(&d.text()).unwrap().limit("leg").is_none());
     }
 
     #[test]
