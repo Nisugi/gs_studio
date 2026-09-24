@@ -129,11 +129,24 @@ pub enum Kind {
     /// Something held, not body ([`crate::prop`]): drawn in its own colour,
     /// never textured, never baked, and left out of grounding.
     Prop { color: [u8; 3] },
+    /// Clothing ([`crate::outfit`]): painted and outlined like the body, but
+    /// never baked and left out of grounding; `hang` says how it follows a
+    /// pose.
+    Garment { hang: crate::outfit::Hang },
 }
 
 impl Kind {
     pub fn is_prop(self) -> bool {
         matches!(self, Kind::Prop { .. })
+    }
+
+    pub fn is_garment(self) -> bool {
+        matches!(self, Kind::Garment { .. })
+    }
+
+    /// Flesh: what the rig measured, what stands on the floor.
+    pub fn is_body(self) -> bool {
+        matches!(self, Kind::Trunk | Kind::Limb | Kind::Hand)
     }
 }
 
@@ -182,6 +195,9 @@ pub struct Segment {
     /// pelvis, an upper arm in the shoulder): they are filled but not
     /// outlined, so a limb grows out of the body instead of being pinned on.
     pub bare: usize,
+    /// Covered by a garment ([`crate::outfit`]): not drawn, outlined or
+    /// given depth, but still posed and still standing on the floor.
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -633,8 +649,8 @@ impl Puppet {
                     Kind::Limb => {
                         run.is_some() && half <= LIMB_DEPTH_MAX * ref_w && half >= LIMB_DEPTH_MIN * ref_w
                     }
-                    // (The builder never makes a prop.)
-                    Kind::Hand | Kind::Prop { .. } => false,
+                    // (The builder never makes a prop or a garment.)
+                    Kind::Hand | Kind::Prop { .. } | Kind::Garment { .. } => false,
                 };
                 // Over the trunk the row still says where the limb sits (it
                 // is tucked into the body there -- shifting it to the run's
@@ -653,7 +669,7 @@ impl Puppet {
                 shift.push(if ok && !crossing { mid } else { 0.0 });
             }
             let mut d: Vec<f32> = match kind {
-                Kind::Hand | Kind::Prop { .. } => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
+                Kind::Hand | Kind::Prop { .. } | Kind::Garment { .. } => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
                 Kind::Limb => interpolate_depth(&depth, &m.w),
                 Kind::Trunk => fill_gaps(&depth, ds, 0.0).unwrap_or_else(|| m.w.clone()),
             };
@@ -865,6 +881,7 @@ impl Puppet {
                 hinge: q3(hinge),
                 stations,
                 bare: 0,
+                hidden: false,
             });
         }
         for i in 0..segments.len() {

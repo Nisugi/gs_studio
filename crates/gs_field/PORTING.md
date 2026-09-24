@@ -347,3 +347,10 @@ held-props file (`gs_puppet::PropSet`): `data/props/weapons.toml` embedded
 (`EMBEDDED_PROPS`, a published copy), overridden by
 `<base>/global/props/weapons.toml` (`props_dir`); it reloads with the puppet
 set. `with_props` for hosts building a set by hand.
+
+### 6.14 Bestiary descriptions
+
+`CreatureEntry.description: Option<String>` (serde-defaulted) and
+`BestiaryDb::entries()` (every entry, in file order): gs-studio's
+`--export-jobs` walks the whole bestiary and briefs a texture generator
+with each creature's description.

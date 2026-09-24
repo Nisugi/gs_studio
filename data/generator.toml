@@ -1,0 +1,7 @@
+# What gs-studio tells the texture generator (textures/jobs.json, written by
+# --export-jobs; see docs/texture-generator-plan.md).
+#
+# Families whose puppet is approved: only their depth guides go into the
+# jobs. A depth guide of an unapproved shape would teach the generator its
+# defects.
+depth_families = ["humanoid"]

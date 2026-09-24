@@ -41,7 +41,11 @@ All paths are relative to the gs-studio **data folder** (in this repo:
 | `textures/<family>/front_paint.png` | gs-studio: Rigs tab → Texture painting → Export templates | RGBA PNG. The creature's silhouette filled with flat grey (205, 205, 205, alpha 255) on a fully transparent background. 512 px on its long side (e.g. humanoid front: 186 × 512). |
 | `textures/<family>/back_paint.png` | same | The front silhouette mirrored left-right. |
 | `textures/<family>/side_paint.png` | same | The side silhouette (e.g. humanoid: 88 × 512). |
-| `textures/jobs.json` | gs-studio **will** export it (not there yet — until it is, build the list yourself from the templates and the bestiary, see below) | The job list. |
+| `textures/<family>/{front,back,side}_depth.png` | same (Export templates writes them too) | **Depth guides** for ControlNet depth: the puppet's rest body seen from that view, in **exactly its template's framing at 4× its size** (humanoid front: 744 × 2048). Opaque grey: nearest surface white (255), farthest body surface grey (64), outside the silhouette black (0) — the MiDaS convention depth ControlNets expect. Hairline seams in the outline (the humanoid's side view draws its arm a sliver off the body) are closed. **Use only for approved families — today: humanoid.** |
+| `textures/<family>/marks.json` | same | Where the puppet's eyes are in each template (`views.<view>.eyes`: `x`, `y`, radius `r` in template pixels; multiply by the painting's scale). **Paint the eyes there**: a painted skin wears no eye dots on the stage, so the face is wherever the painting puts it. |
+| `textures/<family>/outfits/<outfit>/…` | same, for every outfit a creature wears (`data/outfits/outfits.toml`) | The same set of templates, depth guides and marks for the family **dressed** in that outfit (robe, hood, cloak, …): the outline includes the garments. See `docs/clothing-kit-spec.md`. |
+| `textures/jobs.json` | gs-studio: `gs-studio.exe --data <data root> --export-jobs` (headless; also *Export jobs* in the Rigs tab). It exports every template above first. | The job list: every bestiary creature a rig draws (627 today). |
+| `textures/<…>/projected/{side,back}_{render,unpainted}.png` | gs-studio: `gs-studio.exe --data <data root> --project <family>[/<creature>]:side\|back` | Projection-first (`docs/projection-first-export-spec.md`): what the paintings so far show from the side / back, and the mask of what is left to paint. |
 
 Template sizes today (width × height, px; back = front). They change when a
 rig or silhouette changes, so always read the real file. Note that many side
@@ -76,10 +80,13 @@ views are **landscape** (four-legged animals, spiders, snakes):
       "height_ft": 9.0,
       "description": "Huge and dangerous, the forest troll towers above ...",
       "brief": "a huge hulking troll with thick cracked grey hide like stone plates, ...",
+      "outfit": [],
+      "outfit_key": null,
+      "marks": "textures/troll/marks.json",
       "views": {
-        "front": { "template": "textures/troll/front_paint.png", "size": [419, 512] },
-        "back":  { "template": "textures/troll/back_paint.png",  "size": [419, 512] },
-        "side":  { "template": "textures/troll/side_paint.png",  "size": [396, 512] }
+        "front": { "template": "textures/troll/front_paint.png", "depth": "textures/troll/front_depth.png", "size": [419, 512] },
+        "back":  { "template": "textures/troll/back_paint.png",  "depth": "textures/troll/back_depth.png",  "size": [419, 512] },
+        "side":  { "template": "textures/troll/side_paint.png",  "depth": "textures/troll/side_depth.png",  "size": [396, 512] }
       },
       "out_dir": "textures/troll/forest_troll"
     }
@@ -89,14 +96,22 @@ views are **landscape** (four-legged animals, spiders, snakes):
 
 - `size` is the template's pixel size when the list was written. If the
   template on disk has another size, the rig changed since: skip the job and
-  report it ("stale template") — do not generate against it.
+  report it ("stale template") — do not generate against it. A depth guide
+  must be exactly 4× its template; otherwise it is stale too.
+- `depth` is present only for families whose puppet is approved (today:
+  humanoid). No `depth` key → run without depth control.
 - `brief` may be empty: then write one from `description` (section 8), or
   skip the job if `description` is empty too.
-- Until gs-studio exports `jobs.json`: the bestiary is
-  `crates/gs_field/data/bestiary.json` (`{"entries": [{"name", "family",
-  "type", "height", "description", ...}]}`), and the family a creature is
-  drawn as is decided inside gs-studio. For the pilot, hand-write `jobs.json`
-  for 10 humanoid creatures.
+- A creature with an outfit (`"outfit": ["robe", "hood"]`,
+  `"outfit_key": "robe+hood"`) has its `views` and `marks` in
+  `textures/<family>/outfits/<outfit_key>/`: paint the garments into the
+  dressed outline. Creatures with the same outfit share those templates.
+- `out_dir` is the creature's own folder: `front.png`, `side.png`,
+  `back.png` go there, and gs-studio builds that creature's skin from them
+  (*Build every skin*). Several creatures drawn by one family each get their
+  own skin.
+- `brief` is always empty from gs-studio; `description` comes from the
+  bestiary (empty for about 80 creatures).
 
 ### Outputs
 
@@ -288,10 +303,13 @@ trusted to the model.
    - Masked fill: mask = silhouettes grown 8–16 px, feather 0–4 px, inside
      pre-filled grey, denoise 1.0.
    - ControlNet-Union: lineart / canny of the silhouette outline at 0.4–0.6.
-     **No depth yet** — depth maps come from gs-studio's puppets, and feeding
-     today's unapproved animal shapes would teach the model their defects.
-     Add depth (0.7–0.9, end at 0.85) only for families whose puppet has been
-     approved.
+     **Depth, for approved families only (today: humanoid).** gs-studio's
+     `*_depth.png` guides (section 2) show the body's form and where the
+     joints sit, not just its edge. Use them at 0.7–0.9, ending at 0.85; in
+     a control sheet, scale and place each guide exactly as its template (it
+     has the template's framing at 4×), with black where the sheet is grey
+     canvas. Feeding today's unapproved animal shapes would teach the model
+     their defects, so those run without depth until approved.
    - IP-Adapter, weight type "style transfer", 0.6–0.8, the ONE fixed style
      image for all ~600 creatures.
    - Sampler: dpmpp_2m karras, 30 steps, CFG 5–6. 2–4 seeds per creature.
@@ -555,11 +573,12 @@ gs-studio work (ours), in the order the milestones need it:
 
 | # | Deliverable | Needed by |
 | --- | --- | --- |
-| G1 | A separate skin per creature, and a "build every skin" command | M2 |
-| G2 | `jobs.json` export (section 2) | M4 (hand-write it until then) |
+| G1 | A separate skin per creature, and a "build every skin" command | **Studio side done**: creature folders (`out_dir`), *Build every skin*. The stage does not show per-creature skins yet |
+| G2 | `jobs.json` export (section 2) | **Done**: `--export-jobs` |
 | G3 | Control sheet export per family: views at one shared scale, mask, `layout.json` | M3 (per-view jobs until then) |
 | G4 | Textured turnaround render for review | M5 |
-| G5 | Depth maps and the projection pass, from approved puppets only | Later |
+| G5 | Depth maps and the projection pass, from approved puppets only | **Done**: `*_depth.png` from Export templates; the projection pass (depth-tested) was already in `prefill`. Humanoid approved (`data/generator.toml`) |
+| G6 | Projection-first renders (`docs/projection-first-export-spec.md`) | **Done**: `--project <family>[/<creature>]:side\|back` |
 
 ## 11. Risks and open questions
 
@@ -580,7 +599,8 @@ Risks:
 - **Odd shapes.** Worms, arachnids, serpents and ghosts may not fill their
   silhouettes, or may get faces on the back of the head.
 - **The animal puppets are not approved yet.** Their 3D shapes still have
-  known defects (being reworked in gs-studio). Do not use their depth maps,
+  known defects (being reworked in gs-studio). Do not use their depth maps
+  (gs-studio writes them for every family; only humanoid's are approved),
   and expect paintings wrapped onto them to show the defects. Start with the
   humanoid family.
 - **Licences.** Qwen-Image-2.1 is research-only; the FLUX dev family is

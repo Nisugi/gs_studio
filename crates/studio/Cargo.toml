@@ -26,6 +26,8 @@ gs_field = { path = "../gs_field" }
 gs_field_egui = { path = "../gs_field_egui" }
 # Texture sheets and paint-over templates (editor::texture).
 png = "0.17"
+# marks.json and jobs.json for the texture generator (editor::texture).
+serde_json = "1"
 # Scene lighting types for the Stage editor.
 vellum_light = { path = "../vellum_light" }
 # The five art calibrators, hosted as tabs through `ui_contents`.

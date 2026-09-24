@@ -85,10 +85,11 @@ impl Puppet {
         format!("{family}.puppet.toml")
     }
 
-    /// The puppet as baked. Held props ([`crate::prop`]) are not part of
-    /// it: they come last, so dropping them leaves every index valid.
+    /// The puppet as baked: the bare body. Garments ([`crate::outfit`]) and
+    /// held props ([`crate::prop`]) are not part of it: they come last, so
+    /// dropping them leaves every index valid.
     pub fn to_baked(&self) -> BakedPuppet {
-        let body = self.segments.iter().take_while(|s| !s.kind.is_prop()).count();
+        let body = self.segments.iter().take_while(|s| s.kind.is_body()).count();
         let groups = self.segments[..body].iter().map(|s| s.group + 1).max().unwrap_or(0);
         BakedPuppet {
             version: BAKED_VERSION,
@@ -119,7 +120,7 @@ impl Puppet {
                         Kind::Trunk => "trunk",
                         Kind::Limb => "limb",
                         Kind::Hand => "hand",
-                        Kind::Prop { .. } => unreachable!("props are not baked"),
+                        Kind::Prop { .. } | Kind::Garment { .. } => unreachable!("props and garments are not baked"),
                     }
                     .to_owned(),
                     chain_index: s.chain_index as u32,
@@ -183,6 +184,7 @@ impl Puppet {
                 axis_w: narrow3(s.axis_w),
                 axis_d: narrow3(s.axis_d),
                 hinge: narrow3(s.hinge),
+                hidden: false,
                 stations: s
                     .stations
                     .iter()

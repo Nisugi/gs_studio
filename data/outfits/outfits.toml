@@ -1,0 +1,55 @@
+# What each creature wears, from the clothing kit (kit.toml). One table per
+# creature, named by its bestiary name token (lowercase, spaces and hyphens
+# as underscores: gs_field::naming::name_token):
+#
+#   [grim_gigas_skald]
+#   wear = ["robe", "hood"]
+#   robe = { flare = 1.6 }     # its own tweaks of the kit's numbers
+#
+# A creature with no table wears nothing (its paint covers whatever lies on
+# the body). Proposed 2026-09-24 from the ascension art
+# (Creature Images/processed/ascension_creatures); review before painting.
+
+[grim_gigas_skald]
+wear = ["robe", "hood"]
+
+[flayed_gigas_disciple]
+wear = ["robe_short", "hood"]
+
+[squamous_reptilian_mutant]
+wear = ["robe"]
+
+[stunted_halfling_bloodspeaker]
+wear = ["cloak"]
+cloak = { length = 0.9 }
+
+[gaudy_phantasmic_conjurer]
+wear = ["robe", "cloak"]
+
+[triton_warlock]
+wear = ["robe_short"]
+
+[triton_fanatic]
+wear = ["robe_short"]
+
+[triton_brawler]
+wear = ["skirt"]
+
+[tattooed_gigas_berserker]
+wear = ["skirt"]
+
+[brawny_gigas_shield_maiden]
+wear = ["skirt", "pauldrons"]
+
+[infernal_death_knight]
+wear = ["skirt", "pauldrons"]
+skirt = { length = 0.45 }
+
+[shining_winged_disir]
+wear = ["skirt", "pauldrons"]
+
+[cadaverous_tatterdemalion_ghast]
+wear = ["robe_short"]
+
+[bloody_halfling_cannibal]
+wear = ["robe_short"]

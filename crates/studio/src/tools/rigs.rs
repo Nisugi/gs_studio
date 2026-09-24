@@ -53,6 +53,8 @@ pub struct RigTool {
     sheet: Option<SheetFile>,
     sheet_serial: u64,
     sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
+    /// A running "Export jobs" (every family's templates and jobs.json).
+    jobs_export: Option<std::sync::mpsc::Receiver<Result<(std::path::PathBuf, usize), String>>>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
     /// Asked on a worker thread: a stalled `stat` must not freeze a frame.
@@ -144,6 +146,7 @@ impl RigTool {
             sheet: None,
             sheet_serial: 0,
             sheet_texture: None,
+            jobs_export: None,
             files: Default::default(),
             saved_rigs: Default::default(),
             pose_edit: false,
@@ -577,6 +580,7 @@ impl RigTool {
         let pv = &mut self.puppet_view;
         let mut reload_stage = false;
         let (mut export, mut build, mut reload_sheet) = (false, false, false);
+        let (mut build_all, mut project, mut export_jobs) = (false, None, false);
 
         let (names, source, error) = match pv.poses(&data_root, &body_type, &family) {
             Ok((set, source)) => (set.names().into_iter().map(str::to_owned).collect::<Vec<_>>(), Some(*source), None),
@@ -671,6 +675,24 @@ impl RigTool {
                     .on_hover_text("Project front.png / side.png / back.png from that folder onto the pattern: writes sheet.png")
                     .clicked();
                 reload_sheet = ui.button("Reload").on_hover_text("Read sheet.png again after painting on it").clicked();
+                build_all = ui
+                    .button("Build every skin")
+                    .on_hover_text("Build sheet.png in every creature folder of this family (data/textures/<family>/<creature>/), each in its outfit")
+                    .clicked();
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Projection-first:");
+                if ui.button("front -> side").on_hover_text("Render what front.png shows from the side, and what is left to paint: projected/side_*.png").clicked() {
+                    project = Some(gs_puppet::PaintView::Side);
+                }
+                if ui.button("front + side -> back").on_hover_text("The same from behind, from front.png and side.png: projected/back_*.png").clicked() {
+                    project = Some(gs_puppet::PaintView::Back);
+                }
+                let running = self.jobs_export.is_some();
+                export_jobs = ui
+                    .add_enabled(!running, egui::Button::new(if running { "Exporting jobs..." } else { "Export jobs" }))
+                    .on_hover_text("Every family's and outfit's templates, and data/textures/jobs.json for the texture generator (all families; takes a while)")
+                    .clicked();
                 match self.sheet.as_ref().map(|s| &s.pixels) {
                     Some(Err(e)) => {
                         ui.colored_label(ui.visuals().warn_fg_color, e);
@@ -685,6 +707,51 @@ impl RigTool {
                 }
             });
         });
+        if build_all || project.is_some() {
+            let outcome = match self.session.puppet().clone() {
+                Err(why) => Err(format!("no puppet to texture yet: {why}")),
+                Ok(puppet) => {
+                    let outlines = &self.session.outlines;
+                    match project {
+                        Some(view) => {
+                            let d = crate::editor::texture::Dressed::new(&puppet, outlines, &family, None);
+                            crate::editor::texture::export_projected(&crate::editor::texture::dir(&data_root, &family), &d, view, gs_puppet::GRAZING)
+                                .map(|files| format!("Projected: {}", files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", ")))
+                        }
+                        None => crate::editor::texture::build_every_skin(&data_root, &family, &puppet, outlines).map(|(built, failed)| {
+                            let mut s = format!("Built {} skin(s)", built.len());
+                            if !failed.is_empty() {
+                                s += &format!("; FAILED: {}", failed.join("; "));
+                            }
+                            s
+                        }),
+                    }
+                }
+            };
+            self.session.status = outcome.unwrap_or_else(|e| e);
+        }
+        if export_jobs && self.jobs_export.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (root, outlines) = (data_root.clone(), self.session.outlines.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(crate::editor::texture::export_jobs(&root, &outlines));
+            });
+            self.jobs_export = Some(rx);
+            self.session.status = "Exporting every template and jobs.json...".into();
+        }
+        if let Some(rx) = &self.jobs_export {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.session.status = match result {
+                        Ok((path, n)) => format!("{n} jobs written to {}", path.display()),
+                        Err(e) => format!("EXPORT FAILED: {e}"),
+                    };
+                    self.jobs_export = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(std::time::Duration::from_millis(250)),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => self.jobs_export = None,
+            }
+        }
         if export || build {
             let outcome = match self.session.puppet().clone() {
                 Err(why) => Err(format!("no puppet to texture yet: {why}")),

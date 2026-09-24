@@ -302,6 +302,7 @@ impl Puppet {
                     hinge: grip.flat,
                     stations,
                     bare: 0,
+                    hidden: false,
                 });
             }
         }
@@ -330,7 +331,7 @@ fn grip_frame(puppet: &Puppet, hand: Hand, grip: Grip) -> Option<GripFrame> {
             .segments
             .iter()
             .enumerate()
-            .filter(|(_, s)| !s.kind.is_prop() && s.bone.ends_with(side) && want(s))
+            .filter(|(_, s)| s.kind.is_body() && s.bone.ends_with(side) && want(s))
             .max_by_key(|(_, s)| s.chain_index)
             .map(|(i, _)| i)
     };

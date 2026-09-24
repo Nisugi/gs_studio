@@ -52,6 +52,10 @@ pub struct CreatureEntry {
     /// "claw", "shield strike"). A puppet holds the weapon one names.
     #[serde(default)]
     pub offense: Offense,
+    /// The template's description (what gs-studio briefs a texture
+    /// generator with).
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// The attack names of an entry's `offense` block (the values are ignored).
@@ -115,6 +119,11 @@ impl BestiaryDb {
 
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Every entry, in file order.
+    pub fn entries(&self) -> &[CreatureEntry] {
+        &self.entries
     }
 
     pub fn is_empty(&self) -> bool {

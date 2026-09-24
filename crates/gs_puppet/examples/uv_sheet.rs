@@ -15,6 +15,10 @@
 //!   <family>_{front,side,back}_paint.png
 //!                          paint-over templates: the silhouette each view
 //!                          is painted on (the back is the front mirrored)
+//!   <family>_{front,side,back}_depth.png
+//!                          the rest body's depth in each template's frame,
+//!                          at 4x its size (near white, far grey, outside
+//!                          black): a depth guide for an image generator
 //! With `--paint`, the given sheet (same size as the template) is worn
 //! instead of the checker, as `<family>_painted.png`. With any of `--front`,
 //! `--side`, `--back <png>` (paintings over those templates, any size with
@@ -25,7 +29,7 @@
 use std::path::{Path, PathBuf};
 
 use gs_puppet::raster::Canvas;
-use gs_puppet::{prefill, Camera, Look, Painting, Paintings, Pose, PoseSet, Puppet, Skin, Texture, UvLayout, MASK_PX};
+use gs_puppet::{depth_guide, prefill, Camera, Look, PaintView, Painting, Paintings, Pose, PoseSet, Puppet, Skin, Texture, UvLayout, MASK_PX};
 use rig_bake::Mask;
 use rig::{Outlines, Rig, View};
 
@@ -206,9 +210,15 @@ fn main() {
     let layout = UvLayout::fit(&puppet, SHEET_SIDE);
     let (front_mask, side_mask) = (mask(View::Front), mask(View::Side));
     let guide = |_: f32, _: f32| [205, 205, 205];
-    for (name, m, mirror) in [("front", &front_mask, false), ("back", &front_mask, true), ("side", &side_mask, false)] {
+    for (name, m, mirror, view) in [
+        ("front", &front_mask, false, PaintView::Front),
+        ("back", &front_mask, true, PaintView::Back),
+        ("side", &side_mask, false, PaintView::Side),
+    ] {
         if let Some(m) = m {
             write_png(&out.join(format!("{family}_{name}_paint.png")), m.grid.w, m.grid.h, &silhouette(m, mirror, guide));
+            let rgba = depth_guide(&puppet, m, view, 4);
+            write_png(&out.join(format!("{family}_{name}_depth.png")), m.grid.w * 4, m.grid.h * 4, &rgba);
         }
     }
     println!("{family}: sheet {}x{} at {:.1} px/ft, {} patches", layout.w, layout.h, layout.px_per_ft, layout.patches.len());

@@ -11,6 +11,8 @@
 //! (any name `data/props/weapons.toml` knows).
 //! `TURNAROUND_DATA=<dir>` reads another data root. `TURNAROUND_SEGMENTS=1`
 //! paints every segment its own colour, to see which one makes a shape.
+//! `TURNAROUND_WEAR=<piece>[,<piece>...]` dresses it from the clothing kit
+//! (`data/outfits/kit.toml`).
 
 use std::path::Path;
 
@@ -47,6 +49,10 @@ fn main() {
         .map(|n| props.prop(props.weapon(n).unwrap_or_else(|| panic!("no weapon '{n}'"))).expect("its shape"))
         .collect();
     let held: Vec<(Hand, &gs_puppet::Prop)> = hold.iter().zip([Hand::Right, Hand::Left]).map(|(p, h)| (h, p)).collect();
+    let wear = std::env::var("TURNAROUND_WEAR").unwrap_or_default();
+    let wear: Vec<&str> = wear.split(',').map(str::trim).filter(|n| !n.is_empty()).collect();
+    let kit = gs_puppet::Kit::from_toml(&std::fs::read_to_string(data.join("outfits/kit.toml")).expect("kit.toml")).expect("kit parses");
+    let puppet = puppet.wearing(&kit.outfit(&wear).unwrap_or_else(|e| panic!("{e}")));
     let mut puppet = puppet.holding(&held);
     if std::env::var_os("TURNAROUND_SEGMENTS").is_some() {
         const PALETTE: [[u8; 3]; 8] =

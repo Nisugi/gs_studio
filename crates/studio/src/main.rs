@@ -3,6 +3,14 @@
 //!   gs-studio [--data <dir>] [--pool <dir>]
 //!             [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
+//!   gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
+//!   gs-studio [--data <dir>] --export-jobs
+//!
+//! Both run headless, for a texture generator to call, and exit: `--project`
+//! writes the projection-first renders it paints the side and back from
+//! (`editor::texture::project_cli`); `--export-jobs` writes every family's
+//! and outfit's templates and `textures/jobs.json`
+//! (`editor::texture::export_jobs`).
 //!
 //! Two directories: the DATA ROOT (`--data` / GS_STUDIO_DATA: outlines.json
 //! and rigs/, for the rig editor) and the POOL (`--pool` / GS_STUDIO_POOL:
@@ -83,6 +91,27 @@ fn main() -> eframe::Result {
     }
     let data = data_root::from_environment(cli.data, saved.data);
     eprintln!("gs-studio: data root {} ({})", data.path.display(), data.source);
+    if let Some(target) = &cli.project {
+        match editor::texture::project_cli(&data.path, target, cli.grazing) {
+            Ok(files) => {
+                for f in files {
+                    println!("{}", f.display());
+                }
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --project: {e}")),
+        }
+    }
+    if cli.export_jobs {
+        let outlines = rig::Outlines::load(&data.path.join("outlines.json")).unwrap_or_else(|e| fail(&format!("gs-studio: outlines.json: {e}")));
+        match editor::texture::export_jobs(&data.path, &outlines) {
+            Ok((path, n)) => {
+                println!("{n} jobs: {}", path.display());
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --export-jobs: {e}")),
+        }
+    }
     let publish_env = std::env::var_os(editor::PUBLISH_ENV_VAR).filter(|v| !v.is_empty()).map(PathBuf::from);
     let publish_override = cli.publish.or(publish_env).or(saved.publish);
     let publish = editor::resolve_publish_dir(&data.path, publish_override.as_deref());

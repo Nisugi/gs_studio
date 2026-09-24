@@ -7,7 +7,11 @@ use crate::stage::StudioRoomContext;
 
 pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>]\n\
     \x20                [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]\n\
-    \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]";
+    \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]\n\
+    \x20      gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]\n\
+    \x20                (headless: projection-first renders for a texture generator, then exit)\n\
+    \x20      gs-studio [--data <dir>] --export-jobs\n\
+    \x20                (headless: every template and textures/jobs.json for the generator, then exit)";
 
 /// Environment fallback for `--tab`.
 pub const TAB_ENV_VAR: &str = "GS_STUDIO_TAB";
@@ -25,14 +29,26 @@ pub struct Cli {
     /// `--room-uid`, `--room-title`, `--room-location`: new-scene prefill,
     /// the same three a client passes to VellumFE's `studio` subcommand.
     pub room: StudioRoomContext,
+    /// `--project <family>[/<creature>]:side|back`: write the projection-first
+    /// renders (`editor::texture::export_projected`) and exit, no window.
+    pub project: Option<String>,
+    /// `--grazing`: the facing below which projected paint counts as unpainted.
+    pub grazing: Option<f32>,
+    /// `--export-jobs`: write every template and `textures/jobs.json`
+    /// (`editor::texture::export_jobs`) and exit, no window.
+    pub export_jobs: bool,
 }
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 7] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location"];
+    const OPTIONS: [&str; 9] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing"];
     let mut cli = Cli::default();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
+        if arg == "--export-jobs" {
+            cli.export_jobs = true;
+            continue;
+        }
         let (name, inline) = match arg.split_once('=') {
             Some((name, value)) => (name, Some(value.to_owned())),
             None => (arg.as_str(), None),
@@ -53,6 +69,10 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
                 cli.room.uid = Some(value.parse().map_err(|_| format!("--room-uid needs a number, got '{value}'"))?);
             }
             "--room-title" => cli.room.title = Some(value),
+            "--project" => cli.project = Some(value),
+            "--grazing" => {
+                cli.grazing = Some(value.parse().map_err(|_| format!("--grazing needs a number, got '{value}'"))?);
+            }
             _ => cli.room.location = Some(value),
         }
     }
@@ -75,6 +95,15 @@ mod tests {
         assert!(parse_args(&args(&["--data"])).is_err());
         assert!(parse_args(&args(&["--wat"])).is_err());
         assert!(parse_args(&args(&["--wat=1"])).is_err());
+    }
+
+    #[test]
+    fn parses_a_headless_projection() {
+        let cli = parse_args(&args(&["--data", "d", "--project", "humanoid/grim_gigas_skald:side", "--grazing=0.4"])).unwrap();
+        assert_eq!(cli.project.as_deref(), Some("humanoid/grim_gigas_skald:side"));
+        assert_eq!(cli.grazing, Some(0.4));
+        assert!(parse_args(&args(&["--grazing", "steep"])).is_err());
+        assert!(parse_args(&args(&["--export-jobs", "--data", "d"])).unwrap().export_jobs);
     }
 
     #[test]

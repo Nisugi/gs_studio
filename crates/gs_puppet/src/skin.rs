@@ -70,8 +70,17 @@ pub(crate) fn joined(puppet: &crate::Puppet) -> Vec<bool> {
     for i in 0..n {
         for j in 0..n {
             let (a, b) = (&segs[i], &segs[j]);
-            // A prop is not flesh: it keeps its line against the hand.
-            let chain = i == j || (a.parent == Some(j) || b.parent == Some(i)) && a.kind.is_prop() == b.kind.is_prop();
+            // A prop or a garment is not flesh: it keeps its line against
+            // the body it hangs from.
+            let layer = |k: crate::Kind| (k.is_prop(), k.is_garment());
+            // ...except a hem where it leaves the waist: no seam line there.
+            let waist = |g: &crate::Segment, body: usize| {
+                g.chain_index == 0 && g.parent == Some(body) && matches!(g.kind, crate::Kind::Garment { hang: crate::Hang::Toward { .. } })
+            };
+            let chain = i == j
+                || (a.parent == Some(j) || b.parent == Some(i)) && layer(a.kind) == layer(b.kind)
+                || waist(a, j)
+                || waist(b, i);
             let related = a.group == b.group && body(a.group) && {
                 let (pa, pb) = (bone_parent(i), bone_parent(j));
                 a.bone == b.bone
@@ -732,8 +741,10 @@ impl Posed<'_> {
             bind_threads(&mut rgba, &px, &puppet.family, (px_per_ft * 0.012).max(0.7));
         }
 
-        // ---- eyes, where the surface they sit on is the one that shows
-        if !look.dead {
+        // ---- eyes, where the surface they sit on is the one that shows --
+        // unless a painted skin supplies the face (its own eyes, and dots
+        // on top of them would give it four)
+        if !look.dead && texture.is_none() {
             let turn = rot_y(look.yaw);
             for eye in &puppet.eyes {
                 if !surfs.iter().any(|s| s.index == eye.segment) {
@@ -755,7 +766,12 @@ impl Posed<'_> {
                 if cx < 0 || cy < 0 || cx >= w as isize || cy >= h as isize {
                     continue;
                 }
-                if px.z[cy as usize * w + cx as usize] < z - CONTOUR_DEPTH_OF_HEIGHT * height {
+                let at_px = cy as usize * w + cx as usize;
+                if px.z[at_px] < z - CONTOUR_DEPTH_OF_HEIGHT * height {
+                    continue;
+                }
+                // Under a garment (a hood's rim) it is covered, however near.
+                if puppet.segments.get(px.seg[at_px] as usize).is_some_and(|s| s.kind.is_garment()) {
                     continue;
                 }
                 let eye_rgb = [EYE[0], EYE[1], EYE[2]].map(|v| v as f32);

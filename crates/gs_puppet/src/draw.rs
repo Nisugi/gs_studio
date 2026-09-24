@@ -91,10 +91,10 @@ fn is_severable(part: &str) -> bool {
 
 /// Severed limbs: `(hidden, stump)` per segment. The first segment of a
 /// rank-3 arm / leg part becomes a stump; the rest of its subtree (forearm,
-/// hand, shin, foot) is hidden.
+/// hand, shin, foot) is hidden. So is anything a garment covers.
 pub fn severed(posed: &Posed, look: &Look) -> (Vec<bool>, Vec<bool>) {
     let p = posed.puppet;
-    let mut hidden = vec![false; p.segments.len()];
+    let mut hidden: Vec<bool> = p.segments.iter().map(|s| s.hidden).collect();
     let mut stump = vec![false; p.segments.len()];
     for (part, rank) in look.wounds {
         if *rank < 3 || !is_severable(part) {

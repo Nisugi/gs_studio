@@ -119,6 +119,16 @@ what the stage and the calibrators hold), `GS_STUDIO_SMOKE=1` pre-populates
 the stage and `GS_STUDIO_DOLL_VIEW=sets` starts the Dolls tab on its Sets
 view.
 
+Two headless commands, for a texture generator to call; each does its job
+and exits without opening a window (exit code 2 and a message on error):
+
+    gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
+    gs-studio [--data <dir>] --export-jobs
+
+`--project` writes the projection-first renders of a family's (or a
+creature's, in its outfit) paintings, `--export-jobs` every template and
+`textures/jobs.json` -- see *Texture painting* under the Rigs tab.
+
 The top bar holds the tool tabs, the two directory boxes and *Import from
 VellumFE...*. It is one row when the window is wide enough (1480 px) and
 otherwise two -- tabs above, boxes below, the boxes sized to share the row --
@@ -213,14 +223,40 @@ the depth steps), the way the stage draws it; off shows the older flat
 shape list, whose parts jump in front of each other as the figure turns.
 *Texture* dresses the skin in `<data>/textures/<family>/sheet.png`. Under
 *Texture painting*: *Export templates* writes the front / side / back paint-over
-silhouettes (`*_paint.png`) and the pattern (`pattern.png`, `patches.txt`:
-the skin cut open, `gs_puppet::uv`); *Build sheet from paintings* projects
+silhouettes (`*_paint.png`), their depth guides (`*_depth.png`: the rest
+body's depth in each template's own frame at 4x its size -- nearest white,
+farthest grey, outside black, the outline's hairline seams closed -- for an
+image generator's depth control; `gs_puppet::depth_guide`) and the pattern
+(`pattern.png`, `patches.txt`: the skin cut open, `gs_puppet::uv`); *Build sheet from paintings* projects
 `front.png` / `side.png` / `back.png` from that folder onto the pattern as
 `sheet.png` (`gs_puppet::prefill`), which can then be touched up by hand;
 *Reload* re-reads it. A sheet laid out for an older rig (another size) is
 refused with a note. Save installs it beside the puppet as
 `<pool>/global/puppets/<family>.texture.png` and Publish ships it to
-`puppets/`; the stage's puppets wear it.
+`puppets/`; the stage's puppets wear it. Export also writes `marks.json`,
+where the puppet's eyes are in each template: a textured skin draws no eye
+dots, so a painting puts the eyes there.
+
+A creature can have its own skin: paintings in
+`<data>/textures/<family>/<creature>/` (its bestiary name token), built by
+*Build every skin* into a `sheet.png` there, on the family's puppet dressed
+in the creature's outfit (`<data>/outfits/outfits.toml`, see the clothing
+kit below). An outfit's templates are
+`<data>/textures/<family>/outfits/<outfit>/` -- the outline and depth with
+the garments on. The stage does not show per-creature skins or outfits yet.
+
+*Projection-first* (`docs/projection-first-export-spec.md`): *front -> side*
+renders what `front.png` shows of the rest body from the side, framed
+exactly as `side_paint.png` at 4x, unlit and unfilled
+(`projected/side_render.png`), with a mask of what is left to paint
+(`side_unpainted.png`: white where no painting reached, or reached only at a
+grazing angle, facing below 0.35); *front + side -> back* does the same from
+behind using both. A generator paints only the white, so the views agree.
+*Export jobs* (all families, on a worker thread) writes every family's and
+outfit's templates and `<data>/textures/jobs.json`: one job per bestiary
+creature a rig draws, with its family, outfit, template, depth-guide and
+marks paths and the folder its paintings go in. Depth guides are listed only
+for the families `<data>/generator.toml` approves.
 
 **Play death** makes the preview fall down dead from the shown pose into
 the body type's dead pose (`gs_puppet::Fall`, a procedural ragdoll: the
@@ -726,3 +762,36 @@ that script. Re-run it after changing that table or Lich's data.
 Held props hang off the hand as extra puppet segments: they pose, fall and
 skin with the body in their own colours, are never textured or baked, and
 never count toward grounding or a card's placement.
+
+### `outfits/kit.toml` -- the clothing kit
+
+Garments that change a creature's outline -- robes, tunics, skirts, hoods,
+pauldrons, cloaks -- as extra puppet segments (`gs_puppet::outfit`; the
+design is `docs/clothing-kit-spec.md`). Paint still carries whatever lies on
+the body (shirts, armour plates, straps). Each piece names the shape it is
+built as and its defaults (the file's header lists them):
+
+    [robe]
+    shape = "hem"        # hem | hood | pauldron | cloak
+    length = 1.0         # hem: from the waist to the floor; cloak: from the shoulders
+    flare = 1.3          # wider than what it covers, at the hem
+
+Pieces are built from the wearer's own measured body (a robe's waist is its
+pelvis, its hem as wide as its legs there), so one kit fits every family
+with the parts a piece hangs from. `Puppet::wearing(outfit)` adds them after
+the body (and before held props), painted and outlined like it but never
+baked and never grounding it, and hides the body segments a garment covers
+(the thighs under anything to the knees, the shins under anything to the
+ankles; feet always show) -- still posed and still standing on the floor.
+Hood and pauldrons ride their bone; a hem is aimed at the knees and then the
+ankles every pose (so it drapes over the lap sitting and follows the legs
+lying), a cloak hangs straight down, or along the body as it lies.
+
+What a creature wears is `outfits.toml`, one table per creature (not in use
+yet):
+
+    [grim_gigas_skald]
+    wear = ["robe", "hood"]
+    robe = { flare = 1.4 }   # its own tweaks of the kit's numbers
+
+`turnaround` shows an outfit with `TURNAROUND_WEAR=robe,hood`.
