@@ -187,6 +187,39 @@ pub fn puppet_showcase(family: &str) -> Result<BestiaryPick, String> {
     })
 }
 
+/// Everything the spawn-by-name box shows for what is typed: whether the
+/// name itself has art (else which puppet stands in), and the bestiary
+/// suggestions, each with its own art answer. Every one of those is a trip
+/// to the filesystem, so the tool computes this once per typed name
+/// (`fs_cache`), not per frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnHints {
+    pub has_art: bool,
+    pub puppet: Option<String>,
+    pub picks: Vec<(BestiaryPick, bool)>,
+}
+
+pub fn spawn_hints(typed: &str, limit: usize) -> SpawnHints {
+    let noun = last_word(typed);
+    let noun = (!noun.is_empty()).then_some(noun);
+    let has_art = has_art(typed, noun.as_deref());
+    SpawnHints {
+        has_art,
+        puppet: (!has_art).then(|| puppet_family(typed, noun.as_deref())).flatten(),
+        picks: suggest(typed, limit)
+            .into_iter()
+            .map(|p| {
+                let art = has_art_for(&p);
+                (p, art)
+            })
+            .collect(),
+    }
+}
+
+fn has_art_for(pick: &BestiaryPick) -> bool {
+    has_art(&pick.name, Some(&pick.noun))
+}
+
 /// Grouped by bestiary area (multi-area creatures list under each;
 /// unknowns under "Other").
 pub fn by_area(cast: &[CastEntry]) -> BTreeMap<&str, Vec<&CastEntry>> {

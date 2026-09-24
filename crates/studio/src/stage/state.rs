@@ -99,6 +99,8 @@ pub struct StageState {
     /// the only way to see the canine / elephantid / suine puppets without
     /// emptying the pool.
     pub spawn_name: String,
+    /// What the spawn box shows for `spawn_name`, computed once per name.
+    pub spawn_hints: crate::fs_cache::Ttl<String, cast::SpawnHints>,
     next_id: u64,
     pub selected: Option<String>,
     /// Creatures drawn as their family's puppet even when sprite art
@@ -153,6 +155,7 @@ impl StageState {
             cast,
             filter: String::new(),
             spawn_name: String::new(),
+            spawn_hints: Default::default(),
             next_id: 0,
             selected: None,
             forced_puppets: Default::default(),

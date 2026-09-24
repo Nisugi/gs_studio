@@ -108,6 +108,9 @@ pub struct StudioApp {
     chart_edit: String,
     /// The last folder-strip message (an import, a failed remember).
     folders_note: Option<String>,
+    /// Filesystem answers the top bar needs every frame (see `fs_cache`).
+    importable: crate::fs_cache::Ttl<(), Option<PathBuf>>,
+    pool_empty: crate::fs_cache::Ttl<PathBuf, bool>,
     active: ToolId,
     rigs: Result<RigTool, String>,
     /// Scenes + Preview share one stage. Built lazily on first entry (the
@@ -148,6 +151,8 @@ impl StudioApp {
             publish,
             chart_edit: chart.map(|c| c.display().to_string()).unwrap_or_default(),
             folders_note: settings_note,
+            importable: Default::default(),
+            pool_empty: Default::default(),
             active: tab,
             stage: None,
             calibrators: CalibratorsTool::new(),
@@ -159,6 +164,7 @@ impl StudioApp {
     }
 
     fn set_pool(&mut self) {
+        self.pool_empty.invalidate();
         match pool_dir::set_in_app(&self.pool_edit) {
             Ok(pool) => {
                 let path = pool.path.clone();
@@ -319,7 +325,7 @@ impl StudioApp {
     /// into gs-studio's own home. Disabled, with a reason, when there is no
     /// VellumFE directory to copy from.
     fn import_button(&mut self, ui: &mut egui::Ui) {
-        let source = data_home::importable_source();
+        let source = self.importable.get((), data_home::importable_source).clone();
         let enabled = source.is_some();
         let button = ui.add_enabled(enabled, egui::Button::new("Import from VellumFE..."));
         let button = if enabled {
@@ -387,6 +393,7 @@ impl StudioApp {
         if go {
             crate::perf_log::log(&format!("begin: import from VellumFE ({})", plan.summary()));
             let report = data_home::import(&source, &self.pool.path);
+            self.pool_empty.invalidate();
             crate::perf_log::log(&format!("end: {}", report.summary()));
             if let Some(stage) = &mut self.stage {
                 stage.pool_changed();
@@ -513,7 +520,8 @@ impl StudioApp {
         egui::Panel::top("tool_tabs").show(ui, |ui| self.top_bar(ui));
         // First run: the new home is empty, so every pool tab would just be
         // blank. Say so, and say how to fill it.
-        if self.active.uses_pool() && data_home::is_empty_pool(&self.pool.path) {
+        let empty = self.active.uses_pool() && *self.pool_empty.get(self.pool.path.clone(), || data_home::is_empty_pool(&self.pool.path));
+        if empty {
             egui::Panel::top("first_run").show(ui, |ui| self.first_run_banner(ui));
         }
         egui::Panel::bottom("status_line").show(ui, |ui| self.status_bar(ui));

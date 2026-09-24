@@ -44,6 +44,16 @@ pub struct RigTool {
     show_on_stage: Option<String>,
     /// The live 3D puppet panel.
     puppet_view: PuppetView,
+    /// Publish target / saved bake / saved puppet, re-checked at most every
+    /// couple of seconds and after a save or publish -- never per frame.
+    files: crate::fs_cache::Ttl<(String, PathBuf, bool), FileFacts>,
+}
+
+/// What the document controls need to know about files on disk.
+struct FileFacts {
+    target: Result<PathBuf, String>,
+    saved: bool,
+    puppet_saved: bool,
 }
 
 fn label_color(label: usize) -> Color32 {
@@ -69,11 +79,13 @@ impl RigTool {
             prompt: None,
             show_on_stage: None,
             puppet_view: PuppetView::default(),
+            files: Default::default(),
         })
     }
 
     /// Where Publish ships from now on.
     pub fn set_publish_dir(&mut self, dir: PathBuf) {
+        self.files.invalidate();
         self.session.publish_dir = dir;
     }
 
@@ -201,6 +213,7 @@ impl RigTool {
     }
 
     fn save(&mut self) {
+        self.files.invalidate();
         if let Err(e) = self.session.save() {
             self.session.status = format!("Save failed: {e}");
         }
@@ -227,6 +240,20 @@ impl RigTool {
     }
 
     fn document_controls(&mut self, ui: &mut egui::Ui) {
+        let (target, saved, puppet_saved) = {
+            let session = &self.session;
+            let family = session.editor.rig().family.clone();
+            let key = (family.clone(), session.publish_dir.clone(), session.pool.is_some());
+            let facts = self.files.get(key, || FileFacts {
+                target: session.publish_target(),
+                saved: session.has_saved_bake(&family),
+                puppet_saved: session.pool.is_some()
+                    && session.rigs_dir().join(gs_puppet::Puppet::baked_file_name(&family)).is_file(),
+            });
+            (facts.target.clone(), facts.saved, facts.puppet_saved)
+        };
+        // A save or publish below changes those answers: re-check after it.
+        let mut wrote = false;
         let s = &mut self.session;
         let (family, view, body_type, axis, ref_ft) = {
             let r = s.editor.rig();
@@ -324,6 +351,7 @@ impl RigTool {
         ui.horizontal(|ui| {
             let label = if s.editor.is_dirty() { "Save *" } else { "Save" };
             if ui.button(label).on_hover_text("Write the rig and its baked map + metadata (Ctrl+S)").clicked() {
+                wrote = true;
                 if let Err(e) = s.save() {
                     s.status = format!("Save failed: {e}");
                 }
@@ -333,8 +361,7 @@ impl RigTool {
             }
         });
         ui.horizontal(|ui| {
-            let target = s.publish_target();
-            let saved = s.has_saved_bake(&family);
+            let target = target.clone();
             let button = ui.add_enabled(target.is_ok() && saved, egui::Button::new("Publish"));
             let button = match &target {
                 Ok(dir) if saved => button.on_hover_text(format!(
@@ -347,6 +374,7 @@ impl RigTool {
                 Err(why) => button.on_disabled_hover_text(why),
             };
             if button.clicked() {
+                wrote = true;
                 if let Err(e) = s.publish() {
                     s.status = format!("Publish failed: {e}");
                 }
@@ -355,7 +383,6 @@ impl RigTool {
                 .on_hover_text("Save also publishes")
                 .on_disabled_hover_text(target.err().unwrap_or_default());
         });
-        let puppet_saved = s.pool.is_some() && s.rigs_dir().join(gs_puppet::Puppet::baked_file_name(&family)).is_file();
         let mut show = false;
         ui.horizontal(|ui| {
             if ui.add_enabled(s.editor.can_undo(), egui::Button::new("Undo")).clicked() {
@@ -375,6 +402,9 @@ impl RigTool {
         });
         if show {
             self.show_on_stage = Some(family);
+        }
+        if wrote {
+            self.files.invalidate();
         }
     }
 

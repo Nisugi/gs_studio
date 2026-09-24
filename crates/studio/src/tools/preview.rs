@@ -679,12 +679,11 @@ fn spawn_by_name_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         // the renderer runs, so this never disagrees with the card.
         let typed = stage.spawn_name.trim().to_string();
         if !typed.is_empty() {
-            let noun = cast::last_word(&typed);
-            let noun = (!noun.is_empty()).then_some(noun);
-            if cast::has_art(&typed, noun.as_deref()) {
+            let hints = stage.spawn_hints.get(typed.clone(), || cast::spawn_hints(&typed, 12)).clone();
+            if hints.has_art {
                 ui.weak(format!("'{typed}': has art in the pool -- draws as its sprite."));
             } else {
-                let text = match cast::puppet_family(&typed, noun.as_deref()) {
+                let text = match &hints.puppet {
                     Some(family) => format!("'{typed}': NO art in the pool -- draws as the {family} puppet."),
                     None => format!("'{typed}': NO art and no puppet fits -- draws as a placeholder."),
                 };
@@ -692,12 +691,10 @@ fn spawn_by_name_ui(stage: &mut StageState, ui: &mut egui::Ui) {
             }
 
             // Bestiary suggestions: click one to fill the box.
-            let picks = cast::suggest(&typed, 12);
-            if !picks.is_empty() {
+            if !hints.picks.is_empty() {
                 egui::ScrollArea::vertical().id_salt("spawn_suggestions").max_height(120.0).show(ui, |ui| {
-                    for pick in &picks {
-                        let art = cast::has_art(&pick.name, Some(&pick.noun));
-                        let mark = if art { "art" } else { "puppet" };
+                    for (pick, art) in &hints.picks {
+                        let mark = if *art { "art" } else { "puppet" };
                         let family = pick.family.as_deref().unwrap_or("?");
                         let row = ui
                             .selectable_label(false, format!("{}   [{mark}]", pick.name))
