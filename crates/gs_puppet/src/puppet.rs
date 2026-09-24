@@ -624,6 +624,17 @@ impl Puppet {
             median3(&mut d);
             box3(&mut d);
             box3(&mut shift);
+            // Where a hand hangs from this limb, its far end must meet the
+            // hand, which is never shifted: ease the shift out over the
+            // segment's far half. Otherwise a limb lying along the trunk in
+            // the other view (a bird's inner wing) slides in to the body's
+            // centre line while its hand stays out at the bone, and the two
+            // part at the wrist as soon as the limb turns.
+            if kind == Kind::Limb && raws.iter().zip(&kinds).any(|(c, k)| c.parent == Some(i) && *k == Kind::Hand) {
+                for (k, s) in shift.iter_mut().enumerate() {
+                    *s *= (2.0 * (1.0 - k as f32 / (n - 1).max(1) as f32)).clamp(0.0, 1.0);
+                }
+            }
             if let Some(r) = bone.radius_ft.filter(|r| r.is_finite() && *r > 0.0) {
                 w.iter_mut().for_each(|x| *x = r);
                 if kind != Kind::Trunk {

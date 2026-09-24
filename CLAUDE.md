@@ -25,7 +25,9 @@ closes (read the PNG); `GS_STUDIO_POSE_EDIT=<pose>[:<bone>]` opens the Rigs
 tab's 3D preview with the pose editor (`editor/pose_edit.rs`) on that pose.
 
 Crate examples (`cargo run -p <crate> --example <name>`) are the visual test
-harnesses: `gs_puppet` `puppet_demo`, `gs_field_egui` `stage_demo` /
+harnesses: `gs_puppet` `puppet_demo`, `audit` (every rig: stale bakes and
+puppets, and skin pieces floating free in any pose -- run it after a rig
+or puppet-builder change), `gs_field_egui` `stage_demo` /
 `puppet_tune`, `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
 
 ## Architecture
