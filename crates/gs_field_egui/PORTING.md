@@ -472,3 +472,13 @@ test is unchanged apart from the puppet region.
 * Tests: the bake path equals the reference pipeline on Niffy's golden
   bandit (19:30, strength 0.6, dE <= 0.01); lit twins arrive and the
   originals come back when the light goes.
+
+### 7.13 Status icons above the head
+
+`src/creature_indicators.rs` (new) draws vector icons for sleeping (rising
+Zz), webbed, disoriented (turning spiral), calmed (waves), immobilized
+(chain), rooted (sprout) and frozen (snowflake). `creature_field.rs` gains
+two regions (now eleven): the text-badge filter skips iconed statuses
+(`has_icon`), and a block after the badges draws the icon row and moves
+`top_y` up, so the stun swirl and the target reticule stack above it.
+Unknown statuses keep their text badge; a dead creature shows no icons.

@@ -869,7 +869,7 @@ fn paint_creature_card(
                     *s,
                     "prone" | "kneeling" | "sitting" | "flying" | "hovering" | "stunned"
                 )
-            })
+            /* >>>doll */ && !crate::creature_indicators::has_icon(s) /* <<<doll */ })
             .collect();
         if !badges.is_empty() {
             let text = badges.join(" ");
@@ -883,6 +883,23 @@ fn paint_creature_card(
             top_y -= 14.0;
         }
     }
+// >>>doll
+    // Status icons (sleeping Zz, web, spiral...) for the statuses that have
+    // one; the text above covers the rest.
+    if let Some(f) = flags {
+        let (y, moving) = crate::creature_indicators::paint(
+            painter,
+            card.center().x,
+            top_y,
+            card.width(),
+            &f.statuses,
+            dead,
+            now_ms,
+        );
+        top_y = y;
+        animated |= moving;
+    }
+// <<<doll
 
     // Stun swirl: three orbiting stars, wall-clock phased.
     if flags.is_some_and(|f| f.has_flag("stunned")) && !dead {
