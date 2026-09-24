@@ -144,39 +144,42 @@ pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
     gs_field::puppets::puppet_for(name, noun).map(|d| d.family)
 }
 
-/// A creature to show `family`'s puppet with: a bestiary creature of that
-/// family whose puppet resolves to that family, preferring one with NO art
-/// in the pool (so it needs no forcing anywhere). First by name within each,
-/// so the pick is stable. Err says why none will do.
+/// A creature to show `family`'s puppet with: any bestiary creature whose
+/// puppet resolves to that family. The bestiary's family names are not the
+/// rig families (birds are "Bird" for the `avian` rig, bears "Bear" for
+/// `ursine`, and snakes reach `serpent` only by body type), so the puppet
+/// lookup itself is the test. Preferred, in order: a creature whose bestiary
+/// family names the rig (directly or through `FAMILY_ALIASES`), one with NO
+/// art in the pool (so it needs no forcing anywhere), then by name, so the
+/// pick is stable. Err says why none will do.
 pub fn puppet_showcase_in(
     db: &gs_field::bestiary::BestiaryDb,
     family: &str,
     has_art: impl Fn(&str, &str) -> bool,
     puppet_of: impl Fn(&str, &str) -> Option<String>,
 ) -> Result<BestiaryPick, String> {
-    let mut of_family: Vec<&gs_field::bestiary::CreatureEntry> = db
+    let names_rig = |f: &str| {
+        let f = f.trim();
+        f.eq_ignore_ascii_case(family)
+            || gs_field::dolls::rig_family_for(&f.to_ascii_lowercase()).is_some_and(|r| r.eq_ignore_ascii_case(family))
+    };
+    let mut picks: Vec<(bool, bool, BestiaryPick)> = db
         .entries
         .iter()
-        .filter(|e| e.family.as_deref().is_some_and(|f| f.trim().eq_ignore_ascii_case(family)))
-        .collect();
-    if of_family.is_empty() {
-        return Err(format!("no creature in the bestiary is of the {family} family"));
-    }
-    of_family.sort_by(|a, b| a.name.cmp(&b.name));
-    let picks: Vec<BestiaryPick> = of_family
-        .into_iter()
         .map(|e| BestiaryPick {
             name: e.name.clone(),
             noun: if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() },
             family: e.family.clone(),
         })
         .filter(|p| puppet_of(&p.name, &p.noun).is_some_and(|f| f.eq_ignore_ascii_case(family)))
+        .map(|p| (!p.family.as_deref().is_some_and(names_rig), has_art(&p.name, &p.noun), p))
         .collect();
-    let first_artless = picks.iter().position(|p| !has_art(&p.name, &p.noun));
-    let chosen = first_artless.or((!picks.is_empty()).then_some(0));
-    chosen
-        .map(|i| picks[i].clone())
-        .ok_or_else(|| format!("no {family} creature resolves to the {family} puppet"))
+    picks.sort_by(|a, b| (a.0, a.1, &a.2.name).cmp(&(b.0, b.1, &b.2.name)));
+    picks
+        .into_iter()
+        .next()
+        .map(|(_, _, p)| p)
+        .ok_or_else(|| format!("no creature in the bestiary resolves to the {family} puppet"))
 }
 
 /// [`puppet_showcase_in`] against the shared bestiary, the pool and the
@@ -339,6 +342,25 @@ mod tests {
         assert!(puppet_showcase_in(&db, "suine", |_, _| false, canine).unwrap_err().contains("no creature"));
         // A creature whose puppet resolves elsewhere does not show this one.
         assert!(puppet_showcase_in(&db, "canine", |_, _| false, |_, _| Some("humanoid".into())).is_err());
+
+        // The bestiary spells rig families its own way: "Bird" is the avian
+        // rig, and a snake reaches the serpent puppet only by body type.
+        let db = BestiaryDb::from_entries(vec![e("blood eagle", "Bird"), e("viper", "Reptilian"), e("cave lizard", "Reptilian")]);
+        let by_name = |n: &str, _: &str| {
+            Some(match n {
+                "blood eagle" => "avian",
+                "viper" => "serpent",
+                _ => "reptilian",
+            }
+            .to_string())
+        };
+        assert_eq!(puppet_showcase_in(&db, "avian", |_, _| false, by_name).unwrap().name, "blood eagle");
+        assert_eq!(puppet_showcase_in(&db, "serpent", |_, _| false, by_name).unwrap().name, "viper");
+        // A creature of the rig's own family beats an art-less stranger.
+        let db = BestiaryDb::from_entries(vec![e("aaa hawk", "Chimeric"), e("zzz hawk", "Bird")]);
+        let both_avian = |_: &str, _: &str| Some("avian".to_string());
+        let pick = puppet_showcase_in(&db, "avian", |n, _| n == "zzz hawk", both_avian).unwrap();
+        assert_eq!(pick.name, "zzz hawk");
     }
 
     #[test]
@@ -374,3 +396,4 @@ mod tests {
         assert!(!has_art("cave troll", Some("troll")));
     }
 }
+
