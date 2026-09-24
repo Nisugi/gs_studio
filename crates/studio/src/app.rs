@@ -109,8 +109,8 @@ pub struct StudioApp {
     /// The last folder-strip message (an import, a failed remember).
     folders_note: Option<String>,
     /// Filesystem answers the top bar needs every frame (see `fs_cache`).
-    importable: crate::fs_cache::Ttl<(), Option<PathBuf>>,
-    pool_empty: crate::fs_cache::Ttl<PathBuf, bool>,
+    importable: crate::fs_cache::Background<(), Option<PathBuf>>,
+    pool_empty: crate::fs_cache::Background<PathBuf, bool>,
     active: ToolId,
     rigs: Result<RigTool, String>,
     /// Scenes + Preview share one stage. Built lazily on first entry (the
@@ -339,7 +339,8 @@ impl StudioApp {
     /// into gs-studio's own home. Disabled, with a reason, when there is no
     /// VellumFE directory to copy from.
     fn import_button(&mut self, ui: &mut egui::Ui) {
-        let source = self.importable.get((), data_home::importable_source).clone();
+        // Not known yet: disabled for the moment it takes to look.
+        let source = self.importable.get((), data_home::importable_source).cloned().flatten();
         let enabled = source.is_some();
         let button = ui.add_enabled(enabled, egui::Button::new("Import from VellumFE..."));
         let button = if enabled {
@@ -559,7 +560,11 @@ impl StudioApp {
         egui::Panel::top("tool_tabs").show(ui, |ui| self.top_bar(ui));
         // First run: the new home is empty, so every pool tab would just be
         // blank. Say so, and say how to fill it.
-        let empty = self.active.uses_pool() && *self.pool_empty.get(self.pool.path.clone(), || data_home::is_empty_pool(&self.pool.path));
+        let pool = self.pool.path.clone();
+        let empty = self.active.uses_pool() && self.pool_empty.get(pool.clone(), move || data_home::is_empty_pool(&pool)).copied().unwrap_or(false);
+        if self.pool_empty.pending() || self.importable.pending() {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
         if empty {
             egui::Panel::top("first_run").show(ui, |ui| self.first_run_banner(ui));
         }

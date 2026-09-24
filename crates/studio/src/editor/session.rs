@@ -38,6 +38,36 @@ pub fn resolve_publish_dir(data_root: &Path, override_dir: Option<&Path>) -> Pat
     }
 }
 
+/// [`Session::publish_target`] for a directory, without a session (a
+/// worker thread asks it: see `fs_cache::Background`).
+pub fn publish_target_of(dir: &Path) -> Result<PathBuf, String> {
+    let parent_ok = dir.parent().is_some_and(|p| p.as_os_str().is_empty() || p.is_dir());
+    if dir.is_dir() || parent_ok {
+        Ok(dir.to_path_buf())
+    } else {
+        Err(format!(
+            "Nowhere to publish: {} does not exist (and neither does its parent). Set {PUBLISH_ENV_VAR} to a \
+             directory, or run from the gs_studio workspace.",
+            dir.display()
+        ))
+    }
+}
+
+/// [`Session::has_saved_bake`] for a rigs directory.
+pub fn has_saved_bake_in(rigs: &Path, family: &str) -> bool {
+    rigs.join(format!("{family}.png")).is_file() && rigs.join(format!("{family}.toml")).is_file()
+}
+
+/// Every family with a saved `<family>.rig.toml` in a rigs directory.
+pub fn saved_rigs_in(rigs: &Path) -> std::collections::BTreeSet<String> {
+    std::fs::read_dir(rigs)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".rig.toml").map(str::to_owned))
+        .collect()
+}
+
 /// Something that would throw away the current rig.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocAction {
@@ -143,6 +173,7 @@ impl Session {
         self.rigs_dir().join(Rig::file_name(family))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn has_saved_rig(&self, family: &str) -> bool {
         self.rig_path(family).is_file()
     }
@@ -351,24 +382,14 @@ impl Session {
     /// its parent does (it is then created on first publish). Err says why
     /// not, for the disabled button's hover text.
     pub fn publish_target(&self) -> Result<PathBuf, String> {
-        let dir = &self.publish_dir;
-        let parent_ok = dir.parent().is_some_and(|p| p.as_os_str().is_empty() || p.is_dir());
-        if dir.is_dir() || parent_ok {
-            Ok(dir.clone())
-        } else {
-            Err(format!(
-                "Nowhere to publish: {} does not exist (and neither does its parent). Set {PUBLISH_ENV_VAR} to a \
-                 directory, or run from the gs_studio workspace.",
-                dir.display()
-            ))
-        }
+        publish_target_of(&self.publish_dir)
     }
 
     /// True when `<data>/rigs/` holds a saved bake of this family to publish.
     pub fn has_saved_bake(&self, family: &str) -> bool {
-        let dir = self.rigs_dir();
-        dir.join(format!("{family}.png")).is_file() && dir.join(format!("{family}.toml")).is_file()
+        has_saved_bake_in(&self.rigs_dir(), family)
     }
+
 
     /// The SAVED files of a family that ship: `(file name, subdirectory)`.
     /// The puppet is there only when the last save could build one.
@@ -601,6 +622,43 @@ mod tests {
             }
             let skin = t.elapsed();
             eprintln!("{f:12} open {open:>9.1?} bake {bake:>9.1?} depth {depth:>9.1?} puppet {puppet:>9.1?} ({ok}) skin {skin:>9.1?}");
+        }
+    }
+
+    /// Where a Save's time goes (run by hand, `--ignored --nocapture`), on a
+    /// throwaway copy of the data root.
+    #[test]
+    #[ignore]
+    fn save_timing() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        for sub in ["rigs", "poses", "props"] {
+            std::fs::create_dir_all(data.join(sub)).unwrap();
+            for e in std::fs::read_dir(repo.join(sub)).unwrap().flatten() {
+                std::fs::copy(e.path(), data.join(sub).join(e.file_name())).unwrap();
+            }
+        }
+        std::fs::copy(repo.join("outlines.json"), data.join("outlines.json")).unwrap();
+        let pool = dir.path().join("pool");
+        let mut s = Session::open(&data, dir.path().join("publish"), Some(pool)).unwrap();
+        for f in ["humanoid", "elemental", "canine"] {
+            s.request(DocAction::OpenFamily(f.into()));
+            s.baked(false);
+            let t = std::time::Instant::now();
+            s.save().unwrap();
+            let save = t.elapsed();
+            let rig = s.editor.rig().clone();
+            let t = std::time::Instant::now();
+            let _ = Puppet::build(&rig, &s.outlines);
+            let build = t.elapsed();
+            let t = std::time::Instant::now();
+            let _ = s.publish();
+            let publish = t.elapsed();
+            let t = std::time::Instant::now();
+            let _ = s.install_poses();
+            let install = t.elapsed();
+            eprintln!("{f:10} save {save:>9.1?}  (puppet build {build:>9.1?}, publish {publish:>9.1?}, install poses {install:>9.1?})");
         }
     }
 

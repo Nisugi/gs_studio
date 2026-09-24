@@ -55,7 +55,10 @@ pub struct RigTool {
     sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
-    files: crate::fs_cache::Ttl<(String, PathBuf, bool), FileFacts>,
+    /// Asked on a worker thread: a stalled `stat` must not freeze a frame.
+    files: crate::fs_cache::Background<(String, PathBuf, PathBuf, bool), FileFacts>,
+    /// The families with a saved rig, for the family list (same reason).
+    saved_rigs: crate::fs_cache::Background<PathBuf, std::collections::BTreeSet<String>>,
     /// The pose editor: on, the body type's pose file open for editing,
     /// which section it writes, the row (bone) being edited.
     pose_edit: bool,
@@ -90,7 +93,14 @@ struct SkinKey {
     poses: u64,
     /// What each hand holds.
     hold: [String; 2],
+    /// Rendered at half size while something moves (see `DRAFT_SCALE`).
+    draft: bool,
 }
+
+/// While the preview is being turned, zoomed or its rig dragged, the skin is
+/// rendered at this scale and stretched: a quarter of the pixels, so the drag
+/// keeps up. Letting go renders it sharp.
+const DRAFT_SCALE: f32 = 0.5;
 
 /// The family's `sheet.png`, as read from disk (re-read on `serial`).
 struct SheetFile {
@@ -135,6 +145,7 @@ impl RigTool {
             sheet_serial: 0,
             sheet_texture: None,
             files: Default::default(),
+            saved_rigs: Default::default(),
             pose_edit: false,
             pose_doc: None,
             pose_scope: Scope::Shared,
@@ -148,6 +159,7 @@ impl RigTool {
     /// Where Publish ships from now on.
     pub fn set_publish_dir(&mut self, dir: PathBuf) {
         self.files.invalidate();
+        self.saved_rigs.invalidate();
         self.session.publish_dir = dir;
     }
 
@@ -332,6 +344,7 @@ impl RigTool {
 
     fn save(&mut self) {
         self.files.invalidate();
+        self.saved_rigs.invalidate();
         if let Err(e) = self.session.save() {
             self.session.status = format!("Save failed: {e}");
         }
@@ -344,7 +357,10 @@ impl RigTool {
     /// its own scroll area, with a draggable divider between them. Nothing
     /// is clipped: a list that does not fit scrolls.
     fn left_panel(&mut self, ui: &mut egui::Ui) {
-        self.document_controls(ui);
+        {
+            let _t = crate::perf_log::span("rigs: document controls");
+            self.document_controls(ui);
+        }
         ui.separator();
         let spare = ui.available_height();
         let most = (spare - MIN_LIST_HEIGHT).max(MIN_LIST_HEIGHT);
@@ -353,23 +369,39 @@ impl RigTool {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { top: 6, ..Default::default() }))
             .default_size((spare * BONES_SHARE).clamp(MIN_LIST_HEIGHT, most))
             .size_range(MIN_LIST_HEIGHT..=most)
-            .show(ui, |ui| self.bone_list(ui));
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.joint_list(ui));
+            .show(ui, |ui| {
+                let _t = crate::perf_log::span("rigs: bone list");
+                self.bone_list(ui)
+            });
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+            let _t = crate::perf_log::span("rigs: joint list");
+            self.joint_list(ui)
+        });
     }
 
     fn document_controls(&mut self, ui: &mut egui::Ui) {
         let (target, saved, puppet_saved) = {
             let session = &self.session;
             let family = session.editor.rig().family.clone();
-            let key = (family.clone(), session.publish_dir.clone(), session.pool.is_some());
-            let facts = self.files.get(key, || FileFacts {
-                target: session.publish_target(),
-                saved: session.has_saved_bake(&family),
-                puppet_saved: session.pool.is_some()
-                    && session.rigs_dir().join(gs_puppet::Puppet::baked_file_name(&family)).is_file(),
+            let (publish, rigs, pooled) = (session.publish_dir.clone(), session.rigs_dir(), session.pool.is_some());
+            let key = (family.clone(), publish.clone(), rigs.clone(), pooled);
+            let facts = self.files.get(key, move || FileFacts {
+                target: crate::editor::session::publish_target_of(&publish),
+                saved: crate::editor::session::has_saved_bake_in(&rigs, &family),
+                puppet_saved: pooled && rigs.join(gs_puppet::Puppet::baked_file_name(&family)).is_file(),
             });
-            (facts.target.clone(), facts.saved, facts.puppet_saved)
+            let known = match facts {
+                Some(f) => (f.target.clone(), f.saved, f.puppet_saved),
+                // Not known yet (a moment after opening a family).
+                None => (Err("Checking the publish directory...".to_owned()), false, false),
+            };
+            if self.files.pending() || self.saved_rigs.pending() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            known
         };
+        let rigs_dir = self.session.rigs_dir();
+        let saved_rigs = self.saved_rigs.get(rigs_dir.clone(), move || crate::editor::session::saved_rigs_in(&rigs_dir)).cloned().unwrap_or_default();
         // A save or publish below changes those answers: re-check after it.
         let mut wrote = false;
         let s = &mut self.session;
@@ -382,8 +414,9 @@ impl RigTool {
             ui.label("Family");
             let mut open = None;
             egui::ComboBox::from_id_salt("family").selected_text(&family).width(170.0).show_ui(ui, |ui| {
+                let _t = crate::perf_log::span("rigs: family list");
                 for f in s.outlines.families() {
-                    let text = if s.has_saved_rig(&f) { format!("{f}  (saved)") } else { f.clone() };
+                    let text = if saved_rigs.contains(&f) { format!("{f}  (saved)") } else { f.clone() };
                     if ui.selectable_label(f == family, text).clicked() && f != family {
                         open = Some(f);
                     }
@@ -523,6 +556,7 @@ impl RigTool {
         }
         if wrote {
             self.files.invalidate();
+            self.saved_rigs.invalidate();
         }
     }
 
@@ -740,10 +774,19 @@ impl RigTool {
             let d = response.drag_delta();
             self.puppet_view.orbit(d.x, d.y);
         }
+        let mut zooming = false;
         if response.hovered() {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            zooming = scroll != 0.0 || pinch != 1.0;
             self.puppet_view.zoom_by((scroll * 0.002).exp() * pinch);
         }
+        let draft = response.dragged()
+            || zooming
+            || self.session.editor.is_dragging()
+            || self.session.editor.is_depth_dragging()
+            || self.radius_drag
+            || self.thickness_drag
+            || self.depth_value_drag;
 
         let dark = ui.visuals().dark_mode;
         let (bg, grid, shadow) = if dark {
@@ -819,18 +862,22 @@ impl RigTool {
                         texture: texture_serial,
                         poses: poses_revision,
                         hold: hold.clone(),
+                        draft,
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
+                        let s = if draft { DRAFT_SCALE } else { 1.0 };
                         let mut local = cam;
-                        local.center = [rect.width() * 0.5, rect.height() * 0.5];
+                        local.focal *= s;
+                        local.center = [rect.width() * 0.5 * s, rect.height() * 0.5 * s];
                         let _t = crate::perf_log::span("rigs: skin");
                         let skin = posed.skin_textured(&|p| local.project(p), &look, texture.as_deref());
                         let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
                         let tex = ui.ctx().load_texture("rig_puppet_skin", image, egui::TextureOptions::LINEAR);
                         self.skin = Some((key, tex, Vec2::new(skin.origin[0], skin.origin[1])));
                     }
-                    if let Some((_, tex, origin)) = &self.skin {
-                        let at = egui::Rect::from_min_size(rect.min + *origin, tex.size_vec2());
+                    if let Some((k, tex, origin)) = &self.skin {
+                        let s = if k.draft { DRAFT_SCALE } else { 1.0 };
+                        let at = egui::Rect::from_min_size(rect.min + *origin / s, tex.size_vec2() / s);
                         painter.image(tex.id(), at, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                     }
                 } else {
