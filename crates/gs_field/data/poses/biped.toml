@@ -80,3 +80,55 @@ arm_l = { rot = [0.0, 0.0, 62.0], bend = [-35.0] }
 arm_r = { rot = [0.0, 0.0, -18.0] }
 leg_l = { rot = [0.0, 0.0, 14.0] }
 leg_r = { rot = [-12.0, 0.0, -4.0], bend = [24.0] }
+
+
+# ---------------------------------------------------------------- families
+#
+# Per-family corrections: `[family.<family>.<pose>]` replaces just the keys
+# it names in that family's copy of the shared pose; everything it leaves
+# out is inherited.
+#
+# `arms_up` is authored on the humanoid, whose arms hang close to its sides
+# in the frontal plane. Poses are angles FROM REST, so an arm that rests
+# angled well out (orc, ogre, giant) overshoots past vertical, and one that
+# rests swung forward or back (the golem, treekin and elemental copy the
+# stride in their side views, one arm forward, one back) keeps that swing
+# and ends up in front of or behind the head. Each value below was solved
+# per family and side for the same result: the wrist straight above the
+# shoulder, 13 degrees out, in the frontal plane (rig_check / a probe of
+# Posed::point; residual under 0.13 ft).
+
+# The treekin's arms are short and its head is broad: straight up they
+# vanish behind it, so its V is 45 degrees out instead of 13.
+[family.treekin.arms_up]
+arm_l = { rot = [45.0, 0.0, 90.0], bend = [-14.0] }
+arm_r = { rot = [-70.0, 0.0, -70.0], bend = [-14.0] }
+
+[family.golem.arms_up]
+arm_l = { rot = [20.0, 0.0, 160.0], bend = [-14.0] }
+arm_r = { rot = [-35.0, 0.0, -155.0], bend = [-14.0] }
+
+[family.elemental.arms_up]
+arm_l = { rot = [20.0, 0.0, 145.0], bend = [-14.0] }
+arm_r = { rot = [-35.0, 0.0, -140.0], bend = [-14.0] }
+
+[family.orc.arms_up]
+arm = { rot = [-10.0, 0.0, 145.0], bend = [-14.0] }
+
+[family.ogre.arms_up]
+arm = { rot = [-10.0, 0.0, 140.0], bend = [-14.0] }
+
+[family.troll.arms_up]
+arm = { rot = [-30.0, 0.0, 150.0], bend = [-14.0] }
+
+[family.giant.arms_up]
+arm = { rot = [-5.0, 0.0, 140.0], bend = [-14.0] }
+
+# The ghost's "legs" are the two halves of its robe. Folded like legs they
+# lift out as two fat stumps; they stay hanging instead.
+[family.ghost.sit]
+torso_lower = { rot = [-6.0, 0.0, 0.0] }
+leg = { rot = [-12.0, 0.0, 0.0] }
+
+[family.ghost.dead]
+leg = { rot = [0.0, 0.0, 0.0] }

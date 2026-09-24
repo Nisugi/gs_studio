@@ -15,7 +15,8 @@
 //!   <family>_poses.png          every pose of its body type (family overrides
 //!                               applied), plus stand from the front and side
 //!
-//! `RIG_CHECK_DATA=<dir>` reads another data root.
+//! `RIG_CHECK_DATA=<dir>` reads another data root; `RIG_CHECK_YAW=<deg>` turns
+//! the pose tiles (default 35).
 
 use std::path::{Path, PathBuf};
 
@@ -132,18 +133,28 @@ fn poses_png(puppet: &Puppet, poses: &PoseSet, path: &Path) {
         ("stand front".into(), poses.get("stand").cloned().unwrap_or_default(), 0.0),
         ("stand side".into(), poses.get("stand").cloned().unwrap_or_default(), 90.0),
     ];
+    // RIG_CHECK_YAW=<degrees> turns every pose tile (default 35).
+    let yaw: f32 = std::env::var("RIG_CHECK_YAW").ok().and_then(|v| v.parse().ok()).unwrap_or(35.0);
     for name in poses.names() {
-        shots.push((name.to_owned(), poses.get(name).cloned().unwrap_or_default(), 35.0));
+        shots.push((name.to_owned(), poses.get(name).cloned().unwrap_or_default(), yaw));
     }
     let cols = 4usize;
     let rows = shots.len().div_ceil(cols);
     let mut c = Canvas::new(cols * TILE, rows * TILE, 2, BACKGROUND);
     for (i, (_, pose, yaw)) in shots.iter().enumerate() {
         let (x0, y0) = ((i % cols) * TILE, (i / cols) * TILE);
-        let mut cam = Camera::framing(puppet.height.max(1.0) * 1.15, [TILE as f32, TILE as f32]);
-        cam.center = [x0 as f32 + TILE as f32 * 0.5, y0 as f32 + TILE as f32 * 0.55];
         let look = Look { yaw: *yaw, ..Look::default() };
         let posed = puppet.pose(pose);
+        // Frame THIS pose: a lizard lying flat is long, not tall. The figure
+        // turns about the vertical axis, so its reach is the farthest corner
+        // from that axis.
+        let [lo, hi] = posed.bounds();
+        let reach = [lo[0].abs().max(hi[0].abs()), lo[2].abs().max(hi[2].abs())];
+        let radius = (reach[0] * reach[0] + reach[1] * reach[1]).sqrt();
+        let size = (hi[1] - lo[1]).max(radius * 1.4).max(0.5) * 1.15;
+        let mut cam = Camera::framing(size, [TILE as f32, TILE as f32]);
+        cam.target = [0.0, (hi[1] - lo[1]) * 0.5, 0.0];
+        cam.center = [x0 as f32 + TILE as f32 * 0.5, y0 as f32 + TILE as f32 * 0.55];
         let project = |p: gs_puppet::math::V3| cam.project(p);
         c.draw(&ground_grid(&project, 3, [0x4a, 0x52, 0x5c, 255], 1.0));
         c.draw(&posed.draw_list(&project, &look));
