@@ -221,7 +221,11 @@ the puppet, or its name in the row list, and its sliders appear: *swing
 pitch, turn, roll), in half degrees; the picked bone is outlined in yellow.
 A mirror pair is one row (`leg`, both sides mirrored) until *Split sides*
 writes `leg_l` / `leg_r` separately; *Join sides* folds them back (the left
-wins). *edits every <body type>* writes the shared `[pose.<name>]`;
+wins). The sliders stop at the joint's limits -- the `[limits]` table in
+the pose file (per bone or pair stem, `[low, high]` degrees per Euler angle
+and per bend; `[family_limits.<family>]` replaces keys for one family),
+which every pose, blend and death fall on the stage is held inside; a value
+written outside them by hand is flagged. *edits every <body type>* writes the shared `[pose.<name>]`;
 *<family> only* writes that family's sparse correction
 `[family.<family>.<name>]`: rows it does not name show the shared value in
 italics, and moving one adds it to the correction. *Clear* removes a key,

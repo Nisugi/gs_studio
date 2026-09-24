@@ -326,3 +326,74 @@ fn a_lying_quadruped_keeps_its_back_low() {
         assert!(back < 0.45 * p.height, "{family}: back at {back:.2} ft lying down, standing height {:.2}", p.height);
     }
 }
+
+// ---- joint limits ----------------------------------------------------------
+
+/// Every shipped pose (shared, and as each family sees it) lies inside its
+/// body type's limits, and every limit names a bone its template has.
+#[test]
+fn shipped_poses_respect_their_joint_limits() {
+    for (body_type, _) in crate::SHIPPED_POSES {
+        let set = PoseSet::shipped(body_type).expect("parses");
+        assert!(!set.limits.is_empty(), "{body_type} has limits");
+        let mut bad = set.violations();
+        for family in set.families.keys().chain(set.family_limits.keys()) {
+            bad.extend(set.for_family(family).violations());
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+        let template = rig::templates().into_iter().find(|t| t.name == body_type).expect("template");
+        let bones: Vec<&str> = template.bones.iter().map(|b| b.name.as_str()).collect();
+        for key in set.limits.keys() {
+            let known = bones.contains(&key.as_str()) || bones.contains(&format!("{key}_l").as_str());
+            assert!(known, "{body_type}: limit '{key}' names no bone ({bones:?})");
+        }
+    }
+}
+
+#[test]
+fn a_limit_holds_a_bone_and_mirrors_for_the_right_side() {
+    let set = PoseSet::from_toml(
+        "body_type = \"biped\"\n[pose.stand]\n[pose.bad]\nleg = { rot = [-200.0, 0.0, 90.0], bend = [-30.0, 10.0] }\n\
+         [limits]\nleg = { rot = [[-125.0, 45.0], [-45.0, 45.0], [-30.0, 70.0]], bend = [[0.0, 150.0]] }\n",
+    )
+    .unwrap();
+    let bad = set.get("bad").unwrap();
+    assert_eq!(set.violations().len(), 1);
+    let held = set.clamp(bad);
+    let left = held.bone("leg_l");
+    assert_eq!(left.deg, [-125.0, 0.0, 70.0]);
+    assert_eq!(left.bend, vec![0.0, 10.0], "a knee never bends backwards; an unbounded bend is left alone");
+    assert_eq!(left.rot, quat_from_euler([-125.0, 0.0, 70.0]));
+    // The right side reads the stem mirrored, and its limit mirrors too.
+    let right = held.bone("leg_r");
+    assert_eq!(right.deg, [-125.0, 0.0, -70.0]);
+    assert!(set.limit("leg_r").unwrap().allows(&right));
+    let lim = set.limit("leg_r").unwrap();
+    assert_eq!(lim.rot[2], Some([-70.0, 30.0]));
+    // A pose inside its limits is unchanged.
+    let stand = set.get("stand").unwrap();
+    assert_eq!(&set.clamp(stand), stand);
+}
+
+#[test]
+fn a_family_can_bound_a_bone_differently_and_bad_ranges_are_refused() {
+    let set = PoseSet::from_toml(
+        "body_type = \"quadruped\"\n[pose.stand]\n[limits]\nhindleg = { bend = [[0.0, 170.0]] }\n\
+         [family_limits.elephantid]\nhindleg = { bend = [[0.0, 90.0]] }\n",
+    )
+    .unwrap();
+    assert_eq!(set.limit("hindleg_l").unwrap().bend, vec![Some([0.0, 170.0])]);
+    assert_eq!(set.for_family("elephantid").limit("hindleg_l").unwrap().bend, vec![Some([0.0, 90.0])]);
+    assert_eq!(set.for_family("canine").limit("hindleg_l").unwrap().bend, vec![Some([0.0, 170.0])]);
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[limits]\nleg = { bend = [[10.0, -10.0]] }\n").unwrap_err();
+    assert!(err.contains("not low..high"), "{err}");
+}
+
+#[test]
+fn a_blend_moves_angle_by_angle_and_stays_inside_what_both_ends_allow() {
+    let a = Pose::from_euler(&[("arm", [0.0, 0.0, 10.0], &[-10.0])]);
+    let b = Pose::from_euler(&[("arm", [0.0, 0.0, 170.0], &[-90.0])]);
+    let half = a.blend(&b, 0.5).bone("arm_l");
+    assert_eq!(half.deg, [0.0, 0.0, 90.0], "degrees, not the short way round a quaternion");
+    assert_eq!(half.bend, vec![-50.0]);
+}

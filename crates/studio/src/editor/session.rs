@@ -199,6 +199,7 @@ impl Session {
     /// Load the family's saved rig if there is one, else start from its
     /// default template.
     fn open_family(&mut self, family: &str) {
+        let _t = crate::perf_log::span("rigs: open family");
         let path = self.rig_path(family);
         if path.is_file() {
             let loaded = std::fs::read_to_string(&path)
@@ -540,6 +541,38 @@ pub fn other_view(view: View) -> View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Timing probe (run by hand): what opening each family from the Rigs
+    /// dropdown costs, step by step.
+    #[test]
+    #[ignore]
+    fn open_family_timing() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+        let mut s = Session::open(&data, data.join("no/such/publish/dir"), None).unwrap();
+        let families: Vec<String> = s.outlines.families().into_iter().filter(|f| s.has_saved_rig(f)).collect();
+        for f in families {
+            let t = std::time::Instant::now();
+            s.request(DocAction::OpenFamily(f.clone()));
+            let open = t.elapsed();
+            let t = std::time::Instant::now();
+            s.baked(false);
+            let bake = t.elapsed();
+            let t = std::time::Instant::now();
+            s.refresh_depth();
+            let depth = t.elapsed();
+            let t = std::time::Instant::now();
+            let ok = s.puppet().is_ok();
+            let puppet = t.elapsed();
+            let t = std::time::Instant::now();
+            if let Ok(p) = s.puppet() {
+                let posed = p.pose(&gs_puppet::Pose::default());
+                let cam = gs_puppet::Camera::framing(p.height.max(0.5), [380.0, 600.0]);
+                let _ = posed.skin(&|v| cam.project(v), &gs_puppet::Look::default());
+            }
+            let skin = t.elapsed();
+            eprintln!("{f:12} open {open:>9.1?} bake {bake:>9.1?} depth {depth:>9.1?} puppet {puppet:>9.1?} ({ok}) skin {skin:>9.1?}");
+        }
+    }
 
     const OUTLINES: &str = r#"{
         "humanoid-front": {"ref_ft": 6, "subpaths": [[[-1,0],[1,0],[1,6],[-1,6]]]},

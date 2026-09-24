@@ -93,3 +93,13 @@ hind_body = { rot = [-80.0, 0.0, 0.0], bend = [25.0, 0.0, 0.0] }
 fore_body = { rot = [0.0, 35.0, 0.0] }
 neck = { rot = [25.0, 20.0, 0.0] }
 skull = { rot = [-25.0, 0.0, 50.0] }
+
+# Joint limits: how far each bone may turn, [low, high] degrees per Euler
+# angle (x swing, y twist, z spread) and per bend, as poses write them. A pair
+# stem bounds the LEFT side; the right is mirrored. Every pose, blend and
+# death fall is held inside these; the pose editor's sliders stop at them.
+[limits]
+fore_body = { rot = [[-60.0, 90.0], [-90.0, 90.0], [-45.0, 45.0]] }
+neck = { rot = [[-60.0, 90.0], [-90.0, 90.0], [-45.0, 45.0]] }
+skull = { rot = [[-60.0, 70.0], [-80.0, 80.0], [-70.0, 70.0]] }
+hind_body = { rot = [[-110.0, 60.0], [-90.0, 90.0], [-45.0, 45.0]], bend = [[-60.0, 60.0], [-60.0, 60.0], [-60.0, 60.0]] }

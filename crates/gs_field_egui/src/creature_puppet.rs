@@ -907,6 +907,8 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
+        // Inside the body type's joint limits, whatever the file says.
+        let pose = &set.clamp(pose);
         let texture = if skin { self.texture(family) } else { None };
         let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref(), texture.as_deref()));
         self.builds += 1;
@@ -959,7 +961,8 @@ impl PuppetCache {
         };
         let (_, to) = key.pose.resolve(&set, variant)?;
         let (_, start) = from.resolve(&set, 0)?;
-        let pose = gs_puppet::Fall::new(&puppet, start, to, variant).at(t);
+        // A spring's overshoot never bends a joint past its limit.
+        let pose = set.clamp(&gs_puppet::Fall::new(&puppet, start, to, variant).at(t));
         let light = self.light.clone().filter(|_| skin);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;

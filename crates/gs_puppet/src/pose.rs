@@ -62,6 +62,26 @@
 //! pose it does not name, resolve exactly as if the section were not there
 //! -- [`PoseSet::for_family`] hands back the shared set untouched.
 //!
+//! # Joint limits
+//!
+//! A body type's file may bound every bone's angles, so no pose, blend or
+//! fall bends a knee backwards:
+//!
+//! ```toml
+//! [limits]                              # ranges in degrees, low..high
+//! leg = { rot = [[-125.0, 45.0], [-45.0, 45.0], [-30.0, 70.0]], bend = [[0.0, 150.0], [-45.0, 70.0]] }
+//!
+//! [family_limits.elephantid]            # a family may replace a key
+//! hindleg = { rot = [[-60.0, 40.0], [-20.0, 20.0], [-30.0, 20.0]], bend = [[0.0, 90.0]] }
+//! ```
+//!
+//! `rot` bounds each Euler angle (x, y, z) as a pose writes it; `bend` each
+//! bend in order (a missing entry is unbounded). A pair stem (`leg`) bounds
+//! the LEFT side as written and the right mirrored, as poses do. A bone with
+//! no limit is free. [`PoseSet::clamp`] applies them; renderers clamp every
+//! pose they draw, and [`PoseSet::violations`] lists authored angles that
+//! lie outside (a shipped set has none).
+//!
 //! The override lives HERE, in the body type's file, and not in the
 //! family's `.rig.toml`, because a `.rig.toml` is studio source that is
 //! never published: a game client is shipped `<family>.puppet.toml` (baked
@@ -86,12 +106,65 @@ use crate::puppet::Puppet;
 #[derive(Debug, Clone, PartialEq)]
 pub struct BonePose {
     pub rot: Quat,
+    /// The same rotation as the Euler degrees it was written as: what
+    /// blending interpolates and joint limits bound.
+    pub deg: [f32; 3],
     pub bend: Vec<f32>,
 }
 
 impl Default for BonePose {
     fn default() -> Self {
-        BonePose { rot: QUAT_IDENTITY, bend: Vec::new() }
+        BonePose { rot: QUAT_IDENTITY, deg: [0.0; 3], bend: Vec::new() }
+    }
+}
+
+impl BonePose {
+    pub fn euler(deg: [f32; 3], bend: Vec<f32>) -> BonePose {
+        BonePose { rot: quat_from_euler(deg), deg, bend }
+    }
+
+    /// The other side of the body (y and z negated, as `quat_mirror`).
+    pub fn mirrored(&self) -> BonePose {
+        BonePose { rot: quat_mirror(self.rot), deg: [self.deg[0], -self.deg[1], -self.deg[2]], bend: self.bend.clone() }
+    }
+
+    /// Angle by angle from `self` toward `to`; `t` may run past 0..1 (a
+    /// spring's overshoot).
+    pub fn lerp(&self, to: &BonePose, t: f32) -> BonePose {
+        let deg = [0, 1, 2].map(|i| self.deg[i] + (to.deg[i] - self.deg[i]) * t);
+        let n = self.bend.len().max(to.bend.len());
+        let at = |v: &Vec<f32>, i: usize| v.get(i).copied().unwrap_or(0.0);
+        let bend = (0..n).map(|i| at(&self.bend, i) + (at(&to.bend, i) - at(&self.bend, i)) * t).collect();
+        BonePose::euler(deg, bend)
+    }
+}
+
+/// How far one bone may turn: per Euler angle and per bend, `[low, high]`
+/// degrees (None = free). See the module docs.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Limit {
+    pub rot: [Option<[f32; 2]>; 3],
+    pub bend: Vec<Option<[f32; 2]>>,
+}
+
+impl Limit {
+    /// The right side's limit from the left's (y and z ranges flipped).
+    pub fn mirrored(&self) -> Limit {
+        let flip = |r: Option<[f32; 2]>| r.map(|[lo, hi]| [-hi, -lo]);
+        Limit { rot: [self.rot[0], flip(self.rot[1]), flip(self.rot[2])], bend: self.bend.clone() }
+    }
+
+    pub fn clamp(&self, bp: &BonePose) -> BonePose {
+        let c = |v: f32, r: Option<[f32; 2]>| r.map_or(v, |[lo, hi]| v.clamp(lo, hi));
+        let deg = [0, 1, 2].map(|i| c(bp.deg[i], self.rot[i]));
+        let bend = bp.bend.iter().enumerate().map(|(i, b)| c(*b, self.bend.get(i).copied().flatten())).collect();
+        BonePose::euler(deg, bend)
+    }
+
+    /// Does `bp` lie inside (to a hundredth of a degree)?
+    pub fn allows(&self, bp: &BonePose) -> bool {
+        let ok = |v: f32, r: Option<[f32; 2]>| r.is_none_or(|[lo, hi]| v >= lo - 0.01 && v <= hi + 0.01);
+        (0..3).all(|i| ok(bp.deg[i], self.rot[i])) && bp.bend.iter().enumerate().all(|(i, b)| ok(*b, self.bend.get(i).copied().flatten()))
     }
 }
 
@@ -140,13 +213,14 @@ impl Pose {
     pub fn from_euler(entries: &[(&str, [f32; 3], &[f32])]) -> Pose {
         let mut pose = Pose::default();
         for (name, rot, bend) in entries {
-            pose.bones.insert((*name).to_owned(), BonePose { rot: quat_from_euler(*rot), bend: bend.to_vec() });
+            pose.bones.insert((*name).to_owned(), BonePose::euler(*rot, bend.to_vec()));
         }
         pose
     }
 
     pub fn set_euler(&mut self, bone: &str, deg: [f32; 3]) {
-        self.bones.entry(bone.to_owned()).or_default().rot = quat_from_euler(deg);
+        let b = self.bones.entry(bone.to_owned()).or_default();
+        *b = BonePose::euler(deg, std::mem::take(&mut b.bend));
     }
 
     /// What `bone` does in this pose: its own entry, else its pair's
@@ -161,7 +235,7 @@ impl Pose {
             _ => return BonePose::default(),
         };
         match self.bones.get(stem) {
-            Some(b) if right => BonePose { rot: quat_mirror(b.rot), bend: b.bend.clone() },
+            Some(b) if right => b.mirrored(),
             Some(b) => b.clone(),
             None => BonePose::default(),
         }
@@ -187,7 +261,8 @@ impl Pose {
         out
     }
 
-    /// Slerp per bone (and the root), lerp per bend.
+    /// Per bone, angle by angle (the Euler degrees and bends, so a blend
+    /// stays inside joint limits the two ends respect); slerp for the root.
     pub fn blend(&self, to: &Pose, t: f32) -> Pose {
         let t = t.clamp(0.0, 1.0);
         let mut bones = BTreeMap::new();
@@ -208,10 +283,7 @@ impl Pose {
                 continue;
             }
             let (a, b) = (self.bone(&k), to.bone(&k));
-            let n = a.bend.len().max(b.bend.len());
-            let at = |v: &Vec<f32>, i: usize| v.get(i).copied().unwrap_or(0.0);
-            let bend = (0..n).map(|i| at(&a.bend, i) + (at(&b.bend, i) - at(&a.bend, i)) * t).collect();
-            bones.insert(k, BonePose { rot: slerp(a.rot, b.rot, t), bend });
+            bones.insert(k, a.lerp(&b, t));
         }
         // A pair key left beside its explicit sides would be shadowed anyway.
         Pose { root: slerp(self.root, to.root, t), bones }
@@ -234,6 +306,12 @@ struct PoseFile {
     /// `[family.<family>.<pose>]`: that family's sparse corrections.
     #[serde(default)]
     family: BTreeMap<String, BTreeMap<String, BTreeMap<String, toml::Value>>>,
+    /// `[limits]`: joint limits, per bone or pair stem.
+    #[serde(default)]
+    limits: BTreeMap<String, toml::Value>,
+    /// `[family_limits.<family>]`: keys a family bounds differently.
+    #[serde(default)]
+    family_limits: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
 
 /// One `key = { rot, bend }` entry of a pose table, parsed and checked.
@@ -244,7 +322,28 @@ fn bone_def(where_: &str, key: &str, value: toml::Value) -> Result<BonePose, Str
     if !rot.iter().chain(&def.bend).all(|v| v.is_finite()) {
         return Err(format!("{where_}, '{key}': not a finite angle"));
     }
-    Ok(BonePose { rot: quat_from_euler(rot), bend: def.bend })
+    Ok(BonePose::euler(rot, def.bend))
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LimitDef {
+    #[serde(default)]
+    rot: Option<[[f32; 2]; 3]>,
+    #[serde(default)]
+    bend: Vec<[f32; 2]>,
+}
+
+fn limit_def(where_: &str, key: &str, value: toml::Value) -> Result<Limit, String> {
+    let def: LimitDef = value.try_into().map_err(|e| format!("{where_}, '{key}': {e}"))?;
+    let ranges: Vec<[f32; 2]> = def.rot.map(|r| r.to_vec()).unwrap_or_default().into_iter().chain(def.bend.iter().copied()).collect();
+    if let Some(bad) = ranges.iter().find(|[lo, hi]| !(lo.is_finite() && hi.is_finite() && lo <= hi)) {
+        return Err(format!("{where_}, '{key}': range {bad:?} is not low..high"));
+    }
+    Ok(Limit { rot: def.rot.map_or([None; 3], |r| r.map(Some)), bend: def.bend.into_iter().map(Some).collect() })
+}
+
+fn limits_of(where_: &str, table: BTreeMap<String, toml::Value>) -> Result<BTreeMap<String, Limit>, String> {
+    table.into_iter().map(|(k, v)| limit_def(where_, &k, v).map(|l| (k, l))).collect()
 }
 
 fn root_def(where_: &str, value: toml::Value) -> Result<Quat, String> {
@@ -262,6 +361,10 @@ pub struct PoseSet {
     pub poses: BTreeMap<String, Pose>,
     /// Family (lowercase) -> its overrides. Empty for most body types.
     pub families: BTreeMap<String, FamilyPoses>,
+    /// Joint limits by bone or pair stem (see the module docs).
+    pub limits: BTreeMap<String, Limit>,
+    /// Family (lowercase) -> the limit keys it replaces.
+    pub family_limits: BTreeMap<String, BTreeMap<String, Limit>>,
 }
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
@@ -313,7 +416,14 @@ impl PoseSet {
                 families.insert(family, fam);
             }
         }
-        Ok(PoseSet { body_type: file.body_type, poses, families })
+        let limits = limits_of("limits", file.limits)?;
+        let mut family_limits = BTreeMap::new();
+        for (family, table) in file.family_limits {
+            let family = family.trim().to_ascii_lowercase();
+            let lim = limits_of(&format!("family_limits.{family}"), table)?;
+            family_limits.insert(family, lim);
+        }
+        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits })
     }
 
     /// This set as `family` sees it: the shared poses with that family's
@@ -323,15 +433,61 @@ impl PoseSet {
     /// A family may name a pose the shared set lacks; it is added for that
     /// family only.
     pub fn for_family(&self, family: &str) -> Cow<'_, PoseSet> {
-        let Some(fam) = self.families.get(family.trim().to_ascii_lowercase().as_str()) else {
+        let key = family.trim().to_ascii_lowercase();
+        let fam = self.families.get(key.as_str());
+        let lim = self.family_limits.get(key.as_str());
+        if fam.is_none() && lim.is_none() {
             return Cow::Borrowed(self);
-        };
+        }
         let mut out = self.clone();
-        for (name, over) in &fam.poses {
+        for (name, over) in fam.map(|f| &f.poses).into_iter().flatten() {
             let base = out.poses.get(name).cloned().unwrap_or_default();
             out.poses.insert(name.clone(), base.with_override(over));
         }
+        for (k, l) in lim.into_iter().flatten() {
+            if !(k.ends_with("_l") || k.ends_with("_r")) {
+                out.limits.remove(&format!("{k}_l"));
+                out.limits.remove(&format!("{k}_r"));
+            }
+            out.limits.insert(k.clone(), l.clone());
+        }
         Cow::Owned(out)
+    }
+
+    /// The limit on a pose key: its own, else (for a side) its pair stem's,
+    /// mirrored for the right. None = free.
+    pub fn limit(&self, key: &str) -> Option<Limit> {
+        if let Some(l) = self.limits.get(key) {
+            return Some(l.clone());
+        }
+        if let Some(stem) = key.strip_suffix("_l") {
+            return self.limits.get(stem).cloned();
+        }
+        let stem = key.strip_suffix("_r")?;
+        self.limits.get(stem).map(Limit::mirrored)
+    }
+
+    /// `pose` with every bone held inside its limit.
+    pub fn clamp(&self, pose: &Pose) -> Pose {
+        if self.limits.is_empty() {
+            return pose.clone();
+        }
+        let bones = pose.bones.iter().map(|(k, bp)| (k.clone(), self.limit(k).map_or_else(|| bp.clone(), |l| l.clamp(bp)))).collect();
+        Pose { root: pose.root, bones }
+    }
+
+    /// Every authored angle outside its limit, as messages (this set as
+    /// `for_family` gave it: shared poses with that family's folded in).
+    pub fn violations(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (name, pose) in &self.poses {
+            for (key, bp) in &pose.bones {
+                if let Some(l) = self.limit(key).filter(|l| !l.allows(bp)) {
+                    out.push(format!("{}: pose '{name}', '{key}' = {:?} bend {:?} is outside {:?} bend {:?}", self.body_type, bp.deg, bp.bend, l.rot, l.bend));
+                }
+            }
+        }
+        out
     }
 
     /// The bone (or pair-stem) names every override in this set mentions,

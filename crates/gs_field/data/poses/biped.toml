@@ -168,3 +168,15 @@ leg = { rot = [-12.0, 0.0, 0.0] }
 
 [family.ghost.dead]
 leg = { rot = [0.0, 0.0, 0.0] }
+
+# Joint limits: how far each bone may turn, [low, high] degrees per Euler
+# angle (x swing, y twist, z spread) and per bend, as poses write them. A pair
+# stem bounds the LEFT side; the right is mirrored. Every pose, blend and
+# death fall is held inside these; the pose editor's sliders stop at them.
+[limits]
+torso_lower = { rot = [[-30.0, 45.0], [-30.0, 30.0], [-20.0, 20.0]] }
+torso_upper = { rot = [[-30.0, 60.0], [-45.0, 45.0], [-30.0, 30.0]] }
+neck = { rot = [[-40.0, 50.0], [-60.0, 60.0], [-35.0, 35.0]] }
+skull = { rot = [[-40.0, 45.0], [-70.0, 70.0], [-30.0, 30.0]] }
+arm = { rot = [[-180.0, 60.0], [-90.0, 90.0], [-30.0, 180.0]], bend = [[-150.0, 0.0]] }
+leg = { rot = [[-125.0, 45.0], [-45.0, 45.0], [-30.0, 70.0]], bend = [[0.0, 150.0], [-45.0, 70.0]] }

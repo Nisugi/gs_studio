@@ -223,16 +223,26 @@ impl RigTool {
             || self.radius_drag
             || self.eye_drag
             || self.depth_value_drag;
-        self.session.baked(interactive);
+        {
+            let _t = crate::perf_log::span("rigs: bake");
+            self.session.baked(interactive);
+        }
         // The depth guesses move with the joints, so re-read them the same way.
-        self.session.refresh_depth();
+        {
+            let _t = crate::perf_log::span("rigs: depth guess");
+            self.session.refresh_depth();
+        }
         // A family with no second silhouette cannot be edited in DEPTH.
         if !self.session.depth_available() {
             self.session.editor.set_edit_view(EditView::Primary);
         }
 
-        egui::Panel::left("rig_left").default_size(330.0).min_size(260.0).show(ui, |ui| self.left_panel(ui));
+        egui::Panel::left("rig_left").default_size(330.0).min_size(260.0).show(ui, |ui| {
+            let _t = crate::perf_log::span("rigs: left panel");
+            self.left_panel(ui)
+        });
         egui::Panel::right("rig_right").default_size(270.0).min_size(200.0).show(ui, |ui| {
+            let _t = crate::perf_log::span("rigs: right panel");
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.right_panel(ui));
         });
         if self.puppet_view.show {
@@ -240,9 +250,15 @@ impl RigTool {
                 .resizable(true)
                 .default_size(380.0)
                 .min_size(220.0)
-                .show(ui, |ui| self.puppet_panel(ui));
+                .show(ui, |ui| {
+                    let _t = crate::perf_log::span("rigs: 3D panel");
+                    self.puppet_panel(ui)
+                });
         }
-        egui::CentralPanel::default().show(ui, |ui| self.centre(ui));
+        egui::CentralPanel::default().show(ui, |ui| {
+            let _t = crate::perf_log::span("rigs: canvas");
+            self.centre(ui)
+        });
         self.discard_prompt(ui.ctx());
         self.name_prompt(ui.ctx());
         self.pose_quit_prompt(ui.ctx());
@@ -630,21 +646,33 @@ impl RigTool {
 
         let pv = &mut self.puppet_view;
         let dead_of = |set: &gs_puppet::PoseSet| set.dead_name(1).and_then(|n| set.get(n)).cloned().unwrap_or_default();
+        // The pose shown (held inside the joint limits, as the stage holds
+        // it), the dead pose a death falls into, and the set's limits.
+        let shown_of = |set: &gs_puppet::PoseSet, name: &str| {
+            let pose = if name.is_empty() { gs_puppet::Pose::default() } else { set.get(name).cloned().unwrap_or_default() };
+            (set.clamp(&pose), dead_of(set), set.clone())
+        };
+        let pose_name = pv.pose.clone();
         let from_doc = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type).map(|d| {
             let revision = d.revision();
-            let (pose, dead) = match d.set_for(&family) {
-                Ok(set) if !pv.pose.is_empty() => (set.get(&pv.pose).cloned().unwrap_or_default(), dead_of(set)),
-                Ok(set) => (gs_puppet::Pose::default(), dead_of(set)),
-                _ => Default::default(),
+            let (pose, dead, set) = match d.set_for(&family) {
+                Ok(set) => {
+                    let (pose, dead, set) = shown_of(set, &pose_name);
+                    (pose, dead, Some(set))
+                }
+                Err(_) => (gs_puppet::Pose::default(), gs_puppet::Pose::default(), None),
             };
-            (pose, dead, revision + 1)
+            (pose, dead, set, revision + 1)
         });
-        let (pose, dead, poses_revision) = match from_doc {
+        let (pose, dead, limits, poses_revision) = match from_doc {
             Some(p) => p,
-            None => {
-                let dead = pv.poses(&data_root, &body_type, &family).as_ref().map(|(set, _)| dead_of(set)).unwrap_or_default();
-                (pv.current_pose(&data_root, &body_type, &family), dead, 0)
-            }
+            None => match pv.poses(&data_root, &body_type, &family) {
+                Ok((set, _)) => {
+                    let (pose, dead, set) = shown_of(set, &pose_name);
+                    (pose, dead, Some(set), 0)
+                }
+                Err(_) => (gs_puppet::Pose::default(), gs_puppet::Pose::default(), None, 0),
+            },
         };
         // Playing a death: the fall, then the dead pose held a moment.
         let falling = self.death.map(|start| start.elapsed().as_secs_f32());
@@ -704,6 +732,10 @@ impl RigTool {
             None
         };
         let texture_serial = texture.as_ref().map(|_| self.sheet_serial);
+        {
+            let _t = crate::perf_log::span("rigs: build puppet");
+            let _ = self.session.puppet();
+        }
         match self.session.puppet() {
             Ok(puppet) => {
                 let mut cam = gs_puppet::Camera::framing(puppet.height.max(0.5), [rect.width(), rect.height()]);
@@ -711,9 +743,10 @@ impl RigTool {
                 cam.focal *= zoom;
                 cam.pitch_deg = pitch;
                 let look = gs_puppet::Look { yaw, outline_px: 1.5, ..gs_puppet::Look::default() };
-                let shown = match falling {
-                    Some(t) => gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t),
-                    None => pose.clone(),
+                let shown = match (falling, limits.as_ref()) {
+                    (Some(t), Some(set)) => set.clamp(&gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t)),
+                    (Some(t), None) => gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t),
+                    (None, _) => pose.clone(),
                 };
                 let posed = puppet.pose(&shown);
                 let project = |p: gs_puppet::math::V3| cam.project(p);
@@ -735,6 +768,7 @@ impl RigTool {
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let mut local = cam;
                         local.center = [rect.width() * 0.5, rect.height() * 0.5];
+                        let _t = crate::perf_log::span("rigs: skin");
                         let skin = posed.skin_textured(&|p| local.project(p), &look, texture.as_deref());
                         let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
                         let tex = ui.ctx().load_texture("rig_puppet_skin", image, egui::TextureOptions::LINEAR);
@@ -1907,6 +1941,9 @@ impl RigTool {
             return;
         };
         let (mut entry, origin) = doc.value(scope, family, &pose, &row.key);
+        // The sliders stop at the joint's limits (see `[limits]` in the file).
+        let limit = if row.key == ROOT { None } else { doc.set_for(family).as_ref().ok().and_then(|s| s.limit(&row.key)) };
+        let range = |r: Option<[f32; 2]>| r.map_or(-180.0..=180.0, |[lo, hi]| lo..=hi);
         if row.key != ROOT {
             let n = row.bends.max(entry.bend.len());
             entry.bend.resize(n, 0.0);
@@ -1921,11 +1958,20 @@ impl RigTool {
             Some(PairState::Joined) => format!("{} (both sides, mirrored)", row.key),
             _ => row.key.clone(),
         });
+        let outside = limit.as_ref().is_some_and(|l| !l.allows(&gs_puppet::BonePose::euler(entry.rot, entry.bend.clone())));
         for (k, name) in names.iter().enumerate() {
-            ui.add(egui::Slider::new(&mut entry.rot[k], -180.0..=180.0).step_by(0.5).text(*name));
+            let r = range(limit.as_ref().and_then(|l| l.rot[k]));
+            ui.add(egui::Slider::new(&mut entry.rot[k], r).step_by(0.5).text(*name));
         }
         for (i, b) in entry.bend.iter_mut().enumerate() {
-            ui.add(egui::Slider::new(b, -180.0..=180.0).step_by(0.5).text(format!("bend {}", i + 1)));
+            let r = range(limit.as_ref().and_then(|l| l.bend.get(i).copied().flatten()));
+            ui.add(egui::Slider::new(b, r).step_by(0.5).text(format!("bend {}", i + 1)));
+        }
+        if outside {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Outside this joint's limits: it is drawn held at the limit. Move a slider to bring it inside.",
+            );
         }
         if entry != before {
             doc.set(scope, family, &pose, &row.key, Some(&entry));

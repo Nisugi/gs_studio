@@ -63,7 +63,7 @@ pub use fall::Fall;
 pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WOUND_COLORS};
 pub use fit::{rest_iou, rest_prims};
 pub use paint::paint;
-pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
+pub use pose::{BonePose, FamilyPoses, Limit, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use prefill::{prefill, Painting, Paintings};
 pub use skin::{Effects, Skin};
 pub use uv::{silhouette_template, Texture, UvLayout, SHEET_SIDE};

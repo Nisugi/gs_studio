@@ -71,3 +71,14 @@ root = [0.0, 0.0, 180.0]
 neck = { rot = [-30.0, 0.0, 0.0] }
 wing = { rot = [0.0, -80.0, 0.0] }
 leg = { rot = [-20.0, 0.0, 0.0], bend = [70.0, 60.0] }
+
+# Joint limits: how far each bone may turn, [low, high] degrees per Euler
+# angle (x swing, y twist, z spread) and per bend, as poses write them. A pair
+# stem bounds the LEFT side; the right is mirrored. Every pose, blend and
+# death fall is held inside these; the pose editor's sliders stop at them.
+[limits]
+neck = { rot = [[-60.0, 70.0], [-80.0, 80.0], [-60.0, 60.0]] }
+skull = { rot = [[-45.0, 45.0], [-90.0, 90.0], [-40.0, 40.0]] }
+tail = { rot = [[-45.0, 45.0], [-30.0, 30.0], [-30.0, 30.0]] }
+leg = { rot = [[-100.0, 45.0], [-30.0, 30.0], [-30.0, 40.0]], bend = [[-20.0, 160.0], [-110.0, 90.0]] }
+wing = { rot = [[-60.0, 60.0], [-120.0, 30.0], [-30.0, 120.0]] }

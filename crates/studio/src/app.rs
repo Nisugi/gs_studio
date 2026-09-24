@@ -496,10 +496,11 @@ impl StudioApp {
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let started = std::time::Instant::now();
+        crate::perf_log::begin_frame();
         let tab = self.active;
         self.frame(ui, frame);
         let label = TOOLS.iter().find(|t| t.id == tab).map_or("?", |t| t.label);
-        if let Some(line) = crate::perf_log::slow_frame_line(started.elapsed(), label, "") {
+        if let Some(line) = crate::perf_log::slow_frame_line(started.elapsed(), label, &crate::perf_log::spans_detail()) {
             crate::perf_log::log(&line);
         }
     }

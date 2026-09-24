@@ -553,3 +553,10 @@ rebinds `painter` to `field_occluders::label_painter`, which, only when the
 scene has occluders, is a sublayer drawn directly above the field's layer
 (`Context::set_sublayer`). Without occluders it is the field painter itself,
 so VellumFE's look is untouched. Seventeen regions.
+
+### 7.19 Joint limits
+
+`PuppetCache::posed_with` and `posed_falling` pass every pose through
+`PoseSet::clamp` (gs_puppet: the body type's `[limits]`), so neither a
+hand-edited pose nor a fall's spring overshoot bends a joint past its
+range. Pose files without `[limits]` draw exactly as before.

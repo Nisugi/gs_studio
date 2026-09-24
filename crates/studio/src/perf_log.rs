@@ -24,6 +24,47 @@ pub fn log(line: &str) {
     }
 }
 
+thread_local! {
+    /// This frame's timed parts: (name, time). Cleared as a frame starts.
+    static SPANS: std::cell::RefCell<Vec<(&'static str, Duration)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Parts faster than this are not worth naming.
+const SPAN_MIN: Duration = Duration::from_millis(15);
+
+/// Times a part of the frame until dropped: `let _t = perf_log::span("bake");`.
+pub struct Span {
+    name: &'static str,
+    started: std::time::Instant,
+}
+
+pub fn span(name: &'static str) -> Span {
+    Span { name, started: std::time::Instant::now() }
+}
+
+impl Drop for Span {
+    fn drop(&mut self) {
+        let took = self.started.elapsed();
+        if took >= SPAN_MIN {
+            SPANS.with(|s| s.borrow_mut().push((self.name, took)));
+        }
+    }
+}
+
+/// A frame starts: forget the last one's parts.
+pub fn begin_frame() {
+    SPANS.with(|s| s.borrow_mut().clear());
+}
+
+/// This frame's slowest parts, e.g. "rigs: skin 7900 ms, rigs: bake 40 ms".
+pub fn spans_detail() -> String {
+    SPANS.with(|s| {
+        let mut v = s.borrow().clone();
+        v.sort_by(|a, b| b.1.cmp(&a.1));
+        v.iter().take(5).map(|(n, d)| format!("{n} {} ms", d.as_millis())).collect::<Vec<_>>().join(", ")
+    })
+}
+
 /// The line for a slow frame, or None when it was fast enough.
 pub fn slow_frame_line(took: Duration, tab: &str, detail: &str) -> Option<String> {
     (took >= SLOW_FRAME).then(|| format!("slow frame: {} ms on {tab}{}", took.as_millis(), if detail.is_empty() { String::new() } else { format!(" ({detail})") }))
@@ -38,5 +79,21 @@ mod tests {
         assert_eq!(slow_frame_line(Duration::from_millis(40), "Rigs", ""), None);
         let line = slow_frame_line(Duration::from_millis(1200), "Dolls", "sets").unwrap();
         assert_eq!(line, "slow frame: 1200 ms on Dolls (sets)");
+    }
+
+    #[test]
+    fn slow_parts_are_named_and_fast_ones_are_not() {
+        begin_frame();
+        {
+            let _t = span("slow part");
+            std::thread::sleep(Duration::from_millis(30));
+        }
+        {
+            let _t = span("fast part");
+        }
+        let detail = spans_detail();
+        assert!(detail.starts_with("slow part ") && !detail.contains("fast"), "{detail}");
+        begin_frame();
+        assert_eq!(spans_detail(), "");
     }
 }

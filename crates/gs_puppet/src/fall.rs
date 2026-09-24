@@ -13,6 +13,10 @@
 //!   and the arms, head and tail trail it, swing past where they come to
 //!   rest and settle back. The impact kicks them once more.
 //!
+//! Angles move angle by angle (`BonePose::lerp`), so an overshoot past the
+//! dead pose is still a set of joint angles, and a renderer's
+//! `PoseSet::clamp` holds it inside the body type's joint limits.
+//!
 //! Grounding still runs per frame (`Puppet::pose` drops the lowest surface
 //! onto y = 0), so the figure never sinks through the floor. The motion is
 //! a pure function of time and a seed: the same death plays the same way,
@@ -21,7 +25,7 @@
 use std::collections::BTreeMap;
 
 use crate::math::{slerp, Quat};
-use crate::pose::{BonePose, Pose};
+use crate::pose::Pose;
 use crate::puppet::Puppet;
 
 /// When the body hits the ground.
@@ -153,7 +157,7 @@ impl Fall {
             // Nothing hangs back much once the body is down.
             let p = p.max(root_p * 0.6);
             let (a, b) = (self.from.bone(&k), self.to.bone(&k));
-            bones.insert(k, BonePose { rot: slerp(a.rot, b.rot, p), bend: lerp_bend(&a.bend, &b.bend, p) });
+            bones.insert(k, a.lerp(&b, p));
         }
         Pose { root: slerp(self.from.root, self.to.root, root_p) as Quat, bones }
     }
@@ -161,12 +165,6 @@ impl Fall {
 
 fn stem(key: &str) -> &str {
     key.strip_suffix("_l").or_else(|| key.strip_suffix("_r")).unwrap_or(key)
-}
-
-fn lerp_bend(a: &[f32], b: &[f32], t: f32) -> Vec<f32> {
-    let n = a.len().max(b.len());
-    let at = |v: &[f32], i: usize| v.get(i).copied().unwrap_or(0.0);
-    (0..n).map(|i| at(a, i) + (at(b, i) - at(a, i)) * t).collect()
 }
 
 #[cfg(test)]
