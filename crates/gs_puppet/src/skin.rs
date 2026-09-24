@@ -15,7 +15,11 @@
 //!   between pixels whose depths agree, so a shoulder or a hip blends into
 //!   the trunk while an arm held in front of the chest stays separate;
 //! * contours come from the depth buffer: round the whole figure, and inside
-//!   it only where a DIFFERENT segment sits clearly nearer.
+//!   it only where a DIFFERENT segment sits clearly nearer -- and not one it
+//!   is JOINED to ([`joined`]): the tubes a trunk is built from (spine,
+//!   brisket, underline) are one body, so the valley where two of them meet
+//!   is neither outlined nor shaded as a crease, and neither is the knee
+//!   between a thigh and a shank.
 //!
 //! Shading is the shape list's cel look (a light fixed to the view, a lit
 //! and a shaded band), softened at the band edges. Everything is egui-free;
@@ -39,6 +43,46 @@ const BLEND_DEPTH_OF_HEIGHT: f32 = 0.04;
 /// A different segment nearer by more than this (fraction of height) draws
 /// a contour on the far one.
 const CONTOUR_DEPTH_OF_HEIGHT: f32 = 0.035;
+/// Joined segments blend across a depth step this many times the ordinary
+/// tolerance: the valley between two trunk tubes shades as one surface.
+const JOINED_BLEND: f32 = 3.0;
+
+/// Which segments are parts of one continuous surface, as a `n * n` table:
+/// a segment and the next along its chain (parent and child); and, inside
+/// the trunk and the head, segments of the same bone, of a bone and its
+/// parent, or of two sibling bones -- except that a tail joins only its
+/// parent, so a tail laid across the flank keeps its line.
+pub(crate) fn joined(puppet: &crate::Puppet) -> Vec<bool> {
+    let segs = &puppet.segments;
+    let n = segs.len();
+    let bone_parent = |i: usize| -> Option<&str> {
+        // The bone this segment's CHAIN hangs from: walk to its first
+        // segment, then that segment's parent's bone.
+        let mut at = i;
+        while segs[at].chain_index > 0 {
+            at = segs[at].parent?;
+        }
+        segs[at].parent.map(|p| segs[p].bone.as_str())
+    };
+    let body = |g: usize| puppet.groups.get(g).is_some_and(|name| name == "trunk" || name == "head");
+    let tail = |i: usize| segs[i].bone.contains("tail");
+    let mut out = vec![false; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            let (a, b) = (&segs[i], &segs[j]);
+            let chain = i == j || a.parent == Some(j) || b.parent == Some(i);
+            let related = a.group == b.group && body(a.group) && {
+                let (pa, pb) = (bone_parent(i), bone_parent(j));
+                a.bone == b.bone
+                    || pa == Some(b.bone.as_str())
+                    || pb == Some(a.bone.as_str())
+                    || (pa.is_some() && pa == pb && !tail(i) && !tail(j))
+            };
+            out[i * n + j] = chain || related;
+        }
+    }
+    out
+}
 /// Half-width of the softened step between tone bands, in `dot(n, light)`.
 const BAND_SOFT: f32 = 0.09;
 const LIT_TONE: f32 = 1.13;
@@ -314,7 +358,7 @@ impl Pixels {
     /// window (one axis per pass), only between pixels whose depths are
     /// within `tol`. A texture's colours are left sharp: blending is for
     /// the shape, and for softening flat wound tints.
-    fn smooth(&mut self, r: usize, tol: f32, colours: bool) {
+    fn smooth(&mut self, r: usize, tol: f32, colours: bool, joined: &dyn Fn(u32, u32) -> bool) {
         if r == 0 {
             return;
         }
@@ -323,7 +367,7 @@ impl Pixels {
             for y in 0..self.h {
                 for x in 0..self.w {
                     let i = y * self.w + x;
-                    let z0 = self.z[i];
+                    let (z0, s0) = (self.z[i], self.seg[i]);
                     if !z0.is_finite() {
                         continue;
                     }
@@ -334,7 +378,8 @@ impl Pixels {
                             continue;
                         }
                         let j = qy as usize * self.w + qx as usize;
-                        if (self.z[j] - z0).abs() > tol {
+                        let dz = (self.z[j] - z0).abs();
+                        if dz > tol && !(dz <= tol * JOINED_BLEND && joined(s0, self.seg[j])) {
                             continue;
                         }
                         n = add(n, self.n[j]);
@@ -403,7 +448,7 @@ impl Pixels {
 
     /// Strength (0..=1) of an interior contour at every pixel: how close a
     /// pixel of ANOTHER segment is that sits nearer by more than `tol`.
-    fn inner_contour(&self, width: f32, tol: f32) -> Vec<f32> {
+    fn inner_contour(&self, width: f32, tol: f32, joined: &dyn Fn(u32, u32) -> bool) -> Vec<f32> {
         let mut out = vec![0.0; self.w * self.h];
         if width <= 0.0 {
             return out;
@@ -424,7 +469,7 @@ impl Pixels {
                             continue;
                         }
                         let j = qy as usize * self.w + qx as usize;
-                        if self.seg[j] == s0 || self.z[j] >= z0 - tol {
+                        if self.seg[j] == s0 || self.z[j] >= z0 - tol || joined(s0, self.seg[j]) {
                             continue;
                         }
                         // Fade in with the step, so a limb growing out of
@@ -632,14 +677,20 @@ impl Posed<'_> {
         let mut px = Pixels::resolve(&samples, w, h);
         drop(samples);
         let radius = (SMOOTH_OF_HEIGHT * height * px_per_ft).round().clamp(0.0, 16.0) as usize;
-        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any());
+        let table = joined(puppet);
+        let count = puppet.segments.len();
+        let is_joined = |a: u32, b: u32| {
+            let (a, b) = (a as usize, b as usize);
+            a < count && b < count && table[a * count + b]
+        };
+        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any(), &is_joined);
 
         // ---- shade and composite
         let (near, far) =
             px.z.iter().filter(|z| z.is_finite()).fold((f32::MAX, f32::MIN), |(n, f), z| (n.min(*z), f.max(*z)));
         let range = (far - near).max(2.0);
         let outside = px.outside_distance();
-        let inner = px.inner_contour(look.outline_px, CONTOUR_DEPTH_OF_HEIGHT * height);
+        let inner = px.inner_contour(look.outline_px, CONTOUR_DEPTH_OF_HEIGHT * height, &is_joined);
         let gold = BOSS_OUTLINE.map(|c| c as f32);
         let mut rgba = vec![0u8; w * h * 4];
         for i in 0..w * h {
