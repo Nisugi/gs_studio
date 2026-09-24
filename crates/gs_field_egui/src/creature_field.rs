@@ -228,6 +228,9 @@ pub fn render_creature_field_content(
 // >>>doll
     // Weather behind the creatures: the far half of the rain / snow / fog.
     let weather_on = crate::field_weather::paint_back(&painter, map.stage_rect(), ui.ctx());
+    // Point lights: their warm pools on the ground, and the lamps behind
+    // the nearest creature.
+    crate::field_lights::paint_back(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, ui.ctx());
 // <<<doll
     let props: &[gs_field::scenes::SceneProp] =
         scene.map(|s| s.props.as_slice()).unwrap_or_default();
@@ -305,6 +308,7 @@ pub fn render_creature_field_content(
     if weather_on {
         crate::field_weather::paint_front(&painter, map.stage_rect(), ui.ctx());
     }
+    crate::field_lights::paint_front(&painter, &|x, y| map.pt(x, y), map.scale, field, view.scene, ui.ctx());
 // <<<doll
     if show_order {
         paint_target_order(&painter, &map, field, &current_target);
@@ -570,6 +574,8 @@ fn paint_creature_card(
     // Lighting: the layers drawn next are this creature's (its frame for
     // shared overlays, its corpse grey for every layer).
     crate::creature_light::set_wearer(&token, dead);
+    // ...and how much firelight reaches it.
+    crate::field_lights::set_creature(view.scene, field, unit, now_ms);
 // <<<doll
 
     // Sprite geometry before the shadow (the shadow needs the drawn
@@ -706,6 +712,12 @@ fn paint_creature_card(
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             tint,
         );
+// >>>doll
+        // Firelight: the unlit art laid back over the lit, fire-tinted.
+        if !dead {
+            crate::field_lights::paint_sprite_glow(painter, cache, &art.texture, dest);
+        }
+// <<<doll
         body = dest;
         // Manifest overlays: quad layers warp/scale with the card,
         // screen layers sit flat above it. Ranked art resolves its
@@ -1327,6 +1339,11 @@ fn paint_creature_puppet(
     // is already down, and this one is shaped like the pose.
     place.paint(painter, &posed.shadow);
     place.paint_figure(painter, &posed);
+    if !dead {
+        if let Some(glow) = crate::field_lights::current() {
+            place.paint_figure_glow(painter, &posed, glow);
+        }
+    }
 
     // Skin status overlays ride the same code as sprite cards, over the
     // posed body rect. The puppet has no texture, so anchors come from the

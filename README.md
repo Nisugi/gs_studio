@@ -355,6 +355,11 @@ across -- and differ only in the right-hand panel:
   buttons or the slider, plus the player's Lighting strength. Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
+- **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*; select
+  one to set its kind, colour, reach, brightness and flicker, or drag it on
+  the stage. It lights a pool of ground and the creatures within reach, most
+  on the side facing it; best seen at night (`[[lights]]` in the scene file,
+  `gs_field_egui::field_lights`).
 - **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
   Sleet, Blood rain or Fog, with Amount and Wind -- a preview of what the
   game sets from the room (`gs_field_egui::field_weather`).

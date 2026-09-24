@@ -353,6 +353,10 @@ pub struct PosedPuppet {
     pub skin: Option<Arc<gs_puppet::Skin>>,
     /// The skin's texture, uploaded the first time it is painted.
     skin_texture: SkinTexture,
+    /// The same skin before scene lighting, when lighting applied: what
+    /// firelight lays back over the lit one (`field_lights`).
+    pub skin_day: Option<Arc<gs_puppet::Skin>>,
+    skin_day_texture: SkinTexture,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
     /// The puppet's own standing height in feet (the bake's `height`), which
@@ -480,6 +484,26 @@ impl PuppetPlacement {
         painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, egui::Color32::WHITE);
     }
 
+    /// Firelight on a lit puppet: its unlit skin laid over, fire-tinted,
+    /// stronger on the side facing the fire (see `field_lights`).
+    pub fn paint_figure_glow(&self, painter: &egui::Painter, posed: &PosedPuppet, glow: crate::field_lights::FireGlow) {
+        let Some(skin) = posed.skin_day.as_ref().filter(|s| !s.is_empty()) else { return };
+        let tex = posed.skin_day_texture.0.get_or_init(|| {
+            let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
+            let options = egui::TextureOptions {
+                mipmap_mode: Some(egui::TextureFilter::Linear),
+                ..egui::TextureOptions::LINEAR
+            };
+            painter.ctx().load_texture("gs_puppet_skin_day", image, options)
+        });
+        let min = egui::pos2(
+            self.foot.x + skin.origin[0] * self.scale,
+            self.foot.y + skin.origin[1] * self.scale,
+        );
+        let size = egui::vec2(skin.w as f32 * self.scale, skin.h as f32 * self.scale);
+        crate::field_lights::paint_glow_texture(painter, tex.id(), egui::Rect::from_min_size(min, size), glow);
+    }
+
     /// Paint a display list through this placement.
     pub fn paint(&self, painter: &egui::Painter, prims: &[Prim]) {
         use egui::{Color32, Pos2, Shape as EShape, Stroke};
@@ -566,11 +590,13 @@ pub fn pose_puppet_with(
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
+    let mut skin_day = None;
     let skin = skin.then(|| {
         let mut skin = posed.skin_with(&project, &look, texture, key.effects);
         // Scene lighting: the skin is its own standing base, lit exactly as
-        // a sprite would be.
+        // a sprite would be. The unlit one is kept for firelight.
         if let Some(light) = light.filter(|_| !skin.is_empty()) {
+            skin_day = Some(Arc::new(skin.clone()));
             light.light_image(&mut skin.rgba, skin.w);
         }
         Arc::new(skin)
@@ -580,6 +606,8 @@ pub fn pose_puppet_with(
         shadow: shadow.into(),
         skin,
         skin_texture: SkinTexture::default(),
+        skin_day,
+        skin_day_texture: SkinTexture::default(),
         bounds,
         standing_ft: puppet.height.max(0.01),
         px_per_ft,

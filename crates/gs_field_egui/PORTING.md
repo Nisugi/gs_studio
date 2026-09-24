@@ -501,3 +501,18 @@ a depth: the far half is painted right after the backdrop (behind every
 card and prop), the near half after the last card, so creatures stand IN the
 weather. Two block regions in `creature_field.rs` (now thirteen), stripped
 text unchanged.
+
+### 7.16 Point lights (campfires, torches)
+
+`src/field_lights.rs` (new) draws `StageScene.lights` (gs_field 6.12): a warm
+pool on the floor through the solver's ground projection, an animated flame
+(campfire on logs, torch on a pole; none for a glow), and firelight on the
+creatures within reach -- the UNLIT art (`LightState::original_of`) laid
+over the lit art, fire-tinted, at an opacity that falls off with distance
+and is stronger on the side facing the light (a per-vertex gradient), so
+flicker costs no re-bake. Puppets keep their unlit skin (`skin_day`) for
+the same overlay (`PuppetPlacement::paint_figure_glow`). Hooks: the first
+block region also calls `set_creature`; one new region after the sprite's
+base draw (fourteen now); the weather regions also paint the pools and
+lamps (lamps nearer the viewer than every creature draw in front). Dead
+creatures take no firelight.

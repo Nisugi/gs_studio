@@ -134,6 +134,8 @@ pub struct StageState {
     pub weather_wind: f32,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
+    /// Selected point light (index into scene.lights); drag moves it.
+    pub selected_light: Option<usize>,
     /// Creature exist id being dragged on the stage (grabbed by its card).
     dragging_creature: Option<String>,
     /// Scene Arc the solver obstacles were last built from (`make_mut`
@@ -183,6 +185,7 @@ impl StageState {
             weather_intensity: 0.6,
             weather_wind: 0.15,
             selected_prop: None,
+            selected_light: None,
             dragging_creature: None,
             obstacle_scene: None,
             status: StatusLog::default(),
@@ -591,6 +594,39 @@ impl StageState {
     }
 
     /// Remove prop `k`; the selection follows the prop it pointed at.
+    /// A new point light of `kind`, mid-floor at the stage's centre,
+    /// selected so a drag places it.
+    pub fn add_light(&mut self, kind: gs_field::lighting::LampKind) {
+        let (z_near, z_far) = self.field.depth_range();
+        let light = gs_field::lighting::PointLight::new(kind, 440.0, (z_near + z_far) * 0.5);
+        let lights = &mut Arc::make_mut(&mut self.scene).lights;
+        lights.push(light);
+        self.selected_light = Some(lights.len() - 1);
+        self.selected_prop = None;
+    }
+
+    pub fn remove_light(&mut self, k: usize) {
+        if k >= self.scene.lights.len() {
+            return;
+        }
+        Arc::make_mut(&mut self.scene).lights.remove(k);
+        self.selected_light = match self.selected_light {
+            Some(s) if s == k => None,
+            Some(s) if s > k => Some(s - 1),
+            other => other,
+        };
+    }
+
+    /// Move the selected light to the floor point under a stage position.
+    pub fn drag_selected_light_to(&mut self, sx: f32, sy: f32) {
+        let Some(k) = self.selected_light else { return };
+        let (x, z) = self.field.ground_from_screen(sx, sy);
+        if let Some(light) = Arc::make_mut(&mut self.scene).lights.get_mut(k) {
+            light.x = x;
+            light.z = z;
+        }
+    }
+
     pub fn remove_prop(&mut self, k: usize) {
         if k >= self.scene.props.len() {
             return;

@@ -627,6 +627,9 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
             let selected = stage.selected_prop == Some(k);
             if ui.selectable_label(selected, name).on_hover_text("Click again to deselect").clicked() {
                 stage.selected_prop = (!selected).then_some(k);
+                if !selected {
+                    stage.selected_light = None;
+                }
             }
         });
     }
@@ -653,7 +656,80 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
             stage.clamp_prop(k);
         }
     }
+    lights_ui(stage, ui);
     calibrate_scenery
+}
+
+/// Point lights on the floor: campfires, torches, glows (`[[lights]]`).
+fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    use gs_field::lighting::LampKind;
+    ui.separator();
+    ui.heading("Lights");
+    ui.horizontal(|ui| {
+        for (label, kind) in [("+ Campfire", LampKind::Campfire), ("+ Torch", LampKind::Torch), ("+ Glow", LampKind::Glow)] {
+            if ui.button(label).clicked() {
+                stage.add_light(kind);
+            }
+        }
+    });
+    if stage.scene().lights.is_empty() {
+        ui.weak("Firelight shows best at night: tick Light this scene and pick Night.");
+        return;
+    }
+    let names: Vec<String> = stage
+        .scene()
+        .lights
+        .iter()
+        .enumerate()
+        .map(|(k, l)| format!("{} {}", match l.kind { LampKind::Campfire => "Campfire", LampKind::Torch => "Torch", LampKind::Glow => "Glow" }, k + 1))
+        .collect();
+    let mut remove = None;
+    for (k, name) in names.iter().enumerate() {
+        ui.horizontal(|ui| {
+            if ui.small_button("x").on_hover_text("Remove").clicked() {
+                remove = Some(k);
+            }
+            let selected = stage.selected_light == Some(k);
+            if ui.selectable_label(selected, name).on_hover_text("Click again to deselect").clicked() {
+                stage.selected_light = (!selected).then_some(k);
+                if !selected {
+                    stage.selected_prop = None;
+                }
+            }
+        });
+    }
+    if let Some(k) = remove {
+        stage.remove_light(k);
+    }
+    let Some(k) = stage.selected_light else { return };
+    let Some(light) = stage.scene().lights.get(k).cloned() else { return };
+    let mut edited = light.clone();
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("light_kind")
+            .selected_text(match edited.kind { LampKind::Campfire => "Campfire", LampKind::Torch => "Torch", LampKind::Glow => "Glow" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut edited.kind, LampKind::Campfire, "Campfire");
+                ui.selectable_value(&mut edited.kind, LampKind::Torch, "Torch");
+                ui.selectable_value(&mut edited.kind, LampKind::Glow, "Glow (no flame)");
+            });
+        let mut rgb = parse_hex_rgb(&edited.color).unwrap_or([255, 160, 74]);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            edited.color = hex_rgb(rgb);
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label("x");
+        ui.add(egui::DragValue::new(&mut edited.x).speed(2.0));
+        ui.label("z");
+        ui.add(egui::DragValue::new(&mut edited.z).speed(0.02));
+    });
+    ui.add(egui::Slider::new(&mut edited.radius, 0.3..=6.0).text("Reach"));
+    ui.add(egui::Slider::new(&mut edited.intensity, 0.0..=1.0).text("Brightness"));
+    ui.add(egui::Slider::new(&mut edited.flicker, 0.0..=1.0).text("Flicker"));
+    ui.weak("Drag on the stage to move the selected light");
+    if edited != light {
+        stage.scene_mut().lights[k] = edited;
+    }
 }
 
 /// New-scene naming: explicit binding + typed name, previewed and validated
@@ -1111,7 +1187,7 @@ fn simulator_ui(stage: &mut StageState, ui: &mut egui::Ui, id: &str) {
 fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, panel: StagePanel) {
     // On the Scenes tab a selected prop owns the drag (as in VellumFE); on
     // the Preview tab drags always move creatures.
-    let dragging_prop = panel == StagePanel::Scenes && stage.selected_prop.is_some();
+    let dragging_prop = panel == StagePanel::Scenes && (stage.selected_prop.is_some() || stage.selected_light.is_some());
     ui.horizontal(|ui| {
         ui.checkbox(&mut stage.show_grid, "Grid");
         ui.checkbox(&mut stage.show_order, "Draw order");
@@ -1154,7 +1230,11 @@ fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, 
         if response.dragged() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let (sx, sy) = stage_pos(pos);
-                stage.drag_selected_prop_to(sx, sy);
+                if stage.selected_light.is_some() {
+                    stage.drag_selected_light_to(sx, sy);
+                } else {
+                    stage.drag_selected_prop_to(sx, sy);
+                }
             }
         }
     } else {

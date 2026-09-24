@@ -44,6 +44,9 @@ pub struct StageScene {
     /// it did before lighting existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub light: Option<crate::lighting::SceneLight>,
+    /// Campfires, torches: point lights on the floor (`[[lights]]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lights: Vec<crate::lighting::PointLight>,
 }
 
 /// One placed prop: pool art standing on the floor like a creature card
@@ -351,6 +354,7 @@ mod tests {
                 ..Default::default()
             },
             light: None,
+            lights: Vec::new(),
         };
         scene.save("desert").unwrap();
         assert_eq!(StageScene::load("desert").unwrap(), scene);

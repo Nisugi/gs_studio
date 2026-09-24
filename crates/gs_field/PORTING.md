@@ -330,3 +330,9 @@ Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`.
 `<family>.texture.png` beside a puppet, embedded (`data/puppets/`) or in
 `<base>/global/puppets/`; `texture_file_name(family)`. gs_field does not
 decode it (no image dependency); the frontend does.
+
+### 6.12 Point lights
+
+`StageScene.lights: Vec<PointLight>` (`[[lights]]`, skip-serialized when
+empty): kind (campfire / torch / glow), floor position (stage x, world z, as
+a prop), colour, radius (world units), intensity, flicker.

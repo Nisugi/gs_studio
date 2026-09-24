@@ -194,6 +194,64 @@ impl LightFields {
     }
 }
 
+/// What a point light looks like where it stands.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LampKind {
+    /// A fire on the ground.
+    #[default]
+    Campfire,
+    /// A flame on a pole.
+    Torch,
+    /// Light only, nothing drawn (a lit window, a glowing pool).
+    Glow,
+}
+
+/// A light standing on the floor: a campfire, a torch. It warms the ground
+/// around it and the creatures near it, most on the side that faces it,
+/// and flickers. `[[lights]]` in a scene file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PointLight {
+    #[serde(default)]
+    pub kind: LampKind,
+    /// Stage x of its foot (0..880), and its world depth, as a prop's.
+    pub x: f32,
+    pub z: f32,
+    #[serde(default = "fire_colour")]
+    pub color: String,
+    /// Reach, world units (the depth axis's).
+    #[serde(default = "lamp_radius")]
+    pub radius: f32,
+    /// 0..1.
+    #[serde(default = "one")]
+    pub intensity: f32,
+    /// 0 = steady .. 1 = a lively fire.
+    #[serde(default = "lamp_flicker")]
+    pub flicker: f32,
+}
+
+fn fire_colour() -> String {
+    "#ffa04a".into()
+}
+fn lamp_radius() -> f32 {
+    2.5
+}
+fn lamp_flicker() -> f32 {
+    0.5
+}
+
+impl PointLight {
+    /// A new light of `kind` at a floor point, with that kind's defaults.
+    pub fn new(kind: LampKind, x: f32, z: f32) -> PointLight {
+        let (radius, flicker) = match kind {
+            LampKind::Campfire => (2.5, 0.5),
+            LampKind::Torch => (1.8, 0.35),
+            LampKind::Glow => (2.0, 0.0),
+        };
+        PointLight { kind, x, z, color: fire_colour(), radius, intensity: 1.0, flicker }
+    }
+}
+
 /// A scene's `[light]` table. Its presence turns lighting on for the scene.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneLight {
@@ -474,6 +532,27 @@ key = \"#112233\"
         let back = GlobalLighting::from_toml(only_night).unwrap();
         assert_eq!(back.phase.dawn, GlobalLighting::default().phase.dawn);
         assert_eq!(back.phase.night.unwrap().key.as_deref(), Some("#112233"));
+    }
+
+    #[test]
+    fn point_lights_round_trip_with_their_defaults() {
+        let text = "[[lights]]
+x = 300.0
+z = 3.0
+
+[[lights]]
+kind = \"torch\"
+x = 500.0
+z = 4.0
+radius = 1.2
+";
+        let scene: crate::scenes::StageScene = toml::from_str(text).unwrap();
+        assert_eq!(scene.lights.len(), 2);
+        assert_eq!((scene.lights[0].kind, scene.lights[0].color.as_str(), scene.lights[0].radius), (LampKind::Campfire, "#ffa04a", 2.5));
+        assert_eq!((scene.lights[1].kind, scene.lights[1].radius), (LampKind::Torch, 1.2));
+        let back: crate::scenes::StageScene = toml::from_str(&toml::to_string_pretty(&scene).unwrap()).unwrap();
+        assert_eq!(back.lights, scene.lights);
+        assert!(!toml::to_string_pretty(&crate::scenes::StageScene::default()).unwrap().contains("lights"));
     }
 
     #[test]

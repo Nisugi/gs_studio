@@ -164,6 +164,9 @@ pub struct LightState {
     worn_for: Option<u64>,
     /// Asked for while painting (the cache is borrowed shared then).
     pending: std::sync::Mutex<HashMap<u64, WornReq>>,
+    /// Lit texture -> the unlit original it replaced (fire light lays the
+    /// original back over it, see `field_lights`).
+    by_lit: HashMap<egui::TextureId, egui::TextureHandle>,
 }
 
 /// The lights in force, for whoever lights something the cache does not
@@ -318,6 +321,11 @@ impl LightState {
         self.backdrop_colours(bg)
     }
 
+    /// The unlit original behind a lit texture, if `id` is one.
+    pub fn original_of(&self, id: egui::TextureId) -> Option<egui::TextureHandle> {
+        self.by_lit.get(&id).cloned()
+    }
+
     /// A bake is running.
     pub fn busy(&self) -> bool {
         self.job.is_some()
@@ -396,6 +404,9 @@ impl LightState {
                                     self.worn.insert(k, tex);
                                 }
                                 slot => {
+                                    if let Some(layer) = self.layers.get(&slot) {
+                                        self.by_lit.insert(tex.id(), layer.original.clone());
+                                    }
                                     self.lit.insert(slot.clone());
                                     swaps.push((slot, tex));
                                 }
@@ -411,6 +422,7 @@ impl LightState {
 
         let Some(plan) = plan else {
             // Unlit: put every original back.
+            self.by_lit.clear();
             if self.applied.take().is_some() || !self.lit.is_empty() {
                 for slot in self.lit.drain() {
                     if let Some(layer) = self.layers.get(&slot) {

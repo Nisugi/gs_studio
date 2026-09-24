@@ -34,6 +34,8 @@
 //! `STAGE_DEMO_STRENGTH` (default 1). The art stays the real pool unless
 //! `STAGE_DEMO_NO_ART` is set, so sprites and puppets are lit together.
 //! `STAGE_DEMO_WEATHER=rain|storm|snow|sleet|blood|fog` adds weather.
+//! `STAGE_DEMO_FIRE=1` (with `STAGE_DEMO_LIGHT`) puts a campfire mid-field
+//! and a torch to one side.
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -290,10 +292,19 @@ impl Demo {
             last_stage_pos: None,
             shot,
             shot_requested: false,
-            scene: light_bg.map(|bg| gs_field::scenes::StageScene {
-                background: Some(bg),
-                light: Some(gs_field::lighting::SceneLight::default()),
-                ..Default::default()
+            scene: light_bg.map(|bg| {
+                use gs_field::lighting::{LampKind, PointLight};
+                let lights = if std::env::var_os("STAGE_DEMO_FIRE").is_some() {
+                    vec![PointLight::new(LampKind::Campfire, 470.0, 3.6), PointLight::new(LampKind::Torch, 250.0, 3.0)]
+                } else {
+                    Vec::new()
+                };
+                gs_field::scenes::StageScene {
+                    background: Some(bg),
+                    light: Some(gs_field::lighting::SceneLight::default()),
+                    lights,
+                    ..Default::default()
+                }
             }),
             light_settled: 0,
         }
