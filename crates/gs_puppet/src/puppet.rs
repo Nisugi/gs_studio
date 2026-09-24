@@ -74,6 +74,13 @@ const BURIED_CALIBRE: f32 = 1.45;
 /// its inert range rather than loosened for no measured gain.
 pub(crate) const LIMB_DEPTH_MAX: f32 = 4.0;
 pub(crate) const LIMB_DEPTH_MIN: f32 = 0.5;
+/// Another limb this far off a limb's centre line (in its half widths),
+/// inside the same row of the other view, spoils that row as a reading...
+const CROSSING_OFF: f32 = 0.75;
+/// ...and so does one straight behind it when the row is this many times
+/// deeper than the limb is wide: a forearm hanging in front of a fat thigh
+/// read the thigh.
+const CROSSING_DEEP: f32 = 1.6;
 /// A girdle (a trunk bone lying across the body, like a clavicle) is never
 /// thicker, half-width, than this share of its own length. Healthy rigs
 /// measure 0.4-0.8; a broad flat-topped torso read the whole chest into it
@@ -82,6 +89,11 @@ const GIRDLE_THICKNESS: f32 = 0.8;
 /// A trunk slice stops at a limb joint lying within the limb's radius plus
 /// this (feet, along the trunk bone) of it.
 const LIMB_JOINT_REACH_FT: f32 = 0.05;
+/// How far a trunk slice reaches toward another trunk bone running
+/// alongside it (a quadruped's spine over its underline), as a share of the
+/// way to it. Splitting halfway made two tubes that each narrowed to nothing
+/// at the seam: a groove the length of the body.
+const TRUNK_OVERLAP: f32 = 1.0;
 /// A chain counts as visibly bent at rest (so its own plane can give a knee
 /// its hinge) when the sine of the angle between two consecutive segments is
 /// at least this: about 17 degrees.
@@ -329,6 +341,14 @@ fn median3(v: &mut [f32]) {
         v[i] = median(&mut w);
     }
 }
+/// [`median3`] over five: a run of two bad readings goes too.
+fn median5(v: &mut [f32]) {
+    let src = v.to_vec();
+    for i in 2..src.len().saturating_sub(2) {
+        let mut w = [src[i - 2], src[i - 1], src[i], src[i + 1], src[i + 2]];
+        v[i] = median(&mut w);
+    }
+}
 fn box3(v: &mut [f32]) {
     let src = v.to_vec();
     for i in 1..src.len().saturating_sub(1) {
@@ -555,11 +575,21 @@ impl Puppet {
             // toward the body's centre line. Such a row says nothing about
             // the limb. It is recognised by the trunk's own centre line
             // lying inside the run at that height.
-            let trunk_centres = |y: f32| -> Vec<f32> {
+            // The same goes for ANOTHER limb: a forearm hanging in front of
+            // the thigh reads thigh-and-arm in the side view, and took that
+            // whole depth -- a flat plate fanning out of the arm. A row that
+            // another limb's centre line crosses, OFF this limb's own line,
+            // is no reading for this one at all (neither depth nor where it
+            // sits); its own clean rows above and below fill it in. So is one
+            // behind it that is much deeper than this limb is wide. (A twin
+            // straight behind it -- a biped's legs in profile, a quadruped's
+            // fore and hind legs face on -- reads the same row as it does.)
+            let centres_of = |y: f32, want: &dyn Fn(usize, Kind) -> bool| -> Vec<f32> {
                 raws.iter()
                     .zip(&kinds)
-                    .filter(|(_, k)| **k == Kind::Trunk)
-                    .filter_map(|(t, _)| {
+                    .enumerate()
+                    .filter(|(j, (_, k))| want(*j, **k))
+                    .filter_map(|(_, (t, _))| {
                         let (y0, y1) = (t.head[1].min(t.tail[1]), t.head[1].max(t.tail[1]));
                         if y < y0 - TRUNK_ROW_MARGIN_FT || y > y1 + TRUNK_ROW_MARGIN_FT {
                             return None;
@@ -570,6 +600,8 @@ impl Puppet {
                     })
                     .collect()
             };
+            let trunk_centres = |y: f32| centres_of(y, &|_, k| k == Kind::Trunk);
+            let other_limb_centres = |y: f32| centres_of(y, &|j, k| k == Kind::Limb && raws[j].bone != r.bone);
             for k in 0..n {
                 let c = centre(k);
                 // KNOWN LIMIT: the merge also welds two limbs a toe-gap apart
@@ -597,8 +629,14 @@ impl Puppet {
                 // is the trunk's depth, and the limb keeps its own.
                 let over_trunk = kind == Kind::Limb
                     && run.is_some_and(|(lo, hi)| trunk_centres(c[1]).iter().any(|x| (lo..=hi).contains(x)));
-                depth.push((ok && !over_trunk).then_some(half));
-                shift.push(if ok { mid } else { 0.0 });
+                let crossing = kind == Kind::Limb
+                    && run.is_some_and(|(lo, hi)| {
+                        let off = |x: &f32| (x - c[oa]).abs() > CROSSING_OFF * ref_w;
+                        let deeper = half > CROSSING_DEEP * ref_w;
+                        other_limb_centres(c[1]).iter().any(|x| (lo..=hi).contains(x) && (off(x) || deeper))
+                    });
+                depth.push((ok && !over_trunk && !crossing).then_some(half));
+                shift.push(if ok && !crossing { mid } else { 0.0 });
             }
             let mut d: Vec<f32> = match kind {
                 Kind::Hand | Kind::Prop { .. } => m.w.iter().map(|w| w * HAND_DEPTH).collect(),
@@ -631,7 +669,16 @@ impl Puppet {
                 }
             }
             let mut w = m.w.clone();
-            median3(&mut d);
+            // A trunk's side-view rows cross the arms hanging beside it: a
+            // reading or two in a row come out deep and shifted, a fin on
+            // the chest. Its depth and centre change slowly; take out runs
+            // of two.
+            if kind == Kind::Trunk {
+                median5(&mut d);
+                median5(&mut shift);
+            } else {
+                median3(&mut d);
+            }
             box3(&mut d);
             box3(&mut shift);
             // Where a hand hangs from this limb, its far end must meet the
@@ -904,7 +951,12 @@ fn measure_segment<'m>(
         a: [f32; 2],
         b: [f32; 2],
         limb_r: Option<f32>,
+        trunk: bool,
     }
+    // Two bones of the body's barrel (back, chest, belly). A neck reaching
+    // down to the brisket stood up off the withers as a fin, and a skull
+    // shares its slices with the tusks and trunk hanging off it.
+    let body = |o: usize| kinds[o] == Kind::Trunk && !matches!(rig.bones[raws[o].bone].part.as_deref(), Some("head" | "neck"));
     let clips: Vec<Clip> = raws
         .iter()
         .enumerate()
@@ -920,7 +972,7 @@ fn measure_segment<'m>(
                 return None;
             }
             let trunk_stops_at_limb = kind == Kind::Trunk && kinds[o] != Kind::Trunk;
-            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]) })
+            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]), trunk: body(i) && body(o) })
         })
         .collect();
 
@@ -949,16 +1001,26 @@ fn measure_segment<'m>(
     // on down from the chest, so a slice across the belly reads chest AND
     // leg to the paw: a keel under the body that props every lying pose up
     // off the ground. The limb's own joints mark where the body ends (the
-    // elbow, the stifle), so a trunk slice stops at any it passes. A chain's
-    // root joint (shoulder, hip) sits inside the trunk and is not one.
-    let limb_joints: Vec<([f32; 2], f32)> = if kind == Kind::Trunk {
+    // elbow, the stifle), so a trunk slice stops at any it passes -- on the
+    // side the limb goes on toward its paw. The other way is body: an
+    // elephant's elbow sits at belly height, and stopping the belly's slices
+    // there both ways left a belly 0.04 ft thick and the body hollow above
+    // it. A chain's root joint (shoulder, hip) sits inside the trunk and is
+    // not one.
+    let limb_joints: Vec<([f32; 2], f32, [f32; 2])> = if kind == Kind::Trunk {
         raws.iter()
             .enumerate()
             .filter(|(o, _)| kinds[*o] != Kind::Trunk)
             .flat_map(|(o, other)| {
-                let mut v = vec![(flat(view, other.tail), limb_r[o])];
+                let paw = raws
+                    .iter()
+                    .filter(|x| x.bone == other.bone && x.chain == other.chain)
+                    .max_by_key(|x| x.k)
+                    .map_or(other.tail, |x| x.tail);
+                let paw = flat(view, paw);
+                let mut v = vec![(flat(view, other.tail), limb_r[o], paw)];
                 if other.k > 0 {
-                    v.push((flat(view, other.head), limb_r[o]));
+                    v.push((flat(view, other.head), limb_r[o], paw));
                 }
                 v
             })
@@ -981,6 +1043,7 @@ fn measure_segment<'m>(
             let Some(s) = crossing(p, n2, c.a, c.b).filter(|s| s.abs() > 0.03) else { continue };
             let stop = match c.limb_r {
                 Some(lr) => (s.abs() - lr).max(s.abs() * 0.5),
+                None if c.trunk => s.abs() * TRUNK_OVERLAP,
                 None => s.abs() * 0.5,
             };
             if s > 0.0 {
@@ -989,12 +1052,18 @@ fn measure_segment<'m>(
                 lo = lo.max((-stop).min(hi));
             }
         }
-        for (j, lr) in &limb_joints {
+        for (j, lr, paw) in &limb_joints {
             let d = [j[0] - p[0], j[1] - p[1]];
             if (d[0] * u[0] + d[1] * u[1]).abs() > lr + LIMB_JOINT_REACH_FT {
                 continue;
             }
             let s = d[0] * n2[0] + d[1] * n2[1];
+            // Toward the paw only: the joint and the paw on the same side of
+            // this slice's bone, the paw the farther.
+            let s_paw = (paw[0] - p[0]) * n2[0] + (paw[1] - p[1]) * n2[1];
+            if s * s_paw <= 0.0 || s_paw.abs() < s.abs() {
+                continue;
+            }
             if s > 0.03 && s < hi {
                 hi = s.max(lo);
             } else if s < -0.03 && s > lo {
@@ -1079,7 +1148,10 @@ fn measure_segment<'m>(
     if let (true, Some(c)) = (buried, calibre) {
         w.iter_mut().for_each(|x| *x = x.min(BURIED_CALIBRE * c));
     }
-    let mut off: Vec<f32> = off.iter().map(|o| o.unwrap_or(0.0)).collect();
+    // Its surviving stations read the chest too, so their centres are the
+    // chest run's, not the limb's: kept, they slid the upper foreleg back
+    // along the belly as a ball. A buried limb stays on its bone line.
+    let mut off: Vec<f32> = if buried { vec![0.0; n] } else { off.iter().map(|o| o.unwrap_or(0.0)).collect() };
     median3(&mut w);
     box3(&mut w);
     box3(&mut off);

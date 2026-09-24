@@ -235,6 +235,33 @@ fn buried_limb_is_bounded_by_its_chain_not_by_the_trunk() {
     );
 }
 
+/// A buried segment's surviving stations read the chest too, so where they
+/// SIT is the chest's as well. Here the trunk tapers into the limb from one
+/// side only (a belly curving down behind the elbow): the few readings that
+/// pass the gate are narrow enough to believe but centred behind the bone.
+/// Kept, those centres slid the canine's upper foreleg back along its belly
+/// as a ball; the segment must stay on its bone line.
+#[test]
+fn a_buried_segment_stays_on_its_bone_line() {
+    let lopsided = |x: f32, y: f32| {
+        let taper = (2.0..=4.0).contains(&y) && (-trunk_half_at(y, TRUNK_HALF)..=LIMB_HALF).contains(&x);
+        (trunk(x, y) && y >= TAPER_FROM) || taper || limb(x, y)
+    };
+    let (skewed, plain) = (mask_from(lopsided), buried_masks().0);
+    for view in [View::Front, View::Side] {
+        let (front, side) = match view {
+            View::Front => (&skewed, &plain),
+            View::Side => (&plain, &skewed),
+        };
+        let p = Puppet::build_masks(&buried_rig(view), Some(front), Some(side)).expect("builds");
+        let upper = segment(&p, "leg.0");
+        let across = if view == View::Front { 0 } else { 2 };
+        let body = &upper.stations[CAP_RINGS..upper.stations.len() - CAP_RINGS];
+        let worst = body.iter().map(|s| s.c[across].abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.03, "{view:?}: a buried station sits {worst:.3} ft off the bone line");
+    }
+}
+
 // ------------------------------------------- one bad station may not spread
 
 /// A rejected depth reading may be INTERPOLATED from believed neighbours that

@@ -42,8 +42,8 @@ trunk_2 = [1.48, 1.45]
 trunk_3 = [1.53, 1.05]
 trunk_4 = [1.58, 0.66]
 trunk_tip = [1.44, 0.41]
-tusk_base_l = [1.56, 1.63]
-tusk_base_r = [1.72, 1.7]
+tusk_base_l = [1.4, 1.76]
+tusk_base_r = [1.42, 1.8]
 tusk_bend_l = [1.95, 1.47]
 tusk_bend_r = [2.03, 1.64]
 tusk_curl_l = [2.58, 1.67]
@@ -55,14 +55,20 @@ wrist_l = [-0.2, 0.6]
 wrist_r = [0.44, 0.6]
 
 [depth]
-tusk_base_l = 0.3
-tusk_base_r = -0.3
+tusk_base_l = 0.2
+tusk_base_r = -0.2
 tusk_bend_l = 0.6
 tusk_bend_r = -0.6
 tusk_curl_l = 0.9
 tusk_curl_r = -0.9
 tusk_tip_l = 0.85
 tusk_tip_r = -0.85
+
+[radius_depth_ft]
+skull = 0.5
+trunk = 0.12
+tusk_r = 0.05
+tusk_l = 0.05
 
 [[bones]]
 name = "skull"

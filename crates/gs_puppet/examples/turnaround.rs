@@ -9,6 +9,8 @@
 //! and limits applied. `TURNAROUND_TILE=<px>` sets the tile size (default 320);
 //! `TURNAROUND_HOLD=<weapon>[,<left-hand weapon>]` puts props in its hands
 //! (any name `data/props/weapons.toml` knows).
+//! `TURNAROUND_DATA=<dir>` reads another data root. `TURNAROUND_SEGMENTS=1`
+//! paints every segment its own colour, to see which one makes a shape.
 
 use std::path::Path;
 
@@ -32,7 +34,7 @@ fn main() {
     }
     let tile: usize = std::env::var("TURNAROUND_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(320);
 
-    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let data = std::env::var_os("TURNAROUND_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"));
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");
     let rig = Rig::load(&data.join("rigs").join(Rig::file_name(family))).expect("rig loads");
     let mask = |v: View| outlines.get(family, v).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
@@ -45,7 +47,17 @@ fn main() {
         .map(|n| props.prop(props.weapon(n).unwrap_or_else(|| panic!("no weapon '{n}'"))).expect("its shape"))
         .collect();
     let held: Vec<(Hand, &gs_puppet::Prop)> = hold.iter().zip([Hand::Right, Hand::Left]).map(|(p, h)| (h, p)).collect();
-    let puppet = puppet.holding(&held);
+    let mut puppet = puppet.holding(&held);
+    if std::env::var_os("TURNAROUND_SEGMENTS").is_some() {
+        const PALETTE: [[u8; 3]; 8] =
+            [[230, 90, 80], [90, 170, 230], [120, 200, 110], [230, 190, 80], [180, 110, 220], [80, 200, 190], [240, 140, 190], [160, 160, 160]];
+        for (i, s) in puppet.segments.iter_mut().enumerate() {
+            s.kind = gs_puppet::Kind::Prop { color: PALETTE[i % PALETTE.len()] };
+        }
+        for (i, s) in puppet.segments.iter().enumerate() {
+            println!("{i:2} {:?} {}", PALETTE[i % PALETTE.len()], s.name);
+        }
+    }
     let set = PoseSet::load(&data.join("poses"), &rig.body_type).expect("pose set").for_family(family).into_owned();
     let pose = if pose_name == "rest" { Pose::default() } else { set.clamp(set.get(pose_name).expect("no such pose")) };
     let posed = puppet.pose(&pose);
