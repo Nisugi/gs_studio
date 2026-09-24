@@ -2,8 +2,8 @@
 //!
 //!   cargo run --release -p gs_puppet --example fall_strip -- <out.png> [family] [from-pose] [seed]
 //!
-//! Frames of `Fall` from `from-pose` (default `stand`) to the family's dead
-//! pose, left to right every 0.1 s, drawn with the smooth skin at a
+//! Frames of `Fall` from `from-pose` (default `stand`) to the dead pose the
+//! stage would pick (`PoseSet::dead_hash`), left to right every 0.1 s, drawn with the smooth skin at a
 //! three-quarter view. Family defaults to humanoid; puppets are read from
 //! `data/rigs/<family>.puppet.toml`.
 
@@ -30,8 +30,10 @@ fn main() {
     let puppet = Puppet::from_baked_toml(&std::fs::read_to_string(rigs.join(format!("{family}.puppet.toml"))).expect("puppet")).expect("parse");
     let body_type = rig::Rig::load(&rigs.join(format!("{family}.rig.toml"))).expect("rig").body_type;
     let set = PoseSet::load(&data_dir().join("poses"), &body_type).expect("poses").for_family(family).into_owned();
-    let dead = set.get(set.dead_name(seed).unwrap_or("stand")).expect("dead pose");
-    let fall = Fall::new(&puppet, set.get(from).expect("from pose"), dead, seed);
+    let start = set.get(from).expect("from pose");
+    // As the stage picks: the seed's, or the one nearest a pose already lying.
+    let dead = set.get(set.dead_name(set.dead_hash(start, seed)).unwrap_or("stand")).expect("dead pose");
+    let fall = Fall::new(&puppet, start, dead, seed);
 
     let frames = (FALL_SECS / 0.1).ceil() as usize + 1;
     let w = TILE * frames;

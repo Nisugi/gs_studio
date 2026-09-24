@@ -595,3 +595,15 @@ sheet; a dressed creature with no skin wears none (the family's sheet has
 no garments on it). A sheet whose size does not match the dressed figure's
 layout is refused with a warning, as before. Poses, parts and calibration
 read through `base_family` as for armed keys.
+
+### 7.23 Deaths from where the creature lies
+
+`PuppetCache::dead_choice(id, family, choice)`, called before `motion`
+with the choice that goes into the key: a creature seen to die while lying
+down (its pose's root turned more than 45 degrees from upright) falls into
+the dead pose nearest its lie (`gs_puppet::PoseSet::dead_hash`), remembered
+in its `Life` until it gets up, so the pose after the fall is the one it
+ended in. Standing, or first seen dead, it keeps the caller's variety.
+`gs_puppet::Fall` itself now falls from the pose given (see its docs):
+folded limbs hold an upright body low until it is half way down, and the
+root turns so the body's long axis never climbs.

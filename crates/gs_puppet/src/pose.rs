@@ -549,6 +549,25 @@ impl PoseSet {
         let names: Vec<&str> = self.poses.keys().map(String::as_str).filter(|n| n.starts_with("dead")).collect();
         (!names.is_empty()).then(|| names[(hash % names.len() as u64) as usize])
     }
+
+    /// Which dead pose a creature falls into from `from`, as the `hash` for
+    /// [`PoseSet::dead_name`]: `hash` itself (the caller's per-creature
+    /// variety), unless it was already lying down -- its root turned more
+    /// than 45 degrees from upright -- when the dead pose whose lie is
+    /// nearest its own. It goes limp where it lies instead of rolling over
+    /// (through lying on its side, or standing) to reach another.
+    pub fn dead_hash(&self, from: &Pose, hash: u64) -> u64 {
+        let angle = |a: Quat, b: Quat| 2.0 * (a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]).abs().clamp(0.0, 1.0).acos();
+        if angle(from.root, QUAT_IDENTITY) <= 45f32.to_radians() {
+            return hash;
+        }
+        let names: Vec<&str> = self.poses.keys().map(String::as_str).filter(|n| n.starts_with("dead")).collect();
+        names
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| angle(self.poses[**a].root, from.root).total_cmp(&angle(self.poses[**b].root, from.root)))
+            .map_or(hash, |(i, _)| i as u64)
+    }
 }
 
 /// A puppet in a pose: one rigid transform per segment, grounding included.

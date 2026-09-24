@@ -269,11 +269,17 @@ marks paths and the folder its paintings go in. Depth guides are listed only
 for the families `<data>/generator.toml` approves.
 
 **Play death** makes the preview fall down dead from the shown pose into
-the body type's dead pose (`gs_puppet::Fall`, a procedural ragdoll: the
-body topples like a falling pole and bounces once, each limb follows on
+one of the body type's dead poses (`gs_puppet::Fall`, a procedural ragdoll:
+the body topples like a falling pole and bounces once, each limb follows on
 its own spring and swings past before settling), exactly as the stage does
 when a puppet it saw alive dies; the dead pose is held a second, then the
-shown pose comes back.
+shown pose comes back. Each press takes the next variety (which dead pose,
+the springs' timing), as different creatures do on the stage. The fall
+starts from where the figure is: kneeling or sitting, it goes down from
+there (the limbs holding it low give way only once it is half way down),
+and already lying down, it goes limp into the dead pose nearest its own lie
+(`PoseSet::dead_hash`) instead of rolling over or standing up to reach
+another.
 
 **Edit pose** (in the 3D panel's Pose row) opens the pose editor under the
 puppet, on the pose in the list (*rest* becomes `stand`). Click a bone on

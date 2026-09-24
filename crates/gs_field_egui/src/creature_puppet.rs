@@ -746,6 +746,9 @@ struct Life {
     /// A creature first seen has none: it starts where it is.
     changed: Option<(PoseChoice, f64)>,
     seen: u64,
+    /// The dead pose it fell into, when it died in view while lying down
+    /// (see [`PuppetCache::dead_choice`]); None once it is up again.
+    dead_as: Option<u8>,
 }
 
 /// How a puppet is moving this frame (see [`PuppetCache::motion`]).
@@ -1166,7 +1169,7 @@ impl PuppetCache {
     /// whatever pose it is in.
     pub fn motion(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Motion {
         let frame = self.frame.unwrap_or(0);
-        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, changed: None, seen: frame });
+        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, changed: None, seen: frame, dead_as: None });
         life.seen = frame;
         if choice != life.last {
             life.changed = Some((life.last, now_s));
@@ -1187,6 +1190,36 @@ impl PuppetCache {
                 }
             }
         }
+    }
+
+    /// The dead pose a creature is drawn in: `choice` itself (the caller's
+    /// per-creature variety), unless it was seen to die while lying down --
+    /// then the dead pose nearest its lie (`PoseSet::dead_hash`), so it goes
+    /// limp where it lies instead of rolling over into another, remembered
+    /// until it gets up. Call it before [`motion`](Self::motion), every
+    /// frame, with the choice that goes into the key.
+    pub fn dead_choice(&mut self, id: &str, family: &Arc<str>, choice: PoseChoice) -> PoseChoice {
+        let PoseChoice::Dead { variant } = choice else {
+            if let Some(life) = self.lives.get_mut(id) {
+                life.dead_as = None;
+            }
+            return choice;
+        };
+        let Some(life) = self.lives.get(id) else { return choice };
+        if let Some(v) = life.dead_as {
+            return PoseChoice::Dead { variant: v };
+        }
+        let last = life.last;
+        if matches!(last, PoseChoice::Dead { .. }) {
+            return choice;
+        }
+        let Some(set) = self.pose_set(family) else { return choice };
+        let Some((_, from)) = last.resolve(&set, 0) else { return choice };
+        let v = set.dead_hash(from, variant as u64).min(u8::MAX as u64) as u8;
+        if let Some(life) = self.lives.get_mut(id) {
+            life.dead_as = Some(v);
+        }
+        PoseChoice::Dead { variant: v }
     }
 
     /// [`motion`](Self::motion), for callers that only draw deaths: the
@@ -1846,6 +1879,40 @@ mod tests {
         assert!(p.body.width() > s.body.width(), "prone is long");
         // Both were scaled by the same px-per-foot: one creature, one scale.
         assert!((p.scale - s.scale).abs() < 1e-3);
+    }
+
+    /// Seen to die lying on its side, a creature falls into the dead pose on
+    /// its side (whatever its variety says), keeps it while dead, and takes
+    /// its own variety again once it has been up. First seen dead, it keeps
+    /// its variety.
+    #[test]
+    fn a_creature_dying_where_it_lies_keeps_its_lie() {
+        let mut cache = cache();
+        cache.begin_frame(1);
+        let family: Arc<str> = "humanoid".into();
+        let set = cache.pose_set(&family).unwrap();
+        let name = |c: PoseChoice| {
+            let v = match c {
+                PoseChoice::Dead { variant } => variant as u64,
+                _ => 0,
+            };
+            c.resolve(&set, v).unwrap().0.to_owned()
+        };
+        let lying = PoseChoice::Prone { on_side: true };
+        let hashed = PoseChoice::Dead { variant: 1 };
+        assert_eq!(name(hashed), "dead_2", "its variety alone would roll it onto its back");
+        let see = |cache: &mut PuppetCache, choice: PoseChoice, t: f64| {
+            let choice = cache.dead_choice("a", &family, choice);
+            cache.motion("a", choice, t);
+            choice
+        };
+        see(&mut cache, lying, 1.0);
+        let died = see(&mut cache, hashed, 2.0);
+        assert_eq!(name(died), "dead", "dies on its side");
+        assert_eq!(see(&mut cache, hashed, 9.0), died, "and stays so");
+        see(&mut cache, PoseChoice::Standing, 10.0);
+        assert_eq!(see(&mut cache, hashed, 20.0), hashed, "dying on its feet, its variety picks");
+        assert_eq!(cache.dead_choice("b", &family, hashed), hashed, "first seen dead");
     }
 
     /// The LRU: same key = same list, never rebuilt; a changed key builds

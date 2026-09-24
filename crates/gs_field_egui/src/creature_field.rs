@@ -1331,6 +1331,8 @@ fn paint_creature_puppet(
     let (mirror, on_side) = crate::creature_doll::variety(&creature.id);
     let has = |name: &str| flags.is_some_and(|f| f.has_flag(name));
     let pose = PoseChoice::of(dead, &has, on_side, u8::from(on_side));
+    // Died lying down: the dead pose nearest its lie, not a roll into another.
+    let pose = puppets.dead_choice(&creature.id, &family, pose);
     // The card's pixel scale, exactly as the sprite and doll branches take
     // it: the reserved standing height in card pixels. Flying / hovering
     // already moved `card`, so the foot line follows the lift.

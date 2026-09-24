@@ -78,6 +78,9 @@ pub struct RigTool {
     /// "Play death" was pressed at this moment: the preview falls from the
     /// shown pose into the dead one (`gs_puppet::Fall`).
     death: Option<std::time::Instant>,
+    /// Counts the presses: each death takes the next variety (which dead
+    /// pose, the fall's timing), as different creatures do on the stage.
+    death_seed: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +178,7 @@ impl RigTool {
             new_pose_name: String::new(),
             pose_quit: PoseQuit::No,
             death: None,
+            death_seed: 0,
         })
     }
 
@@ -643,6 +647,7 @@ impl RigTool {
             }
             if ui.button("Play death").on_hover_text("Fall down dead from this pose, as the stage does when a creature dies").clicked() {
                 self.death = Some(std::time::Instant::now());
+                self.death_seed += 1;
             }
             if ui.button("Reload poses").on_hover_text(format!("Read {file} again after editing it by hand, here AND on the stage")).clicked() {
                 pv.reload_poses();
@@ -846,12 +851,19 @@ impl RigTool {
         ui.weak(if self.pose_edit { "drag: turn   wheel: zoom   click: pick a bone" } else { "drag: turn   wheel: zoom" });
 
         let pv = &mut self.puppet_view;
-        let dead_of = |set: &gs_puppet::PoseSet| set.dead_name(1).and_then(|n| set.get(n)).cloned().unwrap_or_default();
+        // The dead pose a death falls into: this press's variety, or the one
+        // nearest a pose already lying down (as the stage picks).
+        let seed = self.death_seed;
+        let dead_of = |set: &gs_puppet::PoseSet, from: &gs_puppet::Pose| {
+            set.dead_name(set.dead_hash(from, seed)).and_then(|n| set.get(n)).cloned().unwrap_or_default()
+        };
         // The pose shown (held inside the joint limits, as the stage holds
         // it), the dead pose a death falls into, and the set's limits.
         let shown_of = |set: &gs_puppet::PoseSet, name: &str| {
             let pose = if name.is_empty() { gs_puppet::Pose::default() } else { set.get(name).cloned().unwrap_or_default() };
-            (set.clamp(&pose), dead_of(set), set.clone())
+            let pose = set.clamp(&pose);
+            let dead = dead_of(set, &pose);
+            (pose, dead, set.clone())
         };
         let pose_name = pv.pose.clone();
         let from_doc = self.pose_doc.as_mut().filter(|d| d.body_type() == body_type).map(|d| {
@@ -985,8 +997,8 @@ impl RigTool {
                 cam.pitch_deg = pitch;
                 let look = gs_puppet::Look { yaw, outline_px: 1.5, ..gs_puppet::Look::default() };
                 let shown = match (falling, limits.as_ref()) {
-                    (Some(t), Some(set)) => set.clamp(&gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t)),
-                    (Some(t), None) => gs_puppet::Fall::new(puppet, &pose, &dead, 1).at(t),
+                    (Some(t), Some(set)) => set.clamp(&gs_puppet::Fall::new(puppet, &pose, &dead, self.death_seed).at(t)),
+                    (Some(t), None) => gs_puppet::Fall::new(puppet, &pose, &dead, self.death_seed).at(t),
                     (None, _) => pose.clone(),
                 };
                 let posed = puppet.pose(&shown);
