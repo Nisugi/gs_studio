@@ -9,6 +9,8 @@ description = "The GemStone IV creature field without the drawing: card resoluti
 doctest = false
 
 [dependencies]
+# Creature-field lighting maths (dependency-free, Android-safe).
+vellum_light = { path = "../vellum_light" }
 # Asset formats: skin.toml, scene files, creature_field.toml, image sidecars.
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

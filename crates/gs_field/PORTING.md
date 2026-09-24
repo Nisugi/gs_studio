@@ -303,3 +303,23 @@ Mirrors `dolls.rs` deliberately, line for line where it can: same layering,
 same override design, same cache and generation discipline, same cascade.
 
 Tests: +5 in `puppets::tests`. No new dependencies (`include_dir` already).
+
+### 6.10 `src/lighting.rs` -- creature-field lighting data (Niffy's integration request)
+
+The data half of "Creature Field Environment Lighting": the pixel maths is
+the new path crate `vellum_light` (Niffy's dependency-free port of
+`relight.py`; 35 golden cases, worst OKLab dE 0.006), which this crate now
+depends on. Still Android-safe: `vellum_light` has no dependencies.
+
+* `StageScene.light: Option<SceneLight>` -- the optional `[light]` table,
+  skip-serialized when absent, so existing scene files are unchanged and a
+  scene without it draws exactly as before. `"auto"` key / ambient / bounce /
+  chroma stay `"auto"` on save.
+* `GlobalLighting` -- `global/lighting.toml` (dawn / dusk / night defaults);
+  `data/lighting.toml` is the shipped file and equals the built-in defaults
+  (tested). A scene's `[light.<phase>]` merges over it field by field.
+* `SceneLight::resolve(auto)` = relight.py `resolve_scene_light`;
+  `GlobalLighting::phase_light` = `phase_light`; `SceneLighting::resolve`
+  gathers the scene light and the time-of-day keyframes at a game hour.
+
+Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`.

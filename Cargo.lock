@@ -1040,6 +1040,7 @@ dependencies = [
  "toml",
  "toml_edit 0.22.27",
  "tracing",
+ "vellum_light",
 ]
 
 [[package]]

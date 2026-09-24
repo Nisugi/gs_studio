@@ -1,0 +1,50 @@
+# global/lighting.toml — proposed shipped defaults for the time-of-day passes.
+# Applied to EVERYTHING in the creature field (backdrop, props, creatures) for
+# outdoor scenes. Day has no entry = no change. These are the GLOBAL defaults:
+# every scene uses them unless its own [light.<phase>] table overrides a field
+# (see scene_light_example.toml). Editable in Settings > Lighting; the player's
+# Lighting strength (also there) scales every light on top of these.
+#
+# intensity : 0 = no change .. 1 = the full look (the player's Lighting
+#             strength setting multiplies it)
+# key       : main light colour     ambient : shadow-side fill
+# fog/haze  : soft wash toward fog  exposure: brightness (1 = unchanged)
+# chroma    : saturation scale      night   : night vision (saturation fades,
+#                                             warm hues dim first)
+# strength  : how strongly the light colours tint
+#
+# Schedule (game hours; boundaries = core::elanthian_time::PhaseBoundaries):
+#   06:00-07:00 night -> dawn   07:00 dawn at its peak   07:00-08:00 dawn -> day
+#   08:00-18:00 day             18:00-19:00 day -> dusk  19:00 dusk at its peak
+#   19:00-20:00 dusk -> night   20:00-06:00 night
+
+[phase.dawn]
+bounce_strength = 0.0   # time-of-day light adds no ground bounce
+key = "#f4b9c4"
+ambient = "#9c9ed0"
+fog = "#eadbe6"
+haze = 0.10
+strength = 0.5
+exposure = 0.85
+chroma = 0.9
+intensity = 0.8
+
+[phase.dusk]
+bounce_strength = 0.0   # time-of-day light adds no ground bounce
+key = "#ec9a86"
+ambient = "#665fa6"
+fog = "#e6c2c0"
+haze = 0.06
+strength = 0.6
+exposure = 0.64
+chroma = 0.9
+intensity = 0.75
+
+[phase.night]
+bounce_strength = 0.0   # time-of-day light adds no ground bounce
+key = "#56648c"
+ambient = "#2c3550"
+strength = 0.9
+exposure = 0.3
+night = 0.85
+intensity = 0.7

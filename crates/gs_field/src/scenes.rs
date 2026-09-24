@@ -40,6 +40,10 @@ pub struct StageScene {
     /// unset-keeps-default semantics as the camera.
     #[serde(default, skip_serializing_if = "CreatureFieldSolver::is_empty")]
     pub solver: CreatureFieldSolver,
+    /// Lighting (`crate::lighting`). None = unlit: the scene draws exactly as
+    /// it did before lighting existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub light: Option<crate::lighting::SceneLight>,
 }
 
 /// One placed prop: pool art standing on the floor like a creature card
@@ -346,6 +350,7 @@ mod tests {
                 relax_steps: Some(7),
                 ..Default::default()
             },
+            light: None,
         };
         scene.save("desert").unwrap();
         assert_eq!(StageScene::load("desert").unwrap(), scene);
