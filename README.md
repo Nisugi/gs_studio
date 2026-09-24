@@ -409,6 +409,9 @@ across -- and differ only in the right-hand panel:
   creature the simulator: Target, the crtrStatus flags, dead / boss / mini
   boss / sympathetic / rider / mount, a health bar, and wound rank 0-3 per
   body part. The first creature flagged rider mounts the first flagged mount.
+  A puppet moves between poses: a status change eases from the old pose into
+  the new (0.35 s), a death falls (`gs_puppet::Fall`, 1.7 s) and a revive gets
+  up (0.8 s) -- `creature_puppet::Motion`.
 
 **Sprites beat puppets, so the Cast alone cannot show you a puppet.** A
 creature with base art in the pool draws as that art; only one with none

@@ -1354,14 +1354,20 @@ fn paint_creature_puppet(
     let skin = crate::creature_puppet::puppet_skin(ctx);
     puppets.set_light(crate::creature_light::current_light(ctx));
     // Seen alive and just died: it falls (a procedural ragdoll) into its
-    // dead pose, drawn fresh every frame until it settles.
-    let posed = match puppets.falling(&creature.id, pose, now_ms / 1000.0) {
-        Some((from, t)) => {
+    // dead pose. Any other change of pose eases from the old one into the
+    // new. Both are drawn fresh every frame until they settle.
+    let posed = match puppets.motion(&creature.id, pose, now_ms / 1000.0) {
+        crate::creature_puppet::Motion::Falling { from, t } => {
             *animated = true;
             ctx.request_repaint();
             puppets.posed_falling(&family, &key, skin, from, t)?
         }
-        None => puppets.posed_with(&family, &key, skin)?,
+        crate::creature_puppet::Motion::Changing { from, u } => {
+            *animated = true;
+            ctx.request_repaint();
+            puppets.posed_changing(&family, &key, skin, from, u)?
+        }
+        crate::creature_puppet::Motion::Still => puppets.posed_with(&family, &key, skin)?,
     };
     // The parts this family's puppet actually carries, taken while the lock
     // is already held (the wound pass below needs it, and re-locking once

@@ -560,3 +560,12 @@ so VellumFE's look is untouched. Seventeen regions.
 `PoseSet::clamp` (gs_puppet: the body type's `[limits]`), so neither a
 hand-edited pose nor a fall's spring overshoot bends a joint past its
 range. Pose files without `[limits]` draw exactly as before.
+
+### 7.20 Pose changes ease
+
+`PuppetCache::motion(id, choice, now)` replaces the fall-only tracking
+(`falling` stays, a wrapper): a change of pose choice other than dying eases
+from the old pose into the new over `CHANGE_SECS` (0.35 s; getting up from
+dead, `RISE_SECS` 0.8 s), drawn uncached by `posed_changing` (angle-by-angle
+blend, clamped to the joint limits). Wired in `paint_creature_puppet` (a
+marked region already).

@@ -684,10 +684,32 @@ pub type SharedPuppetCache = Arc<Mutex<PuppetCache>>;
 #[derive(Debug, Clone, Copy)]
 struct Life {
     last: PoseChoice,
-    /// The pose it was in when it died, and when (seconds), if it died in
-    /// view. A creature first seen dead has none: it does not fall.
-    fell: Option<(PoseChoice, f64)>,
+    /// The pose it was in when its pose last changed, and when (seconds).
+    /// A creature first seen has none: it starts where it is.
+    changed: Option<(PoseChoice, f64)>,
     seen: u64,
+}
+
+/// How a puppet is moving this frame (see [`PuppetCache::motion`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Motion {
+    /// Holding its pose: draw the cached figure.
+    Still,
+    /// Falling down dead from `from`, `t` seconds in (`gs_puppet::Fall`).
+    Falling { from: PoseChoice, t: f32 },
+    /// Moving from `from` into its new pose, `u` of the way (eased 0..1).
+    Changing { from: PoseChoice, u: f32 },
+}
+
+/// How long an ordinary pose change takes (stunned -> standing, ...).
+pub const CHANGE_SECS: f32 = 0.35;
+/// Getting up from dead (a revive) takes longer.
+pub const RISE_SECS: f32 = 0.8;
+
+/// Smooth start and stop.
+fn ease(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 /// A creature not drawn for this many frames is forgotten.
@@ -926,27 +948,62 @@ impl PuppetCache {
         Some(posed)
     }
 
-    /// Track creature `id`, drawn this frame in `choice`: while it is
-    /// falling down dead -- it was seen alive, and died under
-    /// `gs_puppet::fall::FALL_SECS` ago -- the pose it fell from and the
-    /// seconds since. None otherwise (alive, settled, or already dead when
-    /// first seen).
-    pub fn falling(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Option<(PoseChoice, f32)> {
+    /// Track creature `id`, drawn this frame in `choice`, and say how it is
+    /// moving: seen alive and just died -> [`Motion::Falling`] (for
+    /// `gs_puppet::fall::FALL_SECS`); any other change of pose ->
+    /// [`Motion::Changing`] ([`CHANGE_SECS`], or [`RISE_SECS`] getting up
+    /// from dead); else [`Motion::Still`]. A creature first seen holds
+    /// whatever pose it is in.
+    pub fn motion(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Motion {
         let frame = self.frame.unwrap_or(0);
-        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, fell: None, seen: frame });
+        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, changed: None, seen: frame });
         life.seen = frame;
-        let dead = matches!(choice, PoseChoice::Dead { .. });
-        if !dead {
-            *life = Life { last: choice, fell: None, seen: frame };
-            return None;
-        }
-        if !matches!(life.last, PoseChoice::Dead { .. }) {
-            life.fell = Some((life.last, now_s));
+        if choice != life.last {
+            life.changed = Some((life.last, now_s));
             life.last = choice;
         }
-        let (from, at) = life.fell?;
+        let Some((from, at)) = life.changed else { return Motion::Still };
         let t = (now_s - at).max(0.0) as f32;
-        (!gs_puppet::Fall::done(t)).then_some((from, t))
+        let dead = |c: PoseChoice| matches!(c, PoseChoice::Dead { .. });
+        match (dead(from), dead(choice)) {
+            (false, true) if !gs_puppet::Fall::done(t) => Motion::Falling { from, t },
+            (true, true) | (false, true) => Motion::Still,
+            (was_dead, false) => {
+                let secs = if was_dead { RISE_SECS } else { CHANGE_SECS };
+                if t < secs {
+                    Motion::Changing { from, u: ease(t / secs) }
+                } else {
+                    Motion::Still
+                }
+            }
+        }
+    }
+
+    /// [`motion`](Self::motion), for callers that only draw deaths: the
+    /// pose it fell from and the seconds since, while falling.
+    pub fn falling(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Option<(PoseChoice, f32)> {
+        match self.motion(id, choice, now_s) {
+            Motion::Falling { from, t } => Some((from, t)),
+            _ => None,
+        }
+    }
+
+    /// The figure `u` of the way from `from`'s pose into `key`'s (angle by
+    /// angle, held inside the joint limits). Built every call, never cached.
+    pub fn posed_changing(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32) -> Option<Arc<PosedPuppet>> {
+        let puppet = self.puppet(family)?;
+        let set = self.pose_set(family)?;
+        let variant = |c: PoseChoice| match c {
+            PoseChoice::Dead { variant } => variant as u64,
+            _ => 0,
+        };
+        let (_, to) = key.pose.resolve(&set, variant(key.pose))?;
+        let (_, start) = from.resolve(&set, variant(from))?;
+        let pose = set.clamp(&start.blend(to, u));
+        let light = self.light.clone().filter(|_| skin);
+        let texture = if skin { self.texture(family) } else { None };
+        self.builds += 1;
+        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
     }
 
     /// The figure `t` seconds into falling dead from `from` into `key`'s
@@ -1458,6 +1515,30 @@ mod tests {
 
     /// The LRU: same key = same list, never rebuilt; a changed key builds
     /// once; the cap evicts the least recently used.
+    #[test]
+    fn a_pose_change_eases_in_and_a_revive_gets_up_slower() {
+        let mut cache = cache();
+        cache.begin_frame(1);
+        assert_eq!(cache.motion("a", PoseChoice::Stunned, 10.0), Motion::Still, "first seen: holds its pose");
+        assert_eq!(cache.motion("a", PoseChoice::Stunned, 10.5), Motion::Still);
+        // Stunned -> standing: eased over CHANGE_SECS.
+        assert_eq!(cache.motion("a", PoseChoice::Standing, 11.0), Motion::Changing { from: PoseChoice::Stunned, u: 0.0 });
+        let Motion::Changing { u: mid, .. } = cache.motion("a", PoseChoice::Standing, 11.0 + CHANGE_SECS as f64 / 2.0) else { panic!() };
+        assert!((mid - 0.5).abs() < 1e-3, "{mid}");
+        assert_eq!(cache.motion("a", PoseChoice::Standing, 11.0 + CHANGE_SECS as f64 + 0.01), Motion::Still);
+        // Dies, then is revived: falls, then rises over RISE_SECS.
+        let dead = PoseChoice::Dead { variant: 0 };
+        assert!(matches!(cache.motion("a", dead, 20.0), Motion::Falling { .. }));
+        assert_eq!(cache.motion("a", dead, 30.0), Motion::Still, "settled");
+        assert!(matches!(cache.motion("a", PoseChoice::Standing, 40.0), Motion::Changing { from: PoseChoice::Dead { .. }, .. }));
+        assert!(matches!(cache.motion("a", PoseChoice::Standing, 40.0 + CHANGE_SECS as f64 + 0.05), Motion::Changing { .. }), "a rise is slower");
+        assert_eq!(cache.motion("a", PoseChoice::Standing, 40.0 + RISE_SECS as f64 + 0.01), Motion::Still);
+        // A change poses the real puppet, part way.
+        let family: Arc<str> = "humanoid".into();
+        let posed = cache.posed_changing(&family, &key(PoseChoice::Standing, &[]), true, PoseChoice::Sitting, 0.5);
+        assert!(posed.is_some_and(|p| p.skin.is_some()));
+    }
+
     #[test]
     fn a_creature_seen_alive_falls_when_it_dies_and_a_corpse_does_not() {
         let mut cache = cache();

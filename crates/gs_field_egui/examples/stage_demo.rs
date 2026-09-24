@@ -38,7 +38,8 @@
 //! and a torch to one side.
 //! `STAGE_DEMO_KILL=<frame>` kills the targeted creature at that frame, so
 //! a shot catches its puppet falling down dead; `STAGE_DEMO_SHOT_FRAME=<n>`
-//! takes the shot at frame n instead of 20.
+//! takes the shot at frame n instead of 20. `STAGE_DEMO_STATUS=<frame>:<status>`
+//! gives the targeted creature that status at that frame (a pose change).
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -487,6 +488,16 @@ impl eframe::App for Demo {
 
         self.frames += 1;
         let kill = std::env::var("STAGE_DEMO_KILL").ok().and_then(|v| v.parse::<u64>().ok());
+        let status = std::env::var("STAGE_DEMO_STATUS").ok();
+        if let Some((at, what)) = status.as_deref().and_then(|v| v.split_once(':')) {
+            if at.parse::<u64>().ok() == Some(self.frames as u64) {
+                let target = self.current_target.clone();
+                if let Some(flags) = self.creatures.iter_mut().find(|c| c.id == target).and_then(|c| c.flags.as_mut()) {
+                    flags.statuses.push(what.to_string());
+                    self.creatures_generation += 1;
+                }
+            }
+        }
         if kill == Some(self.frames as u64) {
             let target = self.current_target.clone();
             if let Some(flags) = self.creatures.iter_mut().find(|c| c.id == target).and_then(|c| c.flags.as_mut()) {
