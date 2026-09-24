@@ -33,6 +33,7 @@
 //! auto), at game hour `STAGE_DEMO_HOUR` (default 12) and Lighting strength
 //! `STAGE_DEMO_STRENGTH` (default 1). The art stays the real pool unless
 //! `STAGE_DEMO_NO_ART` is set, so sprites and puppets are lit together.
+//! `STAGE_DEMO_WEATHER=rain|storm|snow|sleet|blood|fog` adds weather.
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
@@ -424,6 +425,18 @@ impl eframe::App for Demo {
         let ctx = ui.ctx().clone();
         if std::env::var_os("STAGE_DEMO_FLAT").is_some() {
             gs_field_egui::creature_puppet::set_puppet_skin(&ctx, false);
+        }
+        if let Ok(w) = std::env::var("STAGE_DEMO_WEATHER") {
+            use gs_field_egui::field_weather::{set_weather, Weather, WeatherKind};
+            let kind = match w.as_str() {
+                "storm" => WeatherKind::Storm,
+                "snow" => WeatherKind::Snow,
+                "sleet" => WeatherKind::Sleet,
+                "blood" => WeatherKind::BloodRain,
+                "fog" => WeatherKind::Fog,
+                _ => WeatherKind::Rain,
+            };
+            set_weather(&ctx, Some(Weather { kind, intensity: 0.8, wind: 0.25 }));
         }
         // Art prep FIRST, roster sync second (VellumFE studio.rs, finding 8).
         let wanted = self.wanted_art();

@@ -127,6 +127,11 @@ pub struct StageState {
     /// clock) and the Lighting strength (the player's setting, 0..1).
     pub light_hour: Option<f32>,
     pub light_strength: f32,
+    /// Weather preview: 0 = clear, else 1 + the index into the renderer's
+    /// weather kinds; how much falls (0..1); wind (-1..1).
+    pub weather_kind: usize,
+    pub weather_intensity: f32,
+    pub weather_wind: f32,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
     /// Creature exist id being dragged on the stage (grabbed by its card).
@@ -174,6 +179,9 @@ impl StageState {
             prop_filter: String::new(),
             light_hour: None,
             light_strength: 1.0,
+            weather_kind: 0,
+            weather_intensity: 0.6,
+            weather_wind: 0.15,
             selected_prop: None,
             dragging_creature: None,
             obstacle_scene: None,

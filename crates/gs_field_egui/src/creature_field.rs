@@ -225,6 +225,10 @@ pub fn render_creature_field_content(
             }
         }
     }
+// >>>doll
+    // Weather behind the creatures: the far half of the rain / snow / fog.
+    let weather_on = crate::field_weather::paint_back(&painter, map.stage_rect(), ui.ctx());
+// <<<doll
     let props: &[gs_field::scenes::SceneProp] =
         scene.map(|s| s.props.as_slice()).unwrap_or_default();
 
@@ -296,6 +300,12 @@ pub fn render_creature_field_content(
         }
     }
 
+// >>>doll
+    // ...and the near half, in front of them.
+    if weather_on {
+        crate::field_weather::paint_front(&painter, map.stage_rect(), ui.ctx());
+    }
+// <<<doll
     if show_order {
         paint_target_order(&painter, &map, field, &current_target);
     }

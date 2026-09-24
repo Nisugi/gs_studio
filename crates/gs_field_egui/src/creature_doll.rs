@@ -851,8 +851,9 @@ mod tests {
         // inline lighting additions -- the wearer-lit copy of a shared card
         // overlay and part overlay, and the corpse tint on the quad overlay
         // and the three wound draws -- and the status icons: the text
-        // badges skip iconed statuses, and a block draws the icons.
-        assert_eq!(regions, 11, "exactly the eleven documented additions");
+        // badges skip iconed statuses, and a block draws the icons -- and
+        // the weather, behind the creatures and in front of them.
+        assert_eq!(regions, 13, "exactly the thirteen documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

@@ -490,3 +490,14 @@ once per puppet-set generation and checks it against
 `UvLayout::fit(puppet, SHEET_SIDE)` (a sheet painted for another rig is
 refused with a warning); `pose_puppet_with` takes it and the skin wears it
 (`Posed::skin_with`). Lighting and effects apply on top.
+
+### 7.15 Weather
+
+`src/field_weather.rs` (new): rain, storm (heavy rain, darkening, lightning
+flashes), snow, sleet, blood rain and fog, drawn with the painter every
+frame. Host API `set_weather(ctx, Option<Weather { kind, intensity, wind }>)`
+in `ctx.data`; unset = nothing drawn, no frames requested. Every particle has
+a depth: the far half is painted right after the backdrop (behind every
+card and prop), the near half after the last card, so creatures stand IN the
+weather. Two block regions in `creature_field.rs` (now thirteen), stripped
+text unchanged.

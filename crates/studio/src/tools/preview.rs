@@ -185,6 +185,13 @@ impl StageTool {
             outdoor_guess: None,
         });
         self.art.prepare_scene_art(&ctx, stage.scene());
+        use gs_field_egui::field_weather::{set_weather, Weather, WeatherKind};
+        let weather = stage.weather_kind.checked_sub(1).and_then(|k| WeatherKind::ALL.get(k)).map(|&kind| Weather {
+            kind,
+            intensity: stage.weather_intensity,
+            wind: stage.weather_wind,
+        });
+        set_weather(&ctx, weather);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -202,6 +209,7 @@ impl StageTool {
                     calibrate_scenery = scene_ui(stage, ui);
                     light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
                     lighting_changed = global_light_ui(ui, lighting, stage);
+                    weather_ui(stage, ui);
                     ui.separator();
                     camera_ui(stage, ui);
                     ui.separator();
@@ -211,8 +219,9 @@ impl StageTool {
                     if stage.scene().light.is_some() {
                         ui.heading("Light");
                         light_preview_ui(stage, ui, game_hour);
-                        ui.separator();
                     }
+                    weather_ui(stage, ui);
+                    ui.separator();
                     cast_ui(stage, ui)
                 }
             });
@@ -308,6 +317,24 @@ fn light_ui(
     }
 
     light_preview_ui(stage, ui, game_hour);
+}
+
+/// Weather over the stage (a preview: the game sets it from the room).
+fn weather_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    use gs_field_egui::field_weather::WeatherKind;
+    ui.horizontal(|ui| {
+        ui.label("Weather");
+        let name = |k: usize| k.checked_sub(1).and_then(|i| WeatherKind::ALL.get(i)).map_or("Clear", |w| w.label());
+        egui::ComboBox::from_id_salt("stage_weather").selected_text(name(stage.weather_kind)).show_ui(ui, |ui| {
+            for k in 0..=WeatherKind::ALL.len() {
+                ui.selectable_value(&mut stage.weather_kind, k, name(k));
+            }
+        });
+    });
+    if stage.weather_kind > 0 {
+        ui.add(egui::Slider::new(&mut stage.weather_intensity, 0.0..=1.0).text("Amount"));
+        ui.add(egui::Slider::new(&mut stage.weather_wind, -1.0..=1.0).text("Wind"));
+    }
 }
 
 /// The lighting preview: which game hour the stage shows, and the player's

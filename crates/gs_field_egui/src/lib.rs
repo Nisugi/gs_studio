@@ -35,6 +35,7 @@ pub mod creature_light;
 /// Addition since the port (not in VellumFE): the no-art creature puppet,
 /// preferred over the flat doll whenever a baked puppet resolves.
 pub mod creature_puppet;
+pub mod field_weather;
 pub mod image_store;
 
 pub use creature_art::{
