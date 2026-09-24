@@ -62,6 +62,16 @@ impl Patch {
         table[i] + (table[i + 1] - table[i]) * t
     }
 
+    /// The seam-relative angle (0..TAU) at arc fraction `u` round ring `k`.
+    fn angle_at(&self, k: usize, u: f32) -> f32 {
+        let table = &self.arc[k];
+        let u = u.clamp(0.0, 1.0);
+        let i = table.partition_point(|v| *v < u).clamp(1, ARC_SAMPLES);
+        let (a, b) = (table[i - 1], table[i]);
+        let t = if b > a { (u - a) / (b - a) } else { 0.0 };
+        (i as f32 - 1.0 + t) / ARC_SAMPLES as f32 * TAU
+    }
+
     /// The patch outline, as one convex quad per pair of rows: what a
     /// template fills.
     pub fn quads(&self, px_per_ft: f32) -> Vec<[[f32; 2]; 4]> {
@@ -196,6 +206,35 @@ impl UvLayout {
         let u = q.across(k, rel) + (q.across(k1, rel) - q.across(k, rel)) * t;
         let (y, circ) = (q.rows[k].0 + (q.rows[k1].0 - q.rows[k].0) * t, q.rows[k].1 + (q.rows[k1].1 - q.rows[k].1) * t);
         Some([q.centre_x() + (u - 0.5) * circ * self.px_per_ft, q.origin[1] + y])
+    }
+}
+
+impl UvLayout {
+    /// The inverse of [`UvLayout::locate`]: the surface address
+    /// `(segment, station, theta)` under a sheet position, or None off
+    /// every patch.
+    pub fn address(&self, at: [f32; 2]) -> Option<(usize, f32, f32)> {
+        for q in &self.patches {
+            let ly = at[1] - q.origin[1];
+            if at[0] < q.origin[0] || at[0] > q.origin[0] + q.size[0] || ly < 0.0 || ly > q.size[1] {
+                continue;
+            }
+            let Some(k) = q.rows.windows(2).position(|r| ly >= r[0].0 && ly <= r[1].0) else { continue };
+            let ((y0, c0), (y1, c1)) = (q.rows[k], q.rows[k + 1]);
+            let t = if y1 > y0 { (ly - y0) / (y1 - y0) } else { 0.0 };
+            let half = (c0 + (c1 - c0) * t) * self.px_per_ft * 0.5;
+            let dx = at[0] - q.centre_x();
+            if half <= 1e-3 || dx.abs() > half {
+                continue;
+            }
+            let u = (dx / half + 1.0) * 0.5;
+            // Rings k and k + 1 disagree slightly about the angle at `u`;
+            // blend them as `locate` blends their positions.
+            let (a0, a1) = (q.angle_at(k, u), q.angle_at(k + 1, u));
+            let rel = if (a1 - a0).abs() > std::f32::consts::PI { a0 } else { a0 + (a1 - a0) * t };
+            return Some((q.segment, k as f32 + t, q.seam + rel));
+        }
+        None
     }
 }
 

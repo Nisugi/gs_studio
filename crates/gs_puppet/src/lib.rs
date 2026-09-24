@@ -49,6 +49,7 @@ pub mod math;
 pub mod measure;
 pub mod paint;
 pub mod pose;
+pub mod prefill;
 pub mod puppet;
 pub mod raster;
 pub mod skin;
@@ -61,6 +62,7 @@ pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WO
 pub use fit::{rest_iou, rest_prims};
 pub use paint::paint;
 pub use pose::{BonePose, FamilyPoses, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
+pub use prefill::{prefill, Painting, Paintings};
 pub use skin::Skin;
 pub use uv::{Texture, UvLayout};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};

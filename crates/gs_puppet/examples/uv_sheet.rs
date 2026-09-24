@@ -12,13 +12,21 @@
 //!   <family>_checker.png   the puppet wearing a checker sheet (0.25 ft
 //!                          squares), turning and posed: squares should look
 //!                          square and run on unbroken across the body
+//!   <family>_{front,side,back}_paint.png
+//!                          paint-over templates: the silhouette each view
+//!                          is painted on (the back is the front mirrored)
 //! With `--paint`, the given sheet (same size as the template) is worn
-//! instead of the checker, as `<family>_painted.png`.
+//! instead of the checker, as `<family>_painted.png`. With any of `--front`,
+//! `--side`, `--back <png>` (paintings over those templates, any size with
+//! their aspect), the sheet is PRE-FILLED from them (`<family>_prefilled.png`)
+//! and worn as `<family>_projected.png`. `--demo` paints a test outfit onto
+//! the three templates itself and does the same.
 
 use std::path::{Path, PathBuf};
 
 use gs_puppet::raster::Canvas;
-use gs_puppet::{Camera, Look, Pose, PoseSet, Puppet, Skin, Texture, UvLayout, MASK_PX};
+use gs_puppet::{prefill, Camera, Look, Painting, Paintings, Pose, PoseSet, Puppet, Skin, Texture, UvLayout, MASK_PX};
+use rig_bake::Mask;
 use rig::{Outlines, Rig, View};
 
 const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
@@ -102,6 +110,62 @@ fn sheet(layout: &UvLayout, paint: impl Fn(usize, f32, f32, f32) -> [f32; 3]) ->
     rgba
 }
 
+/// A silhouette as an RGBA image: `inside(fx, fy)` picks each covered
+/// pixel's colour from its position (0..1 across, 0..1 from the top of the
+/// figure); transparent outside. `mirror` flips it left to right.
+fn silhouette(mask: &Mask, mirror: bool, paint: impl Fn(f32, f32) -> [u8; 3]) -> Vec<u8> {
+    let g = mask.grid;
+    let (mut top, mut bottom) = (g.h, 0);
+    for row in 0..g.h {
+        if (0..g.w).any(|c| mask.inside[row * g.w + c]) {
+            top = top.min(row);
+            bottom = bottom.max(row);
+        }
+    }
+    let tall = (bottom.saturating_sub(top) + 1) as f32;
+    let mut rgba = vec![0u8; g.w * g.h * 4];
+    for row in 0..g.h {
+        for col in 0..g.w {
+            let src = if mirror { g.w - 1 - col } else { col };
+            if mask.inside[row * g.w + src] {
+                let c = paint(col as f32 / g.w as f32, (row as f32 - top as f32) / tall);
+                let o = (row * g.w + col) * 4;
+                rgba[o..o + 3].copy_from_slice(&c);
+                rgba[o + 3] = 255;
+            }
+        }
+    }
+    rgba
+}
+
+/// A test outfit: skin head, a shirt, trousers, boots; a white badge on the
+/// front of the shirt, a yellow cross on its back, a white belt all round.
+fn demo_outfit(view: &str) -> impl Fn(f32, f32) -> [u8; 3] + '_ {
+    move |fx, fy| {
+        let shirt = if view == "back" { [40, 110, 60] } else { [190, 50, 45] };
+        match fy {
+            y if y < 0.13 => [224, 180, 140],
+            y if (0.48..0.52).contains(&y) => [240, 240, 240],
+            y if y < 0.5 => {
+                let (dx, dy) = (fx - 0.5, y - 0.28);
+                if view == "front" && dx.hypot(dy) < 0.035 {
+                    [245, 245, 245]
+                } else if view == "back" && (dx.abs() - (dy * 0.9).abs()).abs() < 0.02 && dy.abs() < 0.14 {
+                    [235, 200, 40]
+                } else {
+                    shirt
+                }
+            }
+            y if y < 0.93 => [45, 70, 150],
+            _ => [70, 45, 30],
+        }
+    }
+}
+
+fn as_painting(v: &Option<(usize, usize, Vec<u8>)>) -> Option<Painting<'_>> {
+    v.as_ref().map(|(w, h, rgba)| Painting { rgba, w: *w, h: *h })
+}
+
 fn composite(tile: &mut [u8], skin: &Skin) {
     for y in 0..skin.h {
         for x in 0..skin.w {
@@ -121,11 +185,16 @@ fn composite(tile: &mut [u8], skin: &Skin) {
 
 fn main() {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
-    let paint_path = args.iter().position(|a| a == "--paint").map(|i| {
-        let p = PathBuf::from(args.get(i + 1).expect("--paint <sheet.png>"));
-        args.drain(i..=i + 1);
-        p
-    });
+    let mut flag = |name: &str| {
+        args.iter().position(|a| a == name).map(|i| {
+            let p = PathBuf::from(args.get(i + 1).unwrap_or_else(|| panic!("{name} <png>")));
+            args.drain(i..=i + 1);
+            p
+        })
+    };
+    let paint_path = flag("--paint");
+    let views = [flag("--front"), flag("--side"), flag("--back")];
+    let demo = args.iter().position(|a| a == "--demo").map(|i| args.remove(i)).is_some();
     let out = PathBuf::from(args.first().expect("usage: uv_sheet <out_dir> [family] [--paint <sheet.png>]"));
     let family = args.get(1).cloned().unwrap_or_else(|| "humanoid".into());
     std::fs::create_dir_all(&out).expect("out dir");
@@ -135,6 +204,13 @@ fn main() {
     let mask = |v: View| outlines.get(&family, v).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
     let puppet = Puppet::build_masks(&rig, mask(View::Front).as_ref(), mask(View::Side).as_ref()).expect("puppet");
     let layout = UvLayout::fit(&puppet, SHEET_SIDE);
+    let (front_mask, side_mask) = (mask(View::Front), mask(View::Side));
+    let guide = |_: f32, _: f32| [205, 205, 205];
+    for (name, m, mirror) in [("front", &front_mask, false), ("back", &front_mask, true), ("side", &side_mask, false)] {
+        if let Some(m) = m {
+            write_png(&out.join(format!("{family}_{name}_paint.png")), m.grid.w, m.grid.h, &silhouette(m, mirror, guide));
+        }
+    }
     println!("{family}: sheet {}x{} at {:.1} px/ft, {} patches", layout.w, layout.h, layout.px_per_ft, layout.patches.len());
 
     // ---- the template
@@ -179,14 +255,47 @@ fn main() {
     }
     std::fs::write(out.join(format!("{family}_patches.txt")), legend).expect("legend");
 
+    // ---- the paintings to project, if any
+    let mut painted: Vec<Option<(usize, usize, Vec<u8>)>> = views.iter().map(|v| v.as_ref().map(|p| read_png(p))).collect();
+    if demo {
+        for (k, (name, m, mirror)) in [("front", &front_mask, false), ("side", &side_mask, false), ("back", &front_mask, true)].into_iter().enumerate() {
+            if let Some(m) = m {
+                let img = silhouette(m, mirror, demo_outfit(name));
+                write_png(&out.join(format!("{family}_{name}_demo.png")), m.grid.w, m.grid.h, &img);
+                painted[k] = Some((m.grid.w, m.grid.h, img));
+            }
+        }
+    }
+    let projected = painted.iter().any(Option::is_some).then(|| {
+        let paintings = Paintings {
+            front_grid: front_mask.as_ref().map(|m| m.grid),
+            side_grid: side_mask.as_ref().map(|m| m.grid),
+            front: as_painting(&painted[0]),
+            side: as_painting(&painted[1]),
+            back: as_painting(&painted[2]),
+        };
+        let t = std::time::Instant::now();
+        let rgba = prefill(&puppet, &layout, &paintings);
+        println!("pre-filled the sheet in {:.0} ms", t.elapsed().as_secs_f32() * 1000.0);
+        let mut white = rgba.clone();
+        for px in white.chunks_exact_mut(4) {
+            if px[3] == 0 {
+                px.copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+        write_png(&out.join(format!("{family}_prefilled.png")), layout.w, layout.h, &white);
+        rgba
+    });
+
     // ---- what the body wears
-    let (rgba, name) = match &paint_path {
-        Some(p) => {
+    let (rgba, name) = match (&paint_path, projected) {
+        (_, Some(rgba)) => (rgba, "projected"),
+        (Some(p), None) => {
             let (w, h, rgba) = read_png(p);
             assert_eq!((w, h), (layout.w, layout.h), "the painted sheet must be the template's size");
             (rgba, "painted")
         }
-        None => {
+        (None, None) => {
             let checker = sheet(&layout, |i, u, along, circ| {
                 let (a, b) = ((along / GRID_FT).floor() as i64, ((u - 0.5) * circ / GRID_FT).floor() as i64);
                 if (a + b).rem_euclid(2) == 0 { hue(i) } else { [235.0, 232.0, 225.0] }

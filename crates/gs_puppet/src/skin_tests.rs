@@ -174,3 +174,42 @@ fn paint_on_a_patch_shows_on_its_segment_only() {
     assert!(blue(pixel(&skin, at(chest).0).unwrap()), "the chest wears its paint");
     assert!(!blue(pixel(&skin, at(head).0).unwrap()), "the head does not");
 }
+
+#[test]
+fn a_front_and_a_back_painting_land_on_the_front_and_the_back() {
+    use crate::{prefill, Painting, Paintings};
+    let p = humanoid();
+    let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+    let front = outlines.get("humanoid", rig::View::Front).map(|e| rig_bake::rasterize(&e.outline(), crate::MASK_PX)).expect("front");
+    let g = front.grid;
+    let solid = |c: [u8; 3]| -> Vec<u8> { (0..g.w * g.h).flat_map(|_| [c[0], c[1], c[2], 255]).collect() };
+    let (red, green) = (solid([255, 0, 0]), solid([0, 255, 0]));
+    let paintings = Paintings {
+        front_grid: Some(g),
+        front: Some(Painting { rgba: &red, w: g.w, h: g.h }),
+        back: Some(Painting { rgba: &green, w: g.w, h: g.h }),
+        ..Paintings::default()
+    };
+    let layout = crate::UvLayout::new(&p, 30.0);
+    let sheet = prefill(&p, &layout, &paintings);
+    let chest = p.segments.iter().position(|s| s.part.as_deref() == Some("chest")).expect("a chest");
+    let s = &p.segments[chest];
+    let k = s.stations.len() as f32 / 2.0;
+    // The ring angles facing +z (front) and -z (back).
+    let facing = |z: f32| z * s.axis_d[2].signum() * std::f32::consts::FRAC_PI_2;
+    let colour = |theta: f32| {
+        let at = layout.locate(chest, k, theta).expect("on the sheet");
+        let i = (at[1] as usize * layout.w + at[0] as usize) * 4;
+        [sheet[i], sheet[i + 1], sheet[i + 2], sheet[i + 3]]
+    };
+    assert!(s.axis_d[2].abs() > 0.9, "the chest's depth axis is front-back");
+    assert_eq!(colour(facing(1.0)), [255, 0, 0, 255], "front of the chest");
+    // (The trunk's seam runs down the middle of its back: look just beside it.)
+    assert_eq!(colour(facing(-1.0) + 0.3), [0, 255, 0, 255], "back of the chest");
+    // Nothing on the sheet is left unpainted inside a patch.
+    let holes = (0..layout.h)
+        .flat_map(|y| (0..layout.w).map(move |x| (x, y)))
+        .filter(|&(x, y)| layout.address([x as f32 + 0.5, y as f32 + 0.5]).is_some() && sheet[(y * layout.w + x) * 4 + 3] == 0)
+        .count();
+    assert_eq!(holes, 0);
+}
