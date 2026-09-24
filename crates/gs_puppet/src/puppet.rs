@@ -644,6 +644,17 @@ impl Puppet {
             if let Some(r) = rig.radius_depth_ft.get(&bone.name).filter(|r| r.is_finite() && **r > 0.0) {
                 d.iter_mut().for_each(|x| *x = *r);
             }
+            // A taper: from the width at the bone's first joint to
+            // `radius_tip_ft` at its last, along the whole chain.
+            if let Some(tip) = rig.radius_tip_ft.get(&bone.name).filter(|r| r.is_finite() && **r > 0.0) {
+                let count = raws.iter().filter(|o| o.bone == r.bone).count().max(1) as f32;
+                let index = raws[..i].iter().filter(|o| o.bone == r.bone).count() as f32;
+                let base = bone.radius_ft.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(w[0]);
+                for (k, x) in w.iter_mut().enumerate() {
+                    let t = (index + k as f32 / (n - 1).max(1) as f32) / count;
+                    *x = base + (tip - base) * t;
+                }
+            }
             limit_taper(&mut w, ds);
             limit_taper(&mut d, ds);
 

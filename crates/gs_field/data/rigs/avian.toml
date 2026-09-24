@@ -49,7 +49,7 @@ part = "back"
 pivot = [0.7268, 0.1812]
 tip = [0.2959, 0.5212]
 joints = [[0.7268, 0.1812], [0.5, 0.3678], [0.2959, 0.5212]]
-pixels = 6557
+pixels = 6142
 
 [[bones]]
 index = 4
@@ -59,7 +59,7 @@ parent = "spine"
 pivot = [0.2959, 0.5212]
 tip = [0.0238, 0.8032]
 joints = [[0.2959, 0.5212], [0.0238, 0.8032]]
-pixels = 4196
+pixels = 4112
 
 [[bones]]
 index = 5
@@ -99,7 +99,7 @@ parent = "wing_r"
 pivot = [0.432, 0.4175]
 tip = [0.0918, 0.6539]
 joints = [[0.432, 0.4175], [0.0918, 0.6539]]
-pixels = 2611
+pixels = 3110
 
 [[bones]]
 index = 9

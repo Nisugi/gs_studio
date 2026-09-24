@@ -139,6 +139,12 @@ pub struct Rig {
     /// `RigBone` literal keeps compiling.)
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", serialize_with = "ser_f32_map")]
     pub radius_depth_ft: BTreeMap<String, f32>,
+    /// Bone -> in-plane half-width at its LAST joint, in feet: the bone
+    /// tapers from its `radius_ft` (or its measured width) at the first
+    /// joint to this at the last -- a feather blade to its point. Absent =
+    /// no taper.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", serialize_with = "ser_f32_map")]
+    pub radius_tip_ft: BTreeMap<String, f32>,
     #[serde(default)]
     pub bones: Vec<RigBone>,
 }
@@ -267,6 +273,7 @@ impl Rig {
         self.depth.retain(|j, v| v.is_finite() && order.contains(j));
         let bones = &self.bones;
         self.radius_depth_ft.retain(|b, v| v.is_finite() && bones.iter().any(|x| &x.name == b));
+        self.radius_tip_ft.retain(|b, v| v.is_finite() && *v > 0.0 && bones.iter().any(|x| &x.name == b));
 
         while let Some(HierarchyIssue::Cycle(bones)) =
             self.hierarchy_issues().into_iter().find(|i| matches!(i, HierarchyIssue::Cycle(_)))

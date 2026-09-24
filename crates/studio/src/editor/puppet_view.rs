@@ -90,6 +90,7 @@ impl PuppetView {
     }
 
     /// The pose to draw: the named one if the set has it, else rest.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn current_pose(&mut self, data_root: &Path, body_type: &str, family: &str) -> Pose {
         let name = self.pose.clone();
         match self.poses(data_root, body_type, family) {

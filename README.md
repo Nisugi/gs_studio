@@ -599,6 +599,22 @@ stays ONE bone in the rig and ONE index in the bone channel; the bake does
 not split it. So that a later step CAN split chains into segments that bend,
 the baked `[[bones]]` table lists every joint of the chain (`joints`).
 
+**Thickness overrides** (puppet only; the bake ignores them), each keyed by
+bone name, in feet, all optional:
+
+    [depth]                      # a joint's off-plane coordinate (else guessed)
+    wing_wrist_r = -0.48
+
+    [radius_depth_ft]            # half-thickness across the view (else measured)
+    wing_hand_r = 0.03
+
+    [radius_tip_ft]              # half-width at the bone's LAST joint: it tapers
+    wing_hand_r = 0.04           # from radius_ft (or its measured width) to this
+
+The avian's feathers use all three: a folded wing's silhouette says nothing
+about how broad the feathers are once spread, so the blade is set by hand --
+0.22 ft at the wrist tapering to 0.04 at the tip, 0.03 thick.
+
 ### `<family>.png` -- the baked label map
 
 8-bit RGBA, cropped to the silhouette's bounds, 512 px on the long side.

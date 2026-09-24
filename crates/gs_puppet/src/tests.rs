@@ -109,6 +109,7 @@ fn buried_rig(view: View) -> Rig {
         joints,
         depth: BTreeMap::new(),
         radius_depth_ft: BTreeMap::new(),
+        radius_tip_ft: BTreeMap::new(),
         bones: vec![
             RigBone {
                 name: "spine".to_owned(),

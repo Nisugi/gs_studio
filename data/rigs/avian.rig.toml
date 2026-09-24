@@ -59,10 +59,14 @@ wing_wrist_l = 0.48
 wing_wrist_r = -0.48
 
 [radius_depth_ft]
-wing_hand_l = 0.06
-wing_hand_r = 0.06
+wing_hand_l = 0.03
+wing_hand_r = 0.03
 wing_l = 0.08
 wing_r = 0.08
+
+[radius_tip_ft]
+wing_hand_l = 0.04
+wing_hand_r = 0.04
 
 [[bones]]
 name = "skull"
@@ -113,6 +117,7 @@ name = "wing_hand_r"
 part = "rightHand"
 parent = "wing_r"
 joints = ["wing_wrist_r", "wing_tip_r"]
+radius_ft = 0.22
 
 [[bones]]
 name = "leg_r"
@@ -131,6 +136,7 @@ name = "wing_hand_l"
 part = "leftHand"
 parent = "wing_l"
 joints = ["wing_wrist_l", "wing_tip_l"]
+radius_ft = 0.22
 
 [[bones]]
 name = "leg_l"
