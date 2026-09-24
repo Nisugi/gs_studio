@@ -581,7 +581,7 @@ impl RigTool {
             if ui
                 .selectable_label(unused, "Unused")
                 .on_hover_text(
-                    "This family does not have this joint (a worm's eye, a missing leg pair): it is un-placed,                      skipped by the click-through and not warned about. Click again to bring it back.",
+                    "This family does not have this joint (a worm's eye, a missing leg pair): it is un-placed, skipped by the click-through and not warned about. Click again to bring it back.",
                 )
                 .clicked()
             {
