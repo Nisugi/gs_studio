@@ -666,7 +666,7 @@ mod tests {
         assert_eq!((meta.map.width, meta.map.height), (186, 512));
         assert!((meta.ground_frac - 0.9995).abs() < 1e-4);
         assert_eq!(meta.anchor("FEET"), Some([0.4991, 0.9995]));
-        assert_eq!(meta.anchor("mouth"), Some([0.4991, 0.1377]));
+        assert_eq!(meta.anchor("mouth"), Some([0.5067, 0.1225]));
         assert_eq!(meta.eye("lefteye"), Some([0.5538, 0.0631]));
         assert!(meta.parts.iter().any(|p| p == "leftHand"));
         assert!(!meta.parts.iter().any(|p| p == "nsys"));

@@ -6,7 +6,7 @@ px_per_ft = 84.8525
 aspect = 0.3633
 span = 0.828
 ground_frac = 0.9995
-eye_radius_ft = 0.0424
+eye_radius_ft = 0.0433
 parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
 
 [map]
@@ -16,7 +16,7 @@ height = 512
 [anchors]
 feet = [0.4991, 0.9995]
 head = [0.4991, 0.0085]
-mouth = [0.4991, 0.1377]
+mouth = [0.5067, 0.1225]
 saddle = [0.4991, 0.1792]
 
 [eyes]
@@ -28,10 +28,10 @@ index = 1
 name = "skull"
 part = "head"
 parent = "neck"
-pivot = [0.4991, 0.1377]
+pivot = [0.5067, 0.1225]
 tip = [0.4991, 0.0085]
-joints = [[0.4991, 0.0085], [0.4991, 0.1377]]
-pixels = 3020
+joints = [[0.4991, 0.0085], [0.5067, 0.1225]]
+pixels = 2717
 
 [[bones]]
 index = 2
@@ -39,9 +39,9 @@ name = "neck"
 part = "neck"
 parent = "torso_upper"
 pivot = [0.4991, 0.1792]
-tip = [0.4991, 0.1377]
-joints = [[0.4991, 0.1377], [0.4991, 0.1792]]
-pixels = 587
+tip = [0.5067, 0.1225]
+joints = [[0.5067, 0.1225], [0.4991, 0.1792]]
+pixels = 853
 
 [[bones]]
 index = 3
@@ -51,7 +51,7 @@ parent = "torso_upper"
 pivot = [0.4991, 0.1792]
 tip = [0.75, 0.204]
 joints = [[0.2482, 0.204], [0.4991, 0.1792], [0.75, 0.204]]
-pixels = 1915
+pixels = 1952
 
 [[bones]]
 index = 4
@@ -70,7 +70,7 @@ part = "abdomen"
 pivot = [0.4991, 0.4857]
 tip = [0.4991, 0.3034]
 joints = [[0.4991, 0.3034], [0.4991, 0.4857]]
-pixels = 9143
+pixels = 9082
 
 [[bones]]
 index = 6
@@ -119,8 +119,8 @@ part = "rightLeg"
 parent = "torso_lower"
 pivot = [0.3622, 0.5023]
 tip = [0.3075, 0.9945]
-joints = [[0.3622, 0.5023], [0.3485, 0.7261], [0.3622, 0.9581], [0.3075, 0.9945]]
-pixels = 9453
+joints = [[0.3622, 0.5023], [0.299, 0.7274], [0.2366, 0.9677], [0.3075, 0.9945]]
+pixels = 9490
 
 [[bones]]
 index = 11
@@ -129,5 +129,5 @@ part = "leftLeg"
 parent = "torso_lower"
 pivot = [0.6359, 0.5023]
 tip = [0.6907, 0.9945]
-joints = [[0.6359, 0.5023], [0.6496, 0.7261], [0.6359, 0.9581], [0.6907, 0.9945]]
-pixels = 9480
+joints = [[0.6359, 0.5023], [0.7068, 0.7247], [0.758, 0.9636], [0.6907, 0.9945]]
+pixels = 9504

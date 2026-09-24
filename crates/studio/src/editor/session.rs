@@ -424,15 +424,20 @@ impl Session {
         let family = self.editor.rig().family.clone();
         let path = self.rig_path(&family);
         let dir = self.rigs_dir();
-        let baked = self.baked(false).ok_or("no silhouette for this family/view")?.baked.clone();
-        let rig = self.editor.rig();
-        rig.save(&path).map_err(|e| e.to_string())?;
-        write_baked(rig, &baked, &dir).map_err(|e| e.to_string())?;
+        self.baked(false).ok_or("no silhouette for this family/view")?;
+        self.editor.rig().save(&path).map_err(|e| e.to_string())?;
+        // Bake and build from the rig AS WRITTEN: the file rounds joints to
+        // a ten-thousandth of a foot, and a bake of the unrounded ones would
+        // disagree with its own rig file by a step.
+        let written = rig::Rig::load(&path).map_err(|e| e.to_string())?;
+        let mask = self.masks.get(&FULL_PX).ok_or("no silhouette for this family/view")?;
+        let baked = bake_mask(&written, mask);
+        write_baked(&written, &baked, &dir).map_err(|e| e.to_string())?;
         self.editor.mark_saved();
         let mut notes = vec![format!("Saved {}", path.display())];
 
         let puppet_path = dir.join(Puppet::baked_file_name(&family));
-        match Puppet::build(self.editor.rig(), &self.outlines).and_then(|p| p.to_baked_toml()) {
+        match Puppet::build(&written, &self.outlines).and_then(|p| p.to_baked_toml()) {
             Ok(text) => match std::fs::write(&puppet_path, text) {
                 Ok(()) => notes.push("puppet built".into()),
                 Err(e) => notes.push(format!("PUPPET NOT WRITTEN: {}: {e}", puppet_path.display())),
@@ -616,6 +621,22 @@ mod tests {
     #[test]
     fn a_missing_data_dir_is_an_error_not_a_panic() {
         assert!(open(Path::new("definitely/not/here")).is_err());
+    }
+
+    /// A joint placed between ten-thousandths of a foot is saved rounded;
+    /// the bake written beside it is the bake of the rig AS WRITTEN.
+    #[test]
+    fn a_save_bakes_the_rig_as_written() {
+        let data = TempData::new("save_rounded");
+        let mut s = open(&data.0).unwrap();
+        s.editor.place_current([0.123456, 5.876543]);
+        s.editor.place_current([-0.000049, 5.000051]);
+        s.save().unwrap();
+        let written = rig::Rig::load(&data.0.join("rigs/humanoid.rig.toml")).unwrap();
+        let mask = s.masks.get(&FULL_PX).unwrap();
+        let fresh = bake_mask(&written, mask);
+        let text = std::fs::read_to_string(data.0.join("rigs/humanoid.toml")).unwrap();
+        assert_eq!(rig::BakedMeta::from_toml(&text).unwrap(), rig::BakedMeta::new(&written, &fresh));
     }
 
     #[test]
