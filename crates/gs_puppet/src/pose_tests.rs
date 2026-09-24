@@ -308,3 +308,21 @@ neck = { rot = [-40.0, 0.0, 0.0] }
     assert_eq!(trumpet.root, Pose::default().root);
     assert_eq!(trumpet.bone("tail"), Default::default(), "unnamed bones stay at rest");
 }
+
+/// A four-legged puppet lying down rests its body on the ground. A belly
+/// slice that ran on down a foreleg used to leave a keel under the chest
+/// that propped every lying pose up at standing height.
+#[test]
+fn a_lying_quadruped_keeps_its_back_low() {
+    let set = PoseSet::from_toml(include_str!("../../../data/poses/quadruped.toml")).unwrap();
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../gs_field/data/puppets/");
+    for family in ["canine", "ursine", "equine", "caprine", "suine"] {
+        let text = std::fs::read_to_string(format!("{dir}{family}.puppet.toml")).unwrap();
+        let p = crate::Puppet::from_baked_toml(&text).unwrap();
+        let poses = set.for_family(family);
+        let posed = p.pose(poses.get("lie").unwrap());
+        let spine = p.segments.iter().position(|s| s.name.starts_with("spine")).unwrap();
+        let back = posed.xf[spine].point(p.segments[spine].head)[1] + posed.lift;
+        assert!(back < 0.45 * p.height, "{family}: back at {back:.2} ft lying down, standing height {:.2}", p.height);
+    }
+}

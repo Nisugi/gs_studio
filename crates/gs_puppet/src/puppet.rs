@@ -79,6 +79,9 @@ pub(crate) const LIMB_DEPTH_MIN: f32 = 0.5;
 /// measure 0.4-0.8; a broad flat-topped torso read the whole chest into it
 /// (a golem's 2.15 ft clavicle came out 2.9 ft thick).
 const GIRDLE_THICKNESS: f32 = 0.8;
+/// A trunk slice stops at a limb joint lying within the limb's radius plus
+/// this (feet, along the trunk bone) of it.
+const LIMB_JOINT_REACH_FT: f32 = 0.05;
 /// A chain counts as visibly bent at rest (so its own plane can give a knee
 /// its hinge) when the sine of the angle between two consecutive segments is
 /// at least this: about 17 degrees.
@@ -909,6 +912,28 @@ fn measure_segment<'m>(
                 dl > 0.05 && d[1] < -0.7 * dl && [r.head, r.tail].iter().any(|j| len(sub(*j, *near)) < 0.05)
             })
         });
+    // A limb hanging off the trunk crosses a trunk bone at a right angle, so
+    // the clip above never sees it -- and in a side view a leg's pixels run
+    // on down from the chest, so a slice across the belly reads chest AND
+    // leg to the paw: a keel under the body that props every lying pose up
+    // off the ground. The limb's own joints mark where the body ends (the
+    // elbow, the stifle), so a trunk slice stops at any it passes. A chain's
+    // root joint (shoulder, hip) sits inside the trunk and is not one.
+    let limb_joints: Vec<([f32; 2], f32)> = if kind == Kind::Trunk {
+        raws.iter()
+            .enumerate()
+            .filter(|(o, _)| kinds[*o] != Kind::Trunk)
+            .flat_map(|(o, other)| {
+                let mut v = vec![(flat(view, other.tail), limb_r[o])];
+                if other.k > 0 {
+                    v.push((flat(view, other.head), limb_r[o]));
+                }
+                v
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut off: Vec<Option<f32>> = Vec::with_capacity(n);
     let mut half: Vec<Option<f32>> = Vec::with_capacity(n);
     let mut unsplit = vec![0.0f32; n];
@@ -930,6 +955,18 @@ fn measure_segment<'m>(
                 hi = hi.min(stop.max(lo));
             } else {
                 lo = lo.max((-stop).min(hi));
+            }
+        }
+        for (j, lr) in &limb_joints {
+            let d = [j[0] - p[0], j[1] - p[1]];
+            if (d[0] * u[0] + d[1] * u[1]).abs() > lr + LIMB_JOINT_REACH_FT {
+                continue;
+            }
+            let s = d[0] * n2[0] + d[1] * n2[1];
+            if s > 0.03 && s < hi {
+                hi = s.max(lo);
+            } else if s < -0.03 && s > lo {
+                lo = s.min(hi);
             }
         }
         if hi - lo < 2.0 * MIN_HALF_FT {
