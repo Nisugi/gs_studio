@@ -388,6 +388,14 @@ across -- and differ only in the right-hand panel:
   reach, most on the side facing it, and its flame stands in depth order
   among them; best seen at night (`[[lights]]` in the scene file,
   `gs_field_egui::field_lights`).
+- **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
+  holds in front of creatures. Paint white over a rock, cactus or tree trunk
+  in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create
+  mask* writes a transparent one the backdrop's size, to paint as a layer
+  over it; any size works). Each connected blob is one occluder, standing
+  where its lowest pixel meets the floor: creatures behind that depth are
+  hidden by it, nearer ones stand in front, lamps too. *Reload mask* after
+  painting; *Show* tints them red (`gs_field_egui::field_occluders`).
 - **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
   Sleet, Blood rain or Fog, with Amount and Wind -- a preview of what the
   game sets from the room (`gs_field_egui::field_weather`).

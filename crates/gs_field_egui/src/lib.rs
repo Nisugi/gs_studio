@@ -36,6 +36,7 @@ pub mod creature_light;
 /// preferred over the flat doll whenever a baked puppet resolves.
 pub mod creature_puppet;
 pub mod field_lights;
+pub mod field_occluders;
 pub mod field_weather;
 pub mod image_store;
 

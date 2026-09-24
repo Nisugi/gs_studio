@@ -111,6 +111,9 @@ pub struct CreatureArtCache {
     doll_generation: u64,
     /// ADDITION (not in VellumFE): lighting -- kept pixels, lit twins.
     pub(crate) light: crate::creature_light::LightState,
+    /// ADDITION (not in VellumFE): background pool path -> the occluders
+    /// its `<name>.occluders.png` mask paints (None = no mask, or unusable).
+    pub occluders: HashMap<String, Option<std::sync::Arc<crate::field_occluders::Occluders>>>,
 }
 
 // TextureHandle has no Debug; summarize (WidgetRenderSettings derives it).
@@ -282,6 +285,12 @@ impl CreatureArtCache {
             }
             Slot::Worn(_) => {}
         }
+    }
+
+    /// ADDITION (not in VellumFE): the occluders painted for a background
+    /// (see `field_occluders`), if it has a mask and it was prepared.
+    pub fn occluders(&self, background: &str) -> Option<&crate::field_occluders::Occluders> {
+        self.occluders.get(background).and_then(|o| o.as_deref())
     }
 
     pub fn scene_background(&self, pool_path: &str) -> Option<&egui::TextureHandle> {
@@ -682,6 +691,20 @@ impl CreatureArtStore {
                     tex
                 });
                 cache.scene_backgrounds.insert(bg.clone(), tex);
+            }
+            // ADDITION (not in VellumFE): the backdrop's occluder mask.
+            if !cache.occluders.contains_key(bg) {
+                let abs = skins::resolve_image_path(&cache.root, &crate::field_occluders::mask_path(bg));
+                let occ = abs.is_file().then(|| std::fs::read(&abs).map_err(|e| e.to_string()).and_then(|b| crate::field_occluders::Occluders::from_png(&b)));
+                let occ = match occ {
+                    Some(Ok(o)) => Some(std::sync::Arc::new(o)),
+                    Some(Err(e)) => {
+                        tracing::warn!("occluder mask {}: {e}", abs.display());
+                        None
+                    }
+                    None => None,
+                };
+                cache.occluders.insert(bg.clone(), occ);
             }
         }
         for prop in &scene.props {

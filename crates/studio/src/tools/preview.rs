@@ -192,6 +192,7 @@ impl StageTool {
             wind: stage.weather_wind,
         });
         set_weather(&ctx, weather);
+        gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -207,6 +208,7 @@ impl StageTool {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
                 StagePanel::Scenes => {
                     calibrate_scenery = scene_ui(stage, ui);
+                    occluders_ui(stage, ui, &art);
                     light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
                     lighting_changed = global_light_ui(ui, lighting, stage);
                     weather_ui(stage, ui);
@@ -235,6 +237,47 @@ impl StageTool {
 }
 
 // ------------------------------------------------------------------ scene
+
+/// The backdrop's occluder mask (`gs_field_egui::field_occluders`): what
+/// the painting holds in front of creatures.
+fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::creature_art::SharedCreatureArt) {
+    let Some(bg) = stage.scene().background.clone() else { return };
+    let mask = gs_field_egui::field_occluders::mask_path(&bg);
+    ui.separator();
+    ui.heading("Occluders");
+    let (count, size) = {
+        let cache = art.lock().unwrap_or_else(|e| e.into_inner());
+        (cache.occluders(&bg).map(|o| o.blobs.len()), cache.scene_background(&bg).map(|t| t.size()))
+    };
+    let abs = gs_field::data_dirs::global_images_dir().ok().map(|d| d.join(&mask));
+    let exists = abs.as_ref().is_some_and(|p| p.is_file());
+    match (count, exists) {
+        (Some(n), _) => ui.label(format!("{mask}: {n} occluder(s)")),
+        (None, true) => ui.colored_label(ui.visuals().warn_fg_color, format!("{mask} holds no occluders (see the log)")),
+        (None, false) => ui.weak(format!("No {mask}: nothing painted stands in front of creatures.")),
+    };
+    ui.weak("Paint white over what stands IN FRONT of creatures (a rock, a cactus); each blob hides the creatures behind where its bottom meets the floor.");
+    ui.horizontal_wrapped(|ui| {
+        if !exists {
+            let create = ui
+                .add_enabled(size.is_some() && abs.is_some(), egui::Button::new("Create mask"))
+                .on_hover_text("Write a transparent PNG the backdrop's size to paint on (as a layer over the backdrop)");
+            if create.clicked() {
+                if let (Some([w, h]), Some(path)) = (size, abs.as_ref()) {
+                    let written = crate::editor::texture::write_png(path, w, h, &vec![0; w * h * 4]);
+                    stage.push_status(match written {
+                        Ok(()) => format!("Wrote {}", path.display()),
+                        Err(e) => format!("Mask not written: {e}"),
+                    });
+                }
+            }
+        }
+        if ui.button("Reload mask").on_hover_text("Read the mask again after painting it").clicked() {
+            art.lock().unwrap_or_else(|e| e.into_inner()).occluders.remove(&bg);
+        }
+        ui.checkbox(&mut stage.show_occluders, "Show").on_hover_text("Tint the occluders red on the stage");
+    });
+}
 
 /// The Scene section: backdrop + scenery props, persisted whole-file to
 /// `global/scenes/<name>.toml`. Returns true when "Calibrate scenery..." was

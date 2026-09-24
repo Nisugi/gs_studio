@@ -231,6 +231,9 @@ pub fn render_creature_field_content(
     // Point lights: their warm pools on the ground, and the lamps behind
     // the nearest creature.
     crate::field_lights::paint_back(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, ui.ctx());
+    // The painted things standing in front of creatures (the backdrop's
+    // occluder mask), placed by where each meets the floor.
+    let occluders = crate::field_occluders::Prepared::new(ui.ctx(), scene, art_cache, &backdrop_stage_rect, field);
 // <<<doll
     let props: &[gs_field::scenes::SceneProp] =
         scene.map(|s| s.props.as_slice()).unwrap_or_default();
@@ -275,12 +278,13 @@ pub fn render_creature_field_content(
     items.sort_by(|a, b| b.0.total_cmp(&a.0));
     for (_, item) in &items {
 // >>>doll
-        // Lamps farther away than this item stand behind it.
+        // Lamps and painted occluders farther away than this item stand
+        // behind it.
         let item_z = match item {
             DrawItem::Unit(i) => field.ground_z(&field.units()[*i]),
             DrawItem::Prop(k) => props[*k].z.max(0.4),
         };
-        crate::field_lights::paint_lamps_behind(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, item_z, ui.ctx());
+        crate::field_occluders::paint_behind(&painter, &|x, y| map.pt(x, y), map.scale, occluders.as_ref(), field, scene, item_z, ui.ctx());
 // <<<doll
         let i = match item {
             DrawItem::Prop(k) => {
@@ -312,7 +316,9 @@ pub fn render_creature_field_content(
     }
 
 // >>>doll
-    // ...and the near half, in front of them.
+    // Occluders and lamps nearer than every card, then the near half of the
+    // weather, in front of them all.
+    crate::field_occluders::paint_behind(&painter, &|x, y| map.pt(x, y), map.scale, occluders.as_ref(), field, view.scene, f32::NEG_INFINITY, ui.ctx());
     if weather_on {
         crate::field_weather::paint_front(&painter, map.stage_rect(), ui.ctx());
     }

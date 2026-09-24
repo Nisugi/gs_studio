@@ -533,3 +533,17 @@ frame of it uncached, and the card keeps repainting until it settles
 (`gs_puppet::fall::FALL_SECS`). A creature already dead when first drawn
 does not fall. Wired inside `paint_creature_puppet` (already a marked
 region); sprites keep their own death art.
+
+### 7.18 Occluders: the backdrop in front of creatures
+
+`src/field_occluders.rs` (new). A backdrop may have a mask beside it,
+`<name>.occluders.png` (white = stands in front); `prepare_scene_art` loads
+it into `CreatureArtCache::occluders` (a new pub field; `occluders(bg)` reads
+it). Each connected blob is one occluder at the floor depth under its lowest
+pixel. It is drawn as the backdrop texture again, cut to the blob (row-span
+mesh), in depth order among the cards: `Prepared::new` in the first block
+region, and the loop-top and front regions now call
+`field_occluders::paint_behind`, which draws occluders and lamps merged far
+to near (`field_lights::lamps_due` / `paint_lamp` became `pub(crate)`). Still
+sixteen regions. Occluders also cover a card's name and bars when it stands
+behind one. `set_show_occluders` tints them (a host setting).

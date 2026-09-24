@@ -235,7 +235,7 @@ fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32)
     }
 }
 
-fn lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
+pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
     let (foot, ppu) = place(field, to_screen, scale, light.x, light.z);
     let f = flicker(light, i, t);
     match light.kind {
@@ -305,7 +305,7 @@ pub fn paint_lamps_behind(
     let Some(scene) = scene.filter(|s| !s.lights.is_empty()) else { return };
     let t = ctx.input(|i| i.time) as f32;
     for k in lamps_due(&scene.lights, z) {
-        lamp(painter, field, to_screen, scale, &scene.lights[k], k, t);
+        paint_lamp(painter, field, to_screen, scale, &scene.lights[k], k, t);
     }
 }
 
@@ -325,7 +325,7 @@ pub fn paint_front(
 
 /// The lamps not yet drawn this frame at depth >= `z`, far to near, marked
 /// drawn.
-fn lamps_due(lights: &[PointLight], z: f32) -> Vec<usize> {
+pub(crate) fn lamps_due(lights: &[PointLight], z: f32) -> Vec<usize> {
     DRAWN.with(|d| {
         let mut d = d.borrow_mut();
         if d.len() != lights.len() {
