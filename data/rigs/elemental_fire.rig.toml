@@ -37,22 +37,7 @@ wrist_l = [1.4117, 2.9711]
 wrist_r = [-1.4068, 2.9711]
 
 [depth]
-elbow_l = -1.9
-elbow_r = 1.8
-fingertip_l = -1.7
-fingertip_r = 2.2
-shoulder_l = -0.8
-shoulder_r = 0.8
-wrist_l = -1.8
-wrist_r = 2.1
 
-[radius_depth_ft]
-arm_l = 0.6
-arm_r = 0.6
-clavicle = 0.8
-hand_l = 0.45
-hand_r = 0.45
-neck = 0.8
 
 [[bones]]
 name = "skull"

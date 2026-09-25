@@ -55,14 +55,14 @@ wrist_l = [-0.2735, 0.5654]
 wrist_r = [0.1698, 0.5654]
 
 [depth]
-tusk_base_l = 0.2
-tusk_base_r = -0.2
-tusk_bend_l = 0.6
-tusk_bend_r = -0.6
-tusk_curl_l = 0.9
-tusk_curl_r = -0.9
-tusk_tip_l = 0.85
-tusk_tip_r = -0.85
+tusk_base_l = 0.116
+tusk_base_r = -0.194
+tusk_bend_l = 0.425
+tusk_bend_r = -0.503
+tusk_curl_l = 0.657
+tusk_curl_r = -0.735
+tusk_tip_l = 0.618
+tusk_tip_r = -0.696
 
 [radius_depth_ft]
 skull = 0.5

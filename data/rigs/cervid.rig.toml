@@ -91,11 +91,17 @@ wrist_l = 0.2
 wrist_r = -0.2
 
 [radius_depth_ft]
+horn_r = 0.05
+horn_l = 0.05
 foreleg_l = 0.1
 foreleg_r = 0.1
 hindleg_l = 0.1
 hindleg_r = 0.1
 underline = 0.3
+
+[radius_ft]
+horn_r = 0.06
+horn_l = 0.06
 
 [[bones]]
 name = "skull"

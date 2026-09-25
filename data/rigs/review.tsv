@@ -82,3 +82,17 @@ dragon_bat	ready	dev	2026-09-25	new winged_quadruped template; side view mirrore
 elemental_lava	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand
 elemental_steam	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand
 plant_mass	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand
+giant	fixed	dev	2026-09-25	hand tips moved beside the thighs (were at knee height); .93/.93
+orc	fixed	dev	2026-09-25	leg depths set from the side view's leg columns; side .78
+equine	fixed	dev	2026-09-25	tail joints moved to the croup; tail hangs; .77/.85
+elemental_fire	fixed	dev	2026-09-25	donor arm overrides and arm depths dropped, arms measured from the side view; side .47 -> .77
+elemental_ice	fixed	dev	2026-09-25	same; side .55 -> .82
+elemental_water	fixed	dev	2026-09-25	same; side .65 -> .78
+elemental_earth	fixed	dev	2026-09-25	same; front .78 -> .80
+cervid	fixed	dev	2026-09-25	antler beams pinned thin (radius 0.06 / 0.05 ft); tines still not modelled; front .58 -> .61
+rodent	fixed	dev	2026-09-25	ears pinned thin (radius 0.1 / 0.03 ft)
+feline	fixed	dev	2026-09-25	front-view depths rescaled to the new front silhouette
+elephantid	fixed	dev	2026-09-25	tusk depths rescaled to the new front silhouette
+upright_insect	blocked	dev	2026-09-25	needs its own template (abdomen, wings, insect forelimbs), per audit
+ursine	ready	dev	2026-09-25	no depth table to rescale: the wide forelegs are the front view's merged leg columns, a builder matter; left for review
+suine	ready	dev	2026-09-25	depth rescale came out asymmetric on the new boar; left as is for review

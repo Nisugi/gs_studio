@@ -37,11 +37,14 @@ wrist_l = [2.0892, 2.3374]
 wrist_r = [-2.1009, 2.3374]
 
 [depth]
-ankle_l = 0.43
-ankle_r = -0.92
-knee_l = 0.42
-knee_r = -0.69
-toe_r = -0.15
+toe_l = 0.75
+hip_l = 0.15
+hip_r = -0.55
+ankle_l = 0.35
+ankle_r = -0.9
+knee_l = 0.35
+knee_r = -0.75
+toe_r = -0.45
 
 [[bones]]
 name = "skull"
