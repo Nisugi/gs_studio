@@ -1,0 +1,181 @@
+version = 2
+family = "six_legged_insect"
+body_type = "multileg"
+view = "front"
+ref_ft = 1.0
+axis = "carapace"
+joint_order = ["head_top", "mouth", "thorax_top", "thorax_bottom", "abdomen_tip", "eye_r", "leg1_base_r", "leg1_knee_r", "leg1_tip_r", "leg2_base_r", "leg2_knee_r", "leg2_tip_r", "leg3_base_r", "leg3_knee_r", "leg3_tip_r", "leg4_base_r", "leg4_knee_r", "leg4_tip_r", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "eye_l", "leg1_base_l", "leg1_knee_l", "leg1_tip_l", "leg2_base_l", "leg2_knee_l", "leg2_tip_l", "leg3_base_l", "leg3_knee_l", "leg3_tip_l", "leg4_base_l", "leg4_knee_l", "leg4_tip_l", "leg5_base_l", "leg5_knee_l", "leg5_tip_l"]
+unused = ["leg1_base_r", "leg1_knee_r", "leg1_tip_r", "leg1_base_l", "leg1_knee_l", "leg1_tip_l", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "leg5_base_l", "leg5_knee_l", "leg5_tip_l"]
+
+[anchors]
+head = "head_top"
+mouth = "mouth"
+saddle = "thorax_top"
+
+[joints]
+abdomen_tip = [0.0, 0.22]
+eye_l = [0.07, 0.85]
+eye_r = [-0.07, 0.85]
+head_top = [0.0, 0.95]
+leg1_base_l = [0.05, 0.85]
+leg1_base_r = [-0.05, 0.85]
+leg1_knee_l = [0.1, 0.9]
+leg1_knee_r = [-0.1, 0.9]
+leg1_tip_l = [0.15, 0.95]
+leg1_tip_r = [-0.15, 0.95]
+leg2_base_l = [0.15, 0.6]
+leg2_base_r = [-0.15, 0.6]
+leg2_knee_l = [0.42, 0.7]
+leg2_knee_r = [-0.42, 0.7]
+leg2_tip_l = [0.62, 0.02]
+leg2_tip_r = [-0.62, 0.02]
+leg3_base_l = [0.14, 0.55]
+leg3_base_r = [-0.14, 0.55]
+leg3_knee_l = [0.4, 0.6]
+leg3_knee_r = [-0.4, 0.6]
+leg3_tip_l = [0.45, 0.02]
+leg3_tip_r = [-0.45, 0.02]
+leg4_base_l = [0.13, 0.5]
+leg4_base_r = [-0.13, 0.5]
+leg4_knee_l = [0.35, 0.5]
+leg4_knee_r = [-0.35, 0.5]
+leg4_tip_l = [0.28, 0.02]
+leg4_tip_r = [-0.28, 0.02]
+leg5_base_l = [0.1, 0.4]
+leg5_base_r = [-0.1, 0.4]
+leg5_knee_l = [0.2, 0.3]
+leg5_knee_r = [-0.2, 0.3]
+leg5_tip_l = [0.25, 0.02]
+leg5_tip_r = [-0.25, 0.02]
+mouth = [0.0, 0.78]
+thorax_bottom = [0.0, 0.45]
+thorax_top = [0.0, 0.72]
+
+[depth]
+abdomen_tip = -0.65
+eye_l = 0.45
+eye_r = 0.45
+head_top = 0.35
+leg1_base_l = 0.4
+leg1_base_r = 0.4
+leg1_knee_l = 0.5
+leg1_knee_r = 0.5
+leg1_tip_l = 0.6
+leg1_tip_r = 0.6
+leg2_base_l = 0.2
+leg2_base_r = 0.2
+leg2_knee_l = 0.4
+leg2_knee_r = 0.4
+leg2_tip_l = 0.5
+leg2_tip_r = 0.5
+leg3_base_l = 0.0
+leg3_base_r = 0.0
+leg3_knee_l = 0.0
+leg3_knee_r = 0.0
+leg3_tip_l = 0.0
+leg3_tip_r = 0.0
+leg4_base_l = -0.3
+leg4_base_r = -0.3
+leg4_knee_l = -0.5
+leg4_knee_r = -0.5
+leg4_tip_l = -0.7
+leg4_tip_r = -0.7
+leg5_base_l = -0.5
+leg5_base_r = -0.5
+leg5_knee_l = -0.6
+leg5_knee_r = -0.6
+leg5_tip_l = -0.7
+leg5_tip_r = -0.7
+mouth = 0.45
+thorax_bottom = -0.15
+thorax_top = 0.1
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "thorax"
+joints = ["head_top", "mouth"]
+pivot = "mouth"
+
+[[bones]]
+name = "thorax"
+part = "chest"
+joints = ["thorax_top", "thorax_bottom"]
+
+[[bones]]
+name = "abdomen"
+part = "abdomen"
+parent = "thorax"
+joints = ["thorax_bottom", "abdomen_tip"]
+
+[[bones]]
+name = "leg1_r"
+part = "rightArm"
+parent = "thorax"
+joints = ["leg1_base_r", "leg1_knee_r"]
+
+[[bones]]
+name = "leg1_tip_r"
+part = "rightHand"
+parent = "leg1_r"
+joints = ["leg1_knee_r", "leg1_tip_r"]
+
+[[bones]]
+name = "leg1_l"
+part = "leftArm"
+parent = "thorax"
+joints = ["leg1_base_l", "leg1_knee_l"]
+
+[[bones]]
+name = "leg1_tip_l"
+part = "leftHand"
+parent = "leg1_l"
+joints = ["leg1_knee_l", "leg1_tip_l"]
+
+[[bones]]
+name = "leg2_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg2_base_r", "leg2_knee_r", "leg2_tip_r"]
+
+[[bones]]
+name = "leg2_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg2_base_l", "leg2_knee_l", "leg2_tip_l"]
+
+[[bones]]
+name = "leg3_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg3_base_r", "leg3_knee_r", "leg3_tip_r"]
+
+[[bones]]
+name = "leg3_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg3_base_l", "leg3_knee_l", "leg3_tip_l"]
+
+[[bones]]
+name = "leg4_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg4_base_r", "leg4_knee_r", "leg4_tip_r"]
+
+[[bones]]
+name = "leg4_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg4_base_l", "leg4_knee_l", "leg4_tip_l"]
+
+[[bones]]
+name = "leg5_r"
+part = "rightLeg"
+parent = "thorax"
+joints = ["leg5_base_r", "leg5_knee_r", "leg5_tip_r"]
+
+[[bones]]
+name = "leg5_l"
+part = "leftLeg"
+parent = "thorax"
+joints = ["leg5_base_l", "leg5_knee_l", "leg5_tip_l"]

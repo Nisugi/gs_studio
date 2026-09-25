@@ -12,109 +12,82 @@ mouth = "mouth"
 saddle = "thorax_top"
 
 [joints]
-abdomen_tip = [0.7128, 2.1226]
-eye_l = [0.0054, 1.6001]
-eye_r = [-0.0191, 1.6001]
-head_top = [0.1738, 1.7283]
-leg1_base_l = [0.2424, 1.3339]
-leg1_base_r = [-0.254, 1.3339]
-leg1_knee_l = [0.1463, 0.9396]
-leg1_knee_r = [-0.2202, 0.9396]
-leg1_tip_l = [-0.1117, 0.4269]
-leg1_tip_r = [0.0654, 0.4269]
-leg2_base_l = [0.4495, 1.6297]
-leg2_base_r = [-0.4489, 1.6297]
-leg2_knee_l = [0.5464, 1.7776]
-leg2_knee_r = [-0.5457, 1.7776]
-leg2_tip_l = [1.5006, 0.0523]
-leg2_tip_r = [-1.5046, 0.0523]
-leg3_base_l = [0.4456, 1.7283]
-leg3_base_r = [-0.4442, 1.7283]
-leg3_knee_l = [1.2439, 2.024]
-leg3_knee_r = [-1.2525, 2.024]
-leg3_tip_l = [1.4336, 0.3283]
-leg3_tip_r = [-1.4296, 0.3283]
-leg4_base_l = [0.6461, 1.9255]
-leg4_base_r = [-0.6563, 1.9255]
-leg4_knee_l = [0.8753, 2.586]
-leg4_knee_r = [-0.8893, 2.586]
-leg4_tip_l = [1.2942, 0.8705]
-leg4_tip_r = [-1.3018, 0.8705]
-leg5_base_l = [0.1936, 1.5804]
-leg5_base_r = [-0.2058, 1.5804]
-leg5_knee_l = [0.5087, 1.4325]
-leg5_knee_r = [-0.5203, 1.4325]
-leg5_tip_l = [1.5006, 0.0523]
-leg5_tip_r = [-1.5046, 0.0523]
-mouth = [0.0027, 1.255]
-thorax_bottom = [-0.0682, 1.679]
-thorax_top = [-0.6075, 1.9255]
+abdomen_tip = [0.0, 0.25]
+eye_l = [0.1, 1.72]
+eye_r = [-0.1, 1.72]
+head_top = [0.0, 1.8]
+leg1_base_l = [0.12, 1.65]
+leg1_base_r = [-0.12, 1.65]
+leg1_knee_l = [0.2, 1.8]
+leg1_knee_r = [-0.2, 1.8]
+leg1_tip_l = [0.15, 1.9]
+leg1_tip_r = [-0.15, 1.9]
+leg2_base_l = [0.3, 1.5]
+leg2_base_r = [-0.3, 1.5]
+leg2_knee_l = [1.0, 2.3]
+leg2_knee_r = [-1.0, 2.3]
+leg2_tip_l = [1.55, 2.85]
+leg2_tip_r = [-1.55, 2.85]
+leg3_base_l = [0.35, 1.4]
+leg3_base_r = [-0.35, 1.4]
+leg3_knee_l = [1.6, 2.05]
+leg3_knee_r = [-1.6, 2.05]
+leg3_tip_l = [2.3, 2.15]
+leg3_tip_r = [-2.3, 2.15]
+leg4_base_l = [0.35, 1.3]
+leg4_base_r = [-0.35, 1.3]
+leg4_knee_l = [1.5, 1.25]
+leg4_knee_r = [-1.5, 1.25]
+leg4_tip_l = [1.55, 0.05]
+leg4_tip_r = [-1.55, 0.05]
+leg5_base_l = [0.3, 1.2]
+leg5_base_r = [-0.3, 1.2]
+leg5_knee_l = [1.1, 0.95]
+leg5_knee_r = [-1.1, 0.95]
+leg5_tip_l = [1.2, 0.05]
+leg5_tip_r = [-1.2, 0.05]
+mouth = [0.0, 1.6]
+thorax_bottom = [0.0, 1.15]
+thorax_top = [0.0, 1.62]
 
-# Why every joint below is overridden. From the front, a spider's legs
-# stack: the automatic guess gives every joint the centre of the side
-# view's widest span at its height, so all four leg pairs land on the same
-# z and render as one fan. Each pair is instead set onto one leg of the
-# side view `arachnid`, front to back:
-#   leg1 = pedipalps (the short straight pair hanging in front of the fangs)
-#   leg2 = front legs -> side leg reaching forward to z 2.35
-#   leg3 = second legs -> side leg planted at z ~1.0
-#   leg4 = third legs (the high arch in front) -> side leg at z ~-0.5
-#   leg5 = rear legs: hidden behind leg2 in the front view (same front
-#          path), set onto the side view's rear leg at z -2.35
-# Centre joints: head in front, thorax sloping back to the pedicel, abdomen
-# rising back to z -1.8 (the side view's big dome). Values tuned against
-# rest IoU with rig_check. `rig --example bake` drops comments; re-add.
 [depth]
-abdomen_tip = -1.8
-head_top = 0.35
-leg1_base_l = 0.45
-leg1_base_r = 0.45
-leg1_knee_l = 0.6
-leg1_knee_r = 0.6
-leg1_tip_l = 0.65
-leg1_tip_r = 0.65
+abdomen_tip = -1.6
+eye_l = 1.0
+eye_r = 1.0
+head_top = 1.0
+leg1_base_l = 1.1
+leg1_base_r = 1.1
+leg1_knee_l = 1.3
+leg1_knee_r = 1.3
+leg1_tip_l = 1.4
+leg1_tip_r = 1.4
 leg2_base_l = 0.5
 leg2_base_r = 0.5
 leg2_knee_l = 1.3
 leg2_knee_r = 1.3
-leg2_tip_l = 2.33
-leg2_tip_r = 2.33
+leg2_tip_l = 2.2
+leg2_tip_r = 2.2
 leg3_base_l = 0.2
 leg3_base_r = 0.2
-leg3_knee_l = 0.55
-leg3_knee_r = 0.55
-leg3_tip_l = 0.95
-leg3_tip_r = 0.95
+leg3_knee_l = 0.5
+leg3_knee_r = 0.5
+leg3_tip_l = 0.6
+leg3_tip_r = 0.6
 leg4_base_l = -0.2
 leg4_base_r = -0.2
-leg4_knee_l = -0.35
-leg4_knee_r = -0.35
-leg4_tip_l = -0.45
-leg4_tip_r = -0.45
-leg5_base_l = -0.45
-leg5_base_r = -0.45
-leg5_knee_l = -1.5
-leg5_knee_r = -1.5
-leg5_tip_l = -2.35
-leg5_tip_r = -2.35
-mouth = 0.18
-thorax_bottom = -0.4
+leg4_knee_l = -0.5
+leg4_knee_r = -0.5
+leg4_tip_l = -0.4
+leg4_tip_r = -0.4
+leg5_base_l = -0.6
+leg5_base_r = -0.6
+leg5_knee_l = -1.3
+leg5_knee_r = -1.3
+leg5_tip_l = -1.6
+leg5_tip_r = -1.6
+mouth = 1.2
+thorax_bottom = -0.2
 thorax_top = 0.4
-
-[radius_depth_ft]
-abdomen = 0.45
-skull = 0.2
-thorax = 0.6
-
-[radius_tip_ft]
-leg2_l = 0.05
-leg2_r = 0.05
-leg3_l = 0.05
-leg3_r = 0.05
-leg4_l = 0.05
-leg4_r = 0.05
-leg5_l = 0.05
-leg5_r = 0.05
 
 [[bones]]
 name = "skull"
@@ -122,7 +95,6 @@ part = "head"
 parent = "thorax"
 joints = ["head_top", "mouth"]
 pivot = "mouth"
-radius_ft = 0.35
 
 [[bones]]
 name = "thorax"
@@ -142,16 +114,16 @@ parent = "thorax"
 joints = ["leg1_base_r", "leg1_knee_r"]
 
 [[bones]]
-name = "leg1_l"
-part = "leftArm"
-parent = "thorax"
-joints = ["leg1_base_l", "leg1_knee_l"]
-
-[[bones]]
 name = "leg1_tip_r"
 part = "rightHand"
 parent = "leg1_r"
 joints = ["leg1_knee_r", "leg1_tip_r"]
+
+[[bones]]
+name = "leg1_l"
+part = "leftArm"
+parent = "thorax"
+joints = ["leg1_base_l", "leg1_knee_l"]
 
 [[bones]]
 name = "leg1_tip_l"
