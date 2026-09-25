@@ -815,8 +815,10 @@ fn a_biped_s_trunk_below_its_hips_is_no_deeper_than_its_thighs() {
     }
 }
 
-/// A canine's near foreleg is drawn thicker than its far one; the rig's
-/// `mirror` gives it, and the paw below it, the far one's shape.
+/// A canine's near foreleg measured thicker than its far one; the rig's
+/// `mirror` gives it, and the paw below it, the far one's exact shape.
+/// (The builder now evens twins out on its own, to within a tenth, so
+/// without the entry the two are alike but not identical.)
 #[test]
 fn a_mirrored_limb_takes_its_twin_s_shape() {
     let p = shipped("canine");
@@ -831,7 +833,7 @@ fn a_mirrored_limb_takes_its_twin_s_shape() {
     }
     let plain = shipped_where("canine", |rig| rig.mirror.clear());
     let (near, far) = (mean_w(segment(&plain, "foreleg_r.1")), mean_w(segment(&plain, "foreleg_l.1")));
-    assert!(near > far * 1.1, "without it the near lower foreleg is drawn thicker: {near:.3} vs {far:.3}");
+    assert!((near - far).abs() <= 0.12 * near.max(far), "without it the pair is still alike: {near:.3} vs {far:.3}");
 }
 
 /// The ogre's art holds a club: resting on its shoulder, and in its fist in
@@ -1053,4 +1055,20 @@ fn the_fit_counts_the_figure_beyond_the_silhouette_s_grid() {
     let half = crate::fit::rest_iou(&p, View::Front, &narrow);
     assert!(own > 0.8, "against its own outline: {own:.3}");
     assert!((0.35..0.6).contains(&half), "twice as wide as the outline: {half:.3}, about a half");
+}
+
+/// A side-drawn rig's near and far limbs are one silhouette read twice:
+/// however each was measured, the pair comes out alike.
+#[test]
+fn twin_limbs_of_a_side_view_rig_match() {
+    for family in ["canine", "caprine", "equine", "feline", "reptilian", "suine", "ursine", "elephantid", "avian"] {
+        let p = shipped(family);
+        assert_eq!(p.view, rig::View::Side, "{family}");
+        for s in p.segments.iter().filter(|s| s.kind == Kind::Limb && s.name.contains("_r")) {
+            let twin = s.name.replace("_r", "_l");
+            let Some(t) = p.segments.iter().find(|t| t.name == twin) else { continue };
+            let (a, b) = (mean_w(s), mean_w(t));
+            assert!((a - b).abs() <= 0.12 * a.max(b) + 0.01, "{family}: {} {a:.3} vs {twin} {b:.3}", s.name);
+        }
+    }
 }

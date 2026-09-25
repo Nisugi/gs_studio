@@ -625,7 +625,33 @@ impl Puppet {
                         })
                         .collect()
                 };
-                let (wa, wb) = (shared(a, b), shared(b, a));
+                let (mut wa, mut wb) = (shared(a, b), shared(b, a));
+                // The two are one limb seen twice: the silhouette cannot
+                // tell them apart, so any difference left is measurement,
+                // not anatomy (a goat's far foreleg came out twice as thick
+                // as its near one; a horse's near thigh, buried in the chest
+                // and capped to its cannon, half as thick as the far). Both
+                // take the MEAN of the two, station by station along their
+                // length. Nothing in the readings says which is right:
+                // believing the better-read one, the thinner or the thicker
+                // each lost more rest fit over the nine side-drawn families
+                // than the mean (front 0.8417 -> 0.8412, side 0.8760 ->
+                // 0.8737), and matching is what the eye wants. A radius the
+                // rig sets by hand on either (`radius_ft`, the elephant's
+                // far foreleg) is the author's answer, and both take it.
+                let given = |j: usize| rig.bones[raws[j].bone].radius_ft.filter(|r| r.is_finite() && *r > 0.0);
+                match (given(i), given(j)) {
+                    (Some(_), Some(_)) => {}
+                    (Some(r), None) => wb.iter_mut().for_each(|x| *x = r),
+                    (None, Some(r)) => wa.iter_mut().for_each(|x| *x = r),
+                    (None, None) => {
+                        let (na, nb) = (wa.len(), wb.len());
+                        let ca: Vec<f32> = (0..na).map(|k| (wa[k] + at(&wb, k as f32 / (na - 1).max(1) as f32)) * 0.5).collect();
+                        let cb: Vec<f32> = (0..nb).map(|k| (wb[k] + at(&wa, k as f32 / (nb - 1).max(1) as f32)) * 0.5).collect();
+                        wa = ca;
+                        wb = cb;
+                    }
+                }
                 measured[i].as_mut().expect("measured").w = wa;
                 measured[j].as_mut().expect("measured").w = wb;
             }
