@@ -763,9 +763,13 @@ fn a_troll_s_upper_arm_hangs_on_its_bone_line_in_front_of_its_chest() {
     let p = shipped("troll");
     for name in ["arm_r.0", "arm_l.0"] {
         let upper = segment(&p, name);
-        for st in &upper.stations[CAP_RINGS..upper.stations.len() - CAP_RINGS] {
-            let t = ((st.c[1] - upper.head[1]) / (upper.tail[1] - upper.head[1])).clamp(0.0, 1.0);
-            let line = upper.head[2] + (upper.tail[2] - upper.head[2]) * t;
+        // The arm's socket stub (its buried leading rings, from the pivot
+        // inside the chest out to the shoulder) is not the arm's line.
+        let start = CAP_RINGS + upper.bare;
+        let root = upper.stations[start].c;
+        for st in &upper.stations[start..upper.stations.len() - CAP_RINGS] {
+            let t = ((st.c[1] - root[1]) / (upper.tail[1] - root[1])).clamp(0.0, 1.0);
+            let line = root[2] + (upper.tail[2] - root[2]) * t;
             assert!((st.c[2] - line).abs() < 0.15, "{name} at {:.2} ft sits at z {:.2}, its bone at {line:.2}", st.c[1], st.c[2]);
         }
     }

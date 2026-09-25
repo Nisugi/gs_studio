@@ -693,6 +693,8 @@ impl Puppet {
         // ---- segments
         let mut groups: Vec<String> = Vec::new();
         let mut segments: Vec<Segment> = Vec::new();
+        // Socket stub rings per segment (see the socket rule below).
+        let mut sockets: Vec<usize> = Vec::new();
         for (i, r) in raws.iter().enumerate() {
             let bone = &rig.bones[r.bone];
             let m = measured[i].take().expect("measured");
@@ -1038,6 +1040,48 @@ impl Puppet {
                 }
             }
 
+            // A limb hangs off a trunk from INSIDE it. A rig's leg base is
+            // clicked at the body's edge in one view, and its depth in the
+            // other is a guess; where that lands outside the trunk's rings
+            // (a crab's claw a third of a foot in front of a thorax the side
+            // view pushed back), the leg floated free of the body at rest and
+            // swung further off in every pose. So a chain's first segment
+            // whose first ring is not inside its parent trunk grows a stub
+            // back to halfway between that trunk's axis and its surface, and
+            // pivots from there: whatever angle the pose turns it to, its
+            // root stays in the body. The stub is buried, so `bare` leaves it
+            // unoutlined.
+            let mut seg_head = r.head;
+            let mut socket_rings = 0;
+            if r.k == 0 && kind != Kind::Trunk {
+                if let Some(p) = r.parent.filter(|p| segments[*p].kind == Kind::Trunk) {
+                    let ps = &segments[p];
+                    let pa = norm_or(sub(ps.tail, ps.head), [0.0, 1.0, 0.0]);
+                    let c0 = body[0].c;
+                    // The trunk ring whose plane the root sits nearest.
+                    let ring = ps.stations[CAP_RINGS..ps.stations.len() - CAP_RINGS]
+                        .iter()
+                        .min_by(|x, y| dot(sub(c0, x.c), pa).abs().total_cmp(&dot(sub(c0, y.c), pa).abs()));
+                    if let Some(ring) = ring {
+                        let e = sub(c0, ring.c);
+                        let (u, v) = (dot(e, ps.axis_w) / ring.w.max(1e-3), dot(e, ps.axis_d) / ring.d.max(1e-3));
+                        let out = (u * u + v * v).sqrt();
+                        if out > 1.0 {
+                            // Halfway in along the root's own direction from the axis.
+                            let socket = lerp(ring.c, c0, 0.5 / out);
+                            let gap = len(sub(c0, socket));
+                            let steps = ((gap / ds.max(1e-4)).ceil() as usize).max(1);
+                            let stub: Vec<Station> = (0..steps)
+                                .map(|k| Station { c: lerp(socket, c0, k as f32 / steps as f32), w: body[0].w, d: body[0].d })
+                                .collect();
+                            socket_rings = stub.len();
+                            body.splice(0..0, stub);
+                            seg_head = socket;
+                        }
+                    }
+                }
+            }
+
             // Rounded ends: shrinking rings past the last station.
             let cap = |end: Station, dir: V3, reach: Option<f32>| -> Vec<Station> {
                 let mut reach = reach.unwrap_or(0.9 * end.w.min(end.d));
@@ -1168,6 +1212,7 @@ impl Puppet {
 
             let count = raws.iter().filter(|o| o.bone == r.bone).count();
             let index = raws[..i].iter().filter(|o| o.bone == r.bone).count();
+            sockets.push(socket_rings);
             segments.push(Segment {
                 name: if count == 1 { bone.name.clone() } else { format!("{}.{index}", bone.name) },
                 bone: bone.name.clone(),
@@ -1176,7 +1221,7 @@ impl Puppet {
                 group,
                 kind,
                 chain_index: r.k,
-                head: q3(r.head),
+                head: q3(seg_head),
                 tail: q3(r.tail),
                 axis_w: q3(m.axis_w),
                 axis_d: q3(m.axis_d),
@@ -1214,7 +1259,9 @@ impl Puppet {
                 inside(st.c)
                     && [add(st.c, w), sub(st.c, w), add(st.c, d), sub(st.c, d)].into_iter().all(inside)
             };
-            let bare = segments[i].stations.iter().take_while(|st| buried(st)).count();
+            // A socket stub counts as buried whatever its rings poke out: it
+            // is the limb's root inside the body, not a limb to outline.
+            let bare = segments[i].stations.iter().take_while(|st| buried(st)).count().max(CAP_RINGS + sockets[i]);
             segments[i].bare = bare.min(segments[i].stations.len().saturating_sub(CAP_RINGS + 2));
         }
 
