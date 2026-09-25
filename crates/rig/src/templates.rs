@@ -281,6 +281,44 @@ fn avian() -> Template {
     }
 }
 
+/// Wing bones for a body that also has arms or forelegs: `wing_r` / `wing_l`
+/// (root, elbow, wrist) and `wing_hand_r` / `_l` (wrist, tip), carried as
+/// the BACK part (the client's doll has no wing part, and a wing is what
+/// hangs off the back). `hang` is the trunk bone they hang from.
+fn winged(bones: &mut Vec<BoneDef>, joints: &mut Vec<String>, hang: &str) {
+    for suffix in ["r", "l"] {
+        bones.push(bone_owned(format!("wing_{suffix}"), "back", &[format!("wing_root_{suffix}"), format!("wing_elbow_{suffix}"), format!("wing_wrist_{suffix}")]));
+        bones.push(bone_owned(format!("wing_hand_{suffix}"), "back", &[format!("wing_wrist_{suffix}"), format!("wing_tip_{suffix}")]));
+        for j in ["wing_root", "wing_elbow", "wing_wrist", "wing_tip"] {
+            joints.push(format!("{j}_{suffix}"));
+        }
+    }
+    link(bones, "wing", hang, None);
+    link(bones, "wing_hand", "wing", None);
+}
+
+fn bone_owned(name: String, part: &'static str, joints: &[String]) -> BoneDef {
+    BoneDef { name, part, joints: joints.to_vec(), parent: None, pivot: None }
+}
+
+/// The biped with a pair of wings on its back (a gargoyle, a winged demon).
+fn winged_biped() -> Template {
+    let mut t = biped();
+    t.name = "winged_biped";
+    t.blurb = "Upright two-legged body with wings, front view";
+    winged(&mut t.bones, &mut t.joints, "torso_upper");
+    t
+}
+
+/// The quadruped with a pair of wings at its shoulders (a griffin, a dragon).
+fn winged_quadruped() -> Template {
+    let mut t = quadruped();
+    t.name = "winged_quadruped";
+    t.blurb = "Four-legged body with wings, side view; _r wing and legs are the near side";
+    winged(&mut t.bones, &mut t.joints, "spine");
+    t
+}
+
 fn serpentine() -> Template {
     let mut bones = vec![
         bone("skull", "head", &["snout", "skull_base"]),
@@ -359,7 +397,7 @@ fn multileg() -> Template {
 }
 
 pub fn templates() -> Vec<Template> {
-    vec![biped(), quadruped(), avian(), serpentine(), multileg()]
+    vec![biped(), quadruped(), avian(), serpentine(), multileg(), winged_biped(), winged_quadruped()]
 }
 
 pub fn template(name: &str) -> Option<Template> {

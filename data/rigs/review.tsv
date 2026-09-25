@@ -48,3 +48,34 @@ centaur	blocked	dev	2026-09-25	no rig yet: needs a centaur template (quadruped b
 naga	blocked	dev	2026-09-25	no rig yet: needs a naga template (serpentine + arms)
 fish	blocked	dev	2026-09-25	no rig yet: needs a fish template
 floating_orb	blocked	dev	2026-09-25	no rig yet: needs an orb template
+humanoid	audited	image-gen	2026-09-25	clean .97/.97; recommend owner approval; templates pre-date refit, re-export before painting; see image-gen/puppet_review.md and puppet_turnarounds/humanoid_fit.png
+troll	audited	image-gen	2026-09-25	clean .95/.92; recommend owner approval; templates pre-date refit, re-export before painting; see image-gen/puppet_review.md and puppet_turnarounds/troll_fit.png
+canine	audited	image-gen	2026-09-25	clean .92/.87; recommend owner approval; templates pre-date refit, re-export before painting; see image-gen/puppet_review.md and puppet_turnarounds/canine_fit.png
+ogre	audited	image-gen	2026-09-25	good .95/.88; side leg_l.1 spills slightly behind; approvable as is; see image-gen/puppet_review.md and puppet_turnarounds/ogre_fit.png
+giant	audited	image-gen	2026-09-25	hand_r/hand_l run from wrist diagonally to knee height (strip across each thigh in front); fix hand tips, then approvable; see image-gen/puppet_review.md and puppet_turnarounds/giant_fit.png
+orc	audited	image-gen	2026-09-25	side .77: leg_r chain and leg_l.1 sit behind the silhouette legs; see image-gen/puppet_review.md and puppet_turnarounds/orc_fit.png
+fishfolk	audited	image-gen	2026-09-25	.80/.79: side calf fin and head crest missed; usable; see image-gen/puppet_review.md and puppet_turnarounds/fishfolk_fit.png
+equine	audited	image-gen	2026-09-25	tail missed in side, tail spills in front; see image-gen/puppet_review.md and puppet_turnarounds/equine_fit.png
+suine	audited	image-gen	2026-09-25	front .77: neck and hindleg_*.0 too wide; see image-gen/puppet_review.md and puppet_turnarounds/suine_fit.png
+worm	audited	image-gen	2026-09-25	front .74: coiled base missed; see image-gen/puppet_review.md and puppet_turnarounds/worm_fit.png
+ghost	audited	image-gen	2026-09-25	robe hem missed both views (miss .18/.23); widen lower robe stations; see image-gen/puppet_review.md and puppet_turnarounds/ghost_fit.png
+treekin	audited	image-gen	2026-09-25	side .72: arm_l.0/clavicle.1/leg_l.0 put a branch on the back; roots missed; see image-gen/puppet_review.md and puppet_turnarounds/treekin_fit.png
+golem	audited	image-gen	2026-09-25	side .69: torso_upper and skull spill; arms misplaced (miss behind shoulder, at fist); see image-gen/puppet_review.md and puppet_turnarounds/golem_fit.png
+serpent	audited	image-gen	2026-09-25	side hind_body.3 spills .13, tail tip missed; front coils spill sideways; see image-gen/puppet_review.md and puppet_turnarounds/serpent_fit.png
+ursine	audited	image-gen	2026-09-25	front .71: foreleg_*.0 and hindleg_*.0 far too wide; side skull spills; see image-gen/puppet_review.md and puppet_turnarounds/ursine_fit.png
+elephantid	audited	image-gen	2026-09-25	front .68: hindleg_*.0 and underline.0/1 too wide; side belly spills below; see image-gen/puppet_review.md and puppet_turnarounds/elephantid_fit.png
+feline	audited	image-gen	2026-09-25	front .62: spine and underline too wide; tail missed both views; see image-gen/puppet_review.md and puppet_turnarounds/feline_fit.png
+caprine	audited	image-gen	2026-09-25	ears spill both views; horn tips missed in front; see image-gen/puppet_review.md and puppet_turnarounds/caprine_fit.png
+avian	audited	image-gen	2026-09-25	side leg_*.2 and skull spill, legs otherwise missed; front misses legs and tail; see image-gen/puppet_review.md and puppet_turnarounds/avian_fit.png
+rodent	audited	image-gen	2026-09-25	front ear_l draws a big flat disc to the right (.09); side hindleg_l.2 runs forward under the body; see image-gen/puppet_review.md and puppet_turnarounds/rodent_fit.png
+ape	audited	image-gen	2026-09-25	legs cross diagonally in front; side leg_l.1 and arm_*.1 spill; place leg joints by hand; see image-gen/puppet_review.md and puppet_turnarounds/ape_fit.png
+cervid	audited	image-gen	2026-09-25	front .58: horn_*.0/.1 fill the gap between antler beams, tines missed; side foreleg_r.1 spills; see image-gen/puppet_review.md and puppet_turnarounds/cervid_fit.png
+elemental_earth	audited	image-gen	2026-09-25	front misses the shoulder slab corners and fists; side good; see image-gen/puppet_review.md and puppet_turnarounds/elemental_earth_fit.png
+elemental	audited	image-gen	2026-09-25	.89/.79; retiring form, no further work suggested; see image-gen/puppet_review.md and puppet_turnarounds/elemental_fit.png
+elemental_water	audited	image-gen	2026-09-25	side .65: donor arms hang down where the silhouette arm reaches forward; see image-gen/puppet_review.md and puppet_turnarounds/elemental_water_fit.png
+elemental_ice	audited	image-gen	2026-09-25	side .55: arm_r chain and clavicle.0 project backward, silhouette arm reaches forward; see image-gen/puppet_review.md and puppet_turnarounds/elemental_ice_fit.png
+elemental_fire	audited	image-gen	2026-09-25	side .47: donor heavy arms stick out front and back (arm_l.0 alone .31 spill); see image-gen/puppet_review.md and puppet_turnarounds/elemental_fire_fit.png
+upright_insect	audited	image-gen	2026-09-25	side .45 miss .44: humanoid donor lacks abdomen, wings, insect forelimbs; clavicles draw a long diagonal; needs its own template; see image-gen/puppet_review.md and puppet_turnarounds/upright_insect_fit.png
+winged_humanoid	ready	dev	2026-09-25	new winged_biped template; joints by hand; wings are the back part
+winged_beast	ready	dev	2026-09-25	new winged_quadruped template; joints by hand; wing thickness pinned; a wing tip still floats seen from the side
+dragon_bat	ready	dev	2026-09-25	new winged_quadruped template; side view mirrored to face right in its sheet; front and side drawings disagree on the wings, side wins

@@ -576,12 +576,14 @@ pub struct PoseSet {
 }
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
-pub const SHIPPED_POSES: [(&str, &str); 5] = [
+pub const SHIPPED_POSES: [(&str, &str); 7] = [
     ("biped", include_str!("../../../data/poses/biped.toml")),
     ("quadruped", include_str!("../../../data/poses/quadruped.toml")),
     ("avian", include_str!("../../../data/poses/avian.toml")),
     ("serpentine", include_str!("../../../data/poses/serpentine.toml")),
     ("multileg", include_str!("../../../data/poses/multileg.toml")),
+    ("winged_biped", include_str!("../../../data/poses/winged_biped.toml")),
+    ("winged_quadruped", include_str!("../../../data/poses/winged_quadruped.toml")),
 ];
 
 impl PoseSet {

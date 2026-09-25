@@ -38,7 +38,7 @@ Front views face the viewer, so the creature's right (`_r`) is screen-left,
 at negative x.
 
 **Vocabulary.** Three levels: a **body type** (biped, quadruped, avian,
-serpentine, multileg: a rig template and a pose set), a **form** (one
+serpentine, multileg, winged_biped, winged_quadruped: a rig template and a pose set), a **form** (one
 silhouette pair, its rig `<form>.rig.toml`, its puppet and texture; what
 the code and file names still call a *family*), and a **creature** (a
 bestiary entry, with its own skin and outfit). A creature finds its form by
@@ -685,6 +685,8 @@ rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
 | `avian` | side | avian |
 | `serpentine` | side | serpent worm |
 | `multileg` | front | arachnid crustacean |
+| `winged_biped` | front | winged_humanoid |
+| `winged_quadruped` | side | winged_beast dragon_bat |
 
 Templates are data (`crates/rig/src/templates.rs`): the ordered joint list,
 the bones with default parts, parents and pivots, the anchor joints. Each is
@@ -697,13 +699,20 @@ ONE tree:
 | `avian` | `spine` | `neck` (*nape*), `tail`, `breast` (*breast*), `underline`, `wing_*`, `leg_*` <- `spine`; `skull` (*crown*) <- `neck`; `wing_hand_*` <- `wing_*` |
 | `serpentine` | `mid_body` (*belly_mid*) | `fore_body` (*chest_end*), `hind_body` <- `mid_body`; `neck` (*neck_end*) <- `fore_body`; `skull` (*skull_base*) <- `neck` |
 | `multileg` | `thorax` | `skull` (*mouth*), `abdomen`, `leg1_*` .. `leg5_*` <- `thorax`; `leg1_tip_*` <- `leg1_*` |
+| `winged_biped` | as `biped` | the biped, plus `wing_*` <- `torso_upper`; `wing_hand_*` <- `wing_*` |
+| `winged_quadruped` | as `quadruped` | the quadruped, plus `wing_*` <- `spine`; `wing_hand_*` <- `wing_*` |
 
  `_r`/`_l` suffixes are mirror
 pairs; in a side view `_r` is the near limb. Quadruped forelegs are
 `rightArm`/`leftArm` with the paw segment as the hand; spine + tail are
 `back`. `multileg` has 5 leg pairs: pair 1 arms with the tip segment as
 hand (a crab's claws, a spider's pedipalps), 2-5 the four walking pairs;
-leave unused pairs unplaced.
+leave unused pairs unplaced. The winged templates' wings (root, elbow,
+wrist; wrist, tip) carry the `back` part, since the client's doll has no wing
+part; a side-drawn winged form should pin its wings' thickness
+(`[radius_depth_ft]`), because the front view's row at wing height is the
+whole wingspan. Their pose sets are the biped's and quadruped's with wing
+limits, kept in step by hand.
 
 ## File formats
 

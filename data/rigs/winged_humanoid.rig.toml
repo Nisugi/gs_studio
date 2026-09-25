@@ -1,0 +1,170 @@
+version = 2
+family = "winged_humanoid"
+body_type = "winged_biped"
+view = "front"
+ref_ft = 9.0
+axis = "crown"
+joint_order = ["crown", "chin", "neck_base", "sternum", "pelvis", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "hip_r", "knee_r", "ankle_r", "toe_r", "wing_root_r", "wing_elbow_r", "wing_wrist_r", "wing_tip_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l", "hip_l", "knee_l", "ankle_l", "toe_l", "wing_root_l", "wing_elbow_l", "wing_wrist_l", "wing_tip_l"]
+
+[anchors]
+head = "crown"
+mouth = "chin"
+saddle = "neck_base"
+
+[joints]
+ankle_l = [0.85, 0.7]
+ankle_r = [-0.85, 0.7]
+chin = [0.0, 6.7]
+crown = [0.0, 7.6]
+elbow_l = [1.6, 4.6]
+elbow_r = [-1.6, 4.6]
+eye_l = [0.25, 7.15]
+eye_r = [-0.25, 7.15]
+fingertip_l = [2.15, 3.0]
+fingertip_r = [-2.15, 3.0]
+hip_l = [0.55, 3.6]
+hip_r = [-0.55, 3.6]
+knee_l = [0.75, 2.0]
+knee_r = [-0.75, 2.0]
+neck_base = [0.0, 6.4]
+pelvis = [0.0, 3.6]
+shoulder_l = [0.95, 6.15]
+shoulder_r = [-0.95, 6.15]
+sternum = [0.0, 5.4]
+toe_l = [0.95, 0.15]
+toe_r = [-0.95, 0.15]
+wing_elbow_l = [2.2, 8.4]
+wing_elbow_r = [-2.2, 8.4]
+wing_root_l = [0.9, 6.6]
+wing_root_r = [-0.9, 6.6]
+wing_tip_l = [4.9, 5.1]
+wing_tip_r = [-4.9, 5.1]
+wing_wrist_l = [4.3, 6.9]
+wing_wrist_r = [-4.3, 6.9]
+wrist_l = [2.0, 3.6]
+wrist_r = [-2.0, 3.6]
+
+[depth]
+ankle_l = 2.2
+ankle_r = 2.2
+chin = 2.5
+crown = 2.4
+elbow_l = 2.3
+elbow_r = 2.3
+fingertip_l = 2.6
+fingertip_r = 2.6
+hip_l = 1.8
+hip_r = 1.8
+knee_l = 2.1
+knee_r = 2.1
+neck_base = 2.2
+pelvis = 1.8
+shoulder_l = 2.0
+shoulder_r = 2.0
+sternum = 2.0
+toe_l = 2.4
+toe_r = 2.4
+wing_elbow_l = 0.0
+wing_elbow_r = 0.0
+wing_root_l = 1.2
+wing_root_r = 1.2
+wing_tip_l = -2.6
+wing_tip_r = -2.6
+wing_wrist_l = -1.8
+wing_wrist_r = -1.8
+wrist_l = 2.5
+wrist_r = 2.5
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["crown", "chin"]
+pivot = "chin"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "torso_upper"
+joints = ["chin", "neck_base"]
+pivot = "neck_base"
+
+[[bones]]
+name = "clavicle"
+part = "chest"
+parent = "torso_upper"
+joints = ["shoulder_r", "neck_base", "shoulder_l"]
+pivot = "neck_base"
+
+[[bones]]
+name = "torso_upper"
+part = "chest"
+parent = "torso_lower"
+joints = ["neck_base", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "torso_lower"
+part = "abdomen"
+joints = ["sternum", "pelvis"]
+pivot = "pelvis"
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "clavicle"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "clavicle"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]
+
+[[bones]]
+name = "leg_r"
+part = "rightLeg"
+parent = "torso_lower"
+joints = ["hip_r", "knee_r", "ankle_r", "toe_r"]
+
+[[bones]]
+name = "leg_l"
+part = "leftLeg"
+parent = "torso_lower"
+joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]
+
+[[bones]]
+name = "wing_r"
+part = "back"
+parent = "torso_upper"
+joints = ["wing_root_r", "wing_elbow_r", "wing_wrist_r"]
+
+[[bones]]
+name = "wing_l"
+part = "back"
+parent = "torso_upper"
+joints = ["wing_root_l", "wing_elbow_l", "wing_wrist_l"]
+
+[[bones]]
+name = "wing_hand_r"
+part = "back"
+parent = "wing_r"
+joints = ["wing_wrist_r", "wing_tip_r"]
+
+[[bones]]
+name = "wing_hand_l"
+part = "back"
+parent = "wing_l"
+joints = ["wing_wrist_l", "wing_tip_l"]
