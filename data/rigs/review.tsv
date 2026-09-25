@@ -181,3 +181,4 @@ arachnid	ready	dev	2026-09-25	joints placed by hand on the new silhouette; side 
 crustacean	ready	dev	2026-09-25	joints placed by hand on the new silhouette
 elemental_air	ready	dev	2026-09-25	biped placed by hand; the funnel below the waist is both legs merged (leg radii pinned)
 elemental_lightning	ready	dev	2026-09-25	biped placed by hand; side fit .47 from the silhouette's lean and forward arm
+reptilian	fixed	dev	2026-09-25	joints snapped onto the new silhouettes; neck and skull radii pinned to the front width (head no longer fat); fit .69/.84
