@@ -1072,3 +1072,18 @@ fn twin_limbs_of_a_side_view_rig_match() {
         }
     }
 }
+
+/// A cat's chest rows, face on, are two forelegs with a gap between: read
+/// through one leg's column, the spine's depth ribbed a quarter of the way
+/// in on every third station. Those rows are no reading now, so along the
+/// chest the depth changes slowly.
+#[test]
+fn a_side_drawn_trunk_is_not_ribbed_by_the_gap_between_its_legs() {
+    let p = shipped("feline");
+    let s = segment(&p, "spine.0");
+    let body = &s.stations[CAP_RINGS..s.stations.len() - CAP_RINGS];
+    for (a, b) in body.iter().zip(body.iter().skip(1)) {
+        let (lo, hi) = (a.d.min(b.d), a.d.max(b.d));
+        assert!(hi <= lo * 1.25, "spine.0 depth steps {lo:.2} -> {hi:.2} between neighbours");
+    }
+}
