@@ -1,0 +1,73 @@
+family = "floating_orb"
+view = "front"
+ref_ft = 2.0
+axis = "crown"
+px_per_ft = 256.7703
+aspect = 0.7383
+span = 0.1984
+ground_frac = 1.0015
+eye_radius_ft = 0.0568
+parts = ["head", "leftEye", "rightEye", "leftLeg", "rightLeg"]
+
+[map]
+width = 378
+height = 512
+
+[anchors]
+feet = [0.5, 1.0015]
+head = [0.5, 0.0236]
+mouth = [0.5, 0.4248]
+saddle = [0.5, 0.0236]
+
+[eyes]
+leftEye = [0.6018, 0.1991]
+rightEye = [0.3981, 0.1991]
+
+[[bones]]
+index = 1
+name = "orb"
+part = "head"
+pivot = [0.5, 0.0236]
+tip = [0.5, 0.4248]
+joints = [[0.5, 0.0236], [0.5, 0.4248]]
+pixels = 46496
+
+[[bones]]
+index = 2
+name = "leg1_r"
+part = "rightLeg"
+parent = "orb"
+pivot = [0.2962, 0.4498]
+tip = [0.1603, 0.9514]
+joints = [[0.2962, 0.4498], [0.1943, 0.7006], [0.1603, 0.9514]]
+pixels = 5218
+
+[[bones]]
+index = 3
+name = "leg1_l"
+part = "leftLeg"
+parent = "orb"
+pivot = [0.7037, 0.4498]
+tip = [0.8396, 0.9514]
+joints = [[0.7037, 0.4498], [0.8056, 0.7006], [0.8396, 0.9514]]
+pixels = 8469
+
+[[bones]]
+index = 4
+name = "leg2_r"
+part = "rightLeg"
+parent = "orb"
+pivot = [0.4184, 0.4498]
+tip = [0.3981, 0.9514]
+joints = [[0.4184, 0.4498], [0.3981, 0.7006], [0.3981, 0.9514]]
+pixels = 16144
+
+[[bones]]
+index = 5
+name = "leg2_l"
+part = "leftLeg"
+parent = "orb"
+pivot = [0.5815, 0.4498]
+tip = [0.6018, 0.9514]
+joints = [[0.5815, 0.4498], [0.6018, 0.7006], [0.6018, 0.9514]]
+pixels = 11641

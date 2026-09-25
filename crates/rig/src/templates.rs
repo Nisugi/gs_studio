@@ -345,6 +345,160 @@ fn mound() -> Template {
     }
 }
 
+/// An insect standing on two legs (a mantis warrior): head, thorax and an
+/// abdomen hanging behind, clawed forelimbs, backward-jointed legs, and a
+/// pair of wings on the thorax.
+fn upright_insect() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["crown", "chin"]),
+        bone("thorax", "chest", &["neck_base", "thorax_bottom"]),
+        bone("abdomen", "abdomen", &["thorax_bottom", "abdomen_tip"]),
+    ];
+    bones.extend(sided("arm", "Arm", &["shoulder", "elbow", "wrist"]));
+    bones.extend(sided("hand", "Hand", &["wrist", "fingertip"]));
+    bones.extend(sided("leg", "Leg", &["hip", "knee", "ankle", "toe"]));
+    let mut joints = both_sides(&["crown", "chin", "neck_base", "thorax_bottom", "abdomen_tip"], &["eye", "shoulder", "elbow", "wrist", "fingertip", "hip", "knee", "ankle", "toe"]);
+    for suffix in ["r", "l"] {
+        bones.push(bone_owned(format!("wing_{suffix}"), "back", &[format!("wing_root_{suffix}"), format!("wing_tip_{suffix}")]));
+        joints.push(format!("wing_root_{suffix}"));
+        joints.push(format!("wing_tip_{suffix}"));
+    }
+    root_pivot(&mut bones, "thorax", "thorax_bottom");
+    link(&mut bones, "skull", "thorax", Some("chin"));
+    link(&mut bones, "abdomen", "thorax", None);
+    link(&mut bones, "arm", "thorax", None);
+    link(&mut bones, "hand", "arm", None);
+    link(&mut bones, "leg", "thorax", None);
+    link(&mut bones, "wing", "thorax", None);
+    Template {
+        name: "upright_insect",
+        blurb: "Insect on two legs with clawed forelimbs and wings, front view",
+        view: View::Front,
+        joints,
+        bones,
+        anchors: AnchorDef { head: "crown", mouth: "chin", saddle: "neck_base" },
+    }
+}
+
+/// A horse's body with a human torso rising from its withers.
+fn centaur() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["crown", "chin"]),
+        bone("neck", "neck", &["chin", "neck_base"]),
+        bone("clavicle", "chest", &["shoulder_r", "neck_base", "shoulder_l"]),
+        bone("torso_upper", "chest", &["neck_base", "chest"]),
+        bone("torso_lower", "abdomen", &["chest", "withers"]),
+        bone("spine", "back", &["withers", "mid_back", "croup", "tail_base"]),
+        bone("tail", "back", &["tail_base", "tail_tip"]),
+        bone("brisket", "chest", &["chest_front", "girth"]),
+        bone("underline", "abdomen", &["girth", "belly", "groin"]),
+    ];
+    bones.extend(sided("arm", "Arm", &["shoulder", "elbow", "wrist"]));
+    bones.extend(sided("hand", "Hand", &["wrist", "fingertip"]));
+    bones.extend(sided("foreleg", "Leg", &["foreleg_root", "foreknee", "fetlock", "forehoof"]));
+    bones.extend(sided("hindleg", "Leg", &["hip", "stifle", "hock", "hindhoof"]));
+    link(&mut bones, "torso_lower", "spine", Some("withers"));
+    link(&mut bones, "torso_upper", "torso_lower", Some("chest"));
+    link(&mut bones, "neck", "torso_upper", Some("neck_base"));
+    link(&mut bones, "skull", "neck", Some("chin"));
+    link(&mut bones, "clavicle", "torso_upper", Some("neck_base"));
+    link(&mut bones, "arm", "clavicle", None);
+    link(&mut bones, "hand", "arm", None);
+    link(&mut bones, "tail", "spine", None);
+    link(&mut bones, "brisket", "spine", Some("girth"));
+    link(&mut bones, "underline", "spine", None);
+    link(&mut bones, "foreleg", "spine", None);
+    link(&mut bones, "hindleg", "spine", None);
+    let mut joints = names(&["crown", "chin", "neck_base", "chest", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "girth", "belly", "groin", "eye_r"]);
+    for suffix in ["r", "l"] {
+        for j in ["shoulder", "elbow", "wrist", "fingertip", "foreleg_root", "foreknee", "fetlock", "forehoof", "hip", "stifle", "hock", "hindhoof"] {
+            joints.push(format!("{j}_{suffix}"));
+        }
+    }
+    Template {
+        name: "centaur",
+        blurb: "Horse body with a human torso, side view; _r limbs are the near side",
+        view: View::Side,
+        joints,
+        bones,
+        anchors: AnchorDef { head: "crown", mouth: "chin", saddle: "mid_back" },
+    }
+}
+
+/// A human torso and arms on a serpent's tail, coiled on the ground.
+fn naga() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["crown", "chin"]),
+        bone("neck", "neck", &["chin", "neck_base"]),
+        bone("clavicle", "chest", &["shoulder_r", "neck_base", "shoulder_l"]),
+        bone("torso_upper", "chest", &["neck_base", "sternum"]),
+        bone("torso_lower", "abdomen", &["sternum", "tail_root"]),
+        bone("tail", "back", &["tail_root", "tail_1", "tail_2", "tail_3", "tail_tip"]),
+    ];
+    bones.extend(sided("arm", "Arm", &["shoulder", "elbow", "wrist"]));
+    bones.extend(sided("hand", "Hand", &["wrist", "fingertip"]));
+    root_pivot(&mut bones, "torso_lower", "tail_root");
+    link(&mut bones, "torso_upper", "torso_lower", Some("sternum"));
+    link(&mut bones, "neck", "torso_upper", Some("neck_base"));
+    link(&mut bones, "skull", "neck", Some("chin"));
+    link(&mut bones, "clavicle", "torso_upper", Some("neck_base"));
+    link(&mut bones, "arm", "clavicle", None);
+    link(&mut bones, "hand", "arm", None);
+    link(&mut bones, "tail", "torso_lower", None);
+    Template {
+        name: "naga",
+        blurb: "Human torso on a coiled serpent tail, front view",
+        view: View::Front,
+        joints: both_sides(&["crown", "chin", "neck_base", "sternum", "tail_root", "tail_1", "tail_2", "tail_3", "tail_tip"], &["eye", "shoulder", "elbow", "wrist", "fingertip"]),
+        bones,
+        anchors: AnchorDef { head: "crown", mouth: "chin", saddle: "neck_base" },
+    }
+}
+
+/// A fish: head, body, tail fin, dorsal fin, a pair of pectoral fins.
+fn fish() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["snout", "gill"]),
+        bone("body", "chest", &["gill", "mid"]),
+        bone("belly", "abdomen", &["mid", "peduncle"]),
+        bone("tail", "back", &["peduncle", "tail_end"]),
+        bone("dorsal", "back", &["dorsal_base", "dorsal_tip"]),
+    ];
+    bones.extend(sided("pec", "Arm", &["pec_root", "pec_tip"]));
+    root_pivot(&mut bones, "body", "mid");
+    link(&mut bones, "skull", "body", Some("gill"));
+    link(&mut bones, "belly", "body", None);
+    link(&mut bones, "tail", "belly", None);
+    link(&mut bones, "dorsal", "body", None);
+    link(&mut bones, "pec", "body", None);
+    Template {
+        name: "fish",
+        blurb: "Fish, side view; the _r fin is the near side",
+        view: View::Side,
+        joints: both_sides(&["snout", "gill", "mid", "peduncle", "tail_end", "dorsal_base", "dorsal_tip", "eye_r"], &["pec_root", "pec_tip"]),
+        bones,
+        anchors: AnchorDef { head: "gill", mouth: "snout", saddle: "dorsal_base" },
+    }
+}
+
+/// A floating orb with tendrils hanging under it.
+fn floating_orb() -> Template {
+    let mut bones = vec![bone("orb", "head", &["crown", "chin"])];
+    bones.extend(sided("leg1", "Leg", &["leg1_root", "leg1_mid", "leg1_tip"]));
+    bones.extend(sided("leg2", "Leg", &["leg2_root", "leg2_mid", "leg2_tip"]));
+    root_pivot(&mut bones, "orb", "crown");
+    link(&mut bones, "leg1", "orb", None);
+    link(&mut bones, "leg2", "orb", None);
+    Template {
+        name: "floating_orb",
+        blurb: "A floating orb with two pairs of tendrils under it, front view",
+        view: View::Front,
+        joints: both_sides(&["crown", "chin"], &["eye", "leg1_root", "leg1_mid", "leg1_tip", "leg2_root", "leg2_mid", "leg2_tip"]),
+        bones,
+        anchors: AnchorDef { head: "crown", mouth: "chin", saddle: "crown" },
+    }
+}
+
 fn serpentine() -> Template {
     let mut bones = vec![
         bone("skull", "head", &["snout", "skull_base"]),
@@ -423,7 +577,7 @@ fn multileg() -> Template {
 }
 
 pub fn templates() -> Vec<Template> {
-    vec![biped(), quadruped(), avian(), serpentine(), multileg(), winged_biped(), winged_quadruped(), mound()]
+    vec![biped(), quadruped(), avian(), serpentine(), multileg(), winged_biped(), winged_quadruped(), mound(), upright_insect(), centaur(), naga(), fish(), floating_orb()]
 }
 
 pub fn template(name: &str) -> Option<Template> {

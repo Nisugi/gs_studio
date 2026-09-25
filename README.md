@@ -38,7 +38,7 @@ Front views face the viewer, so the creature's right (`_r`) is screen-left,
 at negative x.
 
 **Vocabulary.** Three levels: a **body type** (biped, quadruped, avian,
-serpentine, multileg, winged_biped, winged_quadruped, mound: a rig template and a pose set), a **form** (one
+serpentine, multileg, winged_biped, winged_quadruped, mound, upright_insect, centaur, naga, fish, floating_orb: a rig template and a pose set), a **form** (one
 silhouette pair, its rig `<form>.rig.toml`, its puppet and texture; what
 the code and file names still call a *family*), and a **creature** (a
 bestiary entry, with its own skin and outfit). A creature finds its form by
@@ -688,6 +688,11 @@ rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
 | `winged_biped` | front | winged_humanoid |
 | `winged_quadruped` | side | winged_beast dragon_bat |
 | `mound` | front | elemental_lava elemental_steam plant_mass |
+| `upright_insect` | front | upright_insect |
+| `centaur` | side | centaur |
+| `naga` | front | naga |
+| `fish` | side | fish |
+| `floating_orb` | front | floating_orb |
 
 Templates are data (`crates/rig/src/templates.rs`): the ordered joint list,
 the bones with default parts, parents and pivots, the anchor joints. Each is
@@ -703,6 +708,11 @@ ONE tree:
 | `winged_biped` | as `biped` | the biped, plus `wing_*` <- `torso_upper`; `wing_hand_*` <- `wing_*` |
 | `winged_quadruped` | as `quadruped` | the quadruped, plus `wing_*` <- `spine`; `wing_hand_*` <- `wing_*` |
 | `mound` | `core` (*base*) | `mass` (*belly*) <- `core`; `skull` (*crest*), `arm_*` <- `mass`; `hand_*` <- `arm_*` |
+| `upright_insect` | `thorax` (*thorax_bottom*) | `skull` (*chin*), `abdomen`, `arm_*`, `leg_*`, `wing_*` <- `thorax`; `hand_*` <- `arm_*` |
+| `centaur` | `spine` | `torso_lower` (*withers*), `tail`, `brisket` (*girth*), `underline`, `foreleg_*`, `hindleg_*` <- `spine`; `torso_upper` (*chest*) <- `torso_lower`; `neck`, `clavicle` <- `torso_upper`; `skull` <- `neck`; `arm_*` <- `clavicle`; `hand_*` <- `arm_*` |
+| `naga` | `torso_lower` (*tail_root*) | `torso_upper` (*sternum*), `tail` <- `torso_lower`; `neck`, `clavicle` <- `torso_upper`; `skull` <- `neck`; `arm_*` <- `clavicle`; `hand_*` <- `arm_*` |
+| `fish` | `body` (*mid*) | `skull` (*gill*), `belly`, `dorsal`, `pec_*` <- `body`; `tail` <- `belly` |
+| `floating_orb` | `orb` (*crown*) | `leg1_*`, `leg2_*` (tendrils) <- `orb` |
 
  `_r`/`_l` suffixes are mirror
 pairs; in a side view `_r` is the near limb. Quadruped forelegs are

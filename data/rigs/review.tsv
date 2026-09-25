@@ -96,3 +96,10 @@ elephantid	fixed	dev	2026-09-25	tusk depths rescaled to the new front silhouette
 upright_insect	blocked	dev	2026-09-25	needs its own template (abdomen, wings, insect forelimbs), per audit
 ursine	ready	dev	2026-09-25	no depth table to rescale: the wide forelegs are the front view's merged leg columns, a builder matter; left for review
 suine	ready	dev	2026-09-25	depth rescale came out asymmetric on the new boar; left as is for review
+upright_insect	ready	dev	2026-09-25	new upright_insect template (head, thorax, abdomen, clawed forelimbs, legs, wings); joints by hand
+centaur	ready	dev	2026-09-25	new centaur template (horse body, human torso); joints by hand
+naga	ready	dev	2026-09-25	new naga template (human torso on a coiled tail); joints by hand
+fish	ready	dev	2026-09-25	new fish template (head, body, tail, dorsal, pectorals); joints by hand; hangs in the water, no ground pose
+floating_orb	ready	dev	2026-09-25	new floating_orb template (orb + two tendril pairs); joints by hand
+naga	ready	dev	2026-09-25	front .40: the front drawing coils both ways, the rig follows one; side .62
+upright_insect	ready	dev	2026-09-25	.88/.70; the wings come loose in the two dead poses (audit)

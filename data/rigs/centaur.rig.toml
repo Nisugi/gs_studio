@@ -1,0 +1,189 @@
+version = 2
+family = "centaur"
+body_type = "centaur"
+view = "side"
+ref_ft = 7.0
+axis = "crown"
+joint_order = ["crown", "chin", "neck_base", "chest", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "girth", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "foreleg_root_r", "foreknee_r", "fetlock_r", "forehoof_r", "hip_r", "stifle_r", "hock_r", "hindhoof_r", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l", "foreleg_root_l", "foreknee_l", "fetlock_l", "forehoof_l", "hip_l", "stifle_l", "hock_l", "hindhoof_l"]
+
+[anchors]
+head = "crown"
+mouth = "chin"
+saddle = "mid_back"
+
+[joints]
+belly = [0.0, 2.55]
+chest = [1.85, 4.9]
+chest_front = [1.8, 3.3]
+chin = [1.85, 6.15]
+croup = [-1.3, 4.0]
+crown = [1.85, 6.95]
+elbow_l = [2.0, 4.7]
+elbow_r = [2.2, 4.7]
+eye_r = [2.05, 6.5]
+fetlock_l = [1.2, 0.6]
+fetlock_r = [1.5, 0.6]
+fingertip_l = [2.6, 3.5]
+fingertip_r = [2.7, 3.5]
+forehoof_l = [1.25, 0.1]
+forehoof_r = [1.55, 0.1]
+foreknee_l = [1.2, 1.7]
+foreknee_r = [1.45, 1.7]
+foreleg_root_l = [1.15, 3.15]
+foreleg_root_r = [1.35, 3.2]
+girth = [1.2, 2.55]
+groin = [-1.0, 2.7]
+hindhoof_l = [-1.95, 0.1]
+hindhoof_r = [-1.65, 0.1]
+hip_l = [-1.5, 2.95]
+hip_r = [-1.3, 3.0]
+hock_l = [-2.05, 1.1]
+hock_r = [-1.75, 1.2]
+mid_back = [0.0, 4.05]
+neck_base = [1.85, 5.85]
+shoulder_l = [1.75, 5.6]
+shoulder_r = [1.95, 5.6]
+stifle_l = [-1.9, 1.9]
+stifle_r = [-1.5, 2.0]
+tail_base = [-1.9, 3.85]
+tail_tip = [-2.85, 2.0]
+withers = [1.5, 4.05]
+wrist_l = [2.4, 3.9]
+wrist_r = [2.5, 3.9]
+
+[depth]
+elbow_l = 0.9
+elbow_r = -0.9
+fetlock_l = 0.35
+fetlock_r = -0.35
+fingertip_l = 1.2
+fingertip_r = -1.2
+forehoof_l = 0.35
+forehoof_r = -0.35
+foreknee_l = 0.35
+foreknee_r = -0.35
+foreleg_root_l = 0.35
+foreleg_root_r = -0.35
+hindhoof_l = 0.45
+hindhoof_r = -0.45
+hip_l = 0.45
+hip_r = -0.45
+hock_l = 0.45
+hock_r = -0.45
+shoulder_l = 0.55
+shoulder_r = -0.55
+stifle_l = 0.45
+stifle_r = -0.45
+wrist_l = 1.1
+wrist_r = -1.1
+
+[mirror]
+foreleg_l = "foreleg_r"
+hindleg_l = "hindleg_r"
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["crown", "chin"]
+pivot = "chin"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "torso_upper"
+joints = ["chin", "neck_base"]
+pivot = "neck_base"
+
+[[bones]]
+name = "clavicle"
+part = "chest"
+parent = "torso_upper"
+joints = ["shoulder_r", "neck_base", "shoulder_l"]
+pivot = "neck_base"
+
+[[bones]]
+name = "torso_upper"
+part = "chest"
+parent = "torso_lower"
+joints = ["neck_base", "chest"]
+pivot = "chest"
+
+[[bones]]
+name = "torso_lower"
+part = "abdomen"
+parent = "spine"
+joints = ["chest", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "girth"]
+pivot = "girth"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["girth", "belly", "groin"]
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "clavicle"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "clavicle"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["foreleg_root_r", "foreknee_r", "fetlock_r", "forehoof_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["foreleg_root_l", "foreknee_l", "fetlock_l", "forehoof_l"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindhoof_r"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindhoof_l"]

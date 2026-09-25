@@ -1,0 +1,92 @@
+family = "fish"
+view = "side"
+ref_ft = 4.0
+axis = "crown"
+px_per_ft = 51.0876
+aspect = 2.5098
+span = 0.0488
+ground_frac = 0.9987
+eye_radius_ft = 0.0754
+parts = ["head", "rightEye", "chest", "abdomen", "back", "leftArm", "rightArm"]
+
+[map]
+width = 512
+height = 204
+
+[anchors]
+feet = [0.5, 0.9987]
+head = [0.7894, 0.4979]
+mouth = [0.969, 0.5354]
+saddle = [0.5299, 0.2725]
+
+[eyes]
+rightEye = [0.8991, 0.3852]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "body"
+pivot = [0.7894, 0.4979]
+tip = [0.969, 0.5354]
+joints = [[0.969, 0.5354], [0.7894, 0.4979]]
+pixels = 5507
+
+[[bones]]
+index = 2
+name = "body"
+part = "chest"
+pivot = [0.5499, 0.4979]
+tip = [0.7894, 0.4979]
+joints = [[0.7894, 0.4979], [0.5499, 0.4979]]
+pixels = 12291
+
+[[bones]]
+index = 3
+name = "belly"
+part = "abdomen"
+parent = "body"
+pivot = [0.5499, 0.4979]
+tip = [0.2306, 0.5229]
+joints = [[0.5499, 0.4979], [0.2306, 0.5229]]
+pixels = 10509
+
+[[bones]]
+index = 4
+name = "tail"
+part = "back"
+parent = "belly"
+pivot = [0.2306, 0.5229]
+tip = [0.031, 0.3726]
+joints = [[0.2306, 0.5229], [0.031, 0.3726]]
+pixels = 5391
+
+[[bones]]
+index = 5
+name = "dorsal"
+part = "back"
+parent = "body"
+pivot = [0.5299, 0.2725]
+tip = [0.52, 0.0471]
+joints = [[0.5299, 0.2725], [0.52, 0.0471]]
+pixels = 1978
+
+[[bones]]
+index = 6
+name = "pec_r"
+part = "rightArm"
+parent = "body"
+pivot = [0.6497, 0.6982]
+tip = [0.5698, 0.9737]
+joints = [[0.6497, 0.6982], [0.5698, 0.9737]]
+pixels = 1762
+
+[[bones]]
+index = 7
+name = "pec_l"
+part = "leftArm"
+parent = "body"
+pivot = [0.6497, 0.6982]
+tip = [0.5698, 0.9737]
+joints = [[0.6497, 0.6982], [0.5698, 0.9737]]
+pixels = 95

@@ -1,0 +1,118 @@
+version = 2
+family = "naga"
+body_type = "naga"
+view = "front"
+ref_ft = 5.5
+axis = "crown"
+joint_order = ["crown", "chin", "neck_base", "sternum", "tail_root", "tail_1", "tail_2", "tail_3", "tail_tip", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l"]
+
+[anchors]
+head = "crown"
+mouth = "chin"
+saddle = "neck_base"
+
+[joints]
+chin = [0.0, 4.75]
+crown = [0.0, 5.45]
+elbow_l = [0.95, 3.7]
+elbow_r = [-0.95, 3.7]
+eye_l = [0.2, 5.1]
+eye_r = [-0.2, 5.1]
+fingertip_l = [1.5, 2.9]
+fingertip_r = [-1.5, 2.9]
+neck_base = [0.0, 4.6]
+shoulder_l = [0.6, 4.4]
+shoulder_r = [-0.6, 4.4]
+sternum = [0.0, 3.9]
+tail_1 = [0.1, 1.6]
+tail_2 = [0.9, 0.7]
+tail_3 = [2.0, 0.45]
+tail_root = [0.0, 2.6]
+tail_tip = [2.3, 0.6]
+wrist_l = [1.3, 3.15]
+wrist_r = [-1.3, 3.15]
+
+[depth]
+chin = 0.1
+crown = 0.0
+elbow_l = 0.15
+elbow_r = 0.15
+eye_l = 0.3
+eye_r = 0.3
+fingertip_l = 0.35
+fingertip_r = 0.35
+neck_base = 0.0
+shoulder_l = 0.0
+shoulder_r = 0.0
+sternum = 0.0
+tail_1 = -0.2
+tail_2 = -1.5
+tail_3 = 0.5
+tail_root = 0.0
+tail_tip = 1.8
+wrist_l = 0.3
+wrist_r = 0.3
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["crown", "chin"]
+pivot = "chin"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "torso_upper"
+joints = ["chin", "neck_base"]
+pivot = "neck_base"
+
+[[bones]]
+name = "clavicle"
+part = "chest"
+parent = "torso_upper"
+joints = ["shoulder_r", "neck_base", "shoulder_l"]
+pivot = "neck_base"
+
+[[bones]]
+name = "torso_upper"
+part = "chest"
+parent = "torso_lower"
+joints = ["neck_base", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "torso_lower"
+part = "abdomen"
+joints = ["sternum", "tail_root"]
+pivot = "tail_root"
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "torso_lower"
+joints = ["tail_root", "tail_1", "tail_2", "tail_3", "tail_tip"]
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "clavicle"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "clavicle"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]
