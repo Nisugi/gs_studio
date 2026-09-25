@@ -127,6 +127,7 @@ and exits without opening a window (exit code 2 and a message on error):
 
     gs-studio [--data <dir>] --project <family>[/<creature>]:front|side|back [--grazing <facing>]
     gs-studio [--data <dir>] --build-sheet <family>[/<creature>]
+    gs-studio [--data <dir>] --import-chart <scale-chart.html>
     gs-studio [--data <dir>] --export-jobs
 
 `--project` writes the projection-first renders of a family's (or a
@@ -134,7 +135,8 @@ creature's, in its outfit) paintings: the view named, rendered from the
 paintings of the views before it in the family's order (`projection_order`
 in `<data>/generator.toml`, set for every family: each paints first the
 view that sees the most of it -- the quadrupeds, the bird and the worm their
-side, since their front sees only the face and chest). `--build-sheet` builds a family's (or a creature's) `sheet.png` and `normal.png` from the paintings and
+side, since their front sees only the face and chest). `--import-chart` is the Rigs tab's *Import* without the window: the chart's silhouettes into
+`<data>/outlines.json`. `--build-sheet` builds a family's (or a creature's) `sheet.png` and `normal.png` from the paintings and
 normal maps in its folder, as the Rigs tab's *Build sheet* does. `--export-jobs` writes every template and
 `textures/jobs.json`, each job with its `projection_order`; a family whose
 rig fails to build, or a creature whose templates fail, is skipped and

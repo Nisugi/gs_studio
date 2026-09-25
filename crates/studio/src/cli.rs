@@ -12,6 +12,8 @@ pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publi
     \x20                (headless: projection-first renders for a texture generator, then exit)\n\
     \x20      gs-studio [--data <dir>] --build-sheet <family>[/<creature>]\n\
     \x20                (headless: sheet.png (and normal.png) from the paintings in that folder, then exit)\n\
+    \x20      gs-studio [--data <dir>] --import-chart <scale-chart.html>\n\
+    \x20                (headless: the chart's silhouettes into <data>/outlines.json, then exit)\n\
     \x20      gs-studio [--data <dir>] --export-jobs\n\
     \x20                (headless: every template and textures/jobs.json for the generator, then exit)";
 
@@ -38,6 +40,10 @@ pub struct Cli {
     /// (and normal maps) onto its sheet (`editor::texture::build_sheet_cli`)
     /// and exit, no window.
     pub build_sheet: Option<String>,
+    /// `--import-chart <scale-chart.html>`: write `<data>/outlines.json` from
+    /// the chart (`data_root::import_outlines`, what the Rigs tab's Import
+    /// does) and exit, no window.
+    pub import_chart: Option<PathBuf>,
     /// `--grazing`: the facing below which projected paint counts as unpainted.
     pub grazing: Option<f32>,
     /// `--export-jobs`: write every template and `textures/jobs.json`
@@ -47,7 +53,7 @@ pub struct Cli {
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 10] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet"];
+    const OPTIONS: [&str; 11] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet", "--import-chart"];
     let mut cli = Cli::default();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -77,6 +83,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "--room-title" => cli.room.title = Some(value),
             "--project" => cli.project = Some(value),
             "--build-sheet" => cli.build_sheet = Some(value),
+            "--import-chart" => cli.import_chart = Some(PathBuf::from(value)),
             "--grazing" => {
                 cli.grazing = Some(value.parse().map_err(|_| format!("--grazing needs a number, got '{value}'"))?);
             }
@@ -112,6 +119,7 @@ mod tests {
         assert!(parse_args(&args(&["--grazing", "steep"])).is_err());
         assert!(parse_args(&args(&["--export-jobs", "--data", "d"])).unwrap().export_jobs);
         assert_eq!(parse_args(&args(&["--build-sheet", "troll/cave_troll"])).unwrap().build_sheet.as_deref(), Some("troll/cave_troll"));
+        assert_eq!(parse_args(&args(&["--import-chart", "x/scale-chart.html"])).unwrap().import_chart, Some(PathBuf::from("x/scale-chart.html")));
     }
 
     #[test]

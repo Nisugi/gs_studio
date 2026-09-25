@@ -5,6 +5,7 @@
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 //!   gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
 //!   gs-studio [--data <dir>] --build-sheet <family>[/<creature>]
+//!   gs-studio [--data <dir>] --import-chart <scale-chart.html>
 //!   gs-studio [--data <dir>] --export-jobs
 //!
 //! Both run headless, for a texture generator to call, and exit: `--project`
@@ -101,6 +102,15 @@ fn main() -> eframe::Result {
                 std::process::exit(0);
             }
             Err(e) => fail(&format!("gs-studio: --project: {e}")),
+        }
+    }
+    if let Some(chart) = &cli.import_chart {
+        match data_root::import_outlines(chart, &data.path) {
+            Ok(summary) => {
+                println!("{summary}");
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --import-chart: {e}")),
         }
     }
     if let Some(target) = &cli.build_sheet {
