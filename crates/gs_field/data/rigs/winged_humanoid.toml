@@ -7,7 +7,7 @@ aspect = 1.0323
 span = 0.3398
 ground_frac = 0.9983
 eye_radius_ft = 0.0647
-parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "back", "leftArm", "rightArm", "leftLeg", "rightLeg"]
+parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "back", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
 
 [map]
 width = 512
@@ -41,7 +41,7 @@ parent = "torso_upper"
 pivot = [0.5, 0.2874]
 tip = [0.5, 0.2541]
 joints = [[0.5, 0.2541], [0.5, 0.2874]]
-pixels = 573
+pixels = 571
 
 [[bones]]
 index = 3
@@ -49,117 +49,117 @@ name = "clavicle"
 part = "chest"
 parent = "torso_upper"
 pivot = [0.5, 0.2874]
-tip = [0.6022, 0.3152]
-joints = [[0.3978, 0.3152], [0.5, 0.2874], [0.6022, 0.3152]]
-pixels = 2578
+tip = [0.5986, 0.3152]
+joints = [[0.4014, 0.3152], [0.5, 0.2874], [0.5986, 0.3152]]
+pixels = 1365
 
 [[bones]]
 index = 4
 name = "torso_upper"
 part = "chest"
 parent = "torso_lower"
-pivot = [0.5, 0.3985]
+pivot = [0.5, 0.3948]
 tip = [0.5, 0.2874]
-joints = [[0.5, 0.2874], [0.5, 0.3985]]
-pixels = 4103
+joints = [[0.5, 0.2874], [0.5, 0.3948]]
+pixels = 3765
 
 [[bones]]
 index = 5
 name = "torso_lower"
 part = "abdomen"
 pivot = [0.5, 0.5984]
-tip = [0.5, 0.3985]
-joints = [[0.5, 0.3985], [0.5, 0.5984]]
-pixels = 8174
+tip = [0.5, 0.3948]
+joints = [[0.5, 0.3948], [0.5, 0.5984]]
+pixels = 8079
 
 [[bones]]
 index = 6
 name = "arm_r"
 part = "rightArm"
 parent = "clavicle"
-pivot = [0.3978, 0.3152]
-tip = [0.2848, 0.5984]
-joints = [[0.3978, 0.3152], [0.3278, 0.4874], [0.2848, 0.5984]]
-pixels = 14971
+pivot = [0.4014, 0.3152]
+tip = [0.2947, 0.5984]
+joints = [[0.4014, 0.3152], [0.3242, 0.4874], [0.2947, 0.5984]]
+pixels = 7671
 
 [[bones]]
 index = 7
 name = "arm_l"
 part = "leftArm"
 parent = "clavicle"
-pivot = [0.6022, 0.3152]
-tip = [0.7152, 0.5984]
-joints = [[0.6022, 0.3152], [0.6722, 0.4874], [0.7152, 0.5984]]
-pixels = 14410
+pivot = [0.5986, 0.3152]
+tip = [0.7053, 0.5984]
+joints = [[0.5986, 0.3152], [0.6758, 0.4874], [0.7053, 0.5984]]
+pixels = 7757
 
 [[bones]]
 index = 8
 name = "hand_r"
 part = "rightHand"
 parent = "arm_r"
-pivot = [0.2848, 0.5984]
-tip = [0.2687, 0.6651]
-joints = [[0.2848, 0.5984], [0.2687, 0.6651]]
-pixels = 0
+pivot = [0.2947, 0.5984]
+tip = [0.3057, 0.6931]
+joints = [[0.2947, 0.5984], [0.3057, 0.6931]]
+pixels = 1082
 
 [[bones]]
 index = 9
 name = "hand_l"
 part = "leftHand"
 parent = "arm_l"
-pivot = [0.7152, 0.5984]
-tip = [0.7313, 0.6651]
-joints = [[0.7152, 0.5984], [0.7313, 0.6651]]
-pixels = 0
+pivot = [0.7053, 0.5984]
+tip = [0.6943, 0.6931]
+joints = [[0.7053, 0.5984], [0.6943, 0.6931]]
+pixels = 1050
 
 [[bones]]
 index = 10
 name = "leg_r"
 part = "rightLeg"
 parent = "torso_lower"
-pivot = [0.4408, 0.5984]
-tip = [0.3978, 0.9816]
-joints = [[0.4408, 0.5984], [0.4193, 0.7761], [0.4085, 0.9205], [0.3978, 0.9816]]
-pixels = 7257
+pivot = [0.4544, 0.5914]
+tip = [0.3978, 0.9901]
+joints = [[0.4544, 0.5914], [0.4193, 0.7412], [0.4049, 0.9205], [0.3978, 0.9901]]
+pixels = 7440
 
 [[bones]]
 index = 11
 name = "leg_l"
 part = "leftLeg"
 parent = "torso_lower"
-pivot = [0.5592, 0.5984]
-tip = [0.6022, 0.9816]
-joints = [[0.5592, 0.5984], [0.5807, 0.7761], [0.5915, 0.9205], [0.6022, 0.9816]]
-pixels = 7240
+pivot = [0.5456, 0.5914]
+tip = [0.6022, 0.9901]
+joints = [[0.5456, 0.5914], [0.5807, 0.7412], [0.5951, 0.9205], [0.6022, 0.9901]]
+pixels = 7428
 
 [[bones]]
 index = 12
 name = "wing_r"
 part = "back"
 parent = "torso_upper"
-pivot = [0.4032, 0.2652]
-tip = [0.0373, 0.2319]
-joints = [[0.4032, 0.2652], [0.2633, 0.0653], [0.0373, 0.2319]]
-pixels = 22801
+pivot = [0.376, 0.2862]
+tip = [0.0337, 0.2669]
+joints = [[0.376, 0.2862], [0.2633, 0.0793], [0.0337, 0.2669]]
+pixels = 29387
 
 [[bones]]
 index = 13
 name = "wing_l"
 part = "back"
 parent = "torso_upper"
-pivot = [0.5968, 0.2652]
-tip = [0.9627, 0.2319]
-joints = [[0.5968, 0.2652], [0.7367, 0.0653], [0.9627, 0.2319]]
-pixels = 22705
+pivot = [0.624, 0.2862]
+tip = [0.9663, 0.2669]
+joints = [[0.624, 0.2862], [0.7367, 0.0793], [0.9663, 0.2669]]
+pixels = 29217
 
 [[bones]]
 index = 14
 name = "wing_hand_r"
 part = "back"
 parent = "wing_r"
-pivot = [0.0373, 0.2319]
-tip = [-0.0272, 0.4318]
-joints = [[0.0373, 0.2319], [-0.0272, 0.4318]]
+pivot = [0.0337, 0.2669]
+tip = [-0.0137, 0.4286]
+joints = [[0.0337, 0.2669], [-0.0137, 0.4286]]
 pixels = 0
 
 [[bones]]
@@ -167,7 +167,7 @@ index = 15
 name = "wing_hand_l"
 part = "back"
 parent = "wing_l"
-pivot = [0.9627, 0.2319]
-tip = [1.0272, 0.4318]
-joints = [[0.9627, 0.2319], [1.0272, 0.4318]]
+pivot = [0.9663, 0.2669]
+tip = [1.0137, 0.4286]
+joints = [[0.9663, 0.2669], [1.0137, 0.4286]]
 pixels = 0

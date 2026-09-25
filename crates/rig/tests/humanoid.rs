@@ -183,14 +183,15 @@ fn fnv(bytes: &[u8]) -> u64 {
 /// label); re-pinned 2026-09-24 when the fixture's knees, ankles and chin
 /// were moved onto its silhouette, again when its shoulders and elbows
 /// were moved onto the arm's centre line, and 2026-09-25 when its ankles,
-/// toes, fingertips, hips and pelvis were moved. A change here that is not
+/// toes, fingertips, hips and pelvis were moved, and again that day when
+/// image-gen's joint fitter nudged most of them. A change here that is not
 /// a rig edit is a labeller regression.
 #[test]
 fn the_part_channel_is_what_it_was_before_bones_were_recorded() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
     let outline = outlines.get("humanoid", View::Front).unwrap().outline();
-    for (px, pinned) in [(256, 0xbe2ac77bbb98f823u64), (512, 0xad4a4610375e27c)] {
+    for (px, pinned) in [(256, 0xb89ce81dd4589dd9u64), (512, 0x3f816784e516a0ff)] {
         let mask = rig_bake::rasterize(&outline, px);
         let bones: Vec<_> = rig.bake_bones().into_iter().map(|(_, b)| b).collect();
         let map = rig_bake::label(&mask, &bones);

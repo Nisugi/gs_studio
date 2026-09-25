@@ -13,24 +13,30 @@ saddle = "dorsal_base"
 
 [joints]
 dorsal_base = [0.3, 2.9]
-dorsal_tip = [0.2, 3.8]
+dorsal_tip = [0.4280, 3.8000]
 eye_r = [4.0, 2.45]
-gill = [2.9, 2.0]
+gill = [2.9, 2]
 mid = [0.5, 2.0]
-pec_root_l = [1.5, 1.2]
-pec_root_r = [1.5, 1.2]
-pec_tip_l = [0.7, 0.1]
-pec_tip_r = [0.7, 0.1]
-peduncle = [-2.7, 1.9]
+pec_root_l = [1.5570, 1.0860]
+pec_root_r = [1.5000, 1.0860]
+pec_tip_l = [0.985, 0.0]
+pec_tip_r = [0.7, 0.0]
+peduncle = [-2.8425, 1.9000]
 snout = [4.7, 1.85]
-tail_end = [-4.7, 2.5]
+tail_end = [-4.6582, 2.9275]
 
 [depth]
-pec_root_l = 0.7
-pec_root_r = -0.7
+pec_root_l = 0.7570
+pec_root_r = -0.7570
 pec_tip_l = 2.6
 pec_tip_r = -2.6
 
+dorsal_base = -0.2565
+dorsal_tip = -0.0285
+gill = 0.1140
+mid = 0.1862
+peduncle = -0.2432
+tail_end = 0.2280
 [radius_depth_ft]
 dorsal = 0.06
 tail = 0.08

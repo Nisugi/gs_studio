@@ -12,34 +12,34 @@ mouth = "crest"
 saddle = "crest"
 
 [joints]
-base = [0.0, 0.1]
-belly = [0.0, 0.9]
-crest = [0.0, 1.9]
-crown = [0.0, 2.6]
-elbow_l = [1.0, 2.2]
-elbow_r = [-1.0, 2.2]
+base = [0.0000, 0.0130]
+belly = [0.0000, 0.9870]
+crest = [0, 1.9]
+crown = [0, 2.6]
+elbow_l = [1.0000, 2.2870]
+elbow_r = [-1.0000, 2.2870]
 eye_l = [0.15, 2.3]
 eye_r = [-0.15, 2.3]
-fingertip_l = [1.6, 2.9]
-fingertip_r = [-1.6, 2.9]
-shoulder_l = [0.35, 1.5]
-shoulder_r = [-0.35, 1.5]
-wrist_l = [1.35, 2.6]
-wrist_r = [-1.35, 2.6]
+fingertip_l = [1.3390, 2.6709]
+fingertip_r = [-1.3390, 2.6709]
+shoulder_l = [0.4153, 1.5870]
+shoulder_r = [-0.4153, 1.5870]
+wrist_l = [1.2413, 2.5666]
+wrist_r = [-1.2413, 2.5666]
 
 [depth]
-base = 0.0
-belly = 0.0
-crest = 0.0
-crown = 0.0
+base = -0.2190
+belly = -0.2291
+crest = 0
+crown = 0
 elbow_l = 0.5
 elbow_r = 0.5
 eye_l = 0.6
 eye_r = 0.6
 fingertip_l = 0.7
 fingertip_r = 0.7
-shoulder_l = 0.3
-shoulder_r = 0.3
+shoulder_l = 0.0825
+shoulder_r = 0.0825
 wrist_l = 0.6
 wrist_r = 0.6
 

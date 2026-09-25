@@ -201,12 +201,15 @@ fn biped() -> Template {
     }
 }
 
+/// The tail is one bone of five joints (`tail_base`, `tail_1..3`,
+/// `tail_tip`): a chain follows a curl where one straight bone cannot, and
+/// a pose bends it at each inner joint (`bend = [a, b, c]`).
 fn quadruped() -> Template {
     let mut bones = vec![
         bone("skull", "head", &["nose", "poll"]),
         bone("neck", "neck", &["poll", "withers"]),
         bone("spine", "back", &["withers", "mid_back", "croup", "tail_base"]),
-        bone("tail", "back", &["tail_base", "tail_tip"]),
+        bone("tail", "back", &["tail_base", "tail_1", "tail_2", "tail_3", "tail_tip"]),
         bone("brisket", "chest", &["chest_front", "sternum"]),
         bone("underline", "abdomen", &["sternum", "belly", "groin"]),
     ];
@@ -224,7 +227,7 @@ fn quadruped() -> Template {
     link(&mut bones, "forepaw", "foreleg", None);
     link(&mut bones, "hindleg", "spine", None);
     let mut joints = names(&[
-        "nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front",
+        "nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_2", "tail_3", "tail_tip", "chest_front",
         "sternum", "belly", "groin", "eye_r",
     ]);
     for suffix in ["r", "l"] {
@@ -389,7 +392,7 @@ fn centaur() -> Template {
         bone("torso_upper", "chest", &["neck_base", "chest"]),
         bone("torso_lower", "abdomen", &["chest", "withers"]),
         bone("spine", "back", &["withers", "mid_back", "croup", "tail_base"]),
-        bone("tail", "back", &["tail_base", "tail_tip"]),
+        bone("tail", "back", &["tail_base", "tail_1", "tail_2", "tail_3", "tail_tip"]),
         bone("brisket", "chest", &["chest_front", "girth"]),
         bone("underline", "abdomen", &["girth", "belly", "groin"]),
     ];
@@ -409,7 +412,7 @@ fn centaur() -> Template {
     link(&mut bones, "underline", "spine", None);
     link(&mut bones, "foreleg", "spine", None);
     link(&mut bones, "hindleg", "spine", None);
-    let mut joints = names(&["crown", "chin", "neck_base", "chest", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "girth", "belly", "groin", "eye_r"]);
+    let mut joints = names(&["crown", "chin", "neck_base", "chest", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_2", "tail_3", "tail_tip", "chest_front", "girth", "belly", "groin", "eye_r"]);
     for suffix in ["r", "l"] {
         for j in ["shoulder", "elbow", "wrist", "fingertip", "foreleg_root", "foreknee", "fetlock", "forehoof", "hip", "stifle", "hock", "hindhoof"] {
             joints.push(format!("{j}_{suffix}"));
@@ -714,6 +717,8 @@ mod tests {
         assert_eq!(part("hindleg_l"), "leftLeg");
         assert_eq!(part("spine"), "back");
         assert_eq!(part("tail"), "back");
+        // The tail is a five-joint chain (three bends), so a pose can curl it.
+        assert_eq!(t.bones.iter().find(|b| b.name == "tail").unwrap().joints.len(), 5);
         assert_eq!(part("brisket"), "chest");
         assert_eq!(part("underline"), "abdomen");
     }

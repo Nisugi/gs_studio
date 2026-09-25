@@ -4,7 +4,7 @@ body_type = "quadruped"
 view = "side"
 ref_ft = 3.0
 axis = "withers"
-joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_2", "tail_3", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
 
 [anchors]
 head = "poll"
@@ -12,34 +12,37 @@ mouth = "nose"
 saddle = "mid_back"
 
 [joints]
-belly = [-0.5501, 1.2649]
-chest_front = [1.2895, 1.6144]
-croup = [-1.266, 2.463]
-elbow_l = [0.0231, 0.7158]
-elbow_r = [0.2998, 0.7158]
+belly = [-0.5611, 1.1826]
+chest_front = [1.2484, 1.6555]
+croup = [-1.2043, 2.4630]
+elbow_l = [0.0231, 0.7981]
+elbow_r = [0.3108, 0.7981]
 eye_r = [1.4793, 2.2134]
-forepaw_l = [0.2576, 0.027]
-forepaw_r = [0.2655, 0.027]
-groin = [-0.9342, 1.215]
-hindpaw_l = [-1.9711, 0.027]
-hindpaw_r = [-1.9683, 0.027]
-hip_l = [-1.7501, 2.1135]
-hip_r = [-1.5912, 2.1135]
-hock_l = [-2.0775, 0.4662]
-hock_r = [-1.5385, 0.7258]
+forepaw_l = [0.2480, 0.1093]
+forepaw_r = [0.3066, 0.1710]
+groin = [-0.8519, 1.1327]
+hindpaw_l = [-1.7654, 0.1093]
+hindpaw_r = [-1.6899, 0.1806]
+hip_l = [-1.7295, 2.0107]
+hip_r = [-1.6323, 2.1135]
+hock_l = [-2.0364, 0.5073]
+hock_r = [-1.5275, 0.6435]
 mid_back = [0.1127, 2.7126]
 nose = [2.0159, 1.4646]
 poll = [1.1922, 2.6127]
-shoulder_l = [0.1187, 2.2134]
-shoulder_r = [0.3978, 2.2134]
-sternum = [0.8501, 1.3648]
-stifle_l = [-1.8376, 1.1651]
-stifle_r = [-0.8059, 1.215]
-tail_base = [-2.0179, 1.9438]
-tail_tip = [-2.2588, 1.0653]
-withers = [1.1303, 2.7425]
-wrist_l = [0.1122, 0.2666]
-wrist_r = [0.3835, 0.2666]
+shoulder_l = [0.0364, 2.2751]
+shoulder_r = [0.4910, 2.1613]
+sternum = [0.8912, 1.3648]
+stifle_l = [-1.7444, 1.2062]
+stifle_r = [-0.8059, 1.2561]
+tail_base = [-1.9768, 1.9438]
+tail_1 = [-1.9702, 1.7242]
+tail_2 = [-1.9635, 1.5046]
+tail_3 = [-1.9569, 1.2849]
+tail_tip = [-1.9503, 1.0653]
+withers = [1.0371, 2.7014]
+wrist_l = [0.1945, 0.2666]
+wrist_r = [0.3012, 0.2666]
 
 # NOTE: `rig --example bake` rewrites this file through the model and drops
 # comments. Re-add this block after a re-bake.
@@ -80,23 +83,36 @@ wrist_r = [0.3835, 0.2666]
 #
 # Stability: every value jittered +/-0.03 keeps front IoU in 0.7937-0.7947.
 [depth]
-elbow_l = 0.51
-elbow_r = -0.51
-forepaw_l = 0.61
-forepaw_r = -0.61
-hindpaw_l = 0.61
-hindpaw_r = -0.61
-hip_l = 0.51
-hip_r = -0.51
-hock_l = 0.51
-hock_r = -0.51
-shoulder_l = 0.51
-shoulder_r = -0.51
-stifle_l = 0.51
-stifle_r = -0.51
-wrist_l = 0.54
-wrist_r = -0.54
+elbow_l = 0.3043
+elbow_r = -0.3043
+forepaw_l = 0.4455
+forepaw_r = -0.4455
+hindpaw_l = 0.4043
+hindpaw_r = -0.4043
+hip_l = 0.3043
+hip_r = -0.3043
+hock_l = 0.3454
+hock_r = -0.3454
+shoulder_l = 0.4277
+shoulder_r = -0.4277
+stifle_l = 0.3454
+stifle_r = -0.3454
+wrist_l = 0.7046
+wrist_r = -0.7046
 
+belly = 0.0932
+chest_front = 0.2057
+croup = -0.1646
+groin = 0.0823
+mid_back = -0.0823
+nose = 0.1234
+sternum = 0.1234
+tail_base = 0.1646
+tail_1 = 0.1646
+tail_2 = 0.1646
+tail_3 = 0.1646
+tail_tip = 0.1646
+withers = 0.1646
 [radius_depth_ft]
 forepaw_l = 0.22
 forepaw_r = 0.22
@@ -125,7 +141,7 @@ joints = ["withers", "mid_back", "croup", "tail_base"]
 name = "tail"
 part = "back"
 parent = "spine"
-joints = ["tail_base", "tail_tip"]
+joints = ["tail_base", "tail_1", "tail_2", "tail_3", "tail_tip"]
 
 [[bones]]
 name = "brisket"

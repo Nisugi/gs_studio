@@ -16,21 +16,26 @@ saddle = "chest_end"
 [joints]
 snout = [4.8653, 6.9422]
 skull_base = [3.78, 6.8423]
-neck_end = [2.839, 5.1445]
+neck_end = [2.9709, 5.3528]
 chest_end = [3.3496, 2.9472]
-belly_mid = [3.3077, 1.2494]
+belly_mid = [3.0994, 1.2494]
 belly_end = [1.8404, 0.9498]
-back_1 = [-0.0117, 0.8999]
-back_2 = [-1.8023, 0.8999]
-tail_mid = [-3.7219, 0.8]
-tail_tip = [-4.9423, 0.5004]
+back_1 = [0.0126, 1.1602]
+back_2 = [-1.7502, 0.9520]
+tail_mid = [-3.7219, 1.0603]
+tail_tip = [-5.2547, 0.0]
 
 [depth]
-back_1 = -1.2
-back_2 = -1.2
-tail_mid = 1.6
-tail_tip = 3.2
+back_1 = -1.7484
+back_2 = -1.3007
+tail_mid = 1.7076
+tail_tip = 2.7835
 
+belly_end = 0.5484
+belly_mid = 0.5484
+chest_end = 0.4165
+neck_end = -0.1041
+snout = -0.0278
 [[bones]]
 name = "skull"
 part = "head"

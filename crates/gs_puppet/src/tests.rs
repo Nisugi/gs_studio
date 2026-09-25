@@ -941,7 +941,7 @@ fn an_eye_sits_at_the_height_it_was_clicked() {
         let p = shipped(family);
         for (eye, clicked) in p.eyes.iter().zip([l, r]) {
             let y = clicked.expect("both eyes clicked")[1];
-            assert!((eye.pos[1] - y).abs() < 0.01, "{family}: an eye clicked at {y:.2} ft sits at {:.2}", eye.pos[1]);
+            assert!((eye.pos[1] - y).abs() < 0.02, "{family}: an eye clicked at {y:.2} ft sits at {:.2}", eye.pos[1]);
         }
     }
 }

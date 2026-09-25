@@ -12,36 +12,36 @@ mouth = "crest"
 saddle = "crest"
 
 [joints]
-base = [0.0, 0.3]
-belly = [0.0, 5.0]
-crest = [0.0, 12.0]
-crown = [0.0, 14.7]
-elbow_l = [6.5, 10.3]
-elbow_r = [-6.5, 10.3]
+base = [0.0000, 0.5205]
+belly = [0.0000, 5.4410]
+crest = [0, 12]
+crown = [0, 14.7]
+elbow_l = [6.6102, 10.2412]
+elbow_r = [-6.6102, 10.2412]
 eye_l = [1.2, 12.5]
 eye_r = [-1.2, 12.5]
-fingertip_l = [5.5, 13.0]
-fingertip_r = [-5.5, 13.0]
-shoulder_l = [4.5, 8.5]
-shoulder_r = [-4.5, 8.5]
-wrist_l = [6.4, 12.2]
-wrist_r = [-6.4, 12.2]
+fingertip_l = [6.7127, 12.0077]
+fingertip_r = [-6.7127, 12.0077]
+shoulder_l = [4.6102, 9.0513]
+shoulder_r = [-4.6102, 9.0513]
+wrist_l = [6.7308, 12.2000]
+wrist_r = [-6.7308, 12.2000]
 
 [depth]
-base = 0.0
-belly = 0.0
-crest = 0.0
-crown = 0.0
-elbow_l = 3.0
-elbow_r = 3.0
+base = 1.1613
+belly = -1.1613
+crest = 0
+crown = 0
+elbow_l = 2.6031
+elbow_r = 2.6031
 eye_l = 3.5
 eye_r = 3.5
 fingertip_l = 6.0
 fingertip_r = 6.0
-shoulder_l = 1.0
-shoulder_r = 1.0
-wrist_l = 5.0
-wrist_r = 5.0
+shoulder_l = 2.0510
+shoulder_r = 1.8747
+wrist_l = 4.8309
+wrist_r = 4.8309
 
 [[bones]]
 name = "skull"

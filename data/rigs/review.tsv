@@ -182,3 +182,43 @@ crustacean	ready	dev	2026-09-25	joints placed by hand on the new silhouette
 elemental_air	ready	dev	2026-09-25	biped placed by hand; the funnel below the waist is both legs merged (leg radii pinned)
 elemental_lightning	ready	dev	2026-09-25	biped placed by hand; side fit .47 from the silhouette's lean and forward arm
 reptilian	fixed	dev	2026-09-25	joints snapped onto the new silhouettes; neck and skull radii pinned to the front width (head no longer fat); fit .69/.84
+feline	proposal	image-gen	2026-09-25	joint_fit proposal REVISED: tail made a five-joint chain (tail_base, tail_1..3, tail_tip) along the side view's hook, then fitted; side IoU 0.81->0.96 miss 0.078->0.021 spill 0.137->0.017, front 0.62->0.67 (front drawing is a sitting cat, so front stays low until redrawn); loose poses 0->0; poses still swing the tail from its base (no bend values yet); take image-gen/rig_proposals/feline.rig.toml
+ape	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+avian	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+canine	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+caprine	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+centaur	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+cervid	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+dragon_bat	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+elemental	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elemental_earth	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elemental_fire	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elemental_ice	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; joints under the floor lifted to it
+elemental_lava	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elemental_steam	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elemental_water	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+elephantid	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+equine	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend); joints under the floor lifted to it
+feline	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; joints under the floor lifted to it
+fish	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; joints under the floor lifted to it
+fishfolk	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+floating_orb	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+ghost	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+giant	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; toes lifted to 0.06 ft (rings sat under the floor)
+golem	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+humanoid	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+naga	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+ogre	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+orc	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+plant_mass	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+rodent	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+serpent	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+suine	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+treekin	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+upright_insect	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values
+ursine	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+winged_beast	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; tail made a five-joint chain (straight, for the fitter to bend)
+winged_humanoid	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; toes lifted 0.05 ft (rings sat under the floor)
+worm	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; joints under the floor lifted to it
+troll	blocked	dev	2026-09-25	proposal NOT adopted: with it the chest reads 2.1x deeper than wide (it takes the hunch's depth); please re-fit with sternum, pelvis and shoulders held
+reptilian	fixed	dev	2026-09-25	tail made a five-joint chain; no proposal adopted (placed by hand after the base commit), please re-fit
