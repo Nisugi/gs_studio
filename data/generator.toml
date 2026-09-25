@@ -4,7 +4,7 @@
 # Families whose puppet is approved: only their depth guides go into the
 # jobs. A depth guide of an unapproved shape would teach the generator its
 # defects.
-depth_families = ["humanoid"]
+depth_families = ["humanoid", "canine", "troll"]
 
 # The order each family's views are painted in, projection-first (see
 # docs/projection-first-export-spec.md): the first is painted from scratch,
