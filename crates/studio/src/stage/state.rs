@@ -136,6 +136,8 @@ pub struct StageState {
     pub show_occluders: bool,
     /// Puppets hold the weapon their bestiary entry attacks with.
     pub show_props: bool,
+    /// Living puppets breathe (their body type's `[idle]` cycle).
+    pub show_breath: bool,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
     /// Selected point light (index into scene.lights); drag moves it.
@@ -190,6 +192,7 @@ impl StageState {
             weather_wind: 0.15,
             show_occluders: false,
             show_props: true,
+            show_breath: true,
             selected_prop: None,
             selected_light: None,
             dragging_creature: None,

@@ -102,3 +102,15 @@ leg3 = { rot = [[-80.0, 80.0], [-45.0, 45.0], [-90.0, 70.0]], bend = [[-80.0, 80
 leg4 = { rot = [[-80.0, 80.0], [-45.0, 45.0], [-90.0, 70.0]], bend = [[-80.0, 80.0]] }
 leg5 = { rot = [[-80.0, 80.0], [-45.0, 45.0], [-90.0, 70.0]], bend = [[-80.0, 80.0]] }
 leg1_tip = { rot = [[-60.0, 60.0], [-30.0, 30.0], [-80.0, 80.0]] }
+
+# Breathing at rest: the abdomen pulses, the head with it, and the legs
+# settle and rise a hair, each pair a beat behind the last.
+[idle]
+period = 2.8
+abdomen = { rot = [1.2, 0.0, 0.0] }
+skull = { rot = [-0.6, 0.0, 0.0] }
+leg1 = { rot = [0.0, 0.0, 0.6], bend = [0.7], phase = -0.05 }
+leg2 = { rot = [0.0, 0.0, 0.6], bend = [0.7], phase = -0.1 }
+leg3 = { rot = [0.0, 0.0, 0.6], bend = [0.7], phase = -0.15 }
+leg4 = { rot = [0.0, 0.0, 0.6], bend = [0.7], phase = -0.2 }
+leg5 = { rot = [0.0, 0.0, 0.6], bend = [0.7], phase = -0.25 }

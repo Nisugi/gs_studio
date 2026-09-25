@@ -638,3 +638,20 @@ ended in. Standing, or first seen dead, it keeps the caller's variety.
 `gs_puppet::Fall` itself now falls from the pose given (see its docs):
 folded limbs hold an upright body low until it is half way down, and the
 root turns so the body's long axis never climbs.
+
+### 7.24 Living puppets breathe
+
+`gs_puppet::PoseSet::idle` (the pose file's `[idle]` table, with
+`[family_idle.<family>]` overrides; `gs_puppet::Pose::breathe`) is a slow
+cycle of small angle offsets. `PuppetKey::breath` (0 = still, else
+`1..=BREATH_STEPS` = 16) is part of the cache key, so a cycle costs one
+display list per step per look and a room of one family shares them;
+`POSE_CACHE_CAP` went from 96 to 256 to hold them. `PuppetCache::breath(family,
+id, choice, now_s)` gives a living creature's step (its own phase, hashed
+from its id) and the seconds until the next, which `paint_creature_puppet`
+passes to `request_repaint_after`: an idle room paints once per step change
+per creature, not every frame. `posed_with` breathes the resolved pose
+before clamping; `posed_changing` breathes the target pose by the eased `u`,
+so the cycle fades in with a change. Dead creatures, and body types with no
+`[idle]`, hold still. `set_puppet_breath` / `puppet_breath` (on by default)
+turn it off for a context, as `set_puppet_props` does for props.

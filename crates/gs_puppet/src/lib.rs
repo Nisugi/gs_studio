@@ -67,7 +67,7 @@ pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WO
 pub use fit::{rest_iou, rest_prims};
 pub use outfit::{Cut, Hang, Kit, Outfit, Outfits, Piece, SHIPPED_KIT};
 pub use paint::paint;
-pub use pose::{BonePose, FamilyPoses, Limit, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
+pub use pose::{BonePose, FamilyPoses, Idle, IdleBone, Limit, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use prefill::{depth_guide, dressed_silhouette, prefill, project_view, puppet_eyes, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};

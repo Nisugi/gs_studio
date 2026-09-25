@@ -82,3 +82,13 @@ skull = { rot = [[-45.0, 45.0], [-90.0, 90.0], [-40.0, 40.0]] }
 tail = { rot = [[-45.0, 45.0], [-30.0, 30.0], [-30.0, 30.0]] }
 leg = { rot = [[-100.0, 45.0], [-30.0, 30.0], [-30.0, 40.0]], bend = [[-20.0, 160.0], [-110.0, 90.0]] }
 wing = { rot = [[-60.0, 60.0], [-120.0, 30.0], [-30.0, 120.0]] }
+
+# Breathing at rest: the breast swells, the head bobs with it, and the
+# wings settle and lift a hair against the body.
+[idle]
+period = 2.4
+breast = { rot = [1.0, 0.0, 0.0] }
+neck = { rot = [1.0, 0.0, 0.0] }
+skull = { rot = [-0.6, 0.0, 0.0] }
+wing = { rot = [0.0, 0.0, -1.2], phase = -0.15 }
+tail = { rot = [0.8, 0.0, 0.0], phase = -0.25 }

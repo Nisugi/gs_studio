@@ -103,6 +103,21 @@ fn skin_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_skin")
 }
 
+fn breath_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_breath")
+}
+
+/// Living puppets breathe (the pose set's `[idle]` cycle, see
+/// [`PuppetCache::breath`]). On unless the host turns it off.
+pub fn set_puppet_breath(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(breath_id(), on));
+}
+
+/// See [`set_puppet_breath`].
+pub fn puppet_breath(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(breath_id())).unwrap_or(true)
+}
+
 fn facing_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_facings")
 }
@@ -112,7 +127,7 @@ fn forced_id() -> egui::Id {
 }
 
 /// How many posed display lists one context keeps.
-pub const POSE_CACHE_CAP: usize = 96;
+pub const POSE_CACHE_CAP: usize = 256;
 
 /// Camera pitch (degrees, looking down) the field draws puppets at. Small:
 /// the stage is a shallow, nearly eye-level box, and the cards around it are
@@ -261,7 +276,15 @@ pub struct PuppetKey {
     /// Status effects drawn on the body (web, frost). Only the smooth skin
     /// draws them.
     pub effects: gs_puppet::Effects,
+    /// Where in its breathing cycle the figure is: 0 = holding still, else
+    /// `1..=BREATH_STEPS` (see [`PuppetCache::breath`]). Quantized so a
+    /// room full of one family shares one cycle's worth of display lists.
+    pub breath: u8,
 }
+
+/// A breathing cycle is drawn in this many steps; at rest the figure moves
+/// well under a pixel between two, so the steps never read as a stutter.
+pub const BREATH_STEPS: u8 = 16;
 
 /// Facings are cached in steps this fine, so a slider does not make a new
 /// display list per pixel of drag.
@@ -309,7 +332,14 @@ impl PuppetKey {
             height_px: size_step(height_px),
             facing: None,
             effects: gs_puppet::Effects::default(),
+            breath: 0,
         }
+    }
+
+    /// The same key at this step of its breathing cycle (0 = still).
+    pub fn with_breath(mut self, step: u8) -> Self {
+        self.breath = step.min(BREATH_STEPS);
+        self
     }
 
     /// The same key with these body effects.
@@ -872,6 +902,30 @@ fn ease(x: f32) -> f32 {
     x * x * (3.0 - 2.0 * x)
 }
 
+/// `pose` at breath step `step` of the set's idle cycle (0, or no cycle:
+/// the pose itself), the offsets scaled by `weight`. A step is drawn at
+/// its middle.
+fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, step: u8, weight: f32) -> gs_puppet::Pose {
+    match (&set.idle, step) {
+        (Some(idle), 1..) => pose.breathe(idle, (step as f32 - 0.5) / BREATH_STEPS as f32, weight),
+        _ => pose.clone(),
+    }
+}
+
+/// A creature's own starting point in the cycle, 0..1, from its id
+/// (the same kind of hash as `creature_doll::variety`, other bits).
+fn breath_phase(id: &str) -> f32 {
+    let mut h: u32 = 2166136261;
+    for b in id.trim().trim_start_matches('#').bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(16777619);
+    }
+    h ^= h >> 13;
+    h = h.wrapping_mul(0x5bd1_e995);
+    h ^= h >> 15;
+    (h >> 8) as f32 / (1u32 << 24) as f32
+}
+
 /// A creature not drawn for this many frames is forgotten.
 const LIFE_FRAMES: u64 = 3600;
 
@@ -1241,8 +1295,9 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
+        let pose = breathe(&set, pose, key.breath, 1.0);
         // Inside the body type's joint limits, whatever the file says.
-        let pose = &set.clamp(pose);
+        let pose = &set.clamp(&pose);
         let texture = if skin { self.texture(family) } else { None };
         let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref(), texture.as_deref()));
         self.builds += 1;
@@ -1289,6 +1344,25 @@ impl PuppetCache {
                 }
             }
         }
+    }
+
+    /// Where creature `id` is in its family's breathing cycle at `now_s`:
+    /// the step for [`PuppetKey::with_breath`] and the seconds until the
+    /// next one (when the host should paint again). None when it holds
+    /// still: dead, or its body type has no `[idle]`. Each creature starts
+    /// its cycle at its own point, from its id, so a crowd never breathes
+    /// in step.
+    pub fn breath(&mut self, family: &Arc<str>, id: &str, choice: PoseChoice, now_s: f64) -> Option<(u8, f64)> {
+        if matches!(choice, PoseChoice::Dead { .. }) {
+            return None;
+        }
+        let period = self.pose_set(family)?.idle.as_ref()?.period.max(0.05) as f64;
+        let steps = BREATH_STEPS as f64;
+        let cycles = now_s / period + breath_phase(id) as f64;
+        let u = cycles.rem_euclid(1.0);
+        let step = (u * steps).floor().min(steps - 1.0);
+        let until_next = ((step + 1.0) / steps - u) * period;
+        Some((step as u8 + 1, until_next.max(1e-3)))
     }
 
     /// The dead pose a creature is drawn in: `choice` itself (the caller's
@@ -1341,7 +1415,9 @@ impl PuppetCache {
         };
         let (_, to) = key.pose.resolve(&set, variant(key.pose))?;
         let (_, start) = from.resolve(&set, variant(from))?;
-        let pose = set.clamp(&start.blend(to, u));
+        // The new pose's breath comes in with the change, so it never jumps.
+        let to = breathe(&set, to, key.breath, u);
+        let pose = set.clamp(&start.blend(&to, u));
         let light = self.light.clone().filter(|_| skin);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
@@ -2090,9 +2166,9 @@ mod tests {
         cache.posed(&family, &key(PoseChoice::Standing, &[("head", 1)]));
         assert_eq!(cache.builds, 2);
 
-        for n in 0..(POSE_CACHE_CAP as u8 + 10) {
+        for n in 0..(POSE_CACHE_CAP as u16 + 10) {
             let mut k = key(PoseChoice::Standing, &[]);
-            k.body = [n, 0, 0];
+            k.body = [n as u8, (n >> 8) as u8, 0];
             cache.posed(&family, &k).unwrap();
             // Keep the healthy one hot so it survives eviction.
             cache.posed(&family, &healthy).unwrap();
@@ -2101,6 +2177,40 @@ mod tests {
         let builds = cache.builds;
         cache.posed(&family, &healthy).unwrap();
         assert_eq!(cache.builds, builds, "the hot entry was never evicted");
+    }
+
+    /// Breathing: a living creature steps round its family's idle cycle at
+    /// its own phase; every step is its own cached list; a dead one holds
+    /// still; the figure moves, and only a little.
+    #[test]
+    fn a_living_puppet_breathes_in_cached_steps() {
+        let mut cache = cache();
+        cache.begin_frame(0);
+        let family = cache.family_for("forest troll", Some("troll")).expect("humanoid");
+        let period = cache.pose_set(&family).unwrap().idle.as_ref().expect("bipeds breathe").period as f64;
+
+        let (s0, until) = cache.breath(&family, "#1", PoseChoice::Standing, 0.0).unwrap();
+        assert!((1..=BREATH_STEPS).contains(&s0));
+        assert!(until > 0.0 && until <= period / BREATH_STEPS as f64 + 1e-6, "{until}");
+        let (s1, _) = cache.breath(&family, "#1", PoseChoice::Standing, until + 1e-3).unwrap();
+        assert_eq!(s1, s0 % BREATH_STEPS + 1, "the next step, when it said");
+        let (again, _) = cache.breath(&family, "#1", PoseChoice::Standing, period).unwrap();
+        assert_eq!(again, s0, "one period on: the same step");
+        assert_ne!(cache.breath(&family, "#2", PoseChoice::Standing, 0.0).unwrap().0, s0, "another creature is elsewhere in the cycle");
+        assert!(cache.breath(&family, "#1", PoseChoice::Dead { variant: 0 }, 0.0).is_none());
+
+        let still = cache.posed(&family, &key(PoseChoice::Standing, &[])).unwrap();
+        let steps: Vec<_> = (1..=BREATH_STEPS).map(|n| cache.posed(&family, &key(PoseChoice::Standing, &[]).with_breath(n)).unwrap()).collect();
+        assert_eq!(cache.builds, 1 + BREATH_STEPS as u64, "one list per step");
+        let again = cache.posed(&family, &key(PoseChoice::Standing, &[]).with_breath(3)).unwrap();
+        assert!(Arc::ptr_eq(&again, &steps[2]), "cached");
+        let moved = steps.iter().filter(|p| p.prims != still.prims).count();
+        assert!(moved >= BREATH_STEPS as usize - 1, "the figure moves through the cycle: {moved}");
+        // Small: the drawn span changes by less than a twentieth.
+        for p in &steps {
+            let (a, b) = (p.span().unwrap(), still.span().unwrap());
+            assert!((a - b).abs() / b < 0.05, "{a} vs {b}");
+        }
     }
 
     /// Cost of one pose + draw-list build, and of parsing a baked puppet.

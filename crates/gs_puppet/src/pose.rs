@@ -82,6 +82,25 @@
 //! pose they draw, and [`PoseSet::violations`] lists authored angles that
 //! lie outside (a shipped set has none).
 //!
+//! # Idle motion
+//!
+//! A body type's file may say how a living figure breathes: one slow cycle
+//! of small angle offsets, laid over whatever pose it holds.
+//!
+//! ```toml
+//! [idle]
+//! period = 4.2                                    # seconds per cycle
+//! torso_upper = { rot = [-1.4, 0.0, 0.0] }        # AMPLITUDES, in degrees
+//! arm = { rot = [0.0, 0.0, 1.2], bend = [-1.0], phase = 0.15 }   # lags the chest
+//! ```
+//!
+//! Every key is a bone or pair stem as in a pose; its angles are amplitudes,
+//! and at cycle fraction `u` the bone is offset by `amp * sin(2 pi (u +
+//! phase))`. `phase` (a fraction of the cycle, default 0) staggers one bone
+//! against another. [`Pose::breathe`] applies it; renderers clamp the
+//! result as they do every pose. `[family_idle.<family>]` replaces keys for
+//! one family, composing as `[family_limits]` does.
+//!
 //! The override lives HERE, in the body type's file, and not in the
 //! family's `.rig.toml`, because a `.rig.toml` is studio source that is
 //! never published: a game client is shipped `<family>.puppet.toml` (baked
@@ -204,6 +223,43 @@ impl PoseOverride {
     }
 }
 
+/// One bone's share of the idle cycle: amplitudes and its phase (see the
+/// module docs).
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdleBone {
+    pub amp: BonePose,
+    /// Fraction of the cycle this bone runs ahead of the others.
+    pub phase: f32,
+}
+
+/// How a body type breathes at rest (see the module docs, "Idle motion").
+#[derive(Debug, Clone, PartialEq)]
+pub struct Idle {
+    /// Seconds per cycle.
+    pub period: f32,
+    /// Bone or pair stem -> its amplitudes.
+    pub bones: BTreeMap<String, IdleBone>,
+}
+
+impl Idle {
+    /// Every key `over` names replaces this idle's key; the period too when
+    /// `over` sets one. Composes as [`Pose::with_override`] does for stems.
+    pub fn with_override(&self, over: &Idle) -> Idle {
+        let mut out = self.clone();
+        if over.period > 0.0 {
+            out.period = over.period;
+        }
+        for (key, ib) in &over.bones {
+            if !(key.ends_with("_l") || key.ends_with("_r")) {
+                out.bones.remove(&format!("{key}_l"));
+                out.bones.remove(&format!("{key}_r"));
+            }
+            out.bones.insert(key.clone(), ib.clone());
+        }
+        out
+    }
+}
+
 pub fn quat_from_euler(deg: [f32; 3]) -> Quat {
     quat_from_m3(&euler(deg))
 }
@@ -288,6 +344,36 @@ impl Pose {
         // A pair key left beside its explicit sides would be shadowed anyway.
         Pose { root: slerp(self.root, to.root, t), bones }
     }
+
+    /// This pose `u` of the way (0..1, wrapping) through `idle`'s cycle,
+    /// the offsets scaled by `weight` (1 = as authored; 0 = this pose). A
+    /// stem in `idle` reaches a side this pose spells out (mirrored for the
+    /// right), so nothing the pose says is shadowed. The root never moves.
+    pub fn breathe(&self, idle: &Idle, u: f32, weight: f32) -> Pose {
+        let mut out = self.clone();
+        if weight == 0.0 || !u.is_finite() {
+            return out;
+        }
+        for (key, ib) in &idle.bones {
+            let s = (std::f32::consts::TAU * (u + ib.phase)).sin() * weight;
+            let sided = key.ends_with("_l") || key.ends_with("_r");
+            let has_side = |side: &str| self.bones.contains_key(&format!("{key}{side}"));
+            let targets: Vec<(String, BonePose)> = if !sided && (has_side("_l") || has_side("_r")) {
+                vec![(format!("{key}_l"), ib.amp.clone()), (format!("{key}_r"), ib.amp.mirrored())]
+            } else {
+                vec![(key.clone(), ib.amp.clone())]
+            };
+            for (name, amp) in targets {
+                let base = self.bone(&name);
+                let deg = [0, 1, 2].map(|i| base.deg[i] + amp.deg[i] * s);
+                let n = base.bend.len().max(amp.bend.len());
+                let at = |v: &Vec<f32>, i: usize| v.get(i).copied().unwrap_or(0.0);
+                let bend = (0..n).map(|i| at(&base.bend, i) + at(&amp.bend, i) * s).collect();
+                out.bones.insert(name, BonePose::euler(deg, bend));
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -312,6 +398,48 @@ struct PoseFile {
     /// `[family_limits.<family>]`: keys a family bounds differently.
     #[serde(default)]
     family_limits: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[idle]`: how the body type breathes at rest (`period` + bones).
+    #[serde(default)]
+    idle: BTreeMap<String, toml::Value>,
+    /// `[family_idle.<family>]`: keys a family breathes differently.
+    #[serde(default)]
+    family_idle: BTreeMap<String, BTreeMap<String, toml::Value>>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct IdleBoneDef {
+    #[serde(default)]
+    rot: Option<[f32; 3]>,
+    #[serde(default)]
+    bend: Vec<f32>,
+    #[serde(default)]
+    phase: f32,
+}
+
+/// `[idle]` / `[family_idle.<f>]`: `period` plus bone entries. A family's
+/// table may leave `period` out (0 = keep the shared one).
+fn idle_of(where_: &str, table: BTreeMap<String, toml::Value>) -> Result<Option<Idle>, String> {
+    if table.is_empty() {
+        return Ok(None);
+    }
+    let mut idle = Idle { period: 0.0, bones: BTreeMap::new() };
+    for (key, value) in table {
+        if key == "period" {
+            let p: f32 = value.try_into().map_err(|e| format!("{where_}, 'period': {e}"))?;
+            if !(p.is_finite() && p > 0.0) {
+                return Err(format!("{where_}, 'period': must be a positive number of seconds"));
+            }
+            idle.period = p;
+            continue;
+        }
+        let def: IdleBoneDef = value.try_into().map_err(|e| format!("{where_}, '{key}': {e}"))?;
+        let rot = def.rot.unwrap_or([0.0; 3]);
+        if !rot.iter().chain(&def.bend).chain([&def.phase]).all(|v| v.is_finite()) {
+            return Err(format!("{where_}, '{key}': not a finite number"));
+        }
+        idle.bones.insert(key, IdleBone { amp: BonePose::euler(rot, def.bend), phase: def.phase });
+    }
+    Ok(Some(idle))
 }
 
 /// One `key = { rot, bend }` entry of a pose table, parsed and checked.
@@ -365,6 +493,10 @@ pub struct PoseSet {
     pub limits: BTreeMap<String, Limit>,
     /// Family (lowercase) -> the limit keys it replaces.
     pub family_limits: BTreeMap<String, BTreeMap<String, Limit>>,
+    /// How a living figure breathes at rest; None = it holds still.
+    pub idle: Option<Idle>,
+    /// Family (lowercase) -> the idle keys (and period) it replaces.
+    pub family_idle: BTreeMap<String, Idle>,
 }
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
@@ -423,7 +555,21 @@ impl PoseSet {
             let lim = limits_of(&format!("family_limits.{family}"), table)?;
             family_limits.insert(family, lim);
         }
-        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits })
+        let idle = idle_of("idle", file.idle)?;
+        if idle.as_ref().is_some_and(|i| i.period <= 0.0) {
+            return Err("idle: 'period' (seconds per cycle) is required".to_owned());
+        }
+        let mut family_idle = BTreeMap::new();
+        for (family, table) in file.family_idle {
+            let family = family.trim().to_ascii_lowercase();
+            if let Some(over) = idle_of(&format!("family_idle.{family}"), table)? {
+                if idle.is_none() && over.period <= 0.0 {
+                    return Err(format!("family_idle.{family}: no shared [idle] to take a period from"));
+                }
+                family_idle.insert(family, over);
+            }
+        }
+        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle })
     }
 
     /// This set as `family` sees it: the shared poses with that family's
@@ -436,10 +582,17 @@ impl PoseSet {
         let key = family.trim().to_ascii_lowercase();
         let fam = self.families.get(key.as_str());
         let lim = self.family_limits.get(key.as_str());
-        if fam.is_none() && lim.is_none() {
+        let idle = self.family_idle.get(key.as_str());
+        if fam.is_none() && lim.is_none() && idle.is_none() {
             return Cow::Borrowed(self);
         }
         let mut out = self.clone();
+        if let Some(over) = idle {
+            out.idle = Some(match &self.idle {
+                Some(shared) => shared.with_override(over),
+                None => over.clone(),
+            });
+        }
         for (name, over) in fam.map(|f| &f.poses).into_iter().flatten() {
             let base = out.poses.get(name).cloned().unwrap_or_default();
             out.poses.insert(name.clone(), base.with_override(over));

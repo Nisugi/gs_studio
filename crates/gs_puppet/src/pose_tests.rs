@@ -397,3 +397,65 @@ fn a_blend_moves_angle_by_angle_and_stays_inside_what_both_ends_allow() {
     assert_eq!(half.deg, [0.0, 0.0, 90.0], "degrees, not the short way round a quaternion");
     assert_eq!(half.bend, vec![-50.0]);
 }
+
+#[test]
+fn an_idle_cycle_offsets_a_pose_by_a_sine_and_reaches_spelled_out_sides() {
+    let set = PoseSet::from_toml(
+        "body_type = \"biped\"\n[pose.stand]\n[pose.disoriented]\narm_l = { rot = [-18.0, 0.0, 34.0], bend = [-30.0] }\n\
+         arm_r = { rot = [12.0, 0.0, -4.0] }\n\
+         [idle]\nperiod = 4.0\ntorso_upper = { rot = [-2.0, 0.0, 0.0] }\n\
+         arm = { rot = [0.0, 0.0, 4.0], bend = [-2.0], phase = 0.25 }\n",
+    )
+    .unwrap();
+    let idle = set.idle.as_ref().expect("parsed");
+    assert_eq!(idle.period, 4.0);
+    let stand = set.get("stand").unwrap();
+    // u = 0: the chest is at rest, the arms (a quarter cycle ahead) at their peak.
+    let at0 = stand.breathe(idle, 0.0, 1.0);
+    assert!(at0.bone("torso_upper").deg[0].abs() < 1e-5);
+    assert!((at0.bone("arm_l").deg[2] - 4.0).abs() < 1e-4, "{:?}", at0.bone("arm_l"));
+    assert!((at0.bone("arm_r").deg[2] + 4.0).abs() < 1e-4, "mirrored: {:?}", at0.bone("arm_r"));
+    assert!((at0.bone("arm_l").bend[0] + 2.0).abs() < 1e-4);
+    // u = 0.25: the chest at its peak.
+    let at1 = stand.breathe(idle, 0.25, 1.0);
+    assert!((at1.bone("torso_upper").deg[0] + 2.0).abs() < 1e-4);
+    // Weight 0 is the pose itself; weight halves the swing.
+    assert_eq!(&stand.breathe(idle, 0.25, 0.0), stand);
+    assert!((stand.breathe(idle, 0.25, 0.5).bone("torso_upper").deg[0] + 1.0).abs() < 1e-4);
+    // A pose that spells its arms out per side keeps them: the stem's
+    // amplitude lands on each side (the right mirrored), on top of its own angles.
+    let dis = set.get("disoriented").unwrap();
+    let d0 = dis.breathe(idle, 0.0, 1.0);
+    assert!((d0.bone("arm_l").deg[2] - 38.0).abs() < 1e-4, "{:?}", d0.bone("arm_l"));
+    assert!((d0.bone("arm_l").deg[0] + 18.0).abs() < 1e-4, "its own swing kept");
+    assert!((d0.bone("arm_l").bend[0] + 32.0).abs() < 1e-4);
+    assert!((d0.bone("arm_r").deg[2] + 8.0).abs() < 1e-4, "{:?}", d0.bone("arm_r"));
+    assert!(!d0.bones.contains_key("arm"), "no stem inserted beside the sides");
+}
+
+#[test]
+fn a_family_breathes_its_own_way_and_a_bad_idle_is_refused() {
+    let set = PoseSet::from_toml(
+        "body_type = \"quadruped\"\n[pose.stand]\n[idle]\nperiod = 3.0\nbrisket = { rot = [1.0, 0.0, 0.0] }\ntail = { rot = [0.0, 3.0, 0.0] }\n\
+         [family_idle.elephantid]\nperiod = 6.0\ntail = { rot = [0.0, 1.0, 0.0] }\n\
+         [family_idle.canine]\ntail = { rot = [0.0, 8.0, 0.0] }\n",
+    )
+    .unwrap();
+    let ele = set.for_family("elephantid");
+    let ele = ele.idle.as_ref().unwrap();
+    assert_eq!(ele.period, 6.0);
+    assert_eq!(ele.bones["tail"].amp.deg, [0.0, 1.0, 0.0]);
+    assert_eq!(ele.bones["brisket"].amp.deg, [1.0, 0.0, 0.0], "unnamed keys are kept");
+    let dog = set.for_family("canine");
+    assert_eq!(dog.idle.as_ref().unwrap().period, 3.0, "no period named: the shared one");
+    assert_eq!(dog.idle.as_ref().unwrap().bones["tail"].amp.deg, [0.0, 8.0, 0.0]);
+    assert_eq!(set.for_family("feline").idle, set.idle, "no section: untouched");
+    assert!(PoseSet::from_toml("body_type = \"biped\"\n[pose.stand]\n").unwrap().idle.is_none());
+
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[idle]\nneck = { rot = [1.0, 0.0, 0.0] }\n").unwrap_err();
+    assert!(err.contains("period"), "{err}");
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[idle]\nperiod = 0.0\n").unwrap_err();
+    assert!(err.contains("positive"), "{err}");
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[family_idle.orc]\nneck = { rot = [1.0, 0.0, 0.0] }\n").unwrap_err();
+    assert!(err.contains("no shared"), "{err}");
+}

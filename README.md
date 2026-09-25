@@ -320,6 +320,16 @@ edited in place -- comments, order and line endings kept -- and *Save poses*
 writes `<data>/poses/<body_type>.toml` and puts it on the stage; Publish
 ships it. Closing the window with unsaved poses asks first.
 
+The same file may carry an `[idle]` table: how a living figure of this body
+type breathes at rest. `period` is seconds per cycle; every other key is a
+bone or pair stem, as in a pose, whose `rot` and `bend` are AMPLITUDES in
+degrees -- at cycle fraction `u` the bone is offset by `amp * sin(2π (u +
+phase))`, `phase` (a fraction of the cycle, default 0) lagging one bone
+behind another. `[family_idle.<family>]` replaces keys (and `period`) for
+one family, as `[family_limits]` does. The stage lays it over whatever pose
+the creature holds and clamps the result to the limits; a dead one holds
+still. The pose editor leaves the table alone (it edits in place).
+
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:
 
@@ -511,7 +521,11 @@ across -- and differ only in the right-hand panel:
   body part. The first creature flagged rider mounts the first flagged mount.
   A puppet moves between poses: a status change eases from the old pose into
   the new (0.35 s), a death falls (`gs_puppet::Fall`, 1.7 s) and a revive gets
-  up (0.8 s) -- `creature_puppet::Motion`.
+  up (0.8 s) -- `creature_puppet::Motion`. Alive, it breathes: the slow
+  cycle its body type's poses file authors (`[idle]`, below), each creature
+  starting at its own point in it, drawn in 16 cached steps and fading in
+  with a pose change (`creature_puppet::PuppetCache::breath`; the *Breathing*
+  checkbox under **Puppets** turns it off).
 
 **Sprites beat puppets, so the Cast alone cannot show you a puppet.** A
 creature with base art in the pool draws as that art; only one with none
@@ -520,7 +534,8 @@ pool, so everything in it has art by definition -- which is why a canine,
 elephantid or suine puppet never appeared on the stage however much art was
 in the pool.
 
-The **Puppets** list at the top of the Preview panel is the direct way in:
+The **Puppets** list at the top of the Preview panel (with the *Held
+weapons* and *Breathing* checkboxes) is the direct way in:
 every published puppet (built in, or from the pool), each with *Spawn*,
 which puts up a real bestiary creature of that family DRAWN AS ITS PUPPET
 whatever art the pool holds (preferring one with no art). Any creature on

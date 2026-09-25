@@ -203,6 +203,7 @@ impl StageTool {
         set_weather(&ctx, weather);
         gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
         gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
+        gs_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -1004,6 +1005,10 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         ui.checkbox(&mut stage.show_props, "Held weapons").on_hover_text(
             "A puppet holds the first weapon its bestiary entry attacks with (a forest troll its cudgel), \
              shaped by props/weapons.toml",
+        );
+        ui.checkbox(&mut stage.show_breath, "Breathing").on_hover_text(
+            "A living puppet breathes: the slow cycle in its body type's poses file ([idle] in \
+             poses/<body_type>.toml), each creature at its own point in it",
         );
         let set = gs_field::puppets::puppets();
         let mut spawn: Option<String> = None;

@@ -219,3 +219,20 @@ forepaw = { rot = [[-40.0, 100.0], [-20.0, 20.0], [-20.0, 20.0]] }
 # The elephant's trunk: a bone of its own rig, not of the template.
 [family_limits.elephantid]
 trunk = { rot = [[-140.0, 60.0], [-45.0, 45.0], [-45.0, 45.0]], bend = [[-90.0, 45.0], [-90.0, 45.0], [-90.0, 45.0]] }
+
+# Breathing at rest: the ribcage swells (brisket and underline drop a
+# touch), the head nods with it, and the tail sways from side to side on
+# a lagging beat.
+[idle]
+period = 3.6
+brisket = { rot = [1.1, 0.0, 0.0] }
+underline = { rot = [-0.8, 0.0, 0.0] }
+neck = { rot = [0.9, 0.0, 0.0] }
+skull = { rot = [-0.5, 0.0, 0.0] }
+tail = { rot = [0.6, 4.0, 0.0], phase = -0.25 }
+
+# The elephant is slow, and its trunk swings where a tail would.
+[family_idle.elephantid]
+period = 5.4
+tail = { rot = [0.4, 2.0, 0.0], phase = -0.25 }
+trunk = { rot = [1.2, 0.0, 0.0], bend = [0.8, 0.8, 0.8], phase = -0.2 }

@@ -1363,6 +1363,20 @@ fn paint_creature_puppet(
         None => key,
     };
     let key = key.with_effects(PuppetKey::effects_of(&has));
+    // Alive, it breathes: the key steps round its family's idle cycle, and
+    // the next frame is asked for when the step changes (not every frame).
+    let breath = if crate::creature_puppet::puppet_breath(ctx) {
+        puppets.breath(&family, &creature.id, pose, now_ms / 1000.0)
+    } else {
+        None
+    };
+    let key = match breath {
+        Some((step, until_next)) => {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(until_next));
+            key.with_breath(step)
+        }
+        None => key,
+    };
     let skin = crate::creature_puppet::puppet_skin(ctx);
     puppets.set_light(crate::creature_light::current_light(ctx));
     // Seen alive and just died: it falls (a procedural ragdoll) into its
