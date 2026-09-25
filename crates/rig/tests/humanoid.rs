@@ -181,15 +181,16 @@ fn fnv(bytes: &[u8]) -> u64 {
 /// FNV-1a hashes. First taken from the implementation BEFORE it learned to
 /// record bones (adding the bone channel must not move a single part
 /// label); re-pinned 2026-09-24 when the fixture's knees, ankles and chin
-/// were moved onto its silhouette, and again when its shoulders and elbows
-/// were moved onto the arm's centre line. A change here that is not a rig
-/// edit is a labeller regression.
+/// were moved onto its silhouette, again when its shoulders and elbows
+/// were moved onto the arm's centre line, and 2026-09-25 when its ankles,
+/// toes, fingertips, hips and pelvis were moved. A change here that is not
+/// a rig edit is a labeller regression.
 #[test]
 fn the_part_channel_is_what_it_was_before_bones_were_recorded() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
     let outline = outlines.get("humanoid", View::Front).unwrap().outline();
-    for (px, pinned) in [(256, 0x7880599890340bd4u64), (512, 0x612a95bedefd4e83)] {
+    for (px, pinned) in [(256, 0x495d9fb29cedaa75u64), (512, 0xa1f53863a7c8ea12)] {
         let mask = rig_bake::rasterize(&outline, px);
         let bones: Vec<_> = rig.bake_bones().into_iter().map(|(_, b)| b).collect();
         let map = rig_bake::label(&mask, &bones);
