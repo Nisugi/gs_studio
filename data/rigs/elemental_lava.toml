@@ -38,39 +38,39 @@ index = 2
 name = "mass"
 part = "chest"
 parent = "core"
-pivot = [0.5, 0.5985]
+pivot = [0.5, 0.5619]
 tip = [0.5, 0.1641]
-joints = [[0.5, 0.5985], [0.5, 0.1641]]
-pixels = 42119
+joints = [[0.5, 0.5619], [0.5, 0.1641]]
+pixels = 37652
 
 [[bones]]
 index = 3
 name = "core"
 part = "abdomen"
-pivot = [0.5, 0.9787]
-tip = [0.5, 0.5985]
-joints = [[0.5, 0.9787], [0.5, 0.5985]]
-pixels = 13067
+pivot = [0.5, 0.9753]
+tip = [0.5, 0.5619]
+joints = [[0.5, 0.9753], [0.5, 0.5619]]
+pixels = 17107
 
 [[bones]]
 index = 4
 name = "arm_r"
 part = "rightArm"
 parent = "mass"
-pivot = [0.2886, 0.4202]
+pivot = [0.2762, 0.4275]
 tip = [0.0391, 0.6987]
-joints = [[0.2886, 0.4202], [0.1252, 0.5304], [0.0391, 0.6987]]
-pixels = 12518
+joints = [[0.2762, 0.4275], [0.1252, 0.5304], [0.0391, 0.6987]]
+pixels = 12735
 
 [[bones]]
 index = 5
 name = "arm_l"
 part = "leftArm"
 parent = "mass"
-pivot = [0.7114, 0.4202]
+pivot = [0.7238, 0.4275]
 tip = [0.9609, 0.6987]
-joints = [[0.7114, 0.4202], [0.8748, 0.5304], [0.9609, 0.6987]]
-pixels = 12466
+joints = [[0.7238, 0.4275], [0.8748, 0.5304], [0.9609, 0.6987]]
+pixels = 12676
 
 [[bones]]
 index = 6

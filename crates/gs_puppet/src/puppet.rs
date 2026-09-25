@@ -1054,9 +1054,12 @@ impl Puppet {
             let mut seg_head = r.head;
             let mut socket_rings = 0;
             // Wings and tails take the stub too (trunk-kind, but they hang
-            // off the spine the same way); a head does not: its axis is what
-            // the eyes are placed along, and the neck rules seat it.
-            if r.k == 0 && !part_is_head {
+            // off the spine the same way); the skull does not: its axis is
+            // what the eyes are placed along, and the neck rules seat it.
+            // Antlers, horns and ears share its part and hang off it, and
+            // they do take one (a stag's antlers floated over its head).
+            let is_skull = part_is_head && r.parent.is_none_or(|p| segments[p].part.as_deref() != Some("head"));
+            if r.k == 0 && !is_skull {
                 if let Some(p) = r.parent.filter(|p| segments[*p].kind == Kind::Trunk) {
                     let ps = &segments[p];
                     let pa = norm_or(sub(ps.tail, ps.head), [0.0, 1.0, 0.0]);

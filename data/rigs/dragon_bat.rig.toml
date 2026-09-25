@@ -5,6 +5,7 @@ view = "side"
 ref_ft = 5.0
 axis = "withers"
 joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_2", "tail_3", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "wing_root_r", "wing_elbow_r", "wing_wrist_r", "wing_tip_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "wing_root_l", "wing_elbow_l", "wing_wrist_l", "wing_tip_l"]
+unused = ["shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l"]
 
 [anchors]
 head = "poll"
@@ -12,86 +13,70 @@ mouth = "nose"
 saddle = "mid_back"
 
 [joints]
-belly = [-0.23, 1.19]
-chest_front = [0.8093, 2.0334]
-croup = [-1.06, 3.19]
-elbow_l = [0.62, 1.07]
-elbow_r = [0.87, 1.19]
-eye_r = [1.77, 3.99]
-forepaw_l = [0.64, 0.12]
-forepaw_r = [0.64, 0.12]
-groin = [-1.06, 3.19]
-hindpaw_l = [-0.91, 0.59]
-hindpaw_r = [-0.78, 0.64]
-hip_l = [-0.23, 1.19]
-hip_r = [-0.21, 1.22]
-hock_l = [-0.91, 0.59]
-hock_r = [-0.86, 0.62]
-mid_back = [-0.31, 2.69]
-nose = [2.15, 3.85]
-poll = [1.74, 3.97]
-shoulder_l = [0.6970, 1.9593]
-shoulder_r = [0.6898, 1.9530]
-sternum = [0.42, 1.49]
-stifle_l = [-0.91, 0.59]
-stifle_r = [-0.61, 0.82]
-tail_base = [-1.06, 3.19]
-tail_1 = [-2.36, 0.47]
-tail_2 = [-2.36, 0.47]
-tail_3 = [-2.43, 0.47]
-tail_tip = [-2.43, 0.47]
-wing_elbow_l = [-1.1530, 4.6632]
-wing_elbow_r = [-1.1530, 4.7000]
-wing_root_l = [-0.13, 2.69]
-wing_root_r = [-0.11, 2.69]
-wing_tip_l = [-2.01, 4.84]
-wing_tip_r = [-2.01, 4.84]
-wing_wrist_l = [-2.01, 4.84]
-wing_wrist_r = [-2.01, 4.84]
-withers = [0.5530, 2.8431]
-wrist_l = [0.52, 0.24]
-wrist_r = [0.77, 1.02]
+belly = [0.7073, 1.5695]
+chest_front = [1.4707, 2.3148]
+croup = [0.3500, 1.7037]
+eye_r = [1.9500, 3.9000]
+groin = [0.4463, 1.4195]
+hindpaw_l = [0.7427, 0.0305]
+hindpaw_r = [0.7695, 0.0134]
+hip_l = [0.6464, 1.5342]
+hip_r = [0.6769, 1.5903]
+hock_l = [0.3971, 0.5500]
+hock_r = [0.4195, 0.5500]
+mid_back = [0.9000, 2.1500]
+nose = [2.4500, 3.7500]
+poll = [1.7400, 3.9700]
+sternum = [1.0536, 1.9598]
+stifle_l = [0.7000, 1.1232]
+stifle_r = [0.6768, 1.1232]
+tail_base = [0.0500, 1.2634]
+tail_1 = [-0.1743, 1.3587]
+tail_2 = [-0.5474, 0.5500]
+tail_3 = [-1.7659, 0.4666]
+tail_tip = [-2.4500, 0.5698]
+wing_elbow_l = [0.8568, 3.6037]
+wing_elbow_r = [0.8768, 3.4426]
+wing_root_l = [0.4872, 2.4670]
+wing_root_r = [1.0196, 2.6500]
+wing_tip_l = [-1.9609, 4.8068]
+wing_tip_r = [-2.2000, 4.8800]
+wing_wrist_l = [0.9327, 4.3500]
+wing_wrist_r = [0.9527, 4.3500]
+withers = [1.5000, 2.5000]
 
 [depth]
-elbow_l = 0.4602
-elbow_r = -0.4602
-forepaw_l = -0.0371
-forepaw_r = 0.0371
-hindpaw_l = 0.2765
-hindpaw_r = -0.2765
-hip_l = 0.3696
-hip_r = -0.3696
-hock_l = 0.1295
-hock_r = -0.1295
-shoulder_l = 0.24
-shoulder_r = -0.33
-stifle_l = 0.2594
-stifle_r = -0.2594
-wing_elbow_l = 1.2334
-wing_elbow_r = -1.2334
-wing_root_l = 0.4338
-wing_root_r = -0.4338
-wing_tip_l = 1.72
-wing_tip_r = -1.68
-wing_wrist_l = 1.57
-wing_wrist_r = -1.56
-wrist_l = 0.35
-wrist_r = -0.35
+hindpaw_l = 0.7866
+hindpaw_r = -0.7866
+hip_l = 0.3366
+hip_r = -0.3366
+hock_l = 0.3000
+hock_r = -0.3000
+stifle_l = 0.4232
+stifle_r = -0.4232
+wing_elbow_l = 0.9537
+wing_elbow_r = -0.9537
+wing_root_l = 0.7794
+wing_root_r = -0.7794
+wing_tip_l = 1.8291
+wing_tip_r = -1.8291
+wing_wrist_l = 1.1134
+wing_wrist_r = -1.1134
 
-belly = -0.2009
-croup = 0.39
-groin = -0.16
-mid_back = 0.2401
-nose = 0.04
-sternum = 0.3307
-tail_base = -0.51
-tail_1 = -0.226
-tail_2 = -0.0649
-tail_3 = 0.0962
-tail_tip = 0.2573
-withers = 0.1470
+belly = -0.0927
+croup = -0.2025
+groin = -0.1245
+mid_back = 0.0000
+nose = 0.0000
+sternum = 0.1293
+tail_base = 0.2733
+tail_1 = -0.1293
+tail_2 = -0.1830
+tail_3 = 0.5319
+tail_tip = -0.4587
+withers = 0.0000
+chest_front = 0.1830
 [mirror]
-foreleg_l = "foreleg_r"
 hindleg_l = "hindleg_r"
 wing_l = "wing_r"
 
@@ -100,6 +85,7 @@ wing_r = 0.08
 wing_l = 0.08
 wing_hand_r = 0.08
 wing_hand_l = 0.08
+tail = 0.106
 
 [[bones]]
 name = "skull"
@@ -177,24 +163,24 @@ joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
 
 [[bones]]
 name = "wing_r"
-part = "back"
+part = "rightArm"
 parent = "spine"
 joints = ["wing_root_r", "wing_elbow_r", "wing_wrist_r"]
 
 [[bones]]
 name = "wing_l"
-part = "back"
+part = "leftArm"
 parent = "spine"
 joints = ["wing_root_l", "wing_elbow_l", "wing_wrist_l"]
 
 [[bones]]
 name = "wing_hand_r"
-part = "back"
+part = "rightHand"
 parent = "wing_r"
 joints = ["wing_wrist_r", "wing_tip_r"]
 
 [[bones]]
 name = "wing_hand_l"
-part = "back"
+part = "leftHand"
 parent = "wing_l"
 joints = ["wing_wrist_l", "wing_tip_l"]

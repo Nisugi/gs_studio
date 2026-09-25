@@ -15,27 +15,27 @@ saddle = "chest_end"
 snout = [0.5664, 3.5054]
 skull_base = [-0.4476, 3.3057]
 eye_r = [0.3538, 3.5553]
-neck_end = [-0.3550, 2.2586]
+neck_end = [-0.3550, 2.3119]
 chest_end = [-0.3252, 1.9778]
-belly_mid = [-0.1374, 1.2788]
-belly_end = [0.0885, 1.3331]
-back_1 = [0.3015, 0.4017]
-back_2 = [-1.9850, 0.4660]
-tail_mid = [0.9924, 0.1800]
-tail_tip = [2.1358, 1.0367]
+belly_mid = [-0.1516, 1.2112]
+belly_end = [0.1418, 1.2655]
+back_1 = [0.3015, 0.3875]
+back_2 = [-1.9708, 0.4376]
+tail_mid = [1.0066, 0.1800]
+tail_tip = [2.1500, 1.0367]
 
 
 [depth]
-back_1 = -0.2037
-back_2 = 0.2580
-belly_end = 0.1890
-belly_mid = 0.1694
+back_1 = -0.4081
+back_2 = 0.5122
+belly_end = 0.0663
+belly_mid = 0.1961
 chest_end = -0.0768
-tail_mid = -0.4177
+tail_mid = -0.5652
 
-neck_end = -0.1475
+neck_end = -0.2151
 skull_base = -0.2400
-tail_tip = 0.1867
+tail_tip = 0.1600
 [[bones]]
 name = "skull"
 part = "head"

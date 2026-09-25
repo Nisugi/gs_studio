@@ -12,8 +12,8 @@ mouth = "chin"
 saddle = "neck_base"
 
 [joints]
-ankle_l = [-0.2202, 0.6422]
-ankle_r = [-2.6465, 0.6422]
+ankle_l = [-0.2558, 0.6422]
+ankle_r = [-2.6109, 0.6422]
 chin = [0.0933, 7.8487]
 crown = [0.0252, 8.9085]
 elbow_l = [3.1373, 5.1717]
@@ -30,32 +30,33 @@ neck_base = [-0.055, 7.2129]
 pelvis = [-0.1397, 3.7075]
 shoulder_l = [1.1292, 6.9110]
 shoulder_r = [-0.8850, 6.9110]
-sternum = [0.1126, 5.5207]
-toe_l = [2.9049, 0.0099]
-toe_r = [-2.8756, 0.0099]
+sternum = [0.1126, 5.6543]
+toe_l = [2.9049, 0.0455]
+toe_r = [-2.8756, 0.0455]
 wrist_l = [-0.0848, 4.1901]
 wrist_r = [-0.0144, 4.1901]
 
 [depth]
 
 
-ankle_l = -0.4392
-ankle_r = 0.6966
+ankle_l = -0.6085
+ankle_r = 0.6298
 crown = 0.3060
-elbow_l = 0.2563
-elbow_r = 0.0289
-fingertip_r = -0.1948
+elbow_l = 0.3899
+elbow_r = -0.1047
+fingertip_r = -0.2616
 hip_l = 0.5362
 knee_l = 0.9839
 neck_base = 0.6528
 pelvis = 1.0016
-shoulder_l = 0.3074
+shoulder_l = 0.1738
 shoulder_r = 0.4768
 sternum = 0.9781
 toe_l = 2.5749
-toe_r = 1.9691
+toe_r = 1.4346
 wrist_l = 0.0066
 wrist_r = 0.7118
+fingertip_l = 0.5099
 [[bones]]
 name = "skull"
 part = "head"
