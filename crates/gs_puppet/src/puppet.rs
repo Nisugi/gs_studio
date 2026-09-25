@@ -108,6 +108,12 @@ const TRUNK_OVERLAP: f32 = 1.0;
 /// its hinge) when the sine of the angle between two consecutive segments is
 /// at least this: about 17 degrees.
 const CHAIN_BEND_MIN: f32 = 0.3;
+/// A trunk's depth row is one limb's column, not the body, when a mirror
+/// pair of limbs straddles the trunk's line there -- each at least this
+/// share of the trunk's in-plane width off it --
+const TRUNK_ROW_STRADDLE: f32 = 0.25;
+/// ...and the run is under this share of the span between the pair.
+const TRUNK_ROW_PAIR: f32 = 0.8;
 /// A trunk bone counts as present on a row this far past its end joints
 /// (a torso's bulk extends a little beyond the joints that bound it).
 const TRUNK_ROW_MARGIN_FT: f32 = 0.1;
@@ -760,6 +766,31 @@ impl Puppet {
             };
             let trunk_centres = |y: f32| centres_of(y, &|_, k| k == Kind::Trunk);
             let other_limb_centres = |y: f32| centres_of(y, &|j, k| k == Kind::Limb && raws[j].bone != r.bone);
+            // Mirror pairs of limb segments (`_r` / `_l`, same chain and
+            // link) both present on row `y`: each one's centres in the
+            // other view.
+            let limb_pairs = |y: f32| -> Vec<(f32, f32)> {
+                let centre_at = |t: &Raw| {
+                    let (y0, y1) = (t.head[1].min(t.tail[1]), t.head[1].max(t.tail[1]));
+                    if y < y0 - TRUNK_ROW_MARGIN_FT || y > y1 + TRUNK_ROW_MARGIN_FT {
+                        return None;
+                    }
+                    let dy = t.tail[1] - t.head[1];
+                    let s = if dy.abs() < 1e-4 { 0.5 } else { ((y - t.head[1]) / dy).clamp(0.0, 1.0) };
+                    Some(t.head[oa] + (t.tail[oa] - t.head[oa]) * s)
+                };
+                raws.iter()
+                    .zip(&kinds)
+                    .filter(|(t, k)| **k == Kind::Limb && rig.bones[t.bone].name.ends_with("_r"))
+                    .filter_map(|(t, _)| {
+                        let stem = rig.bones[t.bone].name.strip_suffix("_r")?;
+                        let twin = raws.iter().zip(&kinds).find(|(o, k)| {
+                            **k == Kind::Limb && rig.bones[o.bone].name == format!("{stem}_l") && (o.chain, o.k) == (t.chain, t.k)
+                        })?;
+                        Some((centre_at(t)?, centre_at(twin.0)?))
+                    })
+                    .collect()
+            };
             for k in 0..n {
                 let c = centre(k);
                 // KNOWN LIMIT: the merge also welds two limbs a toe-gap apart
@@ -771,6 +802,33 @@ impl Puppet {
                 // rows split into slivers. Needs a rule that tells the two
                 // apart before it can go in.
                 let mut run = other.and_then(|mask| run_along(mask, [c[oa], c[1]], [1.0, 0.0], MERGE_GAP_FT, 0.12));
+                // A trunk's row in the other view crosses a PAIR of limbs
+                // where they hang off it (a cat's chest rows, face on, are
+                // its two forelegs with a gap between), and the run through
+                // the trunk's own line was one leg's column: a chest a
+                // quarter as deep on those rows as on the next, a ribbed
+                // body. Where a mirror pair straddles the trunk's line on
+                // this row and the run falls well short of the span between
+                // them, it is one limb's column (or what hangs between them,
+                // an elephant's trunk) and says nothing about the body: the
+                // rows above and below fill it in. Not bridged across: the
+                // gap under a belly is real, and so is a row's true width
+                // where the pair itself IS the body's edge. A side-drawn
+                // rig's only: its pairs straddle the body face on. (A
+                // biped's arms and legs overlap in profile, and one set a
+                // little forward is not a pair either side of the body.)
+                if kind == Kind::Trunk && rig.view == View::Side {
+                    if let Some((lo, hi)) = run {
+                        let clear = TRUNK_ROW_STRADDLE * m.w[k];
+                        let one_column = limb_pairs(c[1]).iter().any(|&(xa, xb)| {
+                            let (l, r) = (xa.min(xb), xa.max(xb));
+                            l < c[oa] - clear && r > c[oa] + clear && hi - lo < TRUNK_ROW_PAIR * (r - l)
+                        });
+                        if one_column {
+                            run = None;
+                        }
+                    }
+                }
                 // A head carried low and forward (a hunched troll's) sits in
                 // the same rows of the other view as the top of the chest, and
                 // the chest took the head's depth too: a cap over the head,
