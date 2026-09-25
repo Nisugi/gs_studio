@@ -5,6 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `README.md` is the detailed spec (every tab's behaviour, input bindings, the
 rig / baked-map / baked-toml file formats, templates). Read the relevant
 section before changing behaviour it describes, and keep it in sync.
+`docs/` holds the design specs behind larger features (clothing kit,
+projection-first export, texture generator plan).
 
 ## Commands
 
@@ -38,12 +40,19 @@ fresh-built stations, by segment -- a builder change by numbers),
 `fit_diff` (every family's committed puppet against a fresh build: rest
 IoU per view and the segments that moved most -- run it before
 republishing after a builder change),
+`rig_check` (one rig's editor warnings, build result and rest IoU, plus
+overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
+Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
 `gs_field_egui` `stage_demo` /
 `puppet_tune`, `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
+Lighting: `cargo run -p vellum_light --bin vlight -- golden <dir>` checks the
+relight port against relight.py's golden cases (OKLab dE <= 0.01); `bench`
+prints timings.
 
 ## Architecture
 
-Dependency chain (bottom up):
+Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
+`opt-level = 3` in dev builds, see root `Cargo.toml`):
 
 - `rig_bake` -- zero-dependency labeller: silhouette + bones -> per-pixel part
   label (R) and owning bone (G). It is the hot loop behind every editor drag,
@@ -64,9 +73,16 @@ Dependency chain (bottom up):
   projects front / side / back paintings, drawn over the silhouettes, onto
   that sheet (`uv_sheet --demo` shows it), and renders each template's
   depth guide for an image generator (`depth_guide`). `fall.rs` is the procedural
-  death fall (`examples/fall_strip` films it). Everything
+  death fall (`examples/fall_strip` films it); `Pose::breathe` is the idle
+  breathing cycle (`[idle]` in the pose files; `examples/breath_strip` films it
+  with a peak-vs-trough difference tile). Everything
   except `paint.rs` is egui-free. The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
+- `vellum_light` -- zero-dependency, Android-safe port of Niffy's
+  `relight.py`: scene light + time-of-day phase light applied per pixel to
+  straight RGBA8 slices. `gs_field::lighting` holds the data side
+  (`[light]` in scene files, `global/lighting.toml`); `gs_field_egui::creature_light`
+  and `field_lights` do the drawing. Built at `opt-level = 3` in dev too.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must
   stay Android-safe): it embeds baked artefacts via `include_dir!` and hands
