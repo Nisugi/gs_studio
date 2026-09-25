@@ -465,15 +465,19 @@ impl Session {
             copy_into(&self.rigs_dir().join(&name), &dir.join(sub))?;
             shipped.push(format!("{sub}/{name}"));
         }
-        let texture = super::texture::sheet_path(&self.data_root, &family);
-        let published = gs_field::puppets::texture_file_name(&family);
-        if texture.is_file() {
-            let to = dir.join("puppets").join(&published);
-            std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
-            std::fs::copy(&texture, &to).map_err(|e| format!("{} -> {}: {e}", texture.display(), to.display()))?;
-            shipped.push(format!("puppets/{published}"));
-        } else {
-            take_away(dir.join("puppets").join(&published), format!("puppets/{published}"))?;
+        let sheets = [
+            (super::texture::sheet_path(&self.data_root, &family), gs_field::puppets::texture_file_name(&family)),
+            (super::texture::normal_sheet_path(&self.data_root, &family), gs_field::puppets::normal_file_name(&family)),
+        ];
+        for (sheet, published) in sheets {
+            if sheet.is_file() {
+                let to = dir.join("puppets").join(&published);
+                std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
+                std::fs::copy(&sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
+                shipped.push(format!("puppets/{published}"));
+            } else {
+                take_away(dir.join("puppets").join(&published), format!("puppets/{published}"))?;
+            }
         }
         let skins = super::texture::ship_skins(&self.data_root, &family, &dir.join("puppets"))?;
         if skins > 0 {
@@ -627,13 +631,18 @@ impl Session {
         }
         // The painted texture rides beside the puppet (or goes with it), and
         // so do its creatures' skins.
-        let texture = super::texture::sheet_path(&self.data_root, family);
-        let installed = global.join("puppets").join(gs_field::puppets::texture_file_name(family));
-        if texture.is_file() {
-            std::fs::create_dir_all(global.join("puppets")).map_err(|e| e.to_string())?;
-            std::fs::copy(&texture, &installed).map_err(|e| format!("{} -> {}: {e}", texture.display(), installed.display()))?;
-        } else {
-            let _ = std::fs::remove_file(&installed);
+        let sheets = [
+            (super::texture::sheet_path(&self.data_root, family), gs_field::puppets::texture_file_name(family)),
+            (super::texture::normal_sheet_path(&self.data_root, family), gs_field::puppets::normal_file_name(family)),
+        ];
+        for (sheet, name) in sheets {
+            let installed = global.join("puppets").join(name);
+            if sheet.is_file() {
+                std::fs::create_dir_all(global.join("puppets")).map_err(|e| e.to_string())?;
+                std::fs::copy(&sheet, &installed).map_err(|e| format!("{} -> {}: {e}", sheet.display(), installed.display()))?;
+            } else {
+                let _ = std::fs::remove_file(&installed);
+            }
         }
         super::texture::ship_skins(&self.data_root, family, &global.join("puppets"))?;
         crate::pool_dir::invalidate_caches();

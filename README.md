@@ -126,6 +126,7 @@ Two headless commands, for a texture generator to call; each does its job
 and exits without opening a window (exit code 2 and a message on error):
 
     gs-studio [--data <dir>] --project <family>[/<creature>]:front|side|back [--grazing <facing>]
+    gs-studio [--data <dir>] --build-sheet <family>[/<creature>]
     gs-studio [--data <dir>] --export-jobs
 
 `--project` writes the projection-first renders of a family's (or a
@@ -133,7 +134,8 @@ creature's, in its outfit) paintings: the view named, rendered from the
 paintings of the views before it in the family's order (`projection_order`
 in `<data>/generator.toml`, set for every family: each paints first the
 view that sees the most of it -- the quadrupeds, the bird and the worm their
-side, since their front sees only the face and chest). `--export-jobs` writes every template and
+side, since their front sees only the face and chest). `--build-sheet` builds a family's (or a creature's) `sheet.png` and `normal.png` from the paintings and
+normal maps in its folder, as the Rigs tab's *Build sheet* does. `--export-jobs` writes every template and
 `textures/jobs.json`, each job with its `projection_order`; a family whose
 rig fails to build, or a creature whose templates fail, is skipped and
 named on stderr, and the rest are written -- see *Texture painting* under
@@ -242,11 +244,20 @@ farthest grey, outside black, the outline's hairline seams closed -- for an
 image generator's depth control; `gs_puppet::depth_guide`) and the pattern
 (`pattern.png`, `patches.txt`: the skin cut open, `gs_puppet::uv`); *Build sheet from paintings* projects
 `front.png` / `side.png` / `back.png` from that folder onto the pattern as
-`sheet.png` (`gs_puppet::prefill`), which can then be touched up by hand;
-*Reload* re-reads it. A sheet laid out for an older rig (another size) is
+`sheet.png` (`gs_puppet::prefill`), which can then be touched up by hand,
+and any `front_normal.png` / `side_normal.png` / `back_normal.png` beside
+them (tangent-space normal maps of the paintings, the generator's, in the
+same framing) onto `normal.png` (`gs_puppet::prefill_normals`): the
+paint's relief -- ribs, folds, cracks -- as how far each surface point's
+normal leans from the body's own, in rest space. The skin adds that lean
+to its geometry's normal after smoothing, so the relief shades under the
+skin's own light and under every lamp on the stage, and the paintings'
+big forms, already in the puppet, are not counted twice. *Reload*
+re-reads them. A sheet laid out for an older rig (another size) is
 refused with a note. Save installs it beside the puppet as
-`<pool>/global/puppets/<family>.texture.png` and Publish ships it to
-`puppets/`; the stage's puppets wear it. Export also writes `marks.json`,
+`<pool>/global/puppets/<family>.texture.png` (and `normal.png` as
+`<family>.normal.png`) and Publish ships them to `puppets/`; the stage's
+puppets wear them. Export also writes `marks.json`,
 where the puppet's eyes are in each template: a textured skin draws no eye
 dots, so a painting puts the eyes there.
 
@@ -261,8 +272,9 @@ folder of this family and every creature `outfits.toml` dresses that the
 bestiary puts on it. The preview then shows the puppet in that creature's
 outfit, in its own `sheet.png`; *Build sheet* and the projection buttons
 work in its folder. Save installs every creature sheet of the family as
-`<pool>/global/puppets/skins/<family>/<creature>.png` (dropping ones whose
-sheet is gone) and Publish ships them to `puppets/skins/`. On the stage a
+`<pool>/global/puppets/skins/<family>/<creature>.png` (its normal sheet as
+`<creature>.normal.png` beside it; dropping ones whose sheet is gone) and
+Publish ships them to `puppets/skins/`. On the stage a
 creature with an outfit or a skin draws as its family's puppet in its outfit,
 wearing its own skin. A creature in an outfit with no skin of its own wears
 no texture, because the family's sheet has no garments on it.

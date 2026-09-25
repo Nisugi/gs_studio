@@ -84,6 +84,23 @@ enum Look {
 impl Look {
     const ALL: [Look; 4] = [Look::Front, Look::Back, Look::Right, Look::Left];
 
+    /// A tangent-space normal as a painting over this view stores it (x to
+    /// the picture's right, y up, z out of the picture toward the viewer,
+    /// the usual convention) in REST world space.
+    fn tangent_to_world(self, n: V3) -> V3 {
+        match self {
+            // The front picture's right is +x, and it faces +z.
+            Look::Front => [n[0], n[1], n[2]],
+            // Seen from behind, both are mirrored.
+            Look::Back => [-n[0], n[1], -n[2]],
+            // A side picture's right is the creature's front (+z); seen from
+            // its right (-x), out of the picture is -x...
+            Look::Right => [-n[2], n[1], n[0]],
+            // ...and used again from the left, +x.
+            Look::Left => [n[2], n[1], n[0]],
+        }
+    }
+
     /// Unit vector toward the viewer.
     fn toward(self) -> V3 {
         match self {
@@ -287,6 +304,73 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
             if weight > 0.0 {
                 let o = i * 4;
                 rgba[o..o + 3].copy_from_slice(&sum.map(|v| (v / weight).round().clamp(0.0, 255.0) as u8));
+                rgba[o + 3] = 255;
+                state[i] = 2;
+            }
+        }
+    }
+    fill_holes(&mut rgba, &mut state, &owner, w, h);
+    rgba
+}
+
+/// The NORMAL sheet from normal maps painted over the same silhouettes as
+/// the paintings (see [`prefill`]): straight RGBA8, `layout.w` x `layout.h`,
+/// transparent off the patches and where no map sees. Each map is a
+/// tangent-space normal map of its view (RGB = xyz * 0.5 + 0.5, x to the
+/// right, y up, z toward the viewer); what the sheet stores per pixel is
+/// how far the map's normal, in rest space, leans away from the view's own
+/// direction -- the DEVIATION, so a flat map is zero and the skin adds it
+/// to the normal its own geometry gives (`Posed::skin_textured`). Views
+/// blend as the paintings do, by how squarely each faces the surface.
+pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u8> {
+    let views: Vec<(Look, Grid, Painting, DepthMap)> = Look::ALL
+        .iter()
+        .filter_map(|look| {
+            let (grid, map) = match look {
+                Look::Front => (maps.front_grid?, maps.front?),
+                Look::Back => (maps.front_grid?, maps.back?),
+                Look::Right | Look::Left => (maps.side_grid?, maps.side?),
+            };
+            Some((*look, grid, map, DepthMap::new(p, *look, &grid)))
+        })
+        .collect();
+
+    let (w, h) = (layout.w, layout.h);
+    let mut rgba = vec![0u8; w * h * 4];
+    let mut state = vec![0u8; w * h];
+    let mut owner = vec![usize::MAX; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+            let i = y * w + x;
+            owner[i] = seg;
+            state[i] = 1;
+            let Some((point, normal)) = rest_point(p, seg, station, theta) else { continue };
+            let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+            for (look, grid, map, depth) in &views {
+                let facing = dot(normal, look.toward());
+                if facing < MIN_FACING {
+                    continue;
+                }
+                let (at, d) = look.project(grid, point);
+                if d > depth.nearest(at) + DEPTH_TOL_FT {
+                    continue;
+                }
+                if let Some(c) = map.sample(grid, at) {
+                    let tangent = norm_or(c.map(|v| v / 127.5 - 1.0), [0.0, 0.0, 1.0]);
+                    let deviation = crate::math::sub(look.tangent_to_world(tangent), look.toward());
+                    let wt = facing.powi(FACING_POWER);
+                    for k in 0..3 {
+                        sum[k] += deviation[k] * wt;
+                    }
+                    weight += wt;
+                }
+            }
+            if weight > 0.0 {
+                let o = i * 4;
+                for k in 0..3 {
+                    rgba[o + k] = crate::uv::encode_normal(sum[k] / weight);
+                }
                 rgba[o + 3] = 255;
                 state[i] = 2;
             }

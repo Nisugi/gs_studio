@@ -4,6 +4,7 @@
 //!             [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 //!   gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
+//!   gs-studio [--data <dir>] --build-sheet <family>[/<creature>]
 //!   gs-studio [--data <dir>] --export-jobs
 //!
 //! Both run headless, for a texture generator to call, and exit: `--project`
@@ -100,6 +101,15 @@ fn main() -> eframe::Result {
                 std::process::exit(0);
             }
             Err(e) => fail(&format!("gs-studio: --project: {e}")),
+        }
+    }
+    if let Some(target) = &cli.build_sheet {
+        match editor::texture::build_sheet_cli(&data.path, target) {
+            Ok((path, count)) => {
+                println!("{} ({count} paintings)", path.display());
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --build-sheet: {e}")),
         }
     }
     if cli.export_jobs {

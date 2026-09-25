@@ -365,6 +365,16 @@ four-legged reptilian rig; the spectral black warhorse and the ki-lin are
 equine quadrupeds; the treekin sapling is a treekin). A value the file gives
 always wins. `dolls::FAMILY_ALIASES` gains `goliath -> giant`.
 
+### 6.16 Normal sheets
+
+`PuppetRig::normal` is `<family>.normal.png` beside the texture, undecoded
+(`normal_file_name`), and `PuppetRigs::skin_normal(family, creature)` a
+creature skin's `skins/<family>/<creature>.normal.png`
+(`skin_normal_file_name`; `embedded_skin_normals`, `load_skin_normals`).
+A normal sheet is the texture's relief for the frontend's lighting
+(`gs_puppet::prefill_normals`); `embedded_skins` / `load_skins` leave the
+`.normal.png` files out. Still Android-safe: bytes only.
+
 ### 6.15 Creature skins and outfits
 
 `PuppetRigs` carries, unparsed like the rest:

@@ -161,7 +161,7 @@ fn paint_on_a_patch_shows_on_its_segment_only() {
             rgba[(y * layout.w + x) * 4..][..4].copy_from_slice(&[0, 0, 255, 255]);
         }
     }
-    let tex = crate::Texture { layout, rgba };
+    let tex = crate::Texture { layout, rgba, normal: None };
     let look = Look { outline_px: 0.0, ..Look::default() };
     let skin = posed.skin_textured(&project, &look, Some(&tex));
     let at = |seg: usize| {
@@ -298,4 +298,65 @@ fn a_lamp_casts_the_figure_s_shadow_away_from_it() {
     assert!(caster.cast(&project, &[away], 2.0).is_none(), "a beam pointed away casts none");
     let toward = crate::Lamp { beam: Some(crate::Beam { dir: [1.0, 0.0, 0.0], spread: 60.0, soft: 10.0 }), ..away };
     assert!(caster.cast(&project, &[toward], 2.0).is_some(), "pointed at it, it does");
+}
+
+/// A normal sheet: a flat map projects to no deviation; a map leaning to
+/// the picture's right leans the sheet's rest-space normals toward +x on
+/// the chest, and the skin's normals (what lamps light) with them.
+#[test]
+fn a_normal_sheet_leans_the_skin_where_the_map_leans() {
+    use crate::prefill::{Painting, Paintings};
+    use crate::uv::{decode_normal, UvLayout};
+    let puppet = humanoid();
+    let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+    let grid = |view: rig::View| outlines.get("humanoid", view).map(|e| rig_bake::rasterize(&e.outline(), crate::MASK_PX).grid);
+    let (front_grid, side_grid) = (grid(rig::View::Front), grid(rig::View::Side));
+    let (w, h) = (front_grid.unwrap().w, front_grid.unwrap().h);
+    let flat: Vec<u8> = [128, 128, 255, 255].iter().copied().cycle().take(w * h * 4).collect();
+    // Leaning 45 degrees to the right: (0.707, 0, 0.707).
+    let lean: Vec<u8> = [218, 128, 218, 255].iter().copied().cycle().take(w * h * 4).collect();
+    let layout = UvLayout::fit(&puppet, 512);
+    let sheet = |map: &Vec<u8>| {
+        let maps = Paintings { front_grid, side_grid, front: Some(Painting { rgba: map, w, h }), side: None, back: None };
+        crate::prefill::prefill_normals(&puppet, &layout, &maps)
+    };
+    let (flat_sheet, lean_sheet) = (sheet(&flat), sheet(&lean));
+    let painted = flat_sheet.chunks(4).filter(|p| p[3] == 255).count();
+    assert!(painted > 1000, "{painted} pixels reached by the front map");
+    let mean = |sheet: &Vec<u8>| {
+        let (mut sum, mut n) = ([0.0f32; 3], 0.0);
+        for p in sheet.chunks(4).filter(|p| p[3] == 255) {
+            for k in 0..3 {
+                sum[k] += decode_normal(p[k]);
+            }
+            n += 1.0;
+        }
+        sum.map(|v| v / n)
+    };
+    let f = mean(&flat_sheet);
+    assert!(f.iter().all(|v| v.abs() < 0.02), "flat map, no deviation: {f:?}");
+    let l = mean(&lean_sheet);
+    assert!(l[0] > 0.4 && l[1].abs() < 0.05 && l[2] < -0.1, "leans +x, away from +z: {l:?}");
+
+    // The skin's normals lean with it: over the chest, the surface faces
+    // more to +x with the leaning sheet than without.
+    let posed = puppet.pose(&crate::Pose::default());
+    let cam = crate::Camera::framing(puppet.height * 1.2, [200.0, 200.0]);
+    let project = |p: crate::math::V3| cam.project(p);
+    let rgba = vec![200u8; layout.w * layout.h * 4];
+    let bare = crate::Texture { layout: layout.clone(), rgba: rgba.clone(), normal: None };
+    let leaning = crate::Texture { layout: layout.clone(), rgba, normal: Some(lean_sheet) };
+    let look = crate::Look::default();
+    let (_, s0) = posed.skin_surface(&project, &look, Some(&bare), crate::skin::Effects::default());
+    let (skin, s1) = posed.skin_surface(&project, &look, Some(&leaning), crate::skin::Effects::default());
+    let (mut x0, mut x1, mut n) = (0.0f32, 0.0f32, 0.0f32);
+    for i in 0..skin.w * skin.h {
+        if let (Some(a), Some(b)) = (s0.normal_at(i), s1.normal_at(i)) {
+            x0 += a[0];
+            x1 += b[0];
+            n += 1.0;
+        }
+    }
+    assert!(n > 100.0);
+    assert!(x1 / n > x0 / n + 0.04, "the leaning sheet turns the skin toward +x: {} vs {}", x1 / n, x0 / n);
 }

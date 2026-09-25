@@ -25,7 +25,7 @@ it at a game hour, for lighting checks). Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
 Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
 (projection-first renders, in the family's order: `projection_order` in
-`<data>/generator.toml`, quadrupeds side-first) and `--export-jobs` (every template + `textures/jobs.json`),
+`<data>/generator.toml`, quadrupeds side-first) `--build-sheet <family>[/<creature>]` (sheet.png + normal.png from a folder's paintings) and `--export-jobs` (every template + `textures/jobs.json`),
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
 closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs
@@ -71,7 +71,9 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   (`turnaround` with `TURNAROUND_HOLD` shows them); `outfit.rs` dresses it
   from the clothing kit `data/outfits/kit.toml` (`TURNAROUND_WEAR`); `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
-  that sheet (`uv_sheet --demo` shows it), and renders each template's
+  that sheet (`uv_sheet --demo` shows it) and their normal maps onto a
+  normal sheet (`prefill_normals`; `examples/normal_strip` shows a family
+  with and without it), and renders each template's
   depth guide for an image generator (`depth_guide`). `fall.rs` is the procedural
   death fall (`examples/fall_strip` films it); `Pose::breathe` is the idle
   breathing cycle (`[idle]` in the pose files; `examples/breath_strip` films it

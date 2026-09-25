@@ -43,6 +43,12 @@ const MAX_SIDE: usize = 4096;
 /// Normals and colours are averaged over a window this fraction of the
 /// figure's height across.
 const SMOOTH_OF_HEIGHT: f32 = 0.035;
+/// How far a normal sheet's deviation leans the surface normal (1 = as the
+/// map was painted).
+const NORMAL_MAP_STRENGTH: f32 = 1.0;
+/// How strongly the relief shades: tone per unit change in the light's
+/// incidence the normal sheet makes over the geometry's own.
+const RELIEF_GAIN: f32 = 0.7;
 /// Neighbours further apart in depth than this (fraction of height) are
 /// different surfaces and never blend.
 const BLEND_DEPTH_OF_HEIGHT: f32 = 0.04;
@@ -167,6 +173,9 @@ fn frost_glint(at: [f32; 2]) -> bool {
 /// What the rasteriser paints a sample with, beyond the body colour.
 struct Paint<'a> {
     tex: Option<&'a Texture>,
+    /// A rest-space direction on segment `seg`, as posed and turned: what
+    /// the normal sheet's deviations go through.
+    rot: &'a dyn Fn(usize, V3) -> V3,
     /// A 1 px-per-foot layout of the surface, for effects measured in feet.
     surface: Option<&'a UvLayout>,
     effects: Effects,
@@ -225,6 +234,8 @@ struct Samples {
     seg: Vec<u32>,
     /// Surface points, world feet; empty unless a [`SkinSurface`] is kept.
     pos: Vec<V3>,
+    /// The normal sheet's deviation here, posed (zero without one).
+    dev: Vec<V3>,
 }
 
 impl Samples {
@@ -238,6 +249,7 @@ impl Samples {
             col: vec![[0.0; 3]; n],
             seg: vec![u32::MAX; n],
             pos: if keep_pos { vec![[0.0; 3]; n] } else { Vec::new() },
+            dev: vec![[0.0; 3]; n],
         }
     }
 
@@ -299,6 +311,10 @@ impl Samples {
                 let angle = w0 * theta[0] + w1 * theta[1] + w2 * theta[2];
                 let seg = v[0].seg as usize;
                 let painted = tex.and_then(|t| t.sample(t.layout.locate(seg, station, angle)?));
+                self.dev[i] = tex
+                    .filter(|t| t.normal.is_some())
+                    .and_then(|t| t.sample_normal(t.layout.locate(seg, station, angle)?))
+                    .map_or([0.0; 3], |d| (paint.rot)(seg, d));
                 let mut col = match painted {
                     Some(rgb) => {
                         let wound = [lerp(|c| c.wound[0]), lerp(|c| c.wound[1]), lerp(|c| c.wound[2])];
@@ -341,6 +357,8 @@ struct Pixels {
     col: Vec<[f32; 3]>,
     /// The nearest sample's surface point; empty unless the samples kept them.
     pos: Vec<V3>,
+    /// The normal sheet's deviation, averaged over the samples.
+    dev: Vec<V3>,
 }
 
 impl Pixels {
@@ -355,12 +373,13 @@ impl Pixels {
             n: vec![[0.0; 3]; len],
             col: vec![[0.0; 3]; len],
             pos: if s.pos.is_empty() { Vec::new() } else { vec![[0.0; 3]; len] },
+            dev: vec![[0.0; 3]; len],
         };
         for y in 0..h {
             for x in 0..w {
                 let i = y * w + x;
                 let mut hits = 0;
-                let (mut n, mut col) = ([0.0f32; 3], [0.0f32; 3]);
+                let (mut n, mut col, mut dev) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3]);
                 for sy in 0..SS {
                     for sx in 0..SS {
                         let j = (y * SS + sy) * s.w + x * SS + sx;
@@ -369,6 +388,7 @@ impl Pixels {
                         }
                         hits += 1;
                         n = add(n, norm_or(s.n[j], [0.0, 0.0, 1.0]));
+                        dev = add(dev, s.dev[j]);
                         for k in 0..3 {
                             col[k] += s.col[j][k];
                         }
@@ -385,6 +405,7 @@ impl Pixels {
                     out.cov[i] = hits as f32 / (SS * SS) as f32;
                     out.n[i] = norm_or(n, [0.0, 0.0, 1.0]);
                     out.col[i] = col.map(|c| c / hits as f32);
+                    out.dev[i] = scale(dev, 1.0 / hits as f32);
                 }
             }
         }
@@ -724,8 +745,11 @@ impl Posed<'_> {
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
         let surface = effects.any().then(|| UvLayout::new(puppet, 1.0));
+        let turn = rot_y(look.yaw);
+        let rot = |seg: usize, v: V3| mul_mv(&turn, self.xf[seg].dir(v));
         let paint = Paint {
             tex: texture,
+            rot: &rot,
             surface: surface.as_ref(),
             effects,
             // At least about a pixel wide, however small the figure.
@@ -748,6 +772,23 @@ impl Posed<'_> {
             a < count && b < count && table[a * count + b]
         };
         px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any(), &is_joined);
+        // The normal sheet's relief goes on AFTER the smoothing (which is
+        // for the geometry's seams, and would blur a rib away), leaning the
+        // surface's own normal by the painted deviation: the cel bands and
+        // every lamp then see the ribs, folds and cracks the paint has.
+        // The geometry's own normals are kept: the cel bands are theirs, and
+        // the relief shows as the CHANGE in the light's incidence the map
+        // makes on top (the bands have a tiny continuous term, and a rib
+        // vanished into them).
+        let relief = texture.is_some_and(|t| t.normal.is_some()).then(|| {
+            let geo = px.n.clone();
+            for i in 0..w * h {
+                if px.dev[i] != [0.0; 3] {
+                    px.n[i] = norm_or(add(px.n[i], scale(px.dev[i], NORMAL_MAP_STRENGTH)), px.n[i]);
+                }
+            }
+            geo
+        });
 
         // ---- shade and composite
         let (near, far) =
@@ -772,11 +813,18 @@ impl Posed<'_> {
             if px.cov[i] > 0.0 {
                 let n = px.n[i];
                 let g = dot(n, view.light);
-                let lit = smoothstep(LIGHT_ABOVE - BAND_SOFT, LIGHT_ABOVE + BAND_SOFT, g);
-                let dark = 1.0 - smoothstep(DARK_BELOW - BAND_SOFT, DARK_BELOW + BAND_SOFT, g);
+                let (gb, dg) = match &relief {
+                    Some(geo) => {
+                        let gb = dot(geo[i], view.light);
+                        (gb, g - gb)
+                    }
+                    None => (g, 0.0),
+                };
+                let lit = smoothstep(LIGHT_ABOVE - BAND_SOFT, LIGHT_ABOVE + BAND_SOFT, gb);
+                let dark = 1.0 - smoothstep(DARK_BELOW - BAND_SOFT, DARK_BELOW + BAND_SOFT, gb);
                 // The cel bands, plus a gentle continuous term so a form still
-                // turns between them.
-                let tone = (1.0 + (LIT_TONE - 1.0) * lit - (1.0 - DARK_TONE) * dark) * (1.0 + LAMBERT * g);
+                // turns between them, and the normal sheet's relief on top.
+                let tone = (1.0 + (LIT_TONE - 1.0) * lit - (1.0 - DARK_TONE) * dark) * (1.0 + LAMBERT * gb) * (1.0 + RELIEF_GAIN * dg);
                 let dim = 1.0 - DEPTH_SHADE * ((px.z[i] - near) / range).clamp(0.0, 1.0);
                 let mut c = px.col[i].map(|v| (v * tone * dim).clamp(0.0, 255.0));
                 if inner[i] > 0.0 {
@@ -926,6 +974,12 @@ impl SkinSurface {
     fn blank(w: usize, h: usize, to_cam: V3) -> SkinSurface {
         let n = w * h;
         SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n] }
+    }
+
+    /// The unit normal at pixel `i` (row-major), or None where the body
+    /// does not cover it.
+    pub fn normal_at(&self, i: usize) -> Option<V3> {
+        (self.cov.get(i).copied().unwrap_or(0) > 0).then(|| self.normal[i].map(|v| v as f32 / 127.0))
     }
 
     fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32) {

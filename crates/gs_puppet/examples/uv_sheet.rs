@@ -315,7 +315,7 @@ fn main() {
             (checker, "checker")
         }
     };
-    let texture = Texture { layout, rgba };
+    let texture = Texture { layout, rgba, normal: None };
 
     let poses = PoseSet::load(&data.join("poses"), &rig.body_type).expect("poses");
     let poses = poses.for_family(&family);

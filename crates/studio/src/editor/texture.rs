@@ -15,26 +15,31 @@
 //! | `marks.json` | Export | where the puppet's eyes are in each template (a painting puts the eyes there) |
 //! | `pattern.png`, `patches.txt` | Export | the skin cut open (`gs_puppet::uv`): the sheet's layout |
 //! | `front.png`, `side.png`, `back.png` | the artist / generator | paintings over the templates (any subset), in the family's or the creature's folder |
+//! | `front_normal.png`, `side_normal.png`, `back_normal.png` | the generator | tangent-space normal maps of the paintings (any subset), the same framing |
 //! | `projected/<view>_render.png`, `<view>_unpainted.png` | Project | projection-first: what the paintings so far show from the next view in the family's order ([`projection_order`]), and what is left to paint |
 //! | `sheet.png` | Build sheet, then the artist | the texture itself: the paintings projected onto the pattern, touched up by hand |
+//! | `normal.png` | Build sheet | the normal sheet: the normal maps projected onto the pattern (`gs_puppet::prefill_normals`); only with a map to project |
 //!
 //! Save installs the family's `sheet.png` as
-//! `<pool>/global/puppets/<family>.texture.png`, and each creature's as
-//! `<pool>/global/puppets/skins/<family>/<creature>.png` ([`ship_skins`]),
-//! and Publish ships them beside the puppet. The sheet's layout is rebuilt
+//! `<pool>/global/puppets/<family>.texture.png` (and `normal.png` as
+//! `<family>.normal.png`), and each creature's as
+//! `<pool>/global/puppets/skins/<family>/<creature>.png` (`.normal.png`
+//! beside it) ([`ship_skins`]), and Publish ships them beside the puppet. The sheet's layout is rebuilt
 //! from the puppet wherever it is used, so a sheet painted for an older rig
 //! (another size) is refused rather than smeared.
 
 use std::path::{Path, PathBuf};
 
 use gs_puppet::{
-    depth_guide, dressed_silhouette, prefill, project_view, puppet_eyes, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
+    depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
     Paintings, Puppet, Texture, UvLayout, MASK_PX, SHEET_SIDE,
 };
 use rig::{Outlines, View};
 use rig_bake::Mask;
 
 pub const SHEET: &str = "sheet.png";
+/// The normal sheet beside it.
+pub const NORMAL_SHEET: &str = "normal.png";
 const TEMPLATE_GREY: [u8; 3] = [205, 205, 205];
 /// The depth guides and projection renders are this many times their
 /// template's size: the size the paintings are made at.
@@ -51,6 +56,10 @@ pub fn dir(data_root: &Path, family: &str) -> PathBuf {
 
 pub fn sheet_path(data_root: &Path, family: &str) -> PathBuf {
     dir(data_root, family).join(SHEET)
+}
+
+pub fn normal_sheet_path(data_root: &Path, family: &str) -> PathBuf {
+    dir(data_root, family).join(NORMAL_SHEET)
 }
 
 /// A creature's own paintings and skin: `<data>/textures/<family>/<creature>/`.
@@ -266,20 +275,23 @@ fn as_painting(p: &Option<(usize, usize, Vec<u8>)>) -> Option<Painting<'_>> {
 
 type Pixels = Option<(usize, usize, Vec<u8>)>;
 
-/// `front.png`, `side.png` and `back.png` from `folder`, those there are.
-fn read_paintings(folder: &Path) -> Result<[Pixels; 3], String> {
-    let read = |name: &str| {
-        let p = folder.join(name);
+/// `front<suffix>.png`, `side<suffix>.png` and `back<suffix>.png` from
+/// `folder`, those there are.
+fn read_paintings(folder: &Path, suffix: &str) -> Result<[Pixels; 3], String> {
+    let read = |view: &str| {
+        let p = folder.join(format!("{view}{suffix}.png"));
         p.is_file().then(|| read_png(&p)).transpose()
     };
-    Ok([read("front.png")?, read("side.png")?, read("back.png")?])
+    Ok([read("front")?, read("side")?, read("back")?])
 }
 
 /// Project whichever of `front.png`, `side.png`, `back.png` are in `folder`
-/// onto `d`'s pattern and write `folder/sheet.png` (replacing it). Returns
+/// onto `d`'s pattern and write `folder/sheet.png` (replacing it), and
+/// whichever of `front_normal.png`, `side_normal.png`, `back_normal.png`
+/// are there as `folder/normal.png` (removed when there are none). Returns
 /// the sheet's path and how many paintings went in.
 pub fn build_sheet_in(folder: &Path, d: &Dressed) -> Result<(PathBuf, usize), String> {
-    let [front_px, side_px, back_px] = read_paintings(folder)?;
+    let [front_px, side_px, back_px] = read_paintings(folder, "")?;
     let count = [&front_px, &side_px, &back_px].iter().filter(|p| p.is_some()).count();
     if count == 0 {
         return Err(format!(
@@ -292,6 +304,15 @@ pub fn build_sheet_in(folder: &Path, d: &Dressed) -> Result<(PathBuf, usize), St
     let rgba = prefill(&d.puppet, &layout, &paintings);
     let path = folder.join(SHEET);
     write_png(&path, layout.w, layout.h, &rgba)?;
+    let [front_n, side_n, back_n] = read_paintings(folder, "_normal")?;
+    let normal_path = folder.join(NORMAL_SHEET);
+    if [&front_n, &side_n, &back_n].iter().any(|p| p.is_some()) {
+        let maps = d.paintings(as_painting(&front_n), as_painting(&side_n), as_painting(&back_n));
+        let normals = prefill_normals(&d.puppet, &layout, &maps);
+        write_png(&normal_path, layout.w, layout.h, &normals)?;
+    } else if normal_path.is_file() {
+        std::fs::remove_file(&normal_path).map_err(|e| format!("{}: {e}", normal_path.display()))?;
+    }
     Ok((path, count))
 }
 
@@ -367,16 +388,22 @@ pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)>
 
 /// Put `family`'s creature skins into a puppets folder (the pool's
 /// `global/puppets/`, or the publish dir's `puppets/`) as
-/// `skins/<family>/<creature>.png` (`gs_field::puppets::skin_file_name`), and
-/// drop any there whose creature has no sheet any more. Returns how many
-/// were copied.
+/// `skins/<family>/<creature>.png` (`gs_field::puppets::skin_file_name`),
+/// each with its normal sheet as `<creature>.normal.png` when it has one,
+/// and drop any there whose creature has no sheet (or normal sheet) any
+/// more. Returns how many skins were copied.
 pub fn ship_skins(data_root: &Path, family: &str, puppets: &Path) -> Result<usize, String> {
     let sheets = creature_sheets(data_root, family);
+    let has_normal = |c: &str| sheets.iter().any(|(s, sheet)| s == c && sheet.with_file_name(NORMAL_SHEET).is_file());
     let into = puppets.join(gs_field::puppets::SKINS_DIR).join(family);
     for stale in std::fs::read_dir(&into).into_iter().flatten().flatten() {
         let name = stale.file_name().to_string_lossy().into_owned();
-        let creature = name.strip_suffix(".png");
-        if creature.is_some_and(|c| !sheets.iter().any(|(s, _)| s == c)) {
+        let keep = match (name.strip_suffix(".normal.png"), name.strip_suffix(".png")) {
+            (Some(c), _) => has_normal(c),
+            (None, Some(c)) => sheets.iter().any(|(s, _)| s == c),
+            _ => true,
+        };
+        if !keep {
             std::fs::remove_file(stale.path()).map_err(|e| format!("{}: {e}", stale.path().display()))?;
         }
     }
@@ -388,6 +415,11 @@ pub fn ship_skins(data_root: &Path, family: &str, puppets: &Path) -> Result<usiz
     for (creature, sheet) in &sheets {
         let to = puppets.join(gs_field::puppets::skin_file_name(family, creature));
         std::fs::copy(sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
+        let normal = sheet.with_file_name(NORMAL_SHEET);
+        if normal.is_file() {
+            let to = puppets.join(gs_field::puppets::skin_normal_file_name(family, creature));
+            std::fs::copy(&normal, &to).map_err(|e| format!("{} -> {}: {e}", normal.display(), to.display()))?;
+        }
     }
     Ok(sheets.len())
 }
@@ -454,7 +486,7 @@ pub fn export_projected(folder: &Path, d: &Dressed, view: PaintView, grazing: f3
             view_name(order[2])
         ));
     }
-    let [front_px, side_px, back_px] = read_paintings(folder)?;
+    let [front_px, side_px, back_px] = read_paintings(folder, "")?;
     let first = view_name(order[0]);
     let painted = |v: PaintView| match v {
         PaintView::Front => &front_px,
@@ -677,6 +709,27 @@ pub fn project_cli(data_root: &Path, target: &str, grazing: Option<f32>) -> Resu
     export_projected(&folder, &d, view, grazing.unwrap_or(gs_puppet::GRAZING), projection_order(data_root, family)?)
 }
 
+/// `--build-sheet <family>[/<creature>]`: [`build_sheet_in`] for that
+/// folder, headless. Returns the sheet's path and how many paintings went
+/// in.
+pub fn build_sheet_cli(data_root: &Path, target: &str) -> Result<(PathBuf, usize), String> {
+    let (family, creature) = match target.split_once('/') {
+        Some((f, c)) => (f, Some(c)),
+        None => (target, None),
+    };
+    if family.is_empty() {
+        return Err(format!("--build-sheet wants <family>[/<creature>], got '{target}'"));
+    }
+    let outlines = Outlines::load(&data_root.join("outlines.json")).map_err(|e| format!("outlines.json: {e}"))?;
+    let rig = rig::Rig::load(&data_root.join("rigs").join(rig::Rig::file_name(family))).map_err(|e| format!("{family}: {e}"))?;
+    let puppet = Puppet::build(&rig, &outlines).map_err(|e| format!("{family}: {e}"))?;
+    let (d, folder) = match creature {
+        Some(c) => (Dressed::creature(data_root, &puppet, &outlines, family, c)?, creature_dir(data_root, family, c)),
+        None => (Dressed::new(&puppet, &outlines, family, None), dir(data_root, family)),
+    };
+    build_sheet_in(&folder, &d)
+}
+
 /// The family's `sheet.png` as a texture for `puppet`. Ok(None) when there
 /// is no sheet; Err when it is unreadable or laid out for another rig.
 /// (The Rigs tab caches the pixels and calls [`sheet_texture`] itself.)
@@ -687,7 +740,17 @@ pub fn load_sheet(data_root: &Path, family: &str, puppet: &Puppet) -> Result<Opt
         return Ok(None);
     }
     let (w, h, rgba) = read_png(&path)?;
-    sheet_texture(puppet, w, h, rgba).map(Some)
+    let mut texture = sheet_texture(puppet, w, h, rgba)?;
+    let normal = normal_sheet_path(data_root, family);
+    if normal.is_file() {
+        let (nw, nh, normals) = read_png(&normal)?;
+        if (nw, nh) == (texture.layout.w, texture.layout.h) {
+            texture.normal = Some(normals);
+        } else {
+            return Err(format!("normal.png is {nw}x{nh} but this rig's pattern is {}x{}: build the sheet again", texture.layout.w, texture.layout.h));
+        }
+    }
+    Ok(Some(texture))
 }
 
 /// Decoded sheet pixels as a texture for `puppet`, if the sizes agree.
@@ -699,7 +762,7 @@ pub fn sheet_texture(puppet: &Puppet, w: usize, h: usize, rgba: Vec<u8>) -> Resu
             layout.w, layout.h
         ));
     }
-    Ok(Texture { layout, rgba })
+    Ok(Texture { layout, rgba, normal: None })
 }
 
 #[cfg(test)]

@@ -1199,13 +1199,15 @@ impl PuppetCache {
         let creature = creature_of(family);
         let puppet = self.puppet(family);
         let rigs = self.rigs();
-        let bytes = match creature {
+        // The normal sheet rides with whichever sheet is worn: a creature's
+        // own with its skin, the family's with the family's.
+        let (bytes, normal_bytes) = match creature {
             Some(c) => match rigs.skin(base, c) {
-                Some(skin) => Some(skin.clone()),
-                None if self.outfit(c).is_some() => None,
-                None => rigs.get(base).and_then(|rig| rig.texture.clone()),
+                Some(skin) => (Some(skin.clone()), rigs.skin_normal(base, c).cloned()),
+                None if self.outfit(c).is_some() => (None, None),
+                None => (rigs.get(base).and_then(|rig| rig.texture.clone()), rigs.get(base).and_then(|rig| rig.normal.clone())),
             },
-            None => rigs.get(base).and_then(|rig| rig.texture.clone()),
+            None => (rigs.get(base).and_then(|rig| rig.texture.clone()), rigs.get(base).and_then(|rig| rig.normal.clone())),
         };
         let texture = match (puppet, bytes) {
             (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
@@ -1213,7 +1215,22 @@ impl PuppetCache {
                     let img = img.to_rgba8();
                     let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
                     if (img.width() as usize, img.height() as usize) == (layout.w, layout.h) {
-                        Some(Arc::new(gs_puppet::Texture { layout, rgba: img.into_raw() }))
+                        let normal = normal_bytes.and_then(|bytes| match image::load_from_memory(&bytes) {
+                            Ok(n) => {
+                                let n = n.to_rgba8();
+                                if (n.width() as usize, n.height() as usize) == (layout.w, layout.h) {
+                                    Some(n.into_raw())
+                                } else {
+                                    tracing::warn!("puppet '{family}': normal sheet is {}x{}, the texture {}x{}: ignored", n.width(), n.height(), layout.w, layout.h);
+                                    None
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("puppet '{family}': normal sheet did not decode: {e}");
+                                None
+                            }
+                        });
+                        Some(Arc::new(gs_puppet::Texture { layout, rgba: img.into_raw(), normal }))
                     } else {
                         tracing::warn!(
                             "puppet '{family}': texture is {}x{}, this puppet's sheet is {}x{} (painted for an older rig?)",
@@ -1826,6 +1843,7 @@ mod tests {
             baked: canine.into(),
             source: PuppetSource::Embedded,
             texture: None,
+            normal: None,
         };
         let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
         let mut cache = PuppetCache {
@@ -2335,6 +2353,21 @@ mod tests {
         assert_eq!(flinch_region("leftLeg"), Some(("leg", true)));
         assert_eq!(flinch_region("rightEye"), Some(("head", false)));
         assert_eq!(flinch_region("nsys"), None);
+    }
+
+    /// The humanoid ships a normal sheet beside its texture: it decodes
+    /// into the texture the cache hands out, at the sheet's own size.
+    #[test]
+    fn the_shipped_normal_sheet_rides_with_the_texture() {
+        let mut cache = cache();
+        cache.begin_frame(0);
+        let family: Arc<str> = Arc::from("humanoid");
+        let texture = cache.texture(&family).expect("the humanoid has a texture");
+        let normal = texture.normal.as_ref().expect("and a normal sheet beside it");
+        assert_eq!(normal.len(), texture.rgba.len());
+        assert!(normal.chunks(4).any(|p| p[3] == 255), "painted somewhere");
+        let dog: Arc<str> = Arc::from("canine");
+        assert!(cache.texture(&dog).is_none_or(|t| t.normal.is_none()), "no sheet, no normal sheet");
     }
 
     /// Breathing: a living creature steps round its family's idle cycle at

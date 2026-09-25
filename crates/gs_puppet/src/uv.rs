@@ -243,6 +243,11 @@ impl UvLayout {
 pub struct Texture {
     pub layout: UvLayout,
     pub rgba: Vec<u8>,
+    /// The normal sheet, when the skin has one: the same layout, each
+    /// painted pixel holding the DEVIATION of the painted normal from the
+    /// surface's own, in REST space, as RGB = xyz * 0.5 + 0.5 (see
+    /// [`crate::prefill::prefill_normals`]). Transparent = none there.
+    pub normal: Option<Vec<u8>>,
 }
 
 impl Texture {
@@ -269,6 +274,41 @@ impl Texture {
         }
         (alpha > 0.5).then(|| rgb.map(|c| c / alpha))
     }
+
+    /// The normal deviation at a sheet position (bilinear, rest space), or
+    /// None with no normal sheet or where it is unpainted there.
+    pub fn sample_normal(&self, at: [f32; 2]) -> Option<V3> {
+        let sheet = self.normal.as_ref()?;
+        let (w, h) = (self.layout.w, self.layout.h);
+        if w == 0 || h == 0 || sheet.len() < w * h * 4 || !(at[0].is_finite() && at[1].is_finite()) {
+            return None;
+        }
+        let x = (at[0] - 0.5).clamp(0.0, (w - 1) as f32);
+        let y = (at[1] - 0.5).clamp(0.0, (h - 1) as f32);
+        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+        let (tx, ty) = (x - x0 as f32, y - y0 as f32);
+        let (mut v, mut alpha) = ([0.0f32; 3], 0.0f32);
+        for (px, py, wt) in [(x0, y0, (1.0 - tx) * (1.0 - ty)), (x1, y0, tx * (1.0 - ty)), (x0, y1, (1.0 - tx) * ty), (x1, y1, tx * ty)] {
+            let i = (py * w + px) * 4;
+            let a = sheet[i + 3] as f32 / 255.0 * wt;
+            for k in 0..3 {
+                v[k] += decode_normal(sheet[i + k]) * a;
+            }
+            alpha += a;
+        }
+        (alpha > 0.5).then(|| v.map(|c| c / alpha))
+    }
+}
+
+/// A normal component as the sheets store it: -1..1 -> 0..255.
+pub fn encode_normal(v: f32) -> u8 {
+    ((v.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0).round() as u8
+}
+
+/// [`encode_normal`]'s inverse.
+pub fn decode_normal(b: u8) -> f32 {
+    b as f32 / 127.5 - 1.0
 }
 
 /// The long side, pixels, of the sheet a family's texture is painted on

@@ -671,3 +671,12 @@ every frame, like a change); `posed_changing` takes the flinch too, so it
 rides a pose change; `posed_falling` takes `death_flinch(id)` -- the flinch
 the creature died in, if it died within one -- and starts the fall from that
 shape. `paint_creature_puppet` wires all three.
+
+### 7.26 Normal sheets
+
+`PuppetCache::texture` decodes the normal sheet that rides with the sheet
+worn (`gs_field::PuppetRig::normal` with the family's texture,
+`PuppetRigs::skin_normal` with a creature's skin) into
+`gs_puppet::Texture::normal` when its size matches the layout, else warns
+and leaves it out. Nothing else changes: `gs_puppet`'s skin leans its
+normals by the sheet before the cel shading and the lamps see them.

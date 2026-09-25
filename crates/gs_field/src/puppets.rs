@@ -104,11 +104,20 @@ pub struct PuppetRig {
     /// sheet the frontend's smooth skin wears (`gs_puppet::uv`). None =
     /// the plain body colour.
     pub texture: Option<Arc<[u8]>>,
+    /// `<family>.normal.png` beside it, undecoded: the texture's normal
+    /// sheet (relief for the lighting; `gs_puppet::prefill_normals`). None
+    /// = the skin's own geometry alone.
+    pub normal: Option<Arc<[u8]>>,
 }
 
 /// The texture file name for a family: `<family>.texture.png`.
 pub fn texture_file_name(family: &str) -> String {
     format!("{family}.texture.png")
+}
+
+/// The normal sheet file name for a family: `<family>.normal.png`.
+pub fn normal_file_name(family: &str) -> String {
+    format!("{family}.normal.png")
 }
 
 /// A creature's own skin, relative to a puppets folder:
@@ -118,6 +127,14 @@ pub fn texture_file_name(family: &str) -> String {
 pub fn skin_file_name(family: &str, creature: &str) -> String {
     format!("{SKINS_DIR}/{family}/{creature}.png")
 }
+
+/// A creature skin's normal sheet: `skins/<family>/<creature>.normal.png`.
+pub fn skin_normal_file_name(family: &str, creature: &str) -> String {
+    format!("{SKINS_DIR}/{family}/{creature}.normal.png")
+}
+
+/// The suffix that tells a skin's normal sheet from the skin.
+const NORMAL_SUFFIX: &str = ".normal.png";
 
 /// One pose set: the UNPARSED `<body_type>.toml`.
 #[derive(Debug, Clone)]
@@ -166,6 +183,8 @@ pub struct PuppetRigs {
     outfits: Arc<str>,
     /// Creature skins, undecoded, by (family, creature).
     skins: BTreeMap<(String, String), Arc<[u8]>>,
+    /// Creature skins' normal sheets, undecoded, by (family, creature).
+    skin_normals: BTreeMap<(String, String), Arc<[u8]>>,
     /// Identity of this load: changes whenever the set is rebuilt, so a
     /// frontend can key parsed puppets / posed caches on it.
     generation: u64,
@@ -261,6 +280,11 @@ impl PuppetRigs {
         self.skins.keys().map(|(f, c)| (f.as_str(), c.as_str()))
     }
 
+    /// A creature skin's normal sheet, undecoded ([`skin_normal_file_name`]).
+    pub fn skin_normal(&self, family: &str, creature: &str) -> Option<&Arc<[u8]>> {
+        self.skin_normals.get(&(family.to_ascii_lowercase(), creature.to_ascii_lowercase()))
+    }
+
     /// This set with `png` as `creature`'s skin on `family` (tests, hosts
     /// with their own source).
     pub fn with_skin(mut self, family: &str, creature: &str, png: &[u8]) -> Self {
@@ -334,7 +358,27 @@ pub fn embedded_skins() -> impl Iterator<Item = (&'static str, &'static str, &'s
         .flat_map(|family| {
             let name = family.path().file_name().and_then(|n| n.to_str()).unwrap_or("");
             family.files().filter_map(move |file| {
-                let creature = file.path().file_name()?.to_str()?.strip_suffix(".png")?;
+                let file_name = file.path().file_name()?.to_str()?;
+                if file_name.ends_with(NORMAL_SUFFIX) {
+                    return None;
+                }
+                let creature = file_name.strip_suffix(".png")?;
+                Some((name, creature, file.contents()))
+            })
+        })
+}
+
+/// The creature skins' normal sheets compiled into this crate: `(family,
+/// creature, png)`, from `data/puppets/skins/<family>/<creature>.normal.png`.
+pub fn embedded_skin_normals() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
+    EMBEDDED_PUPPETS
+        .get_dir(SKINS_DIR)
+        .into_iter()
+        .flat_map(|skins| skins.dirs())
+        .flat_map(|family| {
+            let name = family.path().file_name().and_then(|n| n.to_str()).unwrap_or("");
+            family.files().filter_map(move |file| {
+                let creature = file.path().file_name()?.to_str()?.strip_suffix(NORMAL_SUFFIX)?;
                 Some((name, creature, file.contents()))
             })
         })
@@ -343,14 +387,30 @@ pub fn embedded_skins() -> impl Iterator<Item = (&'static str, &'static str, &'s
 /// The creature skins in a puppets folder: `(family, creature, png)` for
 /// every `skins/<family>/<creature>.png`. A missing folder is simply empty.
 pub fn load_skins(dir: &std::path::Path) -> Vec<(String, String, Vec<u8>)> {
+    load_skin_files(dir, false)
+}
+
+/// The creature skins' normal sheets in a puppets folder: `(family,
+/// creature, png)` for every `skins/<family>/<creature>.normal.png`.
+pub fn load_skin_normals(dir: &std::path::Path) -> Vec<(String, String, Vec<u8>)> {
+    load_skin_files(dir, true)
+}
+
+fn load_skin_files(dir: &std::path::Path, normals: bool) -> Vec<(String, String, Vec<u8>)> {
     let mut out = Vec::new();
     for family in std::fs::read_dir(dir.join(SKINS_DIR)).into_iter().flatten().flatten() {
         let Some(name) = family.file_name().to_str().map(str::to_ascii_lowercase) else { continue };
         for file in std::fs::read_dir(family.path()).into_iter().flatten().flatten() {
             let path = file.path();
-            let Some(creature) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".png")) else {
-                continue;
+            let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+            let creature = if normals {
+                file_name.strip_suffix(NORMAL_SUFFIX)
+            } else if file_name.ends_with(NORMAL_SUFFIX) {
+                None
+            } else {
+                file_name.strip_suffix(".png")
             };
+            let Some(creature) = creature else { continue };
             match std::fs::read(&path) {
                 Ok(bytes) => out.push((name.clone(), creature.to_ascii_lowercase(), bytes)),
                 Err(e) => tracing::warn!("creature skin {} skipped: {e}", path.display()),
@@ -399,6 +459,7 @@ pub fn load_dir(dir: &std::path::Path) -> (Vec<PuppetRig>, Vec<PoseFile>) {
                 baked: text.into(),
                 source: PuppetSource::Override,
                 texture: std::fs::read(dir.join(texture_file_name(family))).ok().map(Into::into),
+                normal: std::fs::read(dir.join(normal_file_name(family))).ok().map(Into::into),
             }),
             None => poses.push(PoseFile {
                 body_type: stem.to_ascii_lowercase(),
@@ -444,6 +505,7 @@ pub fn puppets() -> Arc<PuppetRigs> {
             family.clone(),
             Arc::new(PuppetRig {
                 texture: EMBEDDED_PUPPETS.get_file(texture_file_name(&family)).map(|f| f.contents().into()),
+                normal: EMBEDDED_PUPPETS.get_file(normal_file_name(&family)).map(|f| f.contents().into()),
                 family,
                 body_type: scan_body_type(text),
                 baked: text.into(),
@@ -456,6 +518,9 @@ pub fn puppets() -> Arc<PuppetRigs> {
     set.outfits = EMBEDDED_OUTFITS.into();
     for (family, creature, png) in embedded_skins() {
         set.skins.insert((family.to_ascii_lowercase(), creature.to_ascii_lowercase()), png.into());
+    }
+    for (family, creature, png) in embedded_skin_normals() {
+        set.skin_normals.insert((family.to_ascii_lowercase(), creature.to_ascii_lowercase()), png.into());
     }
     for (body_type, text) in embedded_poses() {
         let body_type = body_type.to_ascii_lowercase();
@@ -488,6 +553,9 @@ pub fn puppets() -> Arc<PuppetRigs> {
         }
         for (family, creature, png) in load_skins(&base.join("global").join("puppets")) {
             set.skins.insert((family, creature), png.into());
+        }
+        for (family, creature, png) in load_skin_normals(&base.join("global").join("puppets")) {
+            set.skin_normals.insert((family, creature), png.into());
         }
     }
     set.generation = GENERATION.fetch_add(1, Ordering::Relaxed);

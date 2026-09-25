@@ -120,6 +120,7 @@ For each job, in `<out_dir>/`:
 | File | Rule |
 | --- | --- |
 | `front.png`, `back.png`, `side.png` | RGBA PNG. **Exactly the template's aspect ratio** (any size; write it at 4× the template, e.g. 744 × 2048 for a 186 × 512 template). Alpha = 255 inside the silhouette, 0 outside (take the alpha from the template, scaled up). |
+| `front_normal.png`, `back_normal.png`, `side_normal.png` (optional) | Tangent-space normal maps of the paintings, RGB = xyz × 0.5 + 0.5, x to the picture's right, y up, z toward the viewer; the same size and alpha as the painting they belong to. Niffy's route: the painting plus its depth. gs-studio projects them onto a normal sheet (*Build sheet*) that shades the relief under the stage's lights. Leave out the body's big forms where you can (the puppet already has them): the relief is what matters. |
 | `meta.json` | What made it: model file, seed per view, prompt, workflow version, date, and review status (`pending` / `approved` / `rejected`). |
 
 Hard rules, because of how gs-studio reads the paintings:
