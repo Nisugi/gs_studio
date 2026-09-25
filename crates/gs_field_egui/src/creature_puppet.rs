@@ -878,6 +878,10 @@ struct Life {
     /// The dead pose it fell into, when it died in view while lying down
     /// (see [`PuppetCache::dead_choice`]); None once it is up again.
     dead_as: Option<u8>,
+    /// Its wound ranks as last seen (None: not seen yet), and the last hit
+    /// that landed: the doll label and when (see [`PuppetCache::flinch`]).
+    ranks: Option<[u8; PARTS]>,
+    hit: Option<(u8, f64)>,
 }
 
 /// How a puppet is moving this frame (see [`PuppetCache::motion`]).
@@ -910,6 +914,41 @@ fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, step: u8, weight: f32) -> gs_p
         (Some(idle), 1..) => pose.breathe(idle, (step as f32 - 0.5) / BREATH_STEPS as f32, weight),
         _ => pose.clone(),
     }
+}
+
+/// `pose` flinching from a hit on doll part `label`, `t` seconds in (None,
+/// a part with no region, or a region the set has no table for: the pose
+/// itself). A left-side part mirrors the table.
+fn flinched(set: &PoseSet, pose: &gs_puppet::Pose, flinch: Option<(u8, f32)>) -> gs_puppet::Pose {
+    let Some((label, t)) = flinch else { return pose.clone() };
+    let Some((region, left)) = gs_field::dolls::label_part(label).and_then(flinch_region) else { return pose.clone() };
+    match set.flinch.get(region) {
+        Some(offsets) => pose.flinched(offsets, gs_puppet::flinch_envelope(t), left),
+        None => pose.clone(),
+    }
+}
+
+/// The `[flinch]` region a doll part belongs to, and whether it is on the
+/// creature's left (`leftArm` -> `("arm", true)`, `chest` -> `("chest",
+/// false)`). Eyes are the head; the nervous system is nowhere.
+pub fn flinch_region(part: &str) -> Option<(&'static str, bool)> {
+    let (stem, left) = match (part.strip_prefix("left"), part.strip_prefix("right")) {
+        (Some(s), _) => (s, true),
+        (_, Some(s)) => (s, false),
+        _ => (part, false),
+    };
+    let region = match stem.to_ascii_lowercase().as_str() {
+        "head" | "eye" => "head",
+        "neck" => "neck",
+        "chest" => "chest",
+        "abdomen" => "abdomen",
+        "back" => "back",
+        "arm" => "arm",
+        "hand" => "hand",
+        "leg" => "leg",
+        _ => return None,
+    };
+    Some((region, left))
 }
 
 /// A creature's own starting point in the cycle, 0..1, from its id
@@ -1323,7 +1362,7 @@ impl PuppetCache {
     /// whatever pose it is in.
     pub fn motion(&mut self, id: &str, choice: PoseChoice, now_s: f64) -> Motion {
         let frame = self.frame.unwrap_or(0);
-        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, changed: None, seen: frame, dead_as: None });
+        let life = self.lives.entry(id.to_owned()).or_insert(Life { last: choice, changed: None, seen: frame, dead_as: None, ranks: None, hit: None });
         life.seen = frame;
         if choice != life.last {
             life.changed = Some((life.last, now_s));
@@ -1363,6 +1402,43 @@ impl PuppetCache {
         let step = (u * steps).floor().min(steps - 1.0);
         let until_next = ((step + 1.0) / steps - u) * period;
         Some((step as u8 + 1, until_next.max(1e-3)))
+    }
+
+    /// A hit landing on creature `id`: `ranks` are its wound ranks now (the
+    /// key's); a rank seen to RISE starts a flinch on that part, and this
+    /// returns the flinch in progress -- the part's doll label and seconds
+    /// since the hit, while under `gs_puppet::FLINCH_SECS`. A creature
+    /// first seen wounded does not flinch, nor does a dead one, and a hit
+    /// during a flinch restarts it on the new part. Call it after
+    /// [`motion`](Self::motion), every frame.
+    pub fn flinch(&mut self, id: &str, ranks: &[u8; PARTS], now_s: f64) -> Option<(u8, f32)> {
+        let life = self.lives.get_mut(id)?;
+        if let Some(before) = life.ranks {
+            if let Some(i) = (0..PARTS).find(|&i| ranks[i] > before[i]) {
+                if !matches!(life.last, PoseChoice::Dead { .. }) {
+                    life.hit = Some((i as u8 + 1, now_s));
+                }
+            }
+        }
+        life.ranks = Some(*ranks);
+        if matches!(life.last, PoseChoice::Dead { .. }) {
+            // The flinch it died in belongs to the fall (`death_flinch`).
+            return None;
+        }
+        let (label, at) = life.hit?;
+        let t = (now_s - at) as f32;
+        (0.0..gs_puppet::FLINCH_SECS).contains(&t).then_some((label, t))
+    }
+
+    /// The flinch creature `id` was in when it died, if it died mid-flinch:
+    /// the part and how far in (seconds) the fall began, so the fall starts
+    /// from that shape ([`posed_falling`](Self::posed_falling)).
+    pub fn death_flinch(&self, id: &str) -> Option<(u8, f32)> {
+        let life = self.lives.get(id)?;
+        let (_, died) = life.changed.filter(|_| matches!(life.last, PoseChoice::Dead { .. }))?;
+        let (label, at) = life.hit?;
+        let t = (died - at) as f32;
+        (0.0..gs_puppet::FLINCH_SECS).contains(&t).then_some((label, t))
     }
 
     /// The dead pose a creature is drawn in: `choice` itself (the caller's
@@ -1405,8 +1481,9 @@ impl PuppetCache {
     }
 
     /// The figure `u` of the way from `from`'s pose into `key`'s (angle by
-    /// angle, held inside the joint limits). Built every call, never cached.
-    pub fn posed_changing(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32) -> Option<Arc<PosedPuppet>> {
+    /// angle, held inside the joint limits), flinching from a hit if one
+    /// is in progress ([`flinch`](Self::flinch)). Built every call, never cached.
+    pub fn posed_changing(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32, flinch: Option<(u8, f32)>) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = |c: PoseChoice| match c {
@@ -1417,7 +1494,25 @@ impl PuppetCache {
         let (_, start) = from.resolve(&set, variant(from))?;
         // The new pose's breath comes in with the change, so it never jumps.
         let to = breathe(&set, to, key.breath, u);
-        let pose = set.clamp(&start.blend(&to, u));
+        let pose = set.clamp(&flinched(&set, &start.blend(&to, u), flinch));
+        let light = self.light.clone().filter(|_| skin);
+        let texture = if skin { self.texture(family) } else { None };
+        self.builds += 1;
+        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
+    }
+
+    /// The figure holding `key`'s pose (breathing as the key says) and
+    /// flinching from a hit: `flinch` as [`flinch`](Self::flinch) gave it.
+    /// Built every call, never cached: a flinch is drawn once per frame.
+    pub fn posed_flinching(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, flinch: (u8, f32)) -> Option<Arc<PosedPuppet>> {
+        let puppet = self.puppet(family)?;
+        let set = self.pose_set(family)?;
+        let variant = match key.pose {
+            PoseChoice::Dead { variant } => variant as u64,
+            _ => 0,
+        };
+        let (_, pose) = key.pose.resolve(&set, variant)?;
+        let pose = set.clamp(&flinched(&set, &breathe(&set, pose, key.breath, 1.0), Some(flinch)));
         let light = self.light.clone().filter(|_| skin);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
@@ -1425,9 +1520,11 @@ impl PuppetCache {
     }
 
     /// The figure `t` seconds into falling dead from `from` into `key`'s
-    /// dead pose (`gs_puppet::Fall`). Built every call, never cached: each
-    /// frame of a fall is drawn once.
-    pub fn posed_falling(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32) -> Option<Arc<PosedPuppet>> {
+    /// dead pose (`gs_puppet::Fall`); `flinch` is the flinch it died in,
+    /// if any ([`death_flinch`](Self::death_flinch)), so the fall starts
+    /// from that shape. Built every call, never cached: each frame of a
+    /// fall is drawn once.
+    pub fn posed_falling(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32, flinch: Option<(u8, f32)>) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = match key.pose {
@@ -1436,8 +1533,9 @@ impl PuppetCache {
         };
         let (_, to) = key.pose.resolve(&set, variant)?;
         let (_, start) = from.resolve(&set, 0)?;
+        let start = flinched(&set, start, flinch);
         // A spring's overshoot never bends a joint past its limit.
-        let pose = set.clamp(&gs_puppet::Fall::new(&puppet, start, to, variant).at(t));
+        let pose = set.clamp(&gs_puppet::Fall::new(&puppet, &start, to, variant).at(t));
         let light = self.light.clone().filter(|_| skin);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
@@ -2112,7 +2210,7 @@ mod tests {
         assert_eq!(cache.motion("a", PoseChoice::Standing, 40.0 + RISE_SECS as f64 + 0.01), Motion::Still);
         // A change poses the real puppet, part way.
         let family: Arc<str> = "humanoid".into();
-        let posed = cache.posed_changing(&family, &key(PoseChoice::Standing, &[]), true, PoseChoice::Sitting, 0.5);
+        let posed = cache.posed_changing(&family, &key(PoseChoice::Standing, &[]), true, PoseChoice::Sitting, 0.5, None);
         assert!(posed.is_some_and(|p| p.skin.is_some()));
     }
 
@@ -2130,7 +2228,7 @@ mod tests {
         assert_eq!(cache.falling("b", dead, 11.0), None, "already dead when first seen");
         // A fall poses the real puppet.
         let family: Arc<str> = "humanoid".into();
-        let posed = cache.posed_falling(&family, &key(dead, &[]), true, PoseChoice::Standing, 0.3);
+        let posed = cache.posed_falling(&family, &key(dead, &[]), true, PoseChoice::Standing, 0.3, None);
         assert!(posed.is_some_and(|p| p.skin.is_some()));
         // Revived (the host cleared dead): alive again, and can fall again.
         assert_eq!(cache.falling("a", PoseChoice::Standing, 20.0), None);
@@ -2177,6 +2275,66 @@ mod tests {
         let builds = cache.builds;
         cache.posed(&family, &healthy).unwrap();
         assert_eq!(cache.builds, builds, "the hot entry was never evicted");
+    }
+
+    /// A hit: a wound rank rising starts a flinch on that part, which runs
+    /// its course; a creature first seen wounded, or dead, does not flinch;
+    /// dying mid-flinch falls from the flinched shape.
+    #[test]
+    fn a_rising_wound_rank_starts_a_flinch_and_a_death_falls_from_it() {
+        use gs_puppet::FLINCH_SECS;
+        let mut cache = cache();
+        cache.begin_frame(0);
+        let family = cache.family_for("forest troll", Some("troll")).expect("humanoid");
+        let ranks = |w: &[(&str, u8)]| key(PoseChoice::Standing, w).ranks;
+        let arm = ranks(&[("rightArm", 1)]);
+
+        // First seen wounded: no flinch.
+        cache.motion("a", PoseChoice::Standing, 0.0);
+        assert!(cache.flinch("a", &arm, 0.0).is_none());
+        // The rank rises: a flinch on the right arm.
+        cache.motion("a", PoseChoice::Standing, 1.0);
+        let arm2 = ranks(&[("rightArm", 2)]);
+        let (label, t) = cache.flinch("a", &arm2, 1.0).expect("flinches");
+        assert_eq!(gs_field::dolls::label_part(label), Some("rightArm"));
+        assert_eq!(t, 0.0);
+        let (_, t) = cache.flinch("a", &arm2, 1.2).unwrap();
+        assert!((t - 0.2).abs() < 1e-5);
+        assert!(cache.flinch("a", &arm2, 1.0 + FLINCH_SECS as f64 + 0.01).is_none(), "over");
+        // A new hit elsewhere restarts it on that part.
+        let both = ranks(&[("rightArm", 2), ("head", 1)]);
+        let (label, _) = cache.flinch("a", &both, 3.0).unwrap();
+        assert_eq!(gs_field::dolls::label_part(label), Some("head"));
+        assert!(cache.death_flinch("a").is_none(), "alive");
+
+        // The flinched figure differs from the still one, and settles back.
+        let k = key(PoseChoice::Standing, &[("rightArm", 2)]);
+        let still = cache.posed(&family, &k).unwrap();
+        let peak = cache.posed_flinching(&family, &k, false, (label, FLINCH_SECS / 3.0)).unwrap();
+        assert_ne!(peak.prims, still.prims);
+        let settled = cache.posed_flinching(&family, &k, false, (label, FLINCH_SECS)).unwrap();
+        assert_eq!(settled.prims, still.prims);
+        let changing = cache.posed_changing(&family, &k, false, PoseChoice::Sitting, 0.5, Some((label, 0.1))).unwrap();
+        let plain = cache.posed_changing(&family, &k, false, PoseChoice::Sitting, 0.5, None).unwrap();
+        assert_ne!(changing.prims, plain.prims, "a flinch rides a pose change too");
+
+        // Killed a tenth of a second into a flinch: the fall starts there.
+        let dead = PoseChoice::Dead { variant: 0 };
+        cache.motion("a", PoseChoice::Standing, 10.0);
+        cache.flinch("a", &ranks(&[("rightArm", 2), ("head", 1), ("chest", 1)]), 10.0);
+        assert!(matches!(cache.motion("a", dead, 10.1), Motion::Falling { .. }));
+        let (label, t) = cache.death_flinch("a").expect("died mid-flinch");
+        assert_eq!(gs_field::dolls::label_part(label), Some("chest"));
+        assert!((t - 0.1).abs() < 1e-5);
+        assert!(cache.flinch("a", &ranks(&[("rightArm", 3), ("head", 1), ("chest", 1)]), 10.2).is_none(), "the dead do not flinch");
+        let dk = PuppetKey::new(dead, &[], true, false, body(), false, 160.0);
+        let from_flinch = cache.posed_falling(&family, &dk, false, PoseChoice::Standing, 0.0, Some((label, t))).unwrap();
+        let from_still = cache.posed_falling(&family, &dk, false, PoseChoice::Standing, 0.0, None).unwrap();
+        assert_ne!(from_flinch.prims, from_still.prims);
+
+        assert_eq!(flinch_region("leftLeg"), Some(("leg", true)));
+        assert_eq!(flinch_region("rightEye"), Some(("head", false)));
+        assert_eq!(flinch_region("nsys"), None);
     }
 
     /// Breathing: a living creature steps round its family's idle cycle at

@@ -92,3 +92,39 @@ neck = { rot = [2.5, 0.0, 0.0] }
 skull = { rot = [-1.5, 0.0, 0.0] }
 wing = { rot = [0.0, 0.0, -3.0], phase = -0.15 }
 tail = { rot = [2.0, 0.0, 0.0], phase = -0.25 }
+
+# Flinches (see `Pose::flinched`): PEAK offsets for a hit on the region,
+# written for the creature's RIGHT side and mirrored for the left. "arm" is
+# a wing.
+[flinch.head]
+skull = { rot = [12.0, 0.0, -8.0] }
+neck = { rot = [8.0, 0.0, -5.0] }
+
+[flinch.neck]
+neck = { rot = [12.0, 0.0, 0.0] }
+
+[flinch.chest]
+breast = { rot = [6.0, 0.0, 0.0] }
+neck = { rot = [-10.0, 0.0, 0.0] }
+wing = { rot = [0.0, 0.0, 24.0] }
+
+[flinch.abdomen]
+neck = { rot = [-6.0, 0.0, 0.0] }
+leg = { bend = [10.0, -6.0] }
+tail = { rot = [-12.0, 0.0, 0.0] }
+
+[flinch.back]
+tail = { rot = [-18.0, 0.0, 0.0] }
+wing = { rot = [0.0, 0.0, 14.0] }
+
+[flinch.arm]
+wing_r = { rot = [0.0, -12.0, 28.0] }
+neck = { rot = [0.0, 0.0, -6.0] }
+
+[flinch.hand]
+wing_r = { rot = [0.0, -8.0, 18.0] }
+wing_hand_r = { rot = [0.0, 0.0, 16.0] }
+
+[flinch.leg]
+leg_r = { rot = [-12.0, 0.0, 10.0], bend = [18.0, -8.0] }
+wing = { rot = [0.0, 0.0, 12.0] }

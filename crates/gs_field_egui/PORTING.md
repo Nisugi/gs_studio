@@ -655,3 +655,19 @@ before clamping; `posed_changing` breathes the target pose by the eased `u`,
 so the cycle fades in with a change. Dead creatures, and body types with no
 `[idle]`, hold still. `set_puppet_breath` / `puppet_breath` (on by default)
 turn it off for a context, as `set_puppet_props` does for props.
+
+### 7.25 Hit flinches, and deaths from a flinch
+
+`gs_puppet::PoseSet::flinch` (the pose file's `[flinch.<region>]` tables;
+`gs_puppet::Pose::flinched`, `flinch_envelope`, `FLINCH_SECS` = 0.55) is a
+peak offset per hit region, written for the right side and mirrored for the
+left. `PuppetCache::flinch(id, ranks, now_s)`, called after `motion` every
+frame with the key's wound ranks, starts a flinch on the part whose rank
+rose (a creature first seen wounded, or dead, starts none; a new hit
+restarts it on its part) and returns the one in progress: the doll label
+and seconds in. `creature_puppet::flinch_region` folds a doll part to its
+region and side. `posed_flinching` draws a still figure flinching (built
+every frame, like a change); `posed_changing` takes the flinch too, so it
+rides a pose change; `posed_falling` takes `death_flinch(id)` -- the flinch
+the creature died in, if it died within one -- and starts the fall from that
+shape. `paint_creature_puppet` wires all three.

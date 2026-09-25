@@ -332,6 +332,15 @@ one family, as `[family_limits]` does. The stage lays it over whatever pose
 the creature holds and clamps the result to the limits; a dead one holds
 still. The pose editor leaves the table alone (it edits in place).
 
+And `[flinch.<region>]` tables, one per hit region (`head`, `neck`,
+`chest`, `abdomen`, `back`, `arm`, `hand`, `leg`: the client's doll parts
+with their sides folded; eyes count as the head): bones and pair stems as
+in a pose, whose angles are the PEAK offsets of the reaction, written for
+a hit on the creature's RIGHT side -- a hit on the left mirrors every key
+(`_r` <-> `_l`, y and z negated). No `root`. The stage scales them by a
+quick-rise, slow-settle envelope over `gs_puppet::FLINCH_SECS` and clamps
+the result; a region with no table is no reaction.
+
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:
 
@@ -527,7 +536,11 @@ across -- and differ only in the right-hand panel:
   cycle its body type's poses file authors (`[idle]`, below), each creature
   starting at its own point in it, drawn in 16 cached steps and fading in
   with a pose change (`creature_puppet::PuppetCache::breath`; the *Breathing*
-  checkbox under **Puppets** turns it off).
+  checkbox under **Puppets** turns it off). Hit, it flinches: a wound rank
+  seen to RISE (the simulator's wound ranks do it) snaps the body type's
+  `[flinch.<region>]` offsets for that part on and springs them back over
+  0.55 s (`PuppetCache::flinch`, drawn fresh each frame); a creature killed
+  mid-flinch falls from that shape (`death_flinch`).
 
 **Sprites beat puppets, so the Cast alone cannot show you a puppet.** A
 creature with base art in the pool draws as that art; only one with none

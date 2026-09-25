@@ -459,3 +459,43 @@ fn a_family_breathes_its_own_way_and_a_bad_idle_is_refused() {
     let err = PoseSet::from_toml("body_type = \"biped\"\n[family_idle.orc]\nneck = { rot = [1.0, 0.0, 0.0] }\n").unwrap_err();
     assert!(err.contains("no shared"), "{err}");
 }
+
+#[test]
+fn a_flinch_snaps_and_settles_and_a_left_hit_mirrors_the_right() {
+    use crate::pose::{flinch_envelope, FLINCH_SECS};
+    let set = PoseSet::from_toml(
+        "body_type = \"biped\"\n[pose.stand]\n[pose.disoriented]\narm_l = { rot = [-18.0, 0.0, 34.0] }\narm_r = { rot = [12.0, 0.0, -4.0] }\n\
+         [flinch.arm]\narm_r = { rot = [-16.0, 0.0, 14.0], bend = [-18.0] }\ntorso_upper = { rot = [4.0, -8.0, 0.0] }\n\
+         [flinch.head]\nskull = { rot = [12.0, 0.0, -8.0] }\n",
+    )
+    .unwrap();
+    assert_eq!(set.flinch.len(), 2);
+    assert!(flinch_envelope(0.0).abs() < 1e-6 && flinch_envelope(FLINCH_SECS).abs() < 1e-6 && flinch_envelope(-0.1) == 0.0);
+    assert!((flinch_envelope(FLINCH_SECS / 3.0) - 1.0).abs() < 1e-4, "peaks a third of the way in");
+    assert!(flinch_envelope(FLINCH_SECS * 0.8) > 0.0 && flinch_envelope(FLINCH_SECS * 0.8) < 0.5);
+
+    let stand = set.get("stand").unwrap();
+    let arm = &set.flinch["arm"];
+    let right = stand.flinched(arm, 1.0, false);
+    assert_eq!(right.bone("arm_r").deg, [-16.0, 0.0, 14.0]);
+    assert_eq!(right.bone("arm_r").bend, vec![-18.0]);
+    assert_eq!(right.bone("arm_l").deg, [0.0; 3], "the other arm is untouched");
+    assert_eq!(right.bone("torso_upper").deg, [4.0, -8.0, 0.0]);
+    let left = stand.flinched(arm, 1.0, true);
+    assert_eq!(left.bone("arm_l").deg, [-16.0, 0.0, -14.0], "the side swaps and spread mirrors");
+    assert_eq!(left.bone("arm_l").bend, vec![-18.0]);
+    assert_eq!(left.bone("arm_r").deg, [0.0; 3]);
+    assert_eq!(left.bone("torso_upper").deg, [4.0, 8.0, 0.0], "the twist mirrors too");
+    let half = stand.flinched(arm, 0.5, false);
+    assert_eq!(half.bone("arm_r").deg, [-8.0, 0.0, 7.0]);
+    assert_eq!(&stand.flinched(arm, 0.0, false), stand);
+    // On a pose that spells the arms out, the offset adds to what is there.
+    let dis = set.get("disoriented").unwrap().flinched(arm, 1.0, false);
+    assert_eq!(dis.bone("arm_r").deg, [-4.0, 0.0, 10.0]);
+    assert_eq!(dis.bone("arm_l").deg, [-18.0, 0.0, 34.0]);
+
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[flinch.tail]\nskull = { rot = [1.0, 0.0, 0.0] }\n").unwrap_err();
+    assert!(err.contains("not a hit region"), "{err}");
+    let err = PoseSet::from_toml("body_type = \"biped\"\n[flinch.head]\nroot = [1.0, 0.0, 0.0]\n").unwrap_err();
+    assert!(err.contains("not the root"), "{err}");
+}

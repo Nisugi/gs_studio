@@ -114,3 +114,39 @@ leg2 = { rot = [0.0, 0.0, 1.5], bend = [1.8], phase = -0.1 }
 leg3 = { rot = [0.0, 0.0, 1.5], bend = [1.8], phase = -0.15 }
 leg4 = { rot = [0.0, 0.0, 1.5], bend = [1.8], phase = -0.2 }
 leg5 = { rot = [0.0, 0.0, 1.5], bend = [1.8], phase = -0.25 }
+
+# Flinches (see `Pose::flinched`): PEAK offsets for a hit on the region,
+# written for the creature's RIGHT side and mirrored for the left. "arm" is
+# the front pair, "hand" its tip, "leg" the pairs behind.
+[flinch.head]
+skull = { rot = [10.0, 0.0, -8.0] }
+leg1 = { rot = [0.0, 0.0, 10.0], bend = [10.0] }
+
+[flinch.neck]
+skull = { rot = [8.0, 0.0, 0.0] }
+
+[flinch.chest]
+leg1 = { rot = [0.0, 0.0, 12.0], bend = [12.0] }
+leg2 = { rot = [0.0, 0.0, 8.0], bend = [8.0] }
+skull = { rot = [6.0, 0.0, 0.0] }
+
+[flinch.abdomen]
+abdomen = { rot = [12.0, 0.0, 0.0] }
+leg4 = { rot = [0.0, 0.0, 8.0], bend = [8.0] }
+leg5 = { rot = [0.0, 0.0, 8.0], bend = [8.0] }
+
+[flinch.back]
+abdomen = { rot = [-10.0, 0.0, 0.0] }
+
+[flinch.arm]
+leg1_r = { rot = [-16.0, 0.0, 18.0], bend = [16.0] }
+skull = { rot = [0.0, 0.0, -6.0] }
+
+[flinch.hand]
+leg1_r = { rot = [-8.0, 0.0, 10.0], bend = [10.0] }
+leg1_tip_r = { rot = [-18.0, 0.0, 0.0] }
+
+[flinch.leg]
+leg3_r = { rot = [-14.0, 0.0, 16.0], bend = [18.0] }
+leg4_r = { rot = [-10.0, 0.0, 12.0], bend = [14.0] }
+abdomen = { rot = [0.0, 6.0, 0.0] }

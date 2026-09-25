@@ -101,6 +101,27 @@
 //! result as they do every pose. `[family_idle.<family>]` replaces keys for
 //! one family, composing as `[family_limits]` does.
 //!
+//! # Flinches
+//!
+//! A body type's file may say how a figure reacts to a hit, by where it
+//! landed: the shoulder goes back, the hip turns, a leg steps.
+//!
+//! ```toml
+//! [flinch.arm]                       # a hit on the RIGHT arm; mirrored for the left
+//! arm_r = { rot = [-16.0, 0.0, 14.0], bend = [-18.0] }
+//! torso_upper = { rot = [4.0, -8.0, 0.0] }
+//! leg_r = { rot = [8.0, 0.0, 0.0], bend = [6.0] }
+//! ```
+//!
+//! Regions are `head`, `neck`, `chest`, `abdomen`, `back`, `arm`, `hand`,
+//! `leg` (the client's doll parts, sides folded). Angles are the PEAK
+//! offsets, written for a hit on the creature's right; a hit on the left
+//! mirrors every key (`_r` <-> `_l`, y and z negated) so one table serves
+//! both sides. [`Pose::flinched`] applies them scaled by
+//! [`flinch_envelope`], a quick snap and a spring back over
+//! [`FLINCH_SECS`]. A missing region is no flinch. Renderers clamp the
+//! result as they do every pose.
+//!
 //! The override lives HERE, in the body type's file, and not in the
 //! family's `.rig.toml`, because a `.rig.toml` is studio source that is
 //! never published: a game client is shipped `<family>.puppet.toml` (baked
@@ -260,6 +281,20 @@ impl Idle {
     }
 }
 
+/// How long a flinch lasts, snap to settled.
+pub const FLINCH_SECS: f32 = 0.55;
+
+/// How far into its offsets a flinch is `t` seconds after the hit: a
+/// quick rise to the peak (1.0, a third of the way through) and a slower
+/// settling back to 0 at [`FLINCH_SECS`]; 0 outside.
+pub fn flinch_envelope(t: f32) -> f32 {
+    let x = t / FLINCH_SECS;
+    if !(0.0..1.0).contains(&x) {
+        return 0.0;
+    }
+    6.75 * x * (1.0 - x) * (1.0 - x)
+}
+
 pub fn quat_from_euler(deg: [f32; 3]) -> Quat {
     quat_from_m3(&euler(deg))
 }
@@ -356,23 +391,55 @@ impl Pose {
         }
         for (key, ib) in &idle.bones {
             let s = (std::f32::consts::TAU * (u + ib.phase)).sin() * weight;
-            let sided = key.ends_with("_l") || key.ends_with("_r");
-            let has_side = |side: &str| self.bones.contains_key(&format!("{key}{side}"));
-            let targets: Vec<(String, BonePose)> = if !sided && (has_side("_l") || has_side("_r")) {
-                vec![(format!("{key}_l"), ib.amp.clone()), (format!("{key}_r"), ib.amp.mirrored())]
+            self.add_offset(&mut out, key, &ib.amp, s);
+        }
+        out
+    }
+
+    /// This pose with `offsets` (a `[flinch.<region>]` table, written for a
+    /// hit on the right) added at `scale` (see [`flinch_envelope`]); `left`
+    /// mirrors them for a hit on the left side. Stems reach spelled-out
+    /// sides as in [`breathe`](Self::breathe).
+    pub fn flinched(&self, offsets: &Pose, scale: f32, left: bool) -> Pose {
+        let mut out = self.clone();
+        if scale == 0.0 || !scale.is_finite() {
+            return out;
+        }
+        for (key, amp) in &offsets.bones {
+            if left {
+                let (name, amp) = match (key.strip_suffix("_r"), key.strip_suffix("_l")) {
+                    (Some(stem), _) => (format!("{stem}_l"), amp.mirrored()),
+                    (_, Some(stem)) => (format!("{stem}_r"), amp.mirrored()),
+                    _ => (key.clone(), amp.mirrored()),
+                };
+                self.add_offset(&mut out, &name, &amp, scale);
             } else {
-                vec![(key.clone(), ib.amp.clone())]
-            };
-            for (name, amp) in targets {
-                let base = self.bone(&name);
-                let deg = [0, 1, 2].map(|i| base.deg[i] + amp.deg[i] * s);
-                let n = base.bend.len().max(amp.bend.len());
-                let at = |v: &Vec<f32>, i: usize| v.get(i).copied().unwrap_or(0.0);
-                let bend = (0..n).map(|i| at(&base.bend, i) + at(&amp.bend, i) * s).collect();
-                out.bones.insert(name, BonePose::euler(deg, bend));
+                self.add_offset(&mut out, key, amp, scale);
             }
         }
         out
+    }
+
+    /// Add `amp * s` to what this pose says for `key`, into `out`. A stem
+    /// whose sides this pose spells out lands on each side (the right
+    /// mirrored), so neither entry shadows the other.
+    fn add_offset(&self, out: &mut Pose, key: &str, amp: &BonePose, s: f32) {
+        let sided = key.ends_with("_l") || key.ends_with("_r");
+        let has_side = |side: &str| self.bones.contains_key(&format!("{key}{side}"));
+        let targets: Vec<(String, BonePose)> = if !sided && (has_side("_l") || has_side("_r")) {
+            vec![(format!("{key}_l"), amp.clone()), (format!("{key}_r"), amp.mirrored())]
+        } else {
+            vec![(key.to_owned(), amp.clone())]
+        };
+        for (name, amp) in targets {
+            // Offsets stack: a flinch on top of a breath reads what is there.
+            let base = out.bone(&name);
+            let deg = [0, 1, 2].map(|i| base.deg[i] + amp.deg[i] * s);
+            let n = base.bend.len().max(amp.bend.len());
+            let at = |v: &Vec<f32>, i: usize| v.get(i).copied().unwrap_or(0.0);
+            let bend = (0..n).map(|i| at(&base.bend, i) + at(&amp.bend, i) * s).collect();
+            out.bones.insert(name, BonePose::euler(deg, bend));
+        }
     }
 }
 
@@ -404,7 +471,13 @@ struct PoseFile {
     /// `[family_idle.<family>]`: keys a family breathes differently.
     #[serde(default)]
     family_idle: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[flinch.<region>]`: peak offsets for a hit there (see the module docs).
+    #[serde(default)]
+    flinch: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
+
+/// The hit regions a `[flinch]` table may name.
+pub const FLINCH_REGIONS: [&str; 8] = ["head", "neck", "chest", "abdomen", "back", "arm", "hand", "leg"];
 
 #[derive(Debug, Clone, Default, Deserialize)]
 struct IdleBoneDef {
@@ -497,6 +570,9 @@ pub struct PoseSet {
     pub idle: Option<Idle>,
     /// Family (lowercase) -> the idle keys (and period) it replaces.
     pub family_idle: BTreeMap<String, Idle>,
+    /// Hit region -> the peak offsets of its flinch (bones only; written for
+    /// the right side). See the module docs, "Flinches".
+    pub flinch: BTreeMap<String, Pose>,
 }
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
@@ -569,7 +645,22 @@ impl PoseSet {
                 family_idle.insert(family, over);
             }
         }
-        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle })
+        let mut flinch = BTreeMap::new();
+        for (region, entries) in file.flinch {
+            if !FLINCH_REGIONS.contains(&region.as_str()) {
+                return Err(format!("flinch.{region}: not a hit region ({})", FLINCH_REGIONS.join(", ")));
+            }
+            let mut pose = Pose::default();
+            for (key, value) in entries {
+                let where_ = format!("flinch '{region}'");
+                if key == "root" {
+                    return Err(format!("{where_}: a flinch moves bones, not the root"));
+                }
+                pose.bones.insert(key.clone(), bone_def(&where_, &key, value)?);
+            }
+            flinch.insert(region, pose);
+        }
+        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle, flinch })
     }
 
     /// This set as `family` sees it: the shared poses with that family's

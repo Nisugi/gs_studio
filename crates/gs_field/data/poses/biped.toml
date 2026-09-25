@@ -192,3 +192,60 @@ clavicle = { rot = [-2.0, 0.0, 0.0] }
 neck = { rot = [2.2, 0.0, 0.0] }
 skull = { rot = [1.0, 0.0, 0.0] }
 arm = { rot = [1.5, 0.0, 2.8], bend = [-2.2], phase = -0.16 }
+
+# Flinches (see `Pose::flinched`): PEAK offsets for a hit on the region,
+# written for the creature's RIGHT side and mirrored for the left. A quick
+# snap and a spring back over half a second.
+[flinch.head]
+skull = { rot = [14.0, 0.0, -10.0] }
+neck = { rot = [10.0, 0.0, -5.0] }
+torso_upper = { rot = [4.0, 0.0, 0.0] }
+
+[flinch.neck]
+neck = { rot = [12.0, 0.0, 0.0] }
+skull = { rot = [8.0, 0.0, 0.0] }
+clavicle = { rot = [-6.0, 0.0, 0.0] }
+
+# A blow to the chest: thrown back, arms come up, a step back.
+[flinch.chest]
+torso_upper = { rot = [12.0, 0.0, 0.0] }
+torso_lower = { rot = [5.0, 0.0, 0.0] }
+neck = { rot = [-6.0, 0.0, 0.0] }
+arm = { rot = [-14.0, 0.0, 8.0], bend = [-16.0] }
+leg_r = { rot = [8.0, 0.0, 0.0], bend = [10.0, -4.0] }
+
+# A blow to the belly: doubled over.
+[flinch.abdomen]
+torso_upper = { rot = [-14.0, 0.0, 0.0] }
+torso_lower = { rot = [-8.0, 0.0, 0.0] }
+neck = { rot = [-4.0, 0.0, 0.0] }
+arm = { rot = [-20.0, 0.0, 4.0], bend = [-30.0] }
+leg = { bend = [8.0, -4.0] }
+
+# From behind: arched, head thrown back.
+[flinch.back]
+torso_upper = { rot = [-8.0, 0.0, 0.0] }
+torso_lower = { rot = [-4.0, 0.0, 0.0] }
+neck = { rot = [-8.0, 0.0, 0.0] }
+skull = { rot = [-6.0, 0.0, 0.0] }
+arm = { rot = [-10.0, 0.0, 10.0] }
+
+# The arm jerks back and out, the shoulder turns away, the near leg steps.
+[flinch.arm]
+arm_r = { rot = [-18.0, 0.0, 16.0], bend = [-20.0] }
+clavicle = { rot = [0.0, -8.0, 0.0] }
+torso_upper = { rot = [4.0, -8.0, 0.0] }
+torso_lower = { rot = [0.0, -4.0, 0.0] }
+leg_r = { rot = [8.0, 0.0, 0.0], bend = [6.0] }
+
+[flinch.hand]
+arm_r = { rot = [-12.0, 0.0, 10.0], bend = [-28.0] }
+hand_r = { rot = [-20.0, 0.0, 0.0] }
+torso_upper = { rot = [2.0, -5.0, 0.0] }
+
+# The leg buckles and is drawn up; the hip drops toward it.
+[flinch.leg]
+leg_r = { rot = [-12.0, 0.0, 8.0], bend = [24.0, -8.0] }
+torso_lower = { rot = [-4.0, 0.0, -6.0] }
+torso_upper = { rot = [-4.0, 0.0, 4.0] }
+arm_r = { rot = [0.0, 0.0, 12.0] }

@@ -112,3 +112,25 @@ fore_body = { rot = [2.0, 0.0, 3.5] }
 neck = { rot = [1.5, 0.0, -2.0], phase = -0.1 }
 skull = { rot = [1.5, 0.0, 0.0], phase = -0.15 }
 hind_body = { rot = [0.0, 0.0, 2.0], bend = [2.5, -2.5, 2.5], phase = -0.3 }
+
+# Flinches (see `Pose::flinched`): PEAK offsets for a hit on the region,
+# mirrored for the left. Arms, hands and legs it has none of.
+[flinch.head]
+skull = { rot = [12.0, 0.0, -10.0] }
+neck = { rot = [12.0, 0.0, -12.0] }
+
+[flinch.neck]
+neck = { rot = [14.0, 0.0, 0.0] }
+skull = { rot = [6.0, 0.0, 0.0] }
+
+[flinch.chest]
+fore_body = { rot = [-12.0, 0.0, 8.0] }
+neck = { rot = [8.0, 0.0, 0.0] }
+
+[flinch.abdomen]
+hind_body = { bend = [10.0, -10.0, 10.0] }
+fore_body = { rot = [-6.0, 0.0, 0.0] }
+
+[flinch.back]
+fore_body = { rot = [10.0, 0.0, 0.0] }
+neck = { rot = [-8.0, 0.0, 0.0] }

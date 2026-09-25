@@ -1382,18 +1382,30 @@ fn paint_creature_puppet(
     // Seen alive and just died: it falls (a procedural ragdoll) into its
     // dead pose. Any other change of pose eases from the old one into the
     // new. Both are drawn fresh every frame until they settle.
-    let posed = match puppets.motion(&creature.id, pose, now_ms / 1000.0) {
+    // A hit (a wound rank rising) makes it flinch, drawn fresh each frame
+    // until it settles; killed mid-flinch, it falls from that shape.
+    let motion = puppets.motion(&creature.id, pose, now_ms / 1000.0);
+    let flinch = puppets.flinch(&creature.id, &key.ranks, now_ms / 1000.0);
+    let posed = match motion {
         crate::creature_puppet::Motion::Falling { from, t } => {
             *animated = true;
             ctx.request_repaint();
-            puppets.posed_falling(&family, &key, skin, from, t)?
+            let died_in = puppets.death_flinch(&creature.id);
+            puppets.posed_falling(&family, &key, skin, from, t, died_in)?
         }
         crate::creature_puppet::Motion::Changing { from, u } => {
             *animated = true;
             ctx.request_repaint();
-            puppets.posed_changing(&family, &key, skin, from, u)?
+            puppets.posed_changing(&family, &key, skin, from, u, flinch)?
         }
-        crate::creature_puppet::Motion::Still => puppets.posed_with(&family, &key, skin)?,
+        crate::creature_puppet::Motion::Still => match flinch {
+            Some(f) => {
+                *animated = true;
+                ctx.request_repaint();
+                puppets.posed_flinching(&family, &key, skin, f)?
+            }
+            None => puppets.posed_with(&family, &key, skin)?,
+        },
     };
     // The parts this family's puppet actually carries, taken while the lock
     // is already held (the wound pass below needs it, and re-locking once

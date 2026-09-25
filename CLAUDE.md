@@ -75,7 +75,8 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   depth guide for an image generator (`depth_guide`). `fall.rs` is the procedural
   death fall (`examples/fall_strip` films it); `Pose::breathe` is the idle
   breathing cycle (`[idle]` in the pose files; `examples/breath_strip` films it
-  with a peak-vs-trough difference tile). Everything
+  with a peak-vs-trough difference tile) and `Pose::flinched` the hit
+  reaction (`[flinch.<region>]`; `examples/flinch_strip` films one). Everything
   except `paint.rs` is egui-free. The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `vellum_light` -- zero-dependency, Android-safe port of Niffy's
