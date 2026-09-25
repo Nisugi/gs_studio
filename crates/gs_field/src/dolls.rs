@@ -694,11 +694,11 @@ mod tests {
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         assert_eq!(meta.family, "humanoid");
         assert_eq!(meta.view, "front");
-        assert_eq!((meta.map.width, meta.map.height), (186, 512));
-        assert!((meta.ground_frac - 0.9995).abs() < 1e-4);
-        assert_eq!(meta.anchor("FEET"), Some([0.4991, 0.9995]));
-        assert_eq!(meta.anchor("mouth"), Some([0.5067, 0.1225]));
-        assert_eq!(meta.eye("lefteye"), Some([0.5538, 0.0631]));
+        assert_eq!((meta.map.width, meta.map.height), (182, 512));
+        assert!((meta.ground_frac - 1.0).abs() < 1e-4);
+        assert_eq!(meta.anchor("FEET"), Some([0.4987, 1.0]));
+        assert_eq!(meta.anchor("mouth"), Some([0.5025, 0.1225]));
+        assert_eq!(meta.eye("lefteye"), Some([0.5475, 0.0631]));
         assert!(meta.parts.iter().any(|p| p == "leftHand"));
         assert!(!meta.parts.iter().any(|p| p == "nsys"));
     }
@@ -765,11 +765,11 @@ mod tests {
         let meta = DollMeta::from_toml(HUMANOID_TOML).unwrap();
         let cal = meta.calibration();
         assert_eq!(cal.standing.size, None);
-        assert_eq!(cal.standing.aspect, Some(0.3633));
-        assert_eq!(cal.standing.span, Some(0.828));
+        assert_eq!(cal.standing.aspect, Some(0.3555));
+        assert_eq!(cal.standing.span, Some(0.6374));
         let prone = cal.prone.expect("derived prone pose");
         assert_eq!(prone.size, None);
-        assert!((prone.aspect.unwrap() - 1.0 / 0.3633).abs() < 1e-4);
+        assert!((prone.aspect.unwrap() - 1.0 / 0.3555).abs() < 1e-4);
         assert_eq!(prone.span, Some(1.0));
 
         // Through the shared contract: a 3 ft kobold and a 9 ft chieftain
@@ -787,7 +787,7 @@ mod tests {
         ] {
             let g = crate::geometry::resolve_geometry(&creature(name, noun), Some(&cal));
             assert!((g.world_h - h).abs() < 1e-3, "{name}: {}", g.world_h);
-            assert!((g.standing.w - h * 0.3633).abs() < 1e-3);
+            assert!((g.standing.w - h * 0.3555).abs() < 1e-3);
             assert!((g.prone.h - g.standing.w).abs() < 1e-3, "thickness");
             assert!((g.prone.w - g.standing.h).abs() < 1e-3, "length");
             assert_eq!(g.prone.span, 1.0);
@@ -947,7 +947,7 @@ mod tests {
         std::fs::create_dir_all(&rigs_dir).unwrap();
         std::fs::write(rigs_dir.join("canine.toml"), "family = \"canine\"\nview = \"side\"\naspect = 1.6\n").unwrap();
         std::fs::write(rigs_dir.join("canine.png"), b"not decoded here").unwrap();
-        std::fs::write(rigs_dir.join("humanoid.toml"), HUMANOID_TOML.replace("0.3633", "0.5")).unwrap();
+        std::fs::write(rigs_dir.join("humanoid.toml"), HUMANOID_TOML.replace("0.3555", "0.5")).unwrap();
         std::fs::write(rigs_dir.join("humanoid.png"), b"override").unwrap();
         // Ignored: rig sources, and a toml with no png.
         std::fs::write(rigs_dir.join("canine.rig.toml"), "family = \"canine\"").unwrap();

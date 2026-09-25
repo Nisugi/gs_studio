@@ -1,0 +1,146 @@
+version = 2
+family = "rodent"
+body_type = "quadruped"
+view = "side"
+ref_ft = 1.0
+axis = "withers"
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "ear_base_r", "ear_tip_r", "ear_base_l", "ear_tip_l"]
+
+[anchors]
+head = "poll"
+mouth = "nose"
+saddle = "mid_back"
+
+[joints]
+ear_base_l = [0.0403, 0.9119]
+ear_base_r = [0.0403, 0.9119]
+ear_tip_l = [0.5322, 0.9965]
+ear_tip_r = [0.5322, 0.9965]
+belly = [0.0283, 0.4429]
+chest_front = [0.5425, 0.5356]
+croup = [-0.3046, 0.6583]
+elbow_l = [0.3608, 0.372]
+elbow_r = [0.1283, 0.372]
+eye_r = [0.9578, 0.7701]
+forepaw_l = [0.4188, 0.012]
+forepaw_r = [0.365, 0.012]
+groin = [-0.2297, 0.4811]
+hindpaw_l = [0.4022, 0.012]
+hindpaw_r = [0.3867, 0.012]
+hip_l = [-0.2834, 0.5629]
+hip_r = [-0.2027, 0.5629]
+hock_l = [-0.9532, 0.2492]
+hock_r = [-0.1459, 0.1947]
+mid_back = [0.0758, 0.6774]
+nose = [1.038, 0.6938]
+poll = [0.5841, 0.8301]
+shoulder_l = [0.4526, 0.5356]
+shoulder_r = [0.414, 0.5356]
+sternum = [0.3438, 0.432]
+stifle_l = [-0.1904, 0.3992]
+stifle_r = [-0.5004, 0.372]
+tail_base = [-0.4014, 0.5683]
+tail_tip = [-0.5791, 0.3611]
+withers = [0.4197, 0.7047]
+wrist_l = [0.5416, 0.1129]
+wrist_r = [0.4655, 0.1129]
+
+[depth]
+ear_base_l = 0.32
+ear_base_r = -0.32
+ear_tip_l = 0.39
+ear_tip_r = -0.39
+elbow_l = 0.36
+elbow_r = -0.36
+shoulder_l = 0.4
+shoulder_r = -0.4
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "neck"
+joints = ["nose", "poll"]
+pivot = "poll"
+
+[[bones]]
+name = "neck"
+part = "neck"
+parent = "spine"
+joints = ["poll", "withers"]
+pivot = "withers"
+
+[[bones]]
+name = "ear_r"
+part = "head"
+parent = "skull"
+joints = ["ear_base_r", "ear_tip_r"]
+
+[[bones]]
+name = "ear_l"
+part = "head"
+parent = "skull"
+joints = ["ear_base_l", "ear_tip_l"]
+
+[[bones]]
+name = "spine"
+part = "back"
+joints = ["withers", "mid_back", "croup", "tail_base"]
+
+[[bones]]
+name = "tail"
+part = "back"
+parent = "spine"
+joints = ["tail_base", "tail_tip"]
+
+[[bones]]
+name = "brisket"
+part = "chest"
+parent = "spine"
+joints = ["chest_front", "sternum"]
+pivot = "sternum"
+
+[[bones]]
+name = "underline"
+part = "abdomen"
+parent = "spine"
+joints = ["sternum", "belly", "groin"]
+
+[[bones]]
+name = "foreleg_r"
+part = "rightArm"
+parent = "spine"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "forepaw_r"
+part = "rightHand"
+parent = "foreleg_r"
+joints = ["wrist_r", "forepaw_r"]
+
+[[bones]]
+name = "hindleg_r"
+part = "rightLeg"
+parent = "spine"
+joints = ["hip_r", "stifle_r", "hock_r", "hindpaw_r"]
+
+[[bones]]
+name = "foreleg_l"
+part = "leftArm"
+parent = "spine"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "forepaw_l"
+part = "leftHand"
+parent = "foreleg_l"
+joints = ["wrist_l", "forepaw_l"]
+
+[[bones]]
+name = "hindleg_l"
+part = "leftLeg"
+parent = "spine"
+joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[mirror]
+foreleg_r = "foreleg_l"
+hindleg_l = "hindleg_r"

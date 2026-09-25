@@ -24,7 +24,7 @@ fn a_rig_round_trips_through_toml() {
     let text = rig.to_toml().unwrap();
     assert_eq!(Rig::from_toml(&text).unwrap(), rig, "{text}");
     // f32 values are written tidily, not as their f64 expansion.
-    assert!(text.contains("crown = [0.0, 5.98]"), "{text}");
+    assert!(text.contains("crown = [-0.0077, 5.9463]"), "{text}");
     assert!(text.contains("radius_ft = 0.35"), "{text}");
     assert!(text.contains("eye_radius_ft = 0.08"), "{text}");
     assert!(text.contains("parent = \"torso_lower\""), "{text}");
@@ -135,8 +135,8 @@ fn the_fixture_is_the_biped_template_fully_placed() {
 fn the_humanoid_bakes_every_part() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
-    assert_eq!(outlines.entries.len(), 44);
-    assert_eq!(outlines.families().len(), 22);
+    assert_eq!(outlines.entries.len(), 92);
+    assert_eq!(outlines.families().len(), 46);
     let entry = outlines.get("humanoid", View::Front).unwrap();
     assert_eq!(entry.ref_ft, rig.ref_ft);
     let baked = bake(&rig, &entry.outline(), 512);
@@ -190,7 +190,7 @@ fn the_part_channel_is_what_it_was_before_bones_were_recorded() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
     let outline = outlines.get("humanoid", View::Front).unwrap().outline();
-    for (px, pinned) in [(256, 0x495d9fb29cedaa75u64), (512, 0xa1f53863a7c8ea12)] {
+    for (px, pinned) in [(256, 0xbe2ac77bbb98f823u64), (512, 0xad4a4610375e27c)] {
         let mask = rig_bake::rasterize(&outline, px);
         let bones: Vec<_> = rig.bake_bones().into_iter().map(|(_, b)| b).collect();
         let map = rig_bake::label(&mask, &bones);

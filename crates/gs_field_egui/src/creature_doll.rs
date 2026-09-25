@@ -599,7 +599,7 @@ mod tests {
     #[test]
     fn humanoid_map_decodes_with_the_parts_the_toml_lists() {
         let map = humanoid();
-        assert_eq!((map.width, map.height), (186, 512));
+        assert_eq!((map.width, map.height), (182, 512));
         for part in &map.meta.parts {
             assert!(map.has_part(part), "{part} has pixels");
         }

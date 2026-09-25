@@ -2,3 +2,49 @@ form	status	by	date	note
 humanoid	approved	owner	2026-09-25	painted pilot accepted; depth guides in use
 canine	approved	owner	2026-09-25	painted pilot accepted after side-first + head repaint; depth guides in use
 troll	approved	owner	2026-09-25	painted pilot accepted as-is; depth guides in use
+humanoid	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py); previous approval predates the new silhouette
+canine	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py); previous approval predates the new silhouette
+troll	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py); previous approval predates the new silhouette; arm and leg depths set from the new side view
+giant	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+orc	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+ogre	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+ghost	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+golem	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+treekin	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+elemental	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+equine	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+suine	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+ursine	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+caprine	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+elephantid	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+avian	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+worm	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+serpent	ready	dev	2026-09-25	refit pass 1 on the new silhouette (tools/refit_joints.py)
+feline	ready	dev	2026-09-25	joints placed by hand on the new silhouette
+ape	ready	dev	2026-09-25	new form, first pass from the troll rig; pose set = troll's body type; bestiary entries still need form = "ape"
+cervid	ready	dev	2026-09-25	new form, first pass from the caprine rig; pose set = caprine's body type; bestiary entries still need form = "cervid"
+rodent	ready	dev	2026-09-25	new form, first pass from the canine rig; pose set = canine's body type; bestiary entries still need form = "rodent"
+fishfolk	ready	dev	2026-09-25	new form, first pass from the humanoid rig; pose set = humanoid's body type; bestiary entries still need form = "fishfolk"
+upright_insect	ready	dev	2026-09-25	new form, first pass from the humanoid rig; pose set = humanoid's body type; bestiary entries still need form = "upright_insect"
+elemental_earth	ready	dev	2026-09-25	new form, first pass from the elemental rig; pose set = elemental's body type; bestiary entries still need form = "elemental_earth"
+elemental_fire	ready	dev	2026-09-25	new form, first pass from the elemental rig; pose set = elemental's body type; bestiary entries still need form = "elemental_fire"
+elemental_ice	ready	dev	2026-09-25	new form, first pass from the elemental rig; pose set = elemental's body type; bestiary entries still need form = "elemental_ice"
+elemental_water	ready	dev	2026-09-25	new form, first pass from the elemental rig; pose set = elemental's body type; bestiary entries still need form = "elemental_water"
+arachnid	blocked	dev	2026-09-25	joints need placing by hand (auto-transfer 0.38/0.30)
+crustacean	blocked	dev	2026-09-25	joints need placing by hand; puppet sheds pieces in rear/stunned/fallen_side
+reptilian	blocked	dev	2026-09-25	joints need placing in the editor; head and neck read far too fat
+dragon_bat	blocked	dev	2026-09-25	no rig yet: needs a winged quadruped template
+winged_beast	blocked	dev	2026-09-25	no rig yet: needs a winged quadruped template
+winged_humanoid	blocked	dev	2026-09-25	no rig yet: needs a winged biped template
+scorpion	blocked	dev	2026-09-25	no rig yet: multileg placement by hand + a tail
+six_legged_insect	blocked	dev	2026-09-25	no rig yet: multileg placement by hand
+bloated_sac	blocked	dev	2026-09-25	no rig yet: multileg placement by hand
+elemental_lava	blocked	dev	2026-09-25	no rig yet: needs a mound template
+elemental_steam	blocked	dev	2026-09-25	no rig yet: needs a mound template
+elemental_air	blocked	dev	2026-09-25	no rig yet: biped transfer unusable below the waist
+elemental_lightning	blocked	dev	2026-09-25	no rig yet: biped transfer usable but unchecked
+plant_mass	blocked	dev	2026-09-25	no rig yet: needs a mound template
+centaur	blocked	dev	2026-09-25	no rig yet: needs a centaur template (quadruped body + biped torso)
+naga	blocked	dev	2026-09-25	no rig yet: needs a naga template (serpentine + arms)
+fish	blocked	dev	2026-09-25	no rig yet: needs a fish template
+floating_orb	blocked	dev	2026-09-25	no rig yet: needs an orb template

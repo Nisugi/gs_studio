@@ -353,19 +353,21 @@ mod tests {
         assert!(outlines_from_chart(&chart(r#"{"x": {"d": ["M0,0 Q1,1 2,2 Z"], "baseY": 0, "ref": 1}}"#)).is_err());
     }
 
-    /// The port reproduces what the Python extractor wrote, when the real
-    /// chart is on this machine.
+    /// The import reproduces the checked-in outlines, when the chart they
+    /// came from is on this machine (image-gen's, made by sil_chart.py).
+    /// The checked-in file may carry entries kept by hand beyond the
+    /// chart's (the old single elemental beside the eight new ones).
     #[test]
     fn matches_the_checked_in_outlines_when_the_chart_is_here() {
-        let chart = std::path::Path::new(r"E:\Gemstone\dev\Creature Images\scale-chart.html");
+        let chart = std::path::Path::new(r"C:\Gemstone\image-gen\silhouettes\scale-chart.html");
         let Ok(html) = std::fs::read_to_string(chart) else {
             return;
         };
         let got = Outlines::from_json(&outlines_from_chart(&html).unwrap().json).unwrap();
         let want = Outlines::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outlines.json")).unwrap();
-        assert_eq!(got.entries.keys().collect::<Vec<_>>(), want.entries.keys().collect::<Vec<_>>());
-        for (key, w) in &want.entries {
-            let g = &got.entries[key];
+        assert!(got.entries.keys().all(|k| want.entries.contains_key(k)), "every chart entry is checked in");
+        for (key, g) in &got.entries {
+            let w = &want.entries[key];
             assert_eq!(g.ref_ft, w.ref_ft, "{key}");
             assert_eq!(g.subpaths.len(), w.subpaths.len(), "{key}");
             for (gs, ws) in g.subpaths.iter().zip(&w.subpaths) {
