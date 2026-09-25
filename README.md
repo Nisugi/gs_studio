@@ -838,13 +838,14 @@ art's head really tops out (less the round cap, about 0.9 of the head's
 radius): a crown set low leaves the top of the head to the chest. Below
 the hips the trunk is no deeper than the thighs it sits between. In a side-view rig, a
 left/right limb filled in wider than its twin measures (where it overlaps
-the body) takes the twin's width. A limb hangs off a trunk from INSIDE it:
-where a leg's first ring lands outside the trunk it hangs from (a base
+the body) takes the twin's width. A limb, wing or tail hangs off a trunk
+from INSIDE it: where its first ring lands outside the trunk it hangs from (a base
 clicked at the body's edge, its `[depth]` a guess: a crab's claw a third of
 a foot in front of a thorax the side view set back), the leg grows a stub
 back to halfway between that trunk's axis and its surface and pivots from
 there, so it stays attached at whatever angle a pose turns it; the stub is
-buried (filled, not outlined) like a thigh in the pelvis.
+buried (filled, not outlined) like a thigh in the pelvis. A head takes no
+stub: its axis places the eyes, and the neck rules seat it.
 
 ### `<family>.png` -- the baked label map
 
