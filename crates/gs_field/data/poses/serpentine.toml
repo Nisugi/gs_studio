@@ -108,7 +108,7 @@ hind_body = { rot = [[-110.0, 60.0], [-90.0, 90.0], [-45.0, 45.0]], bend = [[-60
 # hind body rippling behind on a lagging beat.
 [idle]
 period = 4.8
-fore_body = { rot = [0.8, 0.0, 1.4] }
-neck = { rot = [0.6, 0.0, -0.8], phase = -0.1 }
-skull = { rot = [0.6, 0.0, 0.0], phase = -0.15 }
-hind_body = { rot = [0.0, 0.0, 0.8], bend = [1.0, -1.0, 1.0], phase = -0.3 }
+fore_body = { rot = [2.0, 0.0, 3.5] }
+neck = { rot = [1.5, 0.0, -2.0], phase = -0.1 }
+skull = { rot = [1.5, 0.0, 0.0], phase = -0.15 }
+hind_body = { rot = [0.0, 0.0, 2.0], bend = [2.5, -2.5, 2.5], phase = -0.3 }
