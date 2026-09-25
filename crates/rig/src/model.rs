@@ -145,8 +145,48 @@ pub struct Rig {
     /// no taper.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty", serialize_with = "ser_f32_map")]
     pub radius_tip_ft: BTreeMap<String, f32>,
+    /// Parts of the art that are not the creature's body -- a club held in
+    /// front of it, a weapon resting on a shoulder -- which a puppet is not
+    /// measured from (held things are separate props). The label bake still
+    /// sees the whole outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<IgnoreArea>,
+    /// Limbs the art draws unlike their twins (a near leg drawn thicker than
+    /// the far one): `target = "source"` gives the target bone, and every
+    /// bone below it, its twin's shape -- the source's and the bones below
+    /// it, matched by their `_r` / `_l` names.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mirror: BTreeMap<String, String>,
     #[serde(default)]
     pub bones: Vec<RigBone>,
+}
+
+/// An area of one view's silhouette a puppet ignores ([`Rig::ignore`]): a
+/// polygon in that view's feet, the space its joints are placed in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IgnoreArea {
+    pub view: View,
+    pub points: Vec<Pt>,
+}
+
+impl IgnoreArea {
+    /// Is `p` (feet, in this area's view) inside the polygon?
+    pub fn contains(&self, p: Pt) -> bool {
+        let n = self.points.len();
+        if n < 3 {
+            return false;
+        }
+        let mut inside = false;
+        let mut j = n - 1;
+        for i in 0..n {
+            let (a, b) = (self.points[i], self.points[j]);
+            if (a[1] > p[1]) != (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0] {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
 }
 
 /// Something wrong with the bone hierarchy.
@@ -510,5 +550,37 @@ mod unused_tests {
         let text = rig.to_toml().unwrap();
         assert!(text.contains("unused = [\"eye_r\"]"), "{text}");
         assert_eq!(Rig::from_toml(&text).unwrap().unused, rig.unused);
+    }
+}
+
+#[cfg(test)]
+mod ignore_tests {
+    use super::*;
+
+    /// `[[ignore]]` areas round-trip and are left out of files without any;
+    /// a point inside the polygon is inside, one outside is not.
+    #[test]
+    fn ignore_areas_round_trip_and_contain_their_inside() {
+        let mut rig = crate::template("biped").unwrap().new_rig("ogre", View::Front, 6.0, "crown");
+        assert!(!rig.to_toml().unwrap().contains("[[ignore]]"));
+        rig.ignore.push(IgnoreArea { view: View::Side, points: vec![[0.0, 4.0], [2.0, 4.0], [2.0, 5.0], [0.0, 5.0]] });
+        let text = rig.to_toml().unwrap();
+        assert!(text.contains("[[ignore]]") && text.contains("view = \"side\""), "{text}");
+        let back = Rig::from_toml(&text).unwrap();
+        assert_eq!(back.ignore, rig.ignore);
+        let area = &back.ignore[0];
+        assert!(area.contains([1.0, 4.5]));
+        assert!(!area.contains([2.5, 4.5]) && !area.contains([1.0, 3.9]));
+    }
+
+    /// `[mirror]` round-trips, and is left out of files without it.
+    #[test]
+    fn mirrored_limbs_round_trip() {
+        let mut rig = crate::template("biped").unwrap().new_rig("canine", View::Side, 3.5, "crown");
+        assert!(!rig.to_toml().unwrap().contains("[mirror]"));
+        rig.mirror.insert("arm_r".into(), "arm_l".into());
+        let text = rig.to_toml().unwrap();
+        assert!(text.contains("[mirror]") && text.contains("arm_r = \"arm_l\""), "{text}");
+        assert_eq!(Rig::from_toml(&text).unwrap().mirror, rig.mirror);
     }
 }

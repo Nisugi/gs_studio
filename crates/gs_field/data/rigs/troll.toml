@@ -6,7 +6,7 @@ px_per_ft = 84.8525
 aspect = 0.8184
 span = 0.9976
 ground_frac = 0.9995
-eye_radius_ft = 0.081
+eye_radius_ft = 0.09
 parts = ["head", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
 
 [map]
@@ -15,7 +15,7 @@ height = 512
 
 [anchors]
 feet = [0.4994, 0.9995]
-head = [0.4994, 0.1046]
+head = [0.4994, 0.0747]
 mouth = [0.4994, 0.1792]
 saddle = [0.4994, 0.1211]
 
@@ -29,9 +29,9 @@ name = "skull"
 part = "head"
 parent = "neck"
 pivot = [0.4994, 0.1792]
-tip = [0.4994, 0.1046]
-joints = [[0.4994, 0.1046], [0.4994, 0.1792]]
-pixels = 48
+tip = [0.4994, 0.0747]
+joints = [[0.4994, 0.0747], [0.4994, 0.1792]]
+pixels = 514
 
 [[bones]]
 index = 2
@@ -49,9 +49,9 @@ name = "clavicle"
 part = "chest"
 parent = "torso_upper"
 pivot = [0.4994, 0.1211]
-tip = [0.7019, 0.1874]
-joints = [[0.2969, 0.1874], [0.4994, 0.1211], [0.7019, 0.1874]]
-pixels = 17396
+tip = [0.7647, 0.1874]
+joints = [[0.2341, 0.1874], [0.4994, 0.1211], [0.7647, 0.1874]]
+pixels = 20962
 
 [[bones]]
 index = 4
@@ -61,7 +61,7 @@ parent = "torso_lower"
 pivot = [0.4994, 0.3366]
 tip = [0.4994, 0.1211]
 joints = [[0.4994, 0.1211], [0.4994, 0.3366]]
-pixels = 12699
+pixels = 12680
 
 [[bones]]
 index = 5
@@ -77,10 +77,10 @@ index = 6
 name = "arm_r"
 part = "rightArm"
 parent = "clavicle"
-pivot = [0.2969, 0.1874]
+pivot = [0.2341, 0.1874]
 tip = [0.0994, 0.7675]
-joints = [[0.2969, 0.1874], [0.1247, 0.4692], [0.0994, 0.7675]]
-pixels = 21855
+joints = [[0.2341, 0.1874], [0.1247, 0.4692], [0.0994, 0.7675]]
+pixels = 19867
 
 [[bones]]
 index = 7
@@ -97,10 +97,10 @@ index = 8
 name = "arm_l"
 part = "leftArm"
 parent = "clavicle"
-pivot = [0.7019, 0.1874]
+pivot = [0.7647, 0.1874]
 tip = [0.8994, 0.7675]
-joints = [[0.7019, 0.1874], [0.874, 0.4692], [0.8994, 0.7675]]
-pixels = 21885
+joints = [[0.7647, 0.1874], [0.874, 0.4692], [0.8994, 0.7675]]
+pixels = 19860
 
 [[bones]]
 index = 9

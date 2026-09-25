@@ -86,6 +86,16 @@ const CROSSING_DEEP: f32 = 1.6;
 /// measure 0.4-0.8; a broad flat-topped torso read the whole chest into it
 /// (a golem's 2.15 ft clavicle came out 2.9 ft thick).
 const GIRDLE_THICKNESS: f32 = 0.8;
+/// ...and stands no more than this (feet) proud of the outline above it.
+const GIRDLE_PROUD_FT: f32 = 0.1;
+/// A biped's clavicle is a bar along the top of the shoulders: never
+/// thicker than this share of its length (the humanoid's measures 0.42).
+/// Past its shoulder the outline above it runs on up the neck, so the
+/// outline alone let a long one stand up over a jaw.
+/// How fast a biped's trunk may deepen again above its hips ([`biped_crotch`]):
+/// feet of half-depth per foot of height.
+const CROTCH_EASE: f32 = 2.0;
+const BIPED_GIRDLE_THICKNESS: f32 = 0.45;
 /// A trunk slice stops at a limb joint lying within the limb's radius plus
 /// this (feet, along the trunk bone) of it.
 const LIMB_JOINT_REACH_FT: f32 = 0.05;
@@ -479,6 +489,9 @@ struct Measured {
     /// A trunk bone lying across the body with more trunk hanging off it (a
     /// clavicle).
     girdle: bool,
+    /// Per station: its own reading was believed (not thrown out as trunk
+    /// and filled in from its neighbours).
+    read: Vec<bool>,
 }
 
 impl Puppet {
@@ -495,6 +508,9 @@ impl Puppet {
     /// rebuilds on every change; the masks only depend on the outlines). The
     /// rig's own view is required; without the other one everything is round.
     pub fn build_masks(rig: &Rig, front: Option<&Mask>, side: Option<&Mask>) -> Result<Puppet, PuppetError> {
+        // What the rig says is not body (`Rig::ignore`) is not measured.
+        let (front_kept, side_kept) = (front.map(|m| ignoring(rig, View::Front, m)), side.map(|m| ignoring(rig, View::Side, m)));
+        let (front, side) = (front_kept.as_deref(), side_kept.as_deref());
         let mask_of = |v: View| match v {
             View::Front => front,
             View::Side => side,
@@ -565,6 +581,71 @@ impl Puppet {
             }
         }
 
+        // A side view draws a left and right limb one over the other, and
+        // where one overlaps the body its slices read the body too: they are
+        // thrown out and filled in from its neighbours, growing toward the
+        // root (a canine's near upper foreleg came out 44% wider than the far
+        // one). Where one of a pair was really measured and the other was
+        // filled in wider, the filled-in one takes the measured width.
+        if rig.view == View::Side {
+            let stem = |bone: &str| bone.strip_suffix("_r").or_else(|| bone.strip_suffix("_l")).map(str::to_owned);
+            for i in 0..raws.len() {
+                let bone = &rig.bones[raws[i].bone].name;
+                if kinds[i] != Kind::Limb || !bone.ends_with("_r") {
+                    continue;
+                }
+                let Some(j) = (0..raws.len()).find(|&j| {
+                    kinds[j] == Kind::Limb
+                        && rig.bones[raws[j].bone].name.ends_with("_l")
+                        && stem(&rig.bones[raws[j].bone].name) == stem(bone)
+                        && (raws[j].chain, raws[j].k) == (raws[i].chain, raws[i].k)
+                }) else {
+                    continue;
+                };
+                let (Some(a), Some(b)) = (measured[i].as_ref(), measured[j].as_ref()) else { continue };
+                let at = |w: &[f32], t: f32| {
+                    let x = t * (w.len() - 1) as f32;
+                    let k = (x.floor() as usize).min(w.len() - 1);
+                    let k1 = (k + 1).min(w.len() - 1);
+                    w[k] + (w[k1] - w[k]) * (x - k as f32)
+                };
+                let shared = |mine: &Measured, other: &Measured| -> Vec<f32> {
+                    let n = mine.w.len();
+                    (0..n)
+                        .map(|k| {
+                            let t = k as f32 / (n - 1).max(1) as f32;
+                            let theirs = ((t * (other.read.len() - 1) as f32).round() as usize).min(other.read.len() - 1);
+                            // Filling in only ever inflates (it grows toward
+                            // the root): a measured width only slims it.
+                            if !mine.read[k] && other.read[theirs] {
+                                mine.w[k].min(at(&other.w, t))
+                            } else {
+                                mine.w[k]
+                            }
+                        })
+                        .collect()
+                };
+                let (wa, wb) = (shared(a, b), shared(b, a));
+                measured[i].as_mut().expect("measured").w = wa;
+                measured[j].as_mut().expect("measured").w = wb;
+            }
+        }
+
+        // Heads, for the trunk's depth rows (below): each head segment and
+        // how deep it is -- the rig's own radius when it gives one (a head
+        // carried in front of the shoulders measures as wide as they are),
+        // else its measured width.
+        let heads: Vec<(usize, f32)> = raws
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| is_skull(rig, o.bone))
+            .map(|(j, o)| {
+                let bone = &rig.bones[o.bone];
+                let given = rig.radius_depth_ft.get(&bone.name).copied().or(bone.radius_ft).filter(|r| r.is_finite() && *r > 0.0);
+                (j, given.unwrap_or_else(|| measured[j].as_ref().map_or(0.0, |m| median(&mut m.w.clone()))))
+            })
+            .collect();
+
         // ---- segments
         let mut groups: Vec<String> = Vec::new();
         let mut segments: Vec<Segment> = Vec::new();
@@ -601,6 +682,8 @@ impl Puppet {
             let centre = |k: usize| add(lerp(r.head, r.tail, k as f32 / (n - 1) as f32), scale(m.axis_w, m.off[k]));
             let mut depth: Vec<Option<f32>> = Vec::with_capacity(n);
             let mut shift: Vec<f32> = Vec::with_capacity(n);
+            // How far each row runs out in front of the bone line.
+            let mut fronts: Vec<Option<f32>> = Vec::with_capacity(n);
             // What a limb's depth is judged against: see `LIMB_DEPTH_MAX`.
             let ref_w = median(&mut m.w.clone()).max(MIN_HALF_FT);
             // The other view stacks everything along its line of sight, so
@@ -649,7 +732,37 @@ impl Puppet {
                 // IoU (humanoid side .9488 -> .9148): buried and creased limb
                 // rows split into slivers. Needs a rule that tells the two
                 // apart before it can go in.
-                let run = other.and_then(|mask| run_along(mask, [c[oa], c[1]], [1.0, 0.0], MERGE_GAP_FT, 0.12));
+                let mut run = other.and_then(|mask| run_along(mask, [c[oa], c[1]], [1.0, 0.0], MERGE_GAP_FT, 0.12));
+                // A head carried low and forward (a hunched troll's) sits in
+                // the same rows of the other view as the top of the chest, and
+                // the chest took the head's depth too: a cap over the head,
+                // swallowing it. Where a head lies clearly in front of (or
+                // behind) this trunk's line, the row stops at the back of it.
+                // Above the chin -- the face's rows -- a head half its radius
+                // ahead is enough: a big head whose back just meets the
+                // trunk's line was not "clearly" in front, and the chest rose
+                // over it to the crown.
+                if kind == Kind::Trunk && bone.part.as_deref() != Some("head") {
+                    for &(j, r) in heads.iter().filter(|(j, _)| *j != i) {
+                        let h = &raws[j];
+                        let (y0, y1) = (h.head[1].min(h.tail[1]), h.head[1].max(h.tail[1]));
+                        if c[1] < y0 - r || c[1] > y1 + r {
+                            continue;
+                        }
+                        let dy = h.tail[1] - h.head[1];
+                        let s = if dy.abs() < 1e-4 { 0.5 } else { ((c[1] - h.head[1]) / dy).clamp(0.0, 1.0) };
+                        let dz = h.head[oa] + (h.tail[oa] - h.head[oa]) * s - c[oa];
+                        let clear = if c[1] > y0 && rig.body_type == "biped" { 0.5 * r } else { r };
+                        if let Some((lo, hi)) = run.as_mut() {
+                            if dz > clear {
+                                *hi = hi.min(dz - r).max(*lo + 2.0 * MIN_HALF_FT);
+                            } else if dz < -r {
+                                *lo = lo.max(dz + r).min(*hi - 2.0 * MIN_HALF_FT);
+                            }
+                        }
+                    }
+                }
+                fronts.push(run.map(|(_, hi)| hi));
                 let (half, mid) = run.map(|(lo, hi)| ((hi - lo) * 0.5, (lo + hi) * 0.5)).unwrap_or((0.0, 0.0));
                 let ok = match kind {
                     Kind::Trunk => run.is_some(),
@@ -731,6 +844,30 @@ impl Puppet {
             // reading or two in a row come out deep and shifted, a fin on
             // the chest. Its depth and centre change slowly; take out runs
             // of two.
+            // A head or neck the rig pins in depth at both ends (a troll's,
+            // carried low in front of its hunch) stays where it is pinned:
+            // its rows in the other view run through the hunch behind it,
+            // and moving it to their middle buried the head in the chest.
+            let pinned = (is_skull(rig, r.bone) || bone.part.as_deref() == Some("neck"))
+                && [&r.head_joint, &r.tail_joint].iter().all(|j| rig.depth.contains_key(*j));
+            if pinned {
+                shift.iter_mut().for_each(|x| *x = 0.0);
+                // ...but a biped's face juts out in front of where its head is
+                // pinned, and a head that stopped short of it left the face to
+                // nothing (or to the hunch behind): slide the head forward --
+                // never back -- at its own depth until its front meets the
+                // face, so the face is the head's and turns with it, and the
+                // head stands clear of the hunch.
+                if is_skull(rig, r.bone) && rig.body_type == "biped" {
+                    let given = rig.radius_depth_ft.get(&bone.name).copied().filter(|r| r.is_finite() && *r > 0.0);
+                    for k in 0..n {
+                        let half = given.unwrap_or(d[k]);
+                        if let Some(front) = fronts[k] {
+                            shift[k] = (front - half).clamp(0.0, half);
+                        }
+                    }
+                }
+            }
             if kind == Kind::Trunk {
                 median5(&mut d);
                 median5(&mut shift);
@@ -936,6 +1073,11 @@ impl Puppet {
                 hidden: false,
             });
         }
+        if rig.body_type == "biped" {
+            biped_crotch(&mut segments);
+            biped_neck_under_head(&mut segments);
+        }
+        mirror_twins(rig, &mut segments);
         for i in 0..segments.len() {
             if segments[i].kind == Kind::Trunk || segments[i].chain_index != 0 {
                 continue;
@@ -1008,6 +1150,140 @@ impl Puppet {
     pub fn station_count(&self) -> usize {
         self.segments.iter().map(|s| s.stations.len()).sum()
     }
+}
+
+/// The head itself: a head-part bone not hanging off another one (an
+/// elephant's tusks and trunk are head parts too).
+/// A biped's trunk below its hips sits between its thighs, and the other
+/// view's rows there cross the thighs as well: it read the whole body's
+/// depth -- a thin plate standing out in front of and behind the legs (an
+/// orc's crotch). Below the hips it is no deeper than it is wide or than
+/// the thighs, easing back to its own depth over the hips.
+fn biped_crotch(segments: &mut [Segment]) {
+    let thighs: Vec<(f32, f32)> = segments
+        .iter()
+        .filter(|s| s.kind == Kind::Limb && s.chain_index == 0 && s.part.as_deref().is_some_and(|p| p.ends_with("Leg")))
+        .map(|s| (s.head[1], s.stations.iter().map(|st| st.d).fold(0.0f32, f32::max)))
+        .collect();
+    let Some(hip) = thighs.iter().map(|t| t.0).reduce(f32::max) else { return };
+    let thigh = thighs.iter().map(|t| t.1).fold(0.0f32, f32::max);
+    for s in segments.iter_mut().filter(|s| s.kind == Kind::Trunk && !matches!(s.part.as_deref(), Some("head" | "neck"))) {
+        for st in &mut s.stations {
+            let most = st.w.max(thigh) + CROTCH_EASE * (st.c[1] - hip).max(0.0);
+            st.d = q(st.d.min(most));
+        }
+    }
+}
+
+/// Above its chin a biped's neck is inside its head. Its top reads the
+/// head's own rows, and where those run out to heavy shoulders (an orc's)
+/// the neck came out wider than the head and in front of the face: the face
+/// was the neck's, painted onto it and left behind when the head turned.
+/// There its rings are no wider than the head's at that height, and reach
+/// no further forward.
+fn biped_neck_under_head(segments: &mut [Segment]) {
+    let is_head = |s: &Segment| s.part.as_deref() == Some("head");
+    let Some(skull) = segments.iter().position(|s| is_head(s) && s.parent.is_none_or(|p| !is_head(&segments[p]))) else { return };
+    let chin = segments[skull].head[1].min(segments[skull].tail[1]);
+    // The head's rings by height: (y, half-width, front z), measured ones only.
+    let front = |s: &Segment, st: &Station| st.c[2] + st.d * s.axis_d[2].abs() + st.w * s.axis_w[2].abs();
+    let head: Vec<(f32, f32, f32)> = segments[skull].stations.iter().map(|st| (st.c[1], st.w, front(&segments[skull], st))).collect();
+    let at = |y: f32| head.iter().min_by(|a, b| (a.0 - y).abs().total_cmp(&(b.0 - y).abs())).filter(|h| (h.0 - y).abs() < STATION_STEP_FT * 2.0);
+    for s in segments.iter_mut().filter(|s| s.part.as_deref() == Some("neck")) {
+        let (aw, ad) = (s.axis_w[2].abs(), s.axis_d[2].abs());
+        for st in &mut s.stations {
+            if st.c[1] <= chin {
+                continue;
+            }
+            let Some(&(_, hw, hf)) = at(st.c[1]) else { continue };
+            st.w = q(st.w.min(hw).max(MIN_HALF_FT * 0.5));
+            let over = st.c[2] + st.d * ad + st.w * aw - hf;
+            if over > 0.0 && ad > 0.3 {
+                st.d = q((st.d - over / ad).max(MIN_HALF_FT * 0.5));
+            }
+        }
+    }
+}
+
+/// `Rig::mirror`: each named limb, and every bone below it, takes its
+/// twin's shape -- station by station where both have as many, else along
+/// its length -- keeping its own centre line.
+fn mirror_twins(rig: &Rig, segments: &mut [Segment]) {
+    for (target, source) in &rig.mirror {
+        let Some(root) = rig.bones.iter().position(|b| b.name == *target) else { continue };
+        // The side tags to swap below the named bones (`_r` -> `_l`), when
+        // they are a mirror pair.
+        let sides = [("_r", "_l"), ("_l", "_r")].into_iter().find(|(a, b)| target.ends_with(a) && source.ends_with(b));
+        let under = |bone: &str| {
+            let mut at = rig.bones.iter().position(|b| b.name == bone);
+            for _ in 0..rig.bones.len() {
+                match at {
+                    Some(i) if i == root => return true,
+                    Some(i) => at = rig.parent_index(i),
+                    None => return false,
+                }
+            }
+            false
+        };
+        for i in 0..segments.len() {
+            let bone = segments[i].bone.clone();
+            if !under(&bone) {
+                continue;
+            }
+            let twin_bone = if bone == *target {
+                source.clone()
+            } else {
+                match sides.and_then(|(a, b)| bone.strip_suffix(a).map(|stem| format!("{stem}{b}"))) {
+                    Some(t) => t,
+                    None => continue,
+                }
+            };
+            let twin_name = format!("{twin_bone}{}", &segments[i].name[bone.len()..]);
+            let Some(j) = segments.iter().position(|s| s.name == twin_name) else { continue };
+            let from = segments[j].stations.clone();
+            let to = &mut segments[i].stations;
+            let (n, m) = (to.len(), from.len());
+            if n == 0 || m == 0 {
+                continue;
+            }
+            for (k, st) in to.iter_mut().enumerate() {
+                let f = if n == m { k as f32 } else { k as f32 / (n - 1).max(1) as f32 * (m - 1) as f32 };
+                let (a, b) = (f.floor() as usize, (f.ceil() as usize).min(m - 1));
+                let t = f - a as f32;
+                st.w = q(from[a].w + (from[b].w - from[a].w) * t);
+                st.d = q(from[a].d + (from[b].d - from[a].d) * t);
+            }
+        }
+    }
+}
+
+fn is_skull(rig: &Rig, bone: usize) -> bool {
+    let part = |b: &rig::RigBone| b.part.as_deref() == Some("head");
+    let b = &rig.bones[bone];
+    part(b) && !b.parent.as_deref().and_then(|p| rig.bones.iter().find(|x| x.name == p)).is_some_and(part)
+}
+
+/// `mask` without the areas `rig.ignore` lists for `view` (a club, a
+/// weapon: art that is not the body). Borrowed when there are none.
+fn ignoring<'m>(rig: &Rig, view: View, mask: &'m Mask) -> std::borrow::Cow<'m, Mask> {
+    let areas: Vec<&rig::IgnoreArea> = rig.ignore.iter().filter(|a| a.view == view && a.points.len() >= 3).collect();
+    if areas.is_empty() {
+        return std::borrow::Cow::Borrowed(mask);
+    }
+    let mut kept = mask.clone();
+    let g = kept.grid;
+    for y in 0..g.h {
+        for x in 0..g.w {
+            let i = y * g.w + x;
+            if kept.inside[i] {
+                let p = [g.min_x + (x as f32 + 0.5) / g.px_per_ft, g.max_y - (y as f32 + 0.5) / g.px_per_ft];
+                if areas.iter().any(|a| a.contains(p)) {
+                    kept.inside[i] = false;
+                }
+            }
+        }
+    }
+    std::borrow::Cow::Owned(kept)
 }
 
 fn measure_segment<'m>(
@@ -1268,6 +1544,7 @@ fn measure_segment<'m>(
             off[k] = None;
         }
     }
+    let read: Vec<bool> = half.iter().map(Option::is_some).collect();
     // How much of this segment was thrown out as trunk. A segment buried
     // along its whole length loses (nearly) every station, and then BOTH the
     // survivors and anything extrapolated from them are torso too.
@@ -1297,10 +1574,26 @@ fn measure_segment<'m>(
     // chest run's, not the limb's: kept, they slid the upper foreleg back
     // along the belly as a ball. A buried limb stays on its bone line.
     let mut off: Vec<f32> = if buried { vec![0.0; n] } else { off.iter().map(|o| o.unwrap_or(0.0)).collect() };
+    // A girdle sits on its own bone line. On a broad torso its slices read
+    // down through the whole chest: centred on them it hung into the chest
+    // as a slab, and stood up above the shoulders beside the head. It stays
+    // on its line and no more than a little proud of the outline above it.
+    // (A biped's: a side-drawn animal's spine counts as a girdle too.)
+    if girdle && rig.body_type == "biped" {
+        let up = if n2[1] >= 0.0 { n2 } else { [-n2[0], -n2[1]] };
+        for k in 0..n {
+            off[k] = 0.0;
+            w[k] = w[k].min(BIPED_GIRDLE_THICKNESS * length);
+            let p = flat(view, lerp(r.head, r.tail, k as f32 / (n - 1) as f32));
+            if let Some((_, hi)) = run_along(mask, p, up, MERGE_GAP_FT, 0.12) {
+                w[k] = w[k].min(hi + GIRDLE_PROUD_FT).max(MIN_HALF_FT);
+            }
+        }
+    }
     median3(&mut w);
     box3(&mut w);
     box3(&mut off);
-    Measured { view, axis_w, axis_d, off, w, unsplit, buried_calibre: buried.then_some(calibre).flatten(), girdle }
+    Measured { view, axis_w, axis_d, off, w, unsplit, buried_calibre: buried.then_some(calibre).flatten(), girdle, read }
 }
 
 fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) -> Vec<Eye> {

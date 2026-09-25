@@ -31,7 +31,7 @@ parent = "neck"
 pivot = [0.4994, 0.1046]
 tip = [0.4994, 0.0085]
 joints = [[0.4994, 0.0085], [0.4994, 0.1046]]
-pixels = 3021
+pixels = 3191
 
 [[bones]]
 index = 2
@@ -41,7 +41,7 @@ parent = "torso_upper"
 pivot = [0.4994, 0.1294]
 tip = [0.4994, 0.1046]
 joints = [[0.4994, 0.1046], [0.4994, 0.1294]]
-pixels = 337
+pixels = 453
 
 [[bones]]
 index = 3
@@ -49,9 +49,9 @@ name = "clavicle"
 part = "chest"
 parent = "torso_upper"
 pivot = [0.4994, 0.1294]
-tip = [0.6537, 0.1957]
-joints = [[0.3451, 0.1957], [0.4994, 0.1294], [0.6537, 0.1957]]
-pixels = 5593
+tip = [0.7419, 0.1957]
+joints = [[0.257, 0.1957], [0.4994, 0.1294], [0.7419, 0.1957]]
+pixels = 6428
 
 [[bones]]
 index = 4
@@ -61,7 +61,7 @@ parent = "torso_lower"
 pivot = [0.4994, 0.2703]
 tip = [0.4994, 0.1294]
 joints = [[0.4994, 0.1294], [0.4994, 0.2703]]
-pixels = 4146
+pixels = 5940
 
 [[bones]]
 index = 5
@@ -70,17 +70,17 @@ part = "abdomen"
 pivot = [0.4994, 0.5272]
 tip = [0.4994, 0.2703]
 joints = [[0.4994, 0.2703], [0.4994, 0.5272]]
-pixels = 21212
+pixels = 22741
 
 [[bones]]
 index = 6
 name = "arm_r"
 part = "rightArm"
 parent = "clavicle"
-pivot = [0.3451, 0.1957]
+pivot = [0.257, 0.1957]
 tip = [0.0696, 0.6183]
-joints = [[0.3451, 0.1957], [0.1027, 0.4692], [0.0696, 0.6183]]
-pixels = 19895
+joints = [[0.257, 0.1957], [0.1027, 0.4692], [0.0696, 0.6183]]
+pixels = 17693
 
 [[bones]]
 index = 7
@@ -90,17 +90,17 @@ parent = "arm_r"
 pivot = [0.0696, 0.6183]
 tip = [0.0807, 0.7426]
 joints = [[0.0696, 0.6183], [0.0807, 0.7426]]
-pixels = 3963
+pixels = 3944
 
 [[bones]]
 index = 8
 name = "arm_l"
 part = "leftArm"
 parent = "clavicle"
-pivot = [0.6537, 0.1957]
+pivot = [0.7419, 0.1957]
 tip = [0.9292, 0.6183]
-joints = [[0.6537, 0.1957], [0.8961, 0.4692], [0.9292, 0.6183]]
-pixels = 19963
+joints = [[0.7419, 0.1957], [0.8961, 0.4692], [0.9292, 0.6183]]
+pixels = 17758
 
 [[bones]]
 index = 9
@@ -110,7 +110,7 @@ parent = "arm_l"
 pivot = [0.9292, 0.6183]
 tip = [0.9182, 0.7426]
 joints = [[0.9292, 0.6183], [0.9182, 0.7426]]
-pixels = 3950
+pixels = 3932
 
 [[bones]]
 index = 10

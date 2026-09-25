@@ -687,6 +687,43 @@ The avian's feathers use all three: a folded wing's silhouette says nothing
 about how broad the feathers are once spread, so the blade is set by hand --
 0.22 ft at the wrist tapering to 0.04 at the tip, 0.03 thick.
 
+**Art that is not the body** (puppet only; the bake still labels the whole
+outline): a club, a weapon, anything held -- held things are separate props.
+Polygons in the view's own feet, the space the joints are placed in; the
+puppet is measured as if those pixels were not there:
+
+    [[ignore]]
+    view = "side"                # or "front"
+    points = [[0.62, 4.76], [2.3, 4.7], [2.3, 3.15], [1.27, 3.15], [0.9, 4.2]]
+
+The ogre's club (on its shoulder in both views) and the fist holding it (in
+front of its chest in the side view) are cut out this way; measured with
+them, its chest took the club's depth.
+
+**Twins drawn unlike** (puppet only): a limb the art draws unlike its twin
+-- a canine's near foreleg, drawn thicker than the far one -- takes the
+twin's shape, and so does every bone below it (matched by `_r` / `_l`
+names), each keeping its own line:
+
+    [mirror]
+    foreleg_r = "foreleg_l"      # target = source
+
+**Where the builder is careful** (bipeds): an arm is round about its own
+bone and the torso stops at it and at the ball of the shoulder, so place the
+shoulder and elbow joints on the arm's centre line -- a shoulder set inside
+the arm pinches the chest. A clavicle is a bar on its bone line along the
+top of the shoulders. A head pinned in `[depth]` at both ends (a troll's,
+carried low in front of its hunch) stays there -- or slides forward, never
+back, until its front meets the face in the side art, so the face is the
+head's -- and the chest's depth stops behind it (above the chin, whenever
+the head is half its radius ahead). Above the chin the neck lies inside the
+head: no wider, and no further forward. So put the crown joint where the
+art's head really tops out (less the round cap, about 0.9 of the head's
+radius): a crown set low leaves the top of the head to the chest. Below
+the hips the trunk is no deeper than the thighs it sits between. In a side-view rig, a
+left/right limb filled in wider than its twin measures (where it overlaps
+the body) takes the twin's width.
+
 ### `<family>.png` -- the baked label map
 
 8-bit RGBA, cropped to the silhouette's bounds, 512 px on the long side.

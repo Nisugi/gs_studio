@@ -110,6 +110,8 @@ fn buried_rig(view: View) -> Rig {
         depth: BTreeMap::new(),
         radius_depth_ft: BTreeMap::new(),
         radius_tip_ft: BTreeMap::new(),
+        ignore: Vec::new(),
+        mirror: BTreeMap::new(),
         bones: vec![
             RigBone {
                 name: "spine".to_owned(),
@@ -615,7 +617,7 @@ fn a_humanoid_head_is_round_to_its_outline() {
     // Round: a ring a tenth of a foot below the top is still well over half
     // as wide as the head at its widest.
     let widest = skull.stations.iter().map(|s| s.w).fold(0.0f32, f32::max);
-    let near_top = skull.stations.iter().filter(|s| s.c[1] <= top - 0.1).last().expect("a ring below the top");
+    let near_top = skull.stations.iter().rfind(|s| s.c[1] <= top - 0.1).expect("a ring below the top");
     assert!(near_top.w > 0.6 * widest, "{:.3} ft wide 0.1 ft below the top of a {widest:.3} ft head: a crest", near_top.w);
 }
 
@@ -663,4 +665,207 @@ fn a_severed_stump_wears_its_wound_colour() {
     assert_eq!(end.color(look.body, stump.base), crate::draw::RAW_END);
     let forearm = p.segments.iter().rposition(|s| s.part.as_deref() == Some("rightArm")).expect("a forearm");
     assert!(forearm != arm && !surfaces.iter().any(|s| s.index == forearm), "the rest of the arm is gone");
+}
+
+/// A family as the repo rigs it, against its own silhouettes.
+fn shipped(family: &str) -> Puppet {
+    shipped_where(family, |_| {})
+}
+
+/// [`shipped`], with its rig changed first.
+fn shipped_where(family: &str, change: impl FnOnce(&mut Rig)) -> Puppet {
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let mut rig = Rig::load(&data.join("rigs").join(Rig::file_name(family))).expect("rig");
+    change(&mut rig);
+    let outlines = rig::Outlines::load(&data.join("outlines.json")).expect("outlines");
+    Puppet::build(&rig, &outlines).expect("builds")
+}
+
+/// Where a silhouette's outline is furthest toward +x at height `y`, feet.
+fn front_at(outline: &rig_bake::Outline, y: f32) -> Option<f32> {
+    let mut front: Option<f32> = None;
+    for path in &outline.subpaths {
+        for (a, b) in path.iter().zip(path.iter().cycle().skip(1)) {
+            if (a[1] > y) != (b[1] > y) {
+                let x = a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+                front = Some(front.map_or(x, |f| f.max(x)));
+            }
+        }
+    }
+    front
+}
+
+fn mean_w(s: &Segment) -> f32 {
+    let body = &s.stations[CAP_RINGS..s.stations.len() - CAP_RINGS];
+    body.iter().map(|st| st.w).sum::<f32>() / body.len().max(1) as f32
+}
+
+/// The troll carries its head low, in front of its hunch. Its head stays
+/// where the rig pins it in depth (moving it to the middle of the side view's
+/// rows, which run through the hunch, buried it in the chest), and the top of
+/// the chest stops behind it instead of taking its depth as well.
+#[test]
+fn a_troll_carries_its_head_in_front_of_its_hunch() {
+    let p = shipped("troll");
+    let skull = segment(&p, "skull");
+    let z = skull.stations.iter().map(|s| s.c[2]).sum::<f32>() / skull.stations.len() as f32;
+    assert!(z > 1.2, "the head sits at z {z:.2}, pinned at 1.5-1.6");
+    let chest = segment(&p, "torso_upper");
+    let worst = chest.stations[CAP_RINGS..chest.stations.len() - CAP_RINGS].iter().map(|s| s.d / s.w).fold(0.0f32, f32::max);
+    assert!(worst < 1.6, "the chest is {worst:.2} times deeper than wide somewhere: it took the head's depth");
+}
+
+/// The troll carries its head low in front of its hunch, and its face juts
+/// out past where the rig pins the head: a head that stopped short left the
+/// face to nothing. The head slides forward -- never back -- until its front
+/// meets the face in the side art, so the face turns with the head.
+#[test]
+fn a_troll_s_head_reaches_its_face() {
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let outlines = rig::Outlines::load(&data.join("outlines.json")).expect("outlines");
+    let side = outlines.get("troll", View::Side).expect("side art").outline();
+    let p = shipped("troll");
+    let skull = segment(&p, "skull");
+    // The rings the face spans (between the jaw and the brow).
+    let rings: Vec<_> = skull.stations.iter().filter(|s| (5.0..5.45).contains(&s.c[1])).collect();
+    assert!(rings.len() >= 4);
+    for s in rings {
+        let face = front_at(&side, s.c[1]).expect("the face");
+        let front = s.c[2] + s.d;
+        assert!((front - face).abs() < 0.1, "at {:.2} ft the head reaches {front:.2}, the face {face:.2}", s.c[1]);
+    }
+}
+
+/// The troll's head is the top of its figure: in the art the peak of both
+/// outlines is its crown, with the hunch behind it and the shoulders below.
+/// The chest stops behind the head above the chin, so the face is the
+/// head's, and turns with it.
+#[test]
+fn a_troll_s_head_tops_its_figure_and_its_chest_stops_behind_it() {
+    let p = shipped("troll");
+    let (skull, chest) = (segment(&p, "skull"), segment(&p, "torso_upper"));
+    let top = |s: &Segment| s.stations.iter().map(|st| st.c[1]).fold(f32::MIN, f32::max);
+    assert!(top(skull) >= top(chest), "the head tops out at {:.2}, the chest at {:.2}", top(skull), top(chest));
+    let chin = skull.head[1].min(skull.tail[1]);
+    for st in chest.stations.iter().filter(|st| st.c[1] > chin + 0.05) {
+        let h = skull.stations.iter().min_by(|a, b| (a.c[1] - st.c[1]).abs().total_cmp(&(b.c[1] - st.c[1]).abs())).unwrap();
+        let (front, back) = (st.c[2] + st.d, h.c[2] - h.d);
+        assert!(front < back + 0.3, "at {:.2} ft the chest reaches {front:.2}, past the back of the head at {back:.2}", st.c[1]);
+    }
+}
+
+/// Above its chin a biped's neck is inside its head: the orc's, read out to
+/// its heavy shoulders, was wider than the head and stood in front of the
+/// face.
+#[test]
+fn a_biped_s_neck_is_inside_its_head_above_the_chin() {
+    let p = shipped("orc");
+    let (skull, neck) = (segment(&p, "skull"), segment(&p, "neck"));
+    let chin = skull.head[1].min(skull.tail[1]);
+    let above: Vec<_> = neck.stations.iter().filter(|st| st.c[1] > chin).collect();
+    assert!(!above.is_empty(), "the orc's neck reaches above its chin");
+    for st in above {
+        let h = skull.stations.iter().min_by(|a, b| (a.c[1] - st.c[1]).abs().total_cmp(&(b.c[1] - st.c[1]).abs())).unwrap();
+        assert!(st.w <= h.w + 0.01, "at {:.2} ft the neck is {:.2} wide, the head {:.2}", st.c[1], st.w, h.w);
+        assert!(st.c[2] + st.d <= h.c[2] + h.d + 0.01, "at {:.2} ft the neck stands in front of the face", st.c[1]);
+    }
+}
+
+/// A wolf's pointed ears are its strongest cue: the canine's art has them
+/// (the outlines' peaks, 0.6 ft over the poll), and the rig rigs them.
+#[test]
+fn a_canine_has_its_ears() {
+    let p = shipped("canine");
+    let poll = segment(&p, "skull").stations.iter().map(|st| st.c[1]).fold(f32::MIN, f32::max);
+    for n in ["ear_r", "ear_l"] {
+        let tip = segment(&p, n).stations.iter().map(|st| st.c[1]).fold(f32::MIN, f32::max);
+        assert!(tip > poll + 0.15 && tip > 3.5, "{n} rises to {tip:.2} ft, the head to {poll:.2}");
+    }
+}
+
+/// Below its hips a biped's trunk sits between its thighs, and it read the
+/// whole body's depth there: a thin plate standing out in front of and
+/// behind the legs (the orc's crotch). It is no deeper than the thighs.
+#[test]
+fn a_biped_s_trunk_below_its_hips_is_no_deeper_than_its_thighs() {
+    let p = shipped("orc");
+    let thigh = |n: &str| segment(&p, n).stations.iter().map(|s| s.d).fold(0.0f32, f32::max);
+    let (hip, thighs) = (segment(&p, "leg_r.0").head[1], thigh("leg_r.0").max(thigh("leg_l.0")));
+    let below: Vec<_> = segment(&p, "torso_lower").stations.iter().filter(|s| s.c[1] <= hip && s.w > 0.1).collect();
+    assert!(!below.is_empty(), "the orc's trunk reaches below its hips");
+    for s in below {
+        assert!(s.d <= s.w.max(thighs) + 1e-3, "at {:.2} ft the trunk is {:.2} deep, the thighs {thighs:.2}", s.c[1], s.d);
+    }
+}
+
+/// A canine's near foreleg is drawn thicker than its far one; the rig's
+/// `mirror` gives it, and the paw below it, the far one's shape.
+#[test]
+fn a_mirrored_limb_takes_its_twin_s_shape() {
+    let p = shipped("canine");
+    for n in ["foreleg_r.0", "foreleg_r.1", "forepaw_r"] {
+        let (a, b) = (segment(&p, n), segment(&p, &n.replace("_r", "_l")));
+        assert_eq!(a.stations.len(), b.stations.len(), "{n}");
+        for (x, y) in a.stations.iter().zip(&b.stations) {
+            assert!((x.w - y.w).abs() < 1e-3 && (x.d - y.d).abs() < 1e-3, "{n}: {x:?} vs {y:?}");
+        }
+        // Each keeps its own line: the near leg is not moved onto the far one.
+        assert!((a.stations[3].c[0] - b.stations[3].c[0]).abs() > 0.1, "{n} sits on its own side");
+    }
+    let plain = shipped_where("canine", |rig| rig.mirror.clear());
+    let (near, far) = (mean_w(segment(&plain, "foreleg_r.1")), mean_w(segment(&plain, "foreleg_l.1")));
+    assert!(near > far * 1.1, "without it the near lower foreleg is drawn thicker: {near:.3} vs {far:.3}");
+}
+
+/// The ogre's art holds a club: resting on its shoulder, and in its fist in
+/// front of the chest in the side view. The rig's `ignore` areas keep them
+/// out of the measurement, so the chest is measured on the body alone.
+#[test]
+fn the_ogre_is_measured_without_its_club() {
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let mut rig = Rig::load(&data.join("rigs/ogre.rig.toml")).expect("rig");
+    let outlines = rig::Outlines::load(&data.join("outlines.json")).expect("outlines");
+    assert!(!rig.ignore.is_empty(), "the ogre's rig lists its club");
+    // At the fist's height (4.0-4.7 ft), where the side view's rows ran on
+    // through the forearm and the club's handle.
+    let depth = |p: &Puppet| {
+        let rows: Vec<f32> = segment(p, "torso_upper").stations.iter().filter(|s| (4.0..4.7).contains(&s.c[1])).map(|s| s.d).collect();
+        rows.iter().sum::<f32>() / rows.len().max(1) as f32
+    };
+    let without = depth(&Puppet::build(&rig, &outlines).unwrap());
+    rig.ignore.clear();
+    let with_club = depth(&Puppet::build(&rig, &outlines).unwrap());
+    assert!(without < with_club - 0.05, "chest {without:.2} ft deep without the club, {with_club:.2} with it");
+}
+
+/// A side view draws a left and right limb one over the other, and where the
+/// near one overlaps the body its slices are thrown out and filled in, fat
+/// toward the root: a canine's near upper foreleg came out 44% wider than
+/// the far one. Filled in wider than its twin measures, it takes the twin's.
+#[test]
+fn a_side_drawn_pair_is_not_inflated_where_it_overlaps_the_body() {
+    // Without the rig's `mirror`, which would copy the far leg outright.
+    let p = shipped_where("canine", |rig| rig.mirror.clear());
+    let (near, far) = (mean_w(segment(&p, "foreleg_r.0")), mean_w(segment(&p, "foreleg_l.0")));
+    assert!(near < far * 1.2, "near upper foreleg {near:.3} ft, far {far:.3}");
+}
+
+/// A biped's clavicle is a bar along the top of its shoulders: on its bone
+/// line, and no thicker than 0.45 of its length (on a broad torso it hung
+/// into the chest as a slab and stood up over the jaw).
+#[test]
+fn a_biped_clavicle_is_a_bar_on_its_line() {
+    for family in ["orc", "troll", "giant"] {
+        let p = shipped(family);
+        let c = segment(&p, "clavicle.0");
+        let length = crate::math::len(crate::math::sub(c.tail, c.head));
+        for st in &c.stations[CAP_RINGS..c.stations.len() - CAP_RINGS] {
+            assert!(st.w <= 0.45 * length + 1e-3, "{family}: clavicle {:.2} ft thick on a {length:.2} ft bone", st.w);
+            // On the line from head to tail, in the front view it is drawn in.
+            let (a, b) = ([c.head[0], c.head[1]], [c.tail[0], c.tail[1]]);
+            let (e, q) = ([b[0] - a[0], b[1] - a[1]], [st.c[0] - a[0], st.c[1] - a[1]]);
+            let off = (q[0] * e[1] - q[1] * e[0]).abs() / (e[0] * e[0] + e[1] * e[1]).sqrt();
+            assert!(off < 0.05, "{family}: a clavicle ring sits {off:.2} ft off its bone");
+        }
+    }
 }

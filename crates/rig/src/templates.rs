@@ -86,6 +86,8 @@ impl Template {
             depth: BTreeMap::new(),
             radius_depth_ft: BTreeMap::new(),
             radius_tip_ft: BTreeMap::new(),
+            ignore: Vec::new(),
+            mirror: BTreeMap::new(),
             bones: self
                 .bones
                 .iter()

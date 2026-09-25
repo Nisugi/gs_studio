@@ -30,7 +30,7 @@ parent = "neck"
 pivot = [0.8653, 0.1669]
 tip = [0.9772, 0.3032]
 joints = [[0.9772, 0.3032], [0.8653, 0.1669]]
-pixels = 2877
+pixels = 2658
 
 [[bones]]
 index = 2
@@ -40,10 +40,30 @@ parent = "spine"
 pivot = [0.6715, 0.2923]
 tip = [0.8653, 0.1669]
 joints = [[0.8653, 0.1669], [0.6715, 0.2923]]
-pixels = 9400
+pixels = 8967
 
 [[bones]]
 index = 3
+name = "ear_r"
+part = "head"
+parent = "skull"
+pivot = [0.8579, 0.0851]
+tip = [0.8698, 0.0005]
+joints = [[0.8579, 0.0851], [0.8698, 0.0005]]
+pixels = 623
+
+[[bones]]
+index = 4
+name = "ear_l"
+part = "head"
+parent = "skull"
+pivot = [0.8579, 0.0851]
+tip = [0.8698, 0.0005]
+joints = [[0.8579, 0.0851], [0.8698, 0.0005]]
+pixels = 29
+
+[[bones]]
+index = 5
 name = "spine"
 part = "back"
 pivot = [0.6715, 0.2923]
@@ -52,7 +72,7 @@ joints = [[0.6715, 0.2923], [0.5, 0.3196], [0.2987, 0.3387], [0.2092, 0.4286]]
 pixels = 14156
 
 [[bones]]
-index = 4
+index = 6
 name = "tail"
 part = "back"
 parent = "spine"
@@ -62,7 +82,7 @@ joints = [[0.2092, 0.4286], [0.0228, 0.6359]]
 pixels = 4114
 
 [[bones]]
-index = 5
+index = 7
 name = "brisket"
 part = "chest"
 parent = "spine"
@@ -72,7 +92,7 @@ joints = [[0.7535, 0.4614], [0.6566, 0.565]]
 pixels = 3200
 
 [[bones]]
-index = 6
+index = 8
 name = "underline"
 part = "abdomen"
 parent = "spine"
@@ -82,7 +102,7 @@ joints = [[0.6566, 0.565], [0.5, 0.5541], [0.3658, 0.5159]]
 pixels = 6434
 
 [[bones]]
-index = 7
+index = 9
 name = "foreleg_r"
 part = "rightArm"
 parent = "spine"
@@ -92,7 +112,7 @@ joints = [[0.6789, 0.4614], [0.6491, 0.625], [0.6446, 0.884]]
 pixels = 3388
 
 [[bones]]
-index = 8
+index = 10
 name = "forepaw_r"
 part = "rightHand"
 parent = "foreleg_r"
@@ -102,7 +122,7 @@ joints = [[0.6446, 0.884], [0.6715, 0.9849]]
 pixels = 859
 
 [[bones]]
-index = 9
+index = 11
 name = "hindleg_r"
 part = "rightLeg"
 parent = "spine"
@@ -112,7 +132,7 @@ joints = [[0.3211, 0.4341], [0.3807, 0.625], [0.3255, 0.8022], [0.3807, 0.9849]]
 pixels = 5088
 
 [[bones]]
-index = 10
+index = 12
 name = "foreleg_l"
 part = "leftArm"
 parent = "spine"
@@ -122,7 +142,7 @@ joints = [[0.7013, 0.4614], [0.6939, 0.625], [0.6939, 0.884]]
 pixels = 1363
 
 [[bones]]
-index = 11
+index = 13
 name = "forepaw_l"
 part = "leftHand"
 parent = "foreleg_l"
@@ -132,7 +152,7 @@ joints = [[0.6939, 0.884], [0.7237, 0.9849]]
 pixels = 622
 
 [[bones]]
-index = 12
+index = 14
 name = "hindleg_l"
 part = "leftLeg"
 parent = "spine"

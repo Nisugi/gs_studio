@@ -4,7 +4,7 @@ body_type = "quadruped"
 view = "side"
 ref_ft = 3.0
 axis = "withers"
-joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "ear_base_r", "ear_tip_r", "ear_base_l", "ear_tip_l"]
 
 [anchors]
 head = "poll"
@@ -12,6 +12,10 @@ mouth = "nose"
 saddle = "mid_back"
 
 [joints]
+ear_base_l = [2.4, 3.38]
+ear_base_r = [2.4, 3.38]
+ear_tip_l = [2.48, 3.69]
+ear_tip_r = [2.48, 3.69]
 belly = [0.0, 1.66]
 chest_front = [1.7, 2.0]
 croup = [-1.35, 2.45]
@@ -42,6 +46,10 @@ wrist_l = [1.3, 0.45]
 wrist_r = [0.97, 0.45]
 
 [depth]
+ear_base_l = 0.32
+ear_base_r = -0.32
+ear_tip_l = 0.39
+ear_tip_r = -0.39
 elbow_l = 0.36
 elbow_r = -0.36
 shoulder_l = 0.4
@@ -60,6 +68,18 @@ part = "neck"
 parent = "spine"
 joints = ["poll", "withers"]
 pivot = "withers"
+
+[[bones]]
+name = "ear_r"
+part = "head"
+parent = "skull"
+joints = ["ear_base_r", "ear_tip_r"]
+
+[[bones]]
+name = "ear_l"
+part = "head"
+parent = "skull"
+joints = ["ear_base_l", "ear_tip_l"]
 
 [[bones]]
 name = "spine"
@@ -120,3 +140,6 @@ name = "hindleg_l"
 part = "leftLeg"
 parent = "spine"
 joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
+
+[mirror]
+foreleg_r = "foreleg_l"
