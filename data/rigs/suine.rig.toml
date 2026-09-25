@@ -98,6 +98,8 @@ wrist_l = 0.54
 wrist_r = -0.54
 
 [radius_depth_ft]
+forepaw_l = 0.22
+forepaw_r = 0.22
 underline = 0.32
 
 [[bones]]

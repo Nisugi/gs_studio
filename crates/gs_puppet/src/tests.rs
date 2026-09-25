@@ -754,6 +754,23 @@ fn a_troll_s_head_tops_its_figure_and_its_chest_stops_behind_it() {
     }
 }
 
+/// The troll's long arms hang in front of its chest, so in the side view
+/// their rows over the chest are the chest's, the hunch's and both arms'.
+/// The upper arm keeps its bone line there: slid back to the middle of the
+/// hunch, it came out at the elbow as a stub sticking straight forward.
+#[test]
+fn a_troll_s_upper_arm_hangs_on_its_bone_line_in_front_of_its_chest() {
+    let p = shipped("troll");
+    for name in ["arm_r.0", "arm_l.0"] {
+        let upper = segment(&p, name);
+        for st in &upper.stations[CAP_RINGS..upper.stations.len() - CAP_RINGS] {
+            let t = ((st.c[1] - upper.head[1]) / (upper.tail[1] - upper.head[1])).clamp(0.0, 1.0);
+            let line = upper.head[2] + (upper.tail[2] - upper.head[2]) * t;
+            assert!((st.c[2] - line).abs() < 0.15, "{name} at {:.2} ft sits at z {:.2}, its bone at {line:.2}", st.c[1], st.c[2]);
+        }
+    }
+}
+
 /// Above its chin a biped's neck is inside its head: the orc's, read out to
 /// its heavy shoulders, was wider than the head and stood in front of the
 /// face.
@@ -867,5 +884,158 @@ fn a_biped_clavicle_is_a_bar_on_its_line() {
             let off = (q[0] * e[1] - q[1] * e[0]).abs() / (e[0] * e[0] + e[1] * e[1]).sqrt();
             assert!(off < 0.05, "{family}: a clavicle ring sits {off:.2} ft off its bone");
         }
+    }
+}
+
+// ------------------------------------------------------ builder review
+
+/// Every shipped rig, by family name.
+fn shipped_families() -> Vec<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/rigs");
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+        .expect("rigs")
+        .filter_map(|e| e.ok()?.file_name().into_string().ok()?.strip_suffix(".rig.toml").map(str::to_owned))
+        .collect();
+    out.sort();
+    out
+}
+
+/// A clicked eye sits at the height it was clicked. Its place along the
+/// head is read in the view it was clicked in: read in 3D, with the click's
+/// unknown coordinate 0 and the head's not, a head bone that leans in depth
+/// (a crown behind its chin) carried the eyes along the face by the head's
+/// whole depth times that lean -- 0.22 ft down the golem's, 0.12 up the
+/// troll's.
+#[test]
+fn an_eye_sits_at_the_height_it_was_clicked() {
+    // A head leaning back 0.4 ft over 0.8 ft of height, a foot in front of
+    // the trunk's line.
+    let mut rig = plain_rig(
+        View::Front,
+        &[("hip", [0.0, 1.0]), ("neck", [0.0, 3.0]), ("crown", [0.0, 3.8])],
+        vec![bone("spine", "chest", None, &["neck", "hip"]), bone("head", "head", Some("spine"), &["neck", "crown"])],
+    );
+    rig.depth.insert("neck".into(), 1.2);
+    rig.depth.insert("crown".into(), 0.8);
+    rig.eyes.left_eye = Some([0.2, 3.3]);
+    rig.eyes.right_eye = Some([-0.2, 3.3]);
+    let front = mask_from(|x, y| (0.5..=3.9).contains(&y) && x.abs() <= 0.5);
+    let side = mask_from(|z, y| (0.5..=3.9).contains(&y) && (-0.5..=1.7).contains(&z));
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).unwrap();
+    assert_eq!(p.eyes.len(), 2);
+    for e in &p.eyes {
+        assert!((e.pos[1] - 3.3).abs() < 0.01, "an eye clicked at 3.30 ft sits at {:.2}", e.pos[1]);
+    }
+    // And the shipped heads that lean.
+    let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    for family in ["golem", "troll", "ogre", "crustacean"] {
+        let rig = Rig::load(&data.join("rigs").join(Rig::file_name(family))).expect("rig");
+        let (l, r) = rig.eye_points();
+        let p = shipped(family);
+        for (eye, clicked) in p.eyes.iter().zip([l, r]) {
+            let y = clicked.expect("both eyes clicked")[1];
+            assert!((eye.pos[1] - y).abs() < 0.01, "{family}: an eye clicked at {y:.2} ft sits at {:.2}", eye.pos[1]);
+        }
+    }
+}
+
+/// Nothing rests below the ground: every ring of every shipped puppet
+/// reaches down its width axis no further than y = 0 (less the smallest
+/// half-width a ring keeps). The joint ease and the end caps both move
+/// rings after they are measured, so rings are grounded after them:
+/// grounded before, a foot's first ring, moved onto the shin's last, sat up
+/// to 0.18 ft under the floor (the ghost's).
+#[test]
+fn no_ring_of_a_shipped_puppet_rests_below_the_ground() {
+    for family in shipped_families() {
+        let p = shipped(&family);
+        for s in &p.segments {
+            for st in &s.stations {
+                let bottom = st.c[1] - st.w * s.axis_w[1].abs();
+                assert!(bottom > -0.03, "{family}: a ring of {} reaches {bottom:.3} ft, under the ground", s.name);
+            }
+        }
+    }
+}
+
+/// A station whose reading was thrown out (a row that read something far
+/// wider than the limb) takes its centre from its neighbours, as it takes
+/// its width. Snapped back to the bone line instead, a limb drawn beside
+/// its bone jogged sideways there: an elephant's upper foreleg by 0.3 ft
+/// between one ring and the next, a ghost's leg by 0.7.
+#[test]
+fn a_thrown_out_station_follows_its_neighbours_centre() {
+    // A leg drawn 0.1 ft to the left of its bone, with a blob across it at
+    // knee height that no ring may believe.
+    let front = mask_from(|x, y| {
+        ((2.0..=4.0).contains(&y) && x.abs() <= 0.9)
+            || ((0.0..=2.0).contains(&y) && (x - 0.1).abs() <= LIMB_HALF)
+            || ((0.9..=1.1).contains(&y) && x.abs() <= 0.8)
+    });
+    let side = mask_from(|z, y| ((2.0..=4.0).contains(&y) && z.abs() <= 0.9) || ((0.0..=2.0).contains(&y) && z.abs() <= LIMB_HALF));
+    let rig = plain_rig(
+        View::Front,
+        &[("top", [0.0, 4.0]), ("hip", [0.0, 2.0]), ("foot", [0.0, 0.2])],
+        vec![bone("spine", "chest", None, &["top", "hip"]), bone("leg", "leftLeg", Some("spine"), &["hip", "foot"])],
+    );
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).expect("builds");
+    let leg = segment(&p, "leg");
+    let rings: Vec<_> = leg.stations[CAP_RINGS..leg.stations.len() - CAP_RINGS].iter().filter(|st| st.c[1] < 1.8).collect();
+    assert!(rings.iter().any(|st| (0.85..1.15).contains(&st.c[1])), "rings cross the blob");
+    for st in rings {
+        assert!((st.c[0] - 0.1).abs() < 0.03, "at {:.2} ft the leg's ring sits at x {:.2}, the leg at 0.10", st.c[1], st.c[0]);
+    }
+}
+
+/// `radius_tip_ft` tapers a chain from the width at its root to the tip at
+/// its free end -- the joint furthest from its pivot, whichever end of the
+/// bone's joint list that is -- in one run over every segment. Each
+/// segment restarting the run from its own width left a step at every
+/// joint (a shin 0.25 ft wide meeting a thigh's end of 0.20), and a bone
+/// pivoted in the middle started its second chain halfway to the tip.
+#[test]
+fn a_taper_runs_from_the_chain_s_root_to_its_free_end() {
+    let figure = |x: f32, y: f32| trunk(x, y) || ((1.0..=2.0).contains(&y) && x.abs() <= 0.2) || ((0.0..1.0).contains(&y) && x.abs() <= 0.1);
+    let (front, side) = (mask_from(figure), mask_from(figure));
+    let joints = [("top", [0.0, 4.0]), ("hip", [0.0, 2.0]), ("knee", [0.0, 1.0]), ("foot", [0.0, 0.2])];
+    fn body(s: &Segment) -> &[Station] {
+        &s.stations[if s.chain_index == 0 { CAP_RINGS } else { 0 }..s.stations.len() - CAP_RINGS]
+    }
+    for pivot in [None, Some("foot")] {
+        let mut leg = bone("leg", "leftLeg", Some("spine"), &["hip", "knee", "foot"]);
+        leg.pivot = pivot.map(str::to_owned);
+        let mut rig = plain_rig(View::Front, &joints, vec![bone("spine", "chest", None, &["top", "hip"]), leg]);
+        rig.radius_tip_ft.insert("leg".into(), 0.05);
+        let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).expect("builds");
+        let (first, second) = (body(segment(&p, "leg.0")), body(segment(&p, "leg.1")));
+        let (root, joint_a, joint_b, tip) = (first[0].w, first[first.len() - 1].w, second[0].w, second[second.len() - 1].w);
+        assert!((joint_a - joint_b).abs() < 0.02, "pivot {pivot:?}: the segments meet {joint_a:.3} and {joint_b:.3} wide");
+        assert!((tip - 0.05).abs() < 0.02, "pivot {pivot:?}: the free end is {tip:.3} wide, the tip 0.05");
+        assert!(root > 0.08, "pivot {pivot:?}: the root keeps its measured width, not {root:.3}");
+        // The free end is the far end from the pivot: the foot, or with the
+        // pivot there, the hip.
+        let free_y = second[second.len() - 1].c[1];
+        assert!(if pivot.is_none() { free_y < 0.6 } else { free_y > 1.6 }, "pivot {pivot:?}: the free end is at {free_y:.2} ft");
+    }
+    // A bar pivoted in the middle: both halves run from the bar's width at
+    // the pivot to the tip.
+    let bar = |x: f32, y: f32| (2.9..=3.1).contains(&y) && x.abs() <= 0.8;
+    let (front, side) = (mask_from(bar), mask_from(bar));
+    let across = RigBone {
+        name: "bar".into(),
+        part: None,
+        parent: None,
+        joints: vec!["l".into(), "mid".into(), "r".into()],
+        pivot: Some("mid".into()),
+        radius_ft: None,
+    };
+    let mut rig = plain_rig(View::Front, &[("l", [-0.8, 3.0]), ("mid", [0.0, 3.0]), ("r", [0.8, 3.0])], vec![across]);
+    rig.radius_tip_ft.insert("bar".into(), 0.02);
+    let p = Puppet::build_masks(&rig, Some(&front), Some(&side)).expect("builds");
+    for name in ["bar.0", "bar.1"] {
+        let rings = body(segment(&p, name));
+        let (start, end) = (rings[0].w, rings[rings.len() - 1].w);
+        assert!(start > 0.07, "{name} starts at the bar's width, not {start:.3}");
+        assert!((end - 0.02).abs() < 0.015, "{name} ends at the tip, not {end:.3}");
     }
 }

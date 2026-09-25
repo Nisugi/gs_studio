@@ -703,12 +703,16 @@ bone name, in feet, all optional:
     [radius_depth_ft]            # half-thickness across the view (else measured)
     wing_hand_r = 0.03
 
-    [radius_tip_ft]              # half-width at the bone's LAST joint: it tapers
-    wing_hand_r = 0.04           # from radius_ft (or its measured width) to this
+    [radius_tip_ft]              # half-width at the chain's FREE end (the joint
+    wing_hand_r = 0.04           # furthest from its pivot): it tapers to this from
+                                 # radius_ft, or the width measured at its root
 
 The avian's feathers use all three: a folded wing's silhouette says nothing
 about how broad the feathers are once spread, so the blade is set by hand --
 0.22 ft at the wrist tapering to 0.04 at the tip, 0.03 thick.
+The suine's fore trotters set `radius_depth_ft` too: face on, each has its
+hind trotter straight behind it, so the front view cannot say how deep one
+trotter is, and unset they came out no wider across than front to back.
 
 **Art that is not the body** (puppet only; the bake still labels the whole
 outline): a club, a weapon, anything held -- held things are separate props.
@@ -734,7 +738,9 @@ names), each keeping its own line:
 **Where the builder is careful** (bipeds): an arm is round about its own
 bone and the torso stops at it and at the ball of the shoulder, so place the
 shoulder and elbow joints on the arm's centre line -- a shoulder set inside
-the arm pinches the chest. A clavicle is a bar on its bone line along the
+the arm pinches the chest. An arm hung in front of the chest (a troll's)
+keeps its bone line where the side view's rows cross the chest and the
+other arm, so its elbow's `[depth]` is what places it. A clavicle is a bar on its bone line along the
 top of the shoulders. A head pinned in `[depth]` at both ends (a troll's,
 carried low in front of its hunch) stays there -- or slides forward, never
 back, until its front meets the face in the side art, so the face is the

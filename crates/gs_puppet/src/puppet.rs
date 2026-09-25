@@ -646,6 +646,18 @@ impl Puppet {
             })
             .collect();
 
+        // The width each chain starts at (its first segment's, at the root),
+        // for a taper (below) to run from.
+        let chain_base: Vec<f32> = raws
+            .iter()
+            .map(|r| {
+                raws.iter()
+                    .position(|o| o.bone == r.bone && o.chain == r.chain && o.k == 0)
+                    .and_then(|j| measured[j].as_ref().and_then(|m| m.w.first().copied()))
+                    .unwrap_or(0.0)
+            })
+            .collect();
+
         // ---- segments
         let mut groups: Vec<String> = Vec::new();
         let mut segments: Vec<Segment> = Vec::new();
@@ -777,13 +789,18 @@ impl Puppet {
                 // middle hides a shoulder or thigh inside the chest instead of
                 // leaving it standing proud), but not how THICK it is: that
                 // is the trunk's depth, and the limb keeps its own.
-                let over_trunk = kind == Kind::Limb
-                    && run.is_some_and(|(lo, hi)| trunk_centres(c[1]).iter().any(|x| (lo..=hi).contains(x)));
+                // The run is measured from this station; the centre lines
+                // are where the bones are. Compared as they were, a limb well
+                // off the other view's middle (a troll's arm, hung in front
+                // of its chest) missed its twin in the chest's rows, and slid
+                // back to the middle of the hunch.
+                let spans = |(lo, hi): (f32, f32), x: &f32| (c[oa] + lo..=c[oa] + hi).contains(x);
+                let over_trunk = kind == Kind::Limb && run.is_some_and(|r| trunk_centres(c[1]).iter().any(|x| spans(r, x)));
                 let crossing = kind == Kind::Limb
-                    && run.is_some_and(|(lo, hi)| {
+                    && run.is_some_and(|r| {
                         let off = |x: &f32| (x - c[oa]).abs() > CROSSING_OFF * ref_w;
                         let deeper = half > CROSSING_DEEP * ref_w;
-                        other_limb_centres(c[1]).iter().any(|x| (lo..=hi).contains(x) && (off(x) || deeper))
+                        other_limb_centres(c[1]).iter().any(|x| spans(r, x) && (off(x) || deeper))
                     });
                 depth.push((ok && !over_trunk && !crossing).then_some(half));
                 shift.push(if ok && !crossing { mid } else { 0.0 });
@@ -896,12 +913,17 @@ impl Puppet {
             if let Some(r) = rig.radius_depth_ft.get(&bone.name).filter(|r| r.is_finite() && **r > 0.0) {
                 d.iter_mut().for_each(|x| *x = *r);
             }
-            // A taper: from the width at the bone's first joint to
-            // `radius_tip_ft` at its last, along the whole chain.
+            // A taper: from the width at the chain's root (its pivot end) to
+            // `radius_tip_ft` at its free end, along the whole chain. The
+            // root width is the CHAIN's, read once: each segment starting
+            // from its own left a step at every joint (a shin 0.25 ft wide
+            // meeting a thigh's end of 0.20). A bone pivoted in the middle
+            // tapers each of its chains on its own.
             if let Some(tip) = rig.radius_tip_ft.get(&bone.name).filter(|r| r.is_finite() && **r > 0.0) {
-                let count = raws.iter().filter(|o| o.bone == r.bone).count().max(1) as f32;
-                let index = raws[..i].iter().filter(|o| o.bone == r.bone).count() as f32;
-                let base = bone.radius_ft.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(w[0]);
+                let chain = |o: &Raw| o.bone == r.bone && o.chain == r.chain;
+                let count = raws.iter().filter(|o| chain(o)).count().max(1) as f32;
+                let index = raws[..i].iter().filter(|o| chain(o)).count() as f32;
+                let base = bone.radius_ft.filter(|r| r.is_finite() && *r > 0.0).unwrap_or(chain_base[i]);
                 for (k, x) in w.iter_mut().enumerate() {
                     let t = (index + k as f32 / (n - 1).max(1) as f32) / count;
                     *x = base + (tip - base) * t;
@@ -922,13 +944,7 @@ impl Puppet {
                 .map(|k| {
                     let mut c = centre(k);
                     c[oa] += shift[k];
-                    let mut wk = w[k].max(MIN_HALF_FT);
-                    // Nothing rests below the ground.
-                    let reach = wk * m.axis_w[1].abs();
-                    if reach > c[1].max(0.0) && m.axis_w[1].abs() > 1e-3 {
-                        wk = (c[1].max(0.0) / m.axis_w[1].abs()).max(MIN_HALF_FT);
-                    }
-                    Station { c, w: wk, d: d[k].max(MIN_HALF_FT) }
+                    Station { c, w: w[k].max(MIN_HALF_FT), d: d[k].max(MIN_HALF_FT) }
                 })
                 .collect();
             // ...and from where the parent's end sits to its own line.
@@ -988,6 +1004,19 @@ impl Puppet {
             let tail_cap = cap(body[n_body - 1], a, tail_reach);
             stations.append(&mut body);
             stations.extend(tail_cap);
+            // Nothing rests below the ground: a ring reaches down its width
+            // axis no further than y = 0. Last, after the joint ease and the
+            // caps, which both move rings: a foot's first ring, moved onto
+            // the shin's last, sat up to 0.18 ft under the floor.
+            let tilt = m.axis_w[1].abs();
+            if tilt > 1e-3 {
+                for s in &mut stations {
+                    let floor = s.c[1].max(0.0) / tilt;
+                    if s.w > floor {
+                        s.w = floor.max(MIN_HALF_FT);
+                    }
+                }
+            }
             for s in &mut stations {
                 *s = Station { c: q3(s.c), w: q(s.w), d: q(s.d) };
             }
@@ -1573,7 +1602,11 @@ fn measure_segment<'m>(
     // Its surviving stations read the chest too, so their centres are the
     // chest run's, not the limb's: kept, they slid the upper foreleg back
     // along the belly as a ball. A buried limb stays on its bone line.
-    let mut off: Vec<f32> = if buried { vec![0.0; n] } else { off.iter().map(|o| o.unwrap_or(0.0)).collect() };
+    // Otherwise a station whose reading was thrown out follows its
+    // neighbours, as its width does: snapped back to the bone line instead,
+    // it jogged the tube sideways between one ring and the next (an
+    // elephant's upper foreleg by 0.3 ft, a ghost's leg by 0.7).
+    let mut off: Vec<f32> = if buried { vec![0.0; n] } else { fill_gaps(&off, ds, 0.0).unwrap_or_else(|| vec![0.0; n]) };
     // A girdle sits on its own bone line. On a broad torso its slices read
     // down through the whole chest: centred on them it hung into the chest
     // as a slab, and stood up above the shoulders beside the head. It stays
@@ -1624,14 +1657,25 @@ fn build_eyes(rig: &Rig, segments: &[Segment], joints: &BTreeMap<String, V3>) ->
         View::Front => [0.0, 0.0, 1.0],
         View::Side => [1.0, 0.0, 0.0],
     };
+    // The click says nothing about `unknown`: the eye's coordinate there is
+    // taken as the head's own at each ring, so how far along the head it
+    // sits is read in the clicked view. Read in 3D as if that coordinate
+    // were 0, a head bone that leans in depth (a golem's crown sits behind
+    // its chin) carried the eyes down the face by the head's whole depth
+    // times that lean: 0.22 ft. A head pointing at the viewer shows that
+    // view next to nothing of its length, and there the 3D reading stands,
+    // fading in as the view sees less than half the bone.
+    let flat_a = sub(a, scale(unknown, dot(a, unknown)));
+    let seen = (dot(flat_a, flat_a) / 0.25).min(1.0);
+    let along_of = |p: V3, c: V3| seen * dot(sub(p, c), flat_a) + (1.0 - seen) * dot(sub(p, c), a);
     let mut out = Vec::new();
     for (p, side) in wanted {
         // The station whose plane the eye sits nearest.
-        let Some(st) = s.stations.iter().min_by(|x, y| dot(sub(p, x.c), a).abs().total_cmp(&dot(sub(p, y.c), a).abs()))
+        let Some(st) = s.stations.iter().min_by(|x, y| along_of(p, x.c).abs().total_cmp(&along_of(p, y.c).abs()))
         else {
             continue;
         };
-        let along = dot(sub(p, st.c), a);
+        let along = along_of(p, st.c);
         let on_axis = add(st.c, scale(a, along));
         let (w, d) = (st.w.max(1e-3), st.d.max(1e-3));
         let o = sub(unknown, scale(a, dot(unknown, a)));
