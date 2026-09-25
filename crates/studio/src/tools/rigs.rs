@@ -192,6 +192,11 @@ impl RigTool {
     /// The pool Save installs bakes and puppets into.
     pub fn set_pool(&mut self, pool: PathBuf) {
         self.session.pool = Some(pool);
+        match self.session.sync_pool_poses() {
+            Some(Ok(n)) => self.session.status = format!("{n} pose sets refreshed in the pool"),
+            Some(Err(e)) => self.session.status = e,
+            None => {}
+        }
     }
 
     /// Open the 3D preview with the pose editor on `[<family>/]<pose>[:<row>]`

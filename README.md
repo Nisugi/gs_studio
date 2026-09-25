@@ -227,7 +227,9 @@ own overrides applied, and *Reload poses* re-reads the file after an edit
 -- and installs every pose set that parses into the pool's
 `global/puppets/` (and `<data>/props/weapons.toml` into `global/props/`, and
 `<data>/outfits/kit.toml` + `outfits.toml` into `global/outfits/`), so the
-STAGE uses the edited poses too (Save does the same). A file that does not parse is left out and named on the status line.
+STAGE uses the edited poses too (Save does the same, and so does opening the app or
+changing the pool folder whenever a pool copy differs from `<data>/poses/`, since the
+pool's copy shadows the built-in one). A file that does not parse is left out and named on the status line.
 *Smooth skin* (on by default) draws the puppet as one continuous surface
 (`Posed::skin`: a depth test per pixel, joints blended, contours only where
 the depth steps), the way the stage draws it; off shows the older flat

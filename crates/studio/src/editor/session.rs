@@ -162,7 +162,36 @@ impl Session {
             puppet: None,
         };
         session.open_family(&first);
+        if let Some(Ok(n)) = session.sync_pool_poses() {
+            session.status = format!("{n} pose sets refreshed in the pool");
+        }
         Ok(session)
+    }
+
+    /// Bring the pool's pose sets up to date with `<data>/poses/` when any
+    /// differs or is missing there (the pool's copy shadows the built-in
+    /// one on the stage, so a pose file that gained a table -- `[idle]` --
+    /// would otherwise stay invisible until the next Save). Runs at open
+    /// and when the pool changes. None = nothing to do (no pool, no poses,
+    /// or all the same); else [`install_poses`](Self::install_poses)'s
+    /// result.
+    pub fn sync_pool_poses(&mut self) -> Option<Result<usize, String>> {
+        let pool = self.pool.clone()?;
+        let into = pool.join("global").join("puppets");
+        let mut stale = false;
+        for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|e| e == "toml") {
+                continue;
+            }
+            let Ok(ours) = std::fs::read(&path) else { continue };
+            let theirs = std::fs::read(into.join(path.file_name().unwrap_or_default())).ok();
+            if theirs.as_deref() != Some(ours.as_slice()) {
+                stale = true;
+                break;
+            }
+        }
+        stale.then(|| self.install_poses())
     }
 
     pub fn rigs_dir(&self) -> PathBuf {
@@ -741,6 +770,40 @@ mod tests {
     #[test]
     fn a_missing_data_dir_is_an_error_not_a_panic() {
         assert!(open(Path::new("definitely/not/here")).is_err());
+    }
+
+    /// The pool's pose sets are refreshed from `<data>/poses/` at open when
+    /// one differs (or is missing), and left alone when they all match.
+    #[test]
+    fn opening_refreshes_stale_pose_sets_in_the_pool() {
+        let data = TempData::new("sync_poses");
+        std::fs::create_dir_all(data.0.join("poses")).unwrap();
+        let ours = "body_type = \"biped\"
+[pose.stand]
+[idle]
+period = 4.0
+neck = { rot = [1.0, 0.0, 0.0] }
+";
+        std::fs::write(data.0.join("poses/biped.toml"), ours).unwrap();
+        let pool = data.0.join("pool");
+        let installed = pool.join("global/puppets/biped.toml");
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::write(&installed, "body_type = \"biped\"
+[pose.stand]
+").unwrap();
+
+        let s = Session::open(&data.0, data.0.join("no/publish"), Some(pool.clone())).unwrap();
+        assert_eq!(std::fs::read_to_string(&installed).unwrap(), ours, "the stale copy was replaced");
+        assert!(s.status.contains("1 pose sets refreshed"), "{}", s.status);
+        crate::pool_dir::invalidate_caches();
+
+        let mut s = Session::open(&data.0, data.0.join("no/publish"), Some(pool.clone())).unwrap();
+        assert!(!s.status.contains("refreshed"), "all the same: nothing said ({})", s.status);
+        assert!(s.sync_pool_poses().is_none());
+        std::fs::remove_file(&installed).unwrap();
+        assert_eq!(s.sync_pool_poses().unwrap().unwrap(), 1, "a missing copy is installed");
+        assert!(installed.is_file());
+        crate::pool_dir::invalidate_caches();
     }
 
     /// A joint placed between ten-thousandths of a foot is saved rounded;
