@@ -39,7 +39,9 @@ side, in one pose), `dump_segments` (a family's
 fresh-built stations, by segment -- a builder change by numbers),
 `fit_diff` (every family's committed puppet against a fresh build: rest
 IoU per view and the segments that moved most -- run it before
-republishing after a builder change),
+republishing after a builder change), `splat_preview` (a puppet as a
+Gaussian splat cloud beside its skin, CPU-rendered: the look of splats
+before any GPU work),
 `rig_check` (one rig's editor warnings, build result and rest IoU, plus
 overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
 Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
