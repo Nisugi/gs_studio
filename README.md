@@ -575,9 +575,15 @@ in the pool.
 
 The **Puppets** list at the top of the Preview panel (with the *Held
 weapons* and *Breathing* checkboxes) is the direct way in:
-every published puppet (built in, or from the pool), each with *Spawn*,
-which puts up a real bestiary creature of that family DRAWN AS ITS PUPPET
-whatever art the pool holds (preferring one with no art). Any creature on
+every published puppet (built in, or from the pool), grouped bestiary
+family -> form -> texture (`stage::cast::puppet_tree`: a form files under the
+family most of the creatures drawing with it claim, "Other" when none
+does). The form's *Spawn* puts up a real bestiary creature of that form
+DRAWN AS ITS PUPPET whatever art the pool holds (preferring one with no
+art and no skin of its own, so the form's sheet shows); under it, one row
+per creature skin the pool or the build holds
+(`puppets/skins/<form>/<creature>.png`), whose *Spawn* puts up that
+creature, forced to its puppet, wearing the skin. Any creature on
 the stage can be switched the same way with the simulator's *Draw as
 puppet*. This matters as soon as the pool has `creatures/default/`: that
 last tier matches every creature, so without forcing no puppet would show.

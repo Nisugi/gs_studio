@@ -996,10 +996,11 @@ fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
 // ------------------------------------------------------------------- cast
 
-/// Every published puppet, one Spawn button each. The Cast below is built
-/// from the art pool and sprite art beats the puppet, so this is the direct
-/// way to look at one: it spawns a real creature of that family that has no
-/// art.
+/// Every published puppet, grouped bestiary family -> form -> texture, a
+/// Spawn button on each form (its bare sheet) and each skin (the creature
+/// whose skin it is). The Cast below is built from the art pool and sprite
+/// art beats the puppet, so this is the direct way to look at one: it spawns
+/// a real creature of that form forced to draw as the puppet.
 fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     egui::CollapsingHeader::new("Puppets").default_open(true).show(ui, |ui| {
         ui.checkbox(&mut stage.show_props, "Held weapons").on_hover_text(
@@ -1010,27 +1011,49 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
             "A living puppet breathes: the slow cycle in its body type's poses file ([idle] in \
              poses/<body_type>.toml), each creature at its own point in it",
         );
-        let set = gs_field::puppets::puppets();
-        let mut spawn: Option<String> = None;
-        for family in set.families() {
-            let Some(rig) = set.get(family) else { continue };
-            ui.horizontal(|ui| {
-                if ui.small_button("Spawn").on_hover_text("Spawn a creature of this family, drawn as this puppet whatever art the pool has").clicked() {
-                    spawn = Some(family.to_string());
-                }
-                ui.label(family);
-                let body = if rig.body_type.is_empty() { "?" } else { rig.body_type.as_str() };
-                match rig.source {
-                    gs_field::puppets::PuppetSource::Embedded => ui.weak(format!("{body}, built in")),
-                    gs_field::puppets::PuppetSource::Override => ui
-                        .weak(format!("{body}, pool"))
-                        .on_hover_text("From the pool's global/puppets/ (a rig save puts it there); it replaces any built-in one"),
-                };
-            });
-        }
-        ui.weak("Save a rig in the Rigs tab to build its puppet.");
-        if let Some(family) = spawn {
-            stage.spawn_puppet(&family);
+        let mut spawn: Option<(String, Option<(String, String)>)> = None;
+        egui::ScrollArea::vertical().id_salt("stage_puppets").max_height(240.0).show(ui, |ui| {
+            for family in cast::puppet_tree() {
+                let n = family.forms.len();
+                egui::CollapsingHeader::new(format!("{} ({n})", family.family)).id_salt(("puppet_family", &family.family)).show(ui, |ui| {
+                    for form in &family.forms {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .small_button("Spawn")
+                                .on_hover_text("Spawn a creature of this form drawn as its puppet, in the form's own sheet (bare when it has none)")
+                                .clicked()
+                            {
+                                spawn = Some((form.form.clone(), None));
+                            }
+                            ui.label(&form.form);
+                            let body = if form.body_type.is_empty() { "?" } else { form.body_type.as_str() };
+                            let sheet = if form.sheet { ", sheet" } else { "" };
+                            if form.pool {
+                                ui.weak(format!("{body}, pool{sheet}"))
+                                    .on_hover_text("From the pool's global/puppets/ (a rig save puts it there); it replaces any built-in one");
+                            } else {
+                                ui.weak(format!("{body}, built in{sheet}"));
+                            }
+                        });
+                        // Its skins, indented (the sheet is what the form's
+                        // own Spawn wears).
+                        for texture in form.textures.iter().filter(|t| t.creature.is_some()) {
+                            ui.horizontal(|ui| {
+                                ui.add_space(24.0);
+                                if ui.small_button("Spawn").on_hover_text("Spawn this creature drawn as the puppet, wearing its own skin").clicked() {
+                                    spawn = Some((form.form.clone(), texture.creature.clone()));
+                                }
+                                ui.label(&texture.label);
+                                ui.weak("skin");
+                            });
+                        }
+                    }
+                });
+            }
+        });
+        ui.weak("Save a rig in the Rigs tab to build its puppet; a creature's skin (puppets/skins/<form>/<creature>.png) lists under its form.");
+        if let Some((form, creature)) = spawn {
+            stage.spawn_puppet_wearing(&form, creature.as_ref().map(|(n, s)| (n.as_str(), s.as_str())));
         }
     });
 }

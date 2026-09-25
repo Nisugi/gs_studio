@@ -310,6 +310,19 @@ impl StageState {
         }
     }
 
+    /// Put `form`'s puppet on the stage wearing one of its textures: the
+    /// creature whose skin it is (`creature` = name and noun, forced to
+    /// draw as its puppet, so the cache picks its skin), or with None the
+    /// bare sheet via [`spawn_puppet`](Self::spawn_puppet).
+    pub fn spawn_puppet_wearing(&mut self, form: &str, creature: Option<(&str, &str)>) -> bool {
+        let Some((name, noun)) = creature else { return self.spawn_puppet(form) };
+        self.spawn(name, Some(noun.to_string()));
+        let id = self.selected.clone().expect("spawn selects");
+        self.forced_puppets.insert(id);
+        self.push_status(format!("Spawned '{name}': drawing as the {form} puppet in its own skin"));
+        true
+    }
+
     /// Is this creature drawn as its puppet regardless of art?
     pub fn is_forced_puppet(&self, id: &str) -> bool {
         self.forced_puppets.contains(id)

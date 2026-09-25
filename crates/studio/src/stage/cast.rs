@@ -158,12 +158,26 @@ pub fn puppet_showcase_in(
     has_art: impl Fn(&str, &str) -> bool,
     puppet_of: impl Fn(&str, &str) -> Option<String>,
 ) -> Result<BestiaryPick, String> {
+    puppet_showcase_bare_in(db, family, has_art, |_, _| false, puppet_of)
+}
+
+/// [`puppet_showcase_in`] that also steers clear of creatures with a skin of
+/// their own (`has_skin(name, noun)`), so the pick wears the form's bare
+/// sheet: the Puppets list's per-texture rows spawn the skinned creatures
+/// by name, and this is the row for the sheet itself.
+pub fn puppet_showcase_bare_in(
+    db: &gs_field::bestiary::BestiaryDb,
+    family: &str,
+    has_art: impl Fn(&str, &str) -> bool,
+    has_skin: impl Fn(&str, &str) -> bool,
+    puppet_of: impl Fn(&str, &str) -> Option<String>,
+) -> Result<BestiaryPick, String> {
     let names_rig = |f: &str| {
         let f = f.trim();
         f.eq_ignore_ascii_case(family)
             || gs_field::dolls::rig_family_for(&f.to_ascii_lowercase()).is_some_and(|r| r.eq_ignore_ascii_case(family))
     };
-    let mut picks: Vec<(bool, bool, BestiaryPick)> = db
+    let mut picks: Vec<(bool, bool, bool, BestiaryPick)> = db
         .entries
         .iter()
         .map(|e| BestiaryPick {
@@ -172,22 +186,125 @@ pub fn puppet_showcase_in(
             family: e.family.clone(),
         })
         .filter(|p| puppet_of(&p.name, &p.noun).is_some_and(|f| f.eq_ignore_ascii_case(family)))
-        .map(|p| (!p.family.as_deref().is_some_and(names_rig), has_art(&p.name, &p.noun), p))
+        .map(|p| (has_skin(&p.name, &p.noun), !p.family.as_deref().is_some_and(names_rig), has_art(&p.name, &p.noun), p))
         .collect();
-    picks.sort_by(|a, b| (a.0, a.1, &a.2.name).cmp(&(b.0, b.1, &b.2.name)));
+    picks.sort_by(|a, b| (a.0, a.1, a.2, &a.3.name).cmp(&(b.0, b.1, b.2, &b.3.name)));
     picks
         .into_iter()
         .next()
-        .map(|(_, _, p)| p)
+        .map(|(_, _, _, p)| p)
         .ok_or_else(|| format!("no creature in the bestiary resolves to the {family} puppet"))
 }
 
 /// [`puppet_showcase_in`] against the shared bestiary, the pool and the
 /// published puppets.
 pub fn puppet_showcase(family: &str) -> Result<BestiaryPick, String> {
-    puppet_showcase_in(gs_field::bestiary::shared(), family, |n, noun| has_art(n, Some(noun)), |n, noun| {
-        puppet_family(n, Some(noun))
-    })
+    let set = gs_field::puppets::puppets();
+    puppet_showcase_bare_in(
+        gs_field::bestiary::shared(),
+        family,
+        |n, noun| has_art(n, Some(noun)),
+        |n, _| set.skin(family, &gs_field::naming::name_token(n)).is_some(),
+        |n, noun| puppet_family(n, Some(noun)),
+    )
+}
+
+/// One texture a form's puppet can be shown in: the form's own sheet
+/// (`creature` = None: spawn via [`puppet_showcase`]) or a creature skin
+/// (`creature` = the bestiary creature the skin belongs to, name and noun;
+/// a skin the bestiary does not know spawns under its token, spaced).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PuppetTexture {
+    pub label: String,
+    pub creature: Option<(String, String)>,
+}
+
+/// One published form (`<form>.rig.toml`, `family` in the code) with the
+/// textures it can wear.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PuppetForm {
+    pub form: String,
+    pub body_type: String,
+    /// From the pool's `global/puppets/` rather than built in.
+    pub pool: bool,
+    /// The form ships a sheet of its own (`<form>.png`).
+    pub sheet: bool,
+    pub textures: Vec<PuppetTexture>,
+}
+
+/// The published forms grouped by bestiary family: the family most of the
+/// creatures drawing with that form belong to ("Other" when none does).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PuppetFamily {
+    pub family: String,
+    pub forms: Vec<PuppetForm>,
+}
+
+/// The Puppets list: family -> form -> texture. `forms` is every published
+/// form as (form, body type, from the pool, ships a sheet); `skins` every
+/// creature skin as (form, creature token); `puppet_of` resolves a bestiary
+/// creature (name, noun) to its form.
+pub fn puppet_tree_in(
+    db: &gs_field::bestiary::BestiaryDb,
+    forms: &[(String, String, bool, bool)],
+    skins: &[(String, String)],
+    puppet_of: impl Fn(&str, &str) -> Option<String>,
+) -> Vec<PuppetFamily> {
+    // Who draws with which form, and the family they say they are.
+    let mut families: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
+    let mut by_token: BTreeMap<String, (String, String)> = BTreeMap::new();
+    for e in &db.entries {
+        let noun = if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() };
+        by_token.entry(gs_field::naming::name_token(&e.name)).or_insert_with(|| (e.name.clone(), noun.clone()));
+        if let Some(form) = puppet_of(&e.name, &noun) {
+            let family = e.family.as_deref().map(str::trim).filter(|f| !f.is_empty()).unwrap_or("Other");
+            *families.entry(form.to_ascii_lowercase()).or_default().entry(family.to_string()).or_default() += 1;
+        }
+    }
+    let mut tree: BTreeMap<String, Vec<PuppetForm>> = BTreeMap::new();
+    for (form, body_type, pool, sheet) in forms {
+        let family = families
+            .get(&form.to_ascii_lowercase())
+            .and_then(|counts| counts.iter().max_by_key(|(name, n)| (**n, std::cmp::Reverse((*name).clone()))))
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| "Other".to_string());
+        let mut textures = Vec::new();
+        if *sheet {
+            textures.push(PuppetTexture { label: format!("{form} sheet"), creature: None });
+        }
+        for (_, token) in skins.iter().filter(|(f, _)| f.eq_ignore_ascii_case(form)) {
+            let (name, noun) = by_token
+                .get(token)
+                .cloned()
+                .unwrap_or_else(|| (token.replace('_', " "), last_word(&token.replace('_', " "))));
+            textures.push(PuppetTexture { label: name.clone(), creature: Some((name, noun)) });
+        }
+        tree.entry(family).or_default().push(PuppetForm {
+            form: form.clone(),
+            body_type: body_type.clone(),
+            pool: *pool,
+            sheet: *sheet,
+            textures,
+        });
+    }
+    // "Other" last, the rest by name.
+    let mut out: Vec<PuppetFamily> = tree.into_iter().map(|(family, forms)| PuppetFamily { family, forms }).collect();
+    out.sort_by_key(|f| (f.family == "Other", f.family.to_ascii_lowercase()));
+    out
+}
+
+/// [`puppet_tree_in`] against the shared bestiary and the published puppets.
+pub fn puppet_tree() -> Vec<PuppetFamily> {
+    let set = gs_field::puppets::puppets();
+    let forms: Vec<(String, String, bool, bool)> = set
+        .families()
+        .filter_map(|f| {
+            let rig = set.get(f)?;
+            Some((f.to_string(), rig.body_type.clone(), matches!(rig.source, gs_field::puppets::PuppetSource::Override), rig.texture.is_some()))
+        })
+        .collect();
+    let skins: Vec<(String, String)> = set.skins().map(|(f, c)| (f.to_string(), c.to_string())).collect();
+    puppet_tree_in(gs_field::bestiary::shared(), &forms, &skins, |n, noun| puppet_family(n, Some(noun)))
 }
 
 /// Everything the spawn-by-name box shows for what is typed: whether the
@@ -395,5 +512,54 @@ mod tests {
         assert!(has_art("timber wolf", Some("wolf")));
         assert!(!has_art("cave troll", Some("troll")));
     }
-}
 
+    /// The Puppets tree: forms under the family most of their creatures
+    /// claim, a sheet row when the form ships one, a row per creature skin
+    /// (named after the bestiary creature, else the token spaced), and
+    /// "Other" last.
+    #[test]
+    fn the_puppet_tree_groups_forms_by_family_and_lists_their_textures() {
+        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        let e = |name: &str, family: &str| CreatureEntry {
+            name: name.into(),
+            noun: last_word(name),
+            family: Some(family.into()),
+            ..Default::default()
+        };
+        let db = BestiaryDb::from_entries(vec![e("coyote", "Canine"), e("timber wolf", "Canine"), e("giant rat", "Rodent"), e("blood eagle", "Bird")]);
+        let of = |n: &str, _: &str| match n {
+            "coyote" | "timber wolf" | "giant rat" => Some("canine".to_string()),
+            "blood eagle" => Some("avian".to_string()),
+            _ => None,
+        };
+        let forms = vec![
+            ("canine".to_string(), "quadruped".to_string(), true, true),
+            ("avian".to_string(), "avian".to_string(), false, false),
+            ("worm".to_string(), "serpentine".to_string(), false, true),
+        ];
+        let skins = vec![("canine".to_string(), "timber_wolf".to_string()), ("canine".to_string(), "ice_hound".to_string())];
+        let tree = puppet_tree_in(&db, &forms, &skins, of);
+        let families: Vec<&str> = tree.iter().map(|f| f.family.as_str()).collect();
+        assert_eq!(families, ["Bird", "Canine", "Other"]);
+        let canine = &tree[1].forms[0];
+        assert_eq!((canine.form.as_str(), canine.pool, canine.sheet), ("canine", true, true));
+        let labels: Vec<&str> = canine.textures.iter().map(|t| t.label.as_str()).collect();
+        assert_eq!(labels, ["canine sheet", "timber wolf", "ice hound"]);
+        assert_eq!(canine.textures[0].creature, None);
+        assert_eq!(canine.textures[1].creature, Some(("timber wolf".to_string(), "wolf".to_string())));
+        assert_eq!(canine.textures[2].creature, Some(("ice hound".to_string(), "hound".to_string())));
+        assert!(tree[0].forms[0].textures.is_empty(), "no sheet, no skins: nothing to wear");
+        assert_eq!(tree[2].forms[0].form, "worm");
+    }
+
+    /// The bare-sheet showcase passes over creatures with a skin of their own.
+    #[test]
+    fn the_bare_showcase_avoids_skinned_creatures() {
+        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        let e = |name: &str| CreatureEntry { name: name.into(), noun: last_word(name), family: Some("Canine".into()), ..Default::default() };
+        let db = BestiaryDb::from_entries(vec![e("coyote"), e("timber wolf")]);
+        let canine = |_: &str, _: &str| Some("canine".to_string());
+        let pick = puppet_showcase_bare_in(&db, "canine", |_, _| false, |n, _| n == "coyote", canine).unwrap();
+        assert_eq!(pick.name, "timber wolf");
+    }
+}
