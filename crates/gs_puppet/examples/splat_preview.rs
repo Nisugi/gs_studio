@@ -95,6 +95,11 @@ fn main() {
         let xf = &posed.xf[i];
         let n = s.stations.len();
         for (k, st) in s.stations.iter().enumerate() {
+            // Buried rings (a thigh in the pelvis, a socket stub) are inside
+            // the body: a surface hides them, a cloud would show them.
+            if k < s.bare {
+                continue;
+            }
             let c = xf.point(st.c);
             let a = scale(xf.dir(s.axis_w), st.w);
             let b = scale(xf.dir(s.axis_d), st.d);
