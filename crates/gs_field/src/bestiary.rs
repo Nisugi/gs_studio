@@ -51,6 +51,12 @@ pub struct CreatureEntry {
     pub family: Option<String>,
     #[serde(rename = "type", default)]
     pub creature_type: Option<String>,
+    /// The FORM this creature draws with, named outright: the silhouette
+    /// pair and rig (`<form>.rig.toml`) it takes, ahead of the family
+    /// cascade (`dolls::resolve_puppet`). The pool owner's mark: a fire
+    /// elemental is `elemental_fire`, whatever its family says.
+    #[serde(default)]
+    pub form: Option<String>,
     /// Height in feet, from the template. Drives the creature field's card
     /// scale (a kobold and a cyclops stop rendering the same height).
     #[serde(default)]

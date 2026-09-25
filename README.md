@@ -37,6 +37,16 @@ Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.
 Front views face the viewer, so the creature's right (`_r`) is screen-left,
 at negative x.
 
+**Vocabulary.** Three levels: a **body type** (biped, quadruped, avian,
+serpentine, multileg: a rig template and a pose set), a **form** (one
+silhouette pair, its rig `<form>.rig.toml`, its puppet and texture; what
+the code and file names still call a *family*), and a **creature** (a
+bestiary entry, with its own skin and outfit). A creature finds its form by
+the `form` its bestiary entry names, else by the family cascade
+(`gs_field::dolls::resolve_puppet`). Forms are being split finer than the
+game's families (each elemental its own form), so `family` in the code
+means form, and the game's family is only a hint.
+
 ## The app
 
 `gs-studio` works out of two directories, both shown (and changeable) in the

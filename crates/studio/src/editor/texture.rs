@@ -359,7 +359,7 @@ pub fn family_creatures(data_root: &Path, family: &str) -> Vec<String> {
         for e in gs_field::bestiary::shared().entries() {
             let key = gs_field::naming::name_token(&e.name);
             if outfits.get(&key).is_some()
-                && gs_field::dolls::resolve_doll(e.family.as_deref(), e.creature_type.as_deref(), &|f| saved.contains(f)).is_some_and(|d| d.family == family)
+                && gs_field::dolls::resolve_puppet(&gs_field::dolls::DollFacts::of_entry(e), &|f| saved.contains(f)).is_some_and(|d| d.family == family)
             {
                 out.insert(key);
             }
@@ -621,7 +621,7 @@ pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<JobsExport, 
         if key.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
-        let Some(doll) = gs_field::dolls::resolve_doll(e.family.as_deref(), e.creature_type.as_deref(), &|f| puppets.contains_key(f)) else {
+        let Some(doll) = gs_field::dolls::resolve_puppet(&gs_field::dolls::DollFacts::of_entry(e), &|f| puppets.contains_key(f)) else {
             continue;
         };
         let family = doll.family;

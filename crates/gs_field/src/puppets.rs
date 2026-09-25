@@ -298,9 +298,7 @@ impl PuppetRigs {
     /// biped — and `None` (draw the doll) only when no puppet at all fits.
     pub fn puppet_for(&self, name: &str, noun: Option<&str>) -> Option<DollRef> {
         let facts = crate::dolls::bestiary_facts(name, noun);
-        resolve_doll(facts.family.as_deref(), facts.body_type.as_deref(), &|f| {
-            self.has(f)
-        })
+        crate::dolls::resolve_puppet(&facts, &|f| self.has(f))
     }
 }
 

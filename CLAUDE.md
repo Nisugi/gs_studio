@@ -144,3 +144,6 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
   negative x. In side views `_r` is the near limb.
 - Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.
 - Rig/joint/bone names are lower snake_case; `_r`/`_l` suffixes form mirror pairs.
+- The unit of one silhouette pair + rig + puppet is a **form**; the code and file
+  names still say `family` for it (renaming waits on the refit and VellumFE). A
+  bestiary entry's `form` field names it outright (`dolls::resolve_puppet`).

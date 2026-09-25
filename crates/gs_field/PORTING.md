@@ -365,6 +365,19 @@ four-legged reptilian rig; the spectral black warhorse and the ki-lin are
 equine quadrupeds; the treekin sapling is a treekin). A value the file gives
 always wins. `dolls::FAMILY_ALIASES` gains `goliath -> giant`.
 
+### 6.17 Forms: a bestiary entry names its rig
+
+`CreatureEntry::form` (a `form` field on a bestiary entry, the pool
+owner's mark) names the silhouette pair and rig the creature draws with.
+`dolls::resolve_puppet(&DollFacts, has_rig)` puts it in front of the old
+cascade as tier `DollTier::Form`, falling through when that rig is not
+published; `resolve_doll` is unchanged. `DollFacts` gained `form` and
+`DollFacts::of_entry`; `bestiary_facts` fills it by the same rule as the
+family (the exact name's, else a unanimous noun's). `PuppetRigs::puppet_for`
+goes through `resolve_puppet`. "Form" is the new name for what the code
+still calls a family: one `<form>.rig.toml`, its puppet and poses, shared
+by every creature that names it or falls to it.
+
 ### 6.16 Normal sheets
 
 `PuppetRig::normal` is `<family>.normal.png` beside the texture, undecoded

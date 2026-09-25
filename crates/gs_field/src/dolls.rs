@@ -448,6 +448,8 @@ pub fn invalidate_cache() {
 /// Which tier of the cascade matched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DollTier {
+    /// (0) the form the bestiary entry names outright (`form`).
+    Form,
     /// (1) the bestiary family, through [`FAMILY_ALIASES`].
     Family,
     /// (2) the bestiary body type's default family ([`BODY_TYPE_DEFAULTS`]).
@@ -592,6 +594,30 @@ pub fn resolve_doll(
 pub struct DollFacts {
     pub family: Option<String>,
     pub body_type: Option<String>,
+    /// The form the entry names outright, if any (see [`resolve_puppet`]).
+    pub form: Option<String>,
+}
+
+impl DollFacts {
+    /// The facts of one bestiary entry.
+    pub fn of_entry(e: &crate::bestiary::CreatureEntry) -> DollFacts {
+        DollFacts { family: e.family.clone(), body_type: e.creature_type.clone(), form: e.form.clone() }
+    }
+}
+
+/// [`resolve_doll`] with the form tier in front: a creature whose bestiary
+/// entry names its form (`form`, the pool owner's mark) draws with that
+/// rig when it is published, whatever its family and body type say; else
+/// the cascade as before. Forms are the unit a silhouette pair and rig make
+/// (one `<form>.rig.toml`); `family` in the code is the same thing under
+/// its old name.
+pub fn resolve_puppet(facts: &DollFacts, has_rig: &dyn Fn(&str) -> bool) -> Option<DollRef> {
+    if let Some(form) = facts.form.as_deref().map(|f| f.trim().to_ascii_lowercase()).filter(|f| !f.is_empty()) {
+        if has_rig(&form) {
+            return Some(DollRef { family: form, tier: DollTier::Form });
+        }
+    }
+    resolve_doll(facts.family.as_deref(), facts.body_type.as_deref(), has_rig)
 }
 
 /// Family and body type from the shared bestiary, with the field's usual
@@ -600,12 +626,16 @@ pub struct DollFacts {
 /// guesses.
 pub fn bestiary_facts(name: &str, noun: Option<&str>) -> DollFacts {
     DollFacts {
-        family: bestiary_family(name, noun),
+        family: bestiary_field(name, noun, |e| e.family.as_deref()),
         body_type: crate::cards::bestiary_body_type(name, noun),
+        form: bestiary_field(name, noun, |e| e.form.as_deref()),
     }
 }
 
-fn bestiary_family(name: &str, noun: Option<&str>) -> Option<String> {
+/// One text field of the creature's bestiary entry, lowercased: the exact
+/// (boon-stripped) name's, else the noun's when every entry sharing the
+/// noun agrees.
+fn bestiary_field(name: &str, noun: Option<&str>, field: fn(&crate::bestiary::CreatureEntry) -> Option<&str>) -> Option<String> {
     let canonical = crate::naming::canonical_name(name);
     let noun = noun
         .filter(|n| !n.trim().is_empty())
@@ -613,8 +643,7 @@ fn bestiary_family(name: &str, noun: Option<&str>) -> Option<String> {
         .or_else(|| canonical.split_whitespace().last().map(str::to_string))?;
     let entries = crate::bestiary::shared().by_noun(&noun);
     let of = |e: &crate::bestiary::CreatureEntry| -> Option<String> {
-        e.family
-            .as_deref()
+        field(e)
             .map(|f| f.trim().to_ascii_lowercase())
             .filter(|f| !f.is_empty())
     };
@@ -767,6 +796,22 @@ mod tests {
 
     fn only(published: &'static [&'static str]) -> impl Fn(&str) -> bool {
         move |f| published.contains(&f)
+    }
+
+    /// A bestiary entry that names its form draws with that rig ahead of
+    /// its family; a form with no published rig falls through to the
+    /// cascade.
+    #[test]
+    fn a_named_form_wins_when_its_rig_exists() {
+        let facts = DollFacts { family: Some("Elemental".into()), body_type: Some("Elemental".into()), form: Some("Elemental_Fire".into()) };
+        let both = |f: &str| f == "elemental_fire" || f == "elemental";
+        assert_eq!(resolve_puppet(&facts, &both), Some(DollRef { family: "elemental_fire".into(), tier: DollTier::Form }));
+        let only_family = |f: &str| f == "elemental";
+        assert_eq!(resolve_puppet(&facts, &only_family), Some(DollRef { family: "elemental".into(), tier: DollTier::Family }));
+        let none = DollFacts { form: None, ..facts.clone() };
+        assert_eq!(resolve_puppet(&none, &both).map(|d| d.tier), Some(DollTier::Family));
+        let blank = DollFacts { form: Some("  ".into()), ..facts };
+        assert_eq!(resolve_puppet(&blank, &both).map(|d| d.tier), Some(DollTier::Family));
     }
 
     #[test]
