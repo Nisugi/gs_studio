@@ -18,10 +18,12 @@ section before changing behaviour it describes, and keep it in sync.
 
 Headless smoke run of the app: `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the
 window by itself and prints what the stage / calibrators hold;
-`GS_STUDIO_SMOKE=1` pre-populates the stage. Other env: `GS_STUDIO_DATA`,
+`GS_STUDIO_SMOKE=1` pre-populates the stage (`GS_STUDIO_LIGHT_HOUR=23` holds
+it at a game hour, for lighting checks). Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
-Headless texture-generator commands: `--project <family>[/<creature>]:side|back`
-(projection-first renders) and `--export-jobs` (every template + `textures/jobs.json`),
+Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
+(projection-first renders, in the family's order: `projection_order` in
+`<data>/generator.toml`, quadrupeds side-first) and `--export-jobs` (every template + `textures/jobs.json`),
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
 closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs

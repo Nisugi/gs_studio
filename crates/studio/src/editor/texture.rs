@@ -15,7 +15,7 @@
 //! | `marks.json` | Export | where the puppet's eyes are in each template (a painting puts the eyes there) |
 //! | `pattern.png`, `patches.txt` | Export | the skin cut open (`gs_puppet::uv`): the sheet's layout |
 //! | `front.png`, `side.png`, `back.png` | the artist / generator | paintings over the templates (any subset), in the family's or the creature's folder |
-//! | `projected/<view>_render.png`, `<view>_unpainted.png` | Project | projection-first: what the paintings so far show from `side` / `back`, and what is left to paint |
+//! | `projected/<view>_render.png`, `<view>_unpainted.png` | Project | projection-first: what the paintings so far show from the next view in the family's order ([`projection_order`]), and what is left to paint |
 //! | `sheet.png` | Build sheet, then the artist | the texture itself: the paintings projected onto the pattern, touched up by hand |
 //!
 //! Save installs the family's `sheet.png` as
@@ -425,23 +425,49 @@ pub fn build_every_skin(data_root: &Path, family: &str, puppet: &Puppet, outline
     Ok((built, failed))
 }
 
-/// Projection-first (`docs/projection-first-export-spec.md`): what the
-/// paintings in `folder` show of `d` from `view` -- the front's for the side;
-/// the front's and the side's for the back -- written to
-/// `folder/projected/<view>_render.png` and `<view>_unpainted.png`, framed
-/// exactly as that view's template at [`DEPTH_SCALE`] times its size.
-pub fn export_projected(folder: &Path, d: &Dressed, view: PaintView, grazing: f32) -> Result<Vec<PathBuf>, String> {
-    let name = match view {
+/// A view's name, as its files and `generator.toml` spell it.
+pub fn view_name(view: PaintView) -> &'static str {
+    match view {
+        PaintView::Front => "front",
         PaintView::Side => "side",
         PaintView::Back => "back",
-        PaintView::Front => return Err("the front is painted first; project it to the side, then to the back".into()),
-    };
-    let [front_px, side_px, _] = read_paintings(folder)?;
-    if front_px.is_none() {
-        return Err(format!("no front.png in {}: paint the front first", folder.display()));
     }
-    let side_px = if view == PaintView::Back { side_px } else { None };
-    let paintings = d.paintings(as_painting(&front_px), as_painting(&side_px), None);
+}
+
+/// The views in the order they are painted by default: the front first.
+pub const DEFAULT_ORDER: [PaintView; 3] = [PaintView::Front, PaintView::Side, PaintView::Back];
+
+/// Projection-first (`docs/projection-first-export-spec.md`): what the
+/// paintings in `folder` show of `d` from `view` -- those of the views
+/// before it in `order` ([`projection_order`]): the front's for the side and
+/// the front's and side's for the back by default; a quadruped's side's for
+/// its front -- written to `folder/projected/<view>_render.png` and
+/// `<view>_unpainted.png`, framed exactly as that view's template at
+/// [`DEPTH_SCALE`] times its size.
+pub fn export_projected(folder: &Path, d: &Dressed, view: PaintView, grazing: f32, order: [PaintView; 3]) -> Result<Vec<PathBuf>, String> {
+    let name = view_name(view);
+    let at = order.iter().position(|v| *v == view).ok_or_else(|| format!("{name} is not in the painting order"))?;
+    if at == 0 {
+        return Err(format!(
+            "the {name} is painted first; project it to the {}, then to the {}",
+            view_name(order[1]),
+            view_name(order[2])
+        ));
+    }
+    let [front_px, side_px, back_px] = read_paintings(folder)?;
+    let first = view_name(order[0]);
+    let painted = |v: PaintView| match v {
+        PaintView::Front => &front_px,
+        PaintView::Side => &side_px,
+        PaintView::Back => &back_px,
+    };
+    if painted(order[0]).is_none() {
+        return Err(format!("no {first}.png in {}: paint the {first} first", folder.display()));
+    }
+    // Only the views painted before this one: a later view's painting (from
+    // an earlier round) must not paint the render it is to be made from.
+    let before = |v: PaintView| if order[..at].contains(&v) { as_painting(painted(v)) } else { None };
+    let paintings = d.paintings(before(PaintView::Front), before(PaintView::Side), before(PaintView::Back));
     let mask = d.mask(view).ok_or_else(|| format!("no {name} silhouette"))?;
     let (render, unpainted) = project_view(&d.puppet, mask, view, DEPTH_SCALE, &paintings, grazing);
     let out = folder.join(PROJECTED);
@@ -453,18 +479,50 @@ pub fn export_projected(folder: &Path, d: &Dressed, view: PaintView, grazing: f3
     Ok(files.to_vec())
 }
 
-/// `<data>/generator.toml`: the families whose puppets are approved -- only
-/// their depth guides go into the jobs (`depth_families = ["humanoid"]`).
-fn depth_families(data_root: &Path) -> Result<Vec<String>, String> {
-    #[derive(serde::Deserialize, Default)]
-    struct Settings {
-        #[serde(default)]
-        depth_families: Vec<String>,
-    }
+/// `<data>/generator.toml`: what gs-studio tells the texture generator.
+#[derive(serde::Deserialize, Default)]
+struct GeneratorSettings {
+    /// The families whose puppets are approved: only their depth guides go
+    /// into the jobs (`depth_families = ["humanoid"]`).
+    #[serde(default)]
+    depth_families: Vec<String>,
+    /// Per family, the order its views are painted in, projection-first
+    /// (`projection_order = { canine = ["side", "front", "back"] }`).
+    #[serde(default)]
+    projection_order: std::collections::BTreeMap<String, Vec<String>>,
+}
+
+fn generator_settings(data_root: &Path) -> Result<GeneratorSettings, String> {
     match std::fs::read_to_string(data_root.join("generator.toml")) {
-        Ok(text) => toml::from_str::<Settings>(&text).map(|s| s.depth_families).map_err(|e| format!("generator.toml: {e}")),
-        Err(_) => Ok(Vec::new()),
+        Ok(text) => toml::from_str::<GeneratorSettings>(&text).map_err(|e| format!("generator.toml: {e}")),
+        Err(_) => Ok(GeneratorSettings::default()),
     }
+}
+
+impl GeneratorSettings {
+    /// `family`'s painting order: its `projection_order` entry -- all three
+    /// views, each once -- else [`DEFAULT_ORDER`].
+    fn order(&self, family: &str) -> Result<[PaintView; 3], String> {
+        let Some(names) = self.projection_order.get(family) else { return Ok(DEFAULT_ORDER) };
+        let bad = || format!("generator.toml: projection_order.{family} must name front, side and back once each, got {names:?}");
+        let views: Vec<PaintView> = names
+            .iter()
+            .map(|n| DEFAULT_ORDER.into_iter().find(|v| view_name(*v) == n.trim()).ok_or_else(bad))
+            .collect::<Result<_, _>>()?;
+        match views[..] {
+            [a, b, c] if a != b && b != c && a != c => Ok([a, b, c]),
+            _ => Err(bad()),
+        }
+    }
+}
+
+/// The order `family`'s views are painted in, projection-first: each view
+/// after the first is rendered from the paintings of those before it
+/// ([`export_projected`]). `projection_order` in `<data>/generator.toml`,
+/// else front, side, back. A quadruped's front sees only its face and
+/// chest, so its side goes first.
+pub fn projection_order(data_root: &Path, family: &str) -> Result<[PaintView; 3], String> {
+    generator_settings(data_root)?.order(family)
 }
 
 /// `path` relative to `root`, with forward slashes (the jobs file's form).
@@ -472,23 +530,55 @@ fn relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/")
 }
 
+/// What [`export_jobs`] wrote.
+#[derive(Debug)]
+pub struct JobsExport {
+    pub path: PathBuf,
+    pub jobs: usize,
+    /// What was left out and why: a rig that failed to build, a creature
+    /// whose templates could not be made (a panic included, named).
+    pub skipped: Vec<String>,
+}
+
+/// Run `work`, turning a panic into an error naming `what`: one bad rig or
+/// outfit must not take the whole export down with it.
+fn guarded<T>(what: &str, work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)) {
+        Ok(result) => result,
+        Err(payload) => {
+            let why = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned());
+            Err(format!("{what}: panicked: {}", why.unwrap_or_else(|| "(no message)".into())))
+        }
+    }
+}
+
 /// The texture generator's job list (`docs/texture-generator-plan.md` §2):
 /// every bestiary creature a rig in `<data>/rigs/` draws (the doll cascade,
 /// stand-ins included), with its family, its outfit, the templates, depth
-/// guides and eye marks it is painted over, and the folder its paintings go
-/// in. Every family's templates, and every outfit's its creatures wear, are
-/// exported first so the paths exist. Writes `<data>/textures/jobs.json`;
-/// returns it and how many jobs it holds.
-pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<(PathBuf, usize), String> {
+/// guides and eye marks it is painted over, the order its views are painted
+/// in (`projection_order`), and the folder its paintings go in. Every
+/// family's templates, and every outfit's its creatures wear, are exported
+/// first so the paths exist. Writes `<data>/textures/jobs.json`. A family
+/// whose rig will not build, or a creature whose templates fail, is left out
+/// and named in [`JobsExport::skipped`]; the rest are still written.
+pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<JobsExport, String> {
     let (kit, outfits) = outfits(data_root)?;
-    let approved = depth_families(data_root)?;
+    let settings = generator_settings(data_root)?;
+    let approved = &settings.depth_families;
+    let mut skipped = Vec::new();
     let mut puppets: std::collections::BTreeMap<String, Puppet> = std::collections::BTreeMap::new();
     for entry in std::fs::read_dir(data_root.join("rigs")).map_err(|e| format!("rigs: {e}"))?.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(family) = name.strip_suffix(".rig.toml") else { continue };
-        let Ok(rig) = rig::Rig::load(&entry.path()) else { continue };
-        if let Ok(p) = Puppet::build(&rig, outlines) {
-            puppets.insert(family.to_owned(), p);
+        let built = guarded(family, || {
+            let rig = rig::Rig::load(&entry.path()).map_err(|e| format!("{family}: {e}"))?;
+            Puppet::build(&rig, outlines).map_err(|e| format!("{family}: {e}"))
+        });
+        match built {
+            Ok(p) => {
+                puppets.insert(family.to_owned(), p);
+            }
+            Err(e) => skipped.push(e),
         }
     }
     let mut exported: std::collections::BTreeSet<(String, Option<String>)> = std::collections::BTreeSet::new();
@@ -503,13 +593,31 @@ pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<(PathBuf, us
             continue;
         };
         let family = doll.family;
-        let puppet = &puppets[&family];
+        let Some(puppet) = puppets.get(&family) else { continue };
         let outfit = outfits.get(&key);
-        let d = Dressed::new(puppet, outlines, &family, outfit.map(|o| (o, &kit)));
-        let templates = d.templates_dir(data_root, &family);
-        if exported.insert((family.clone(), d.outfit.clone())) {
-            write_templates(&templates, &family, &d)?;
-        }
+        let order = match settings.order(&family) {
+            Ok(o) => o,
+            Err(why) => {
+                skipped.push(format!("{}: {why}", e.name));
+                continue;
+            }
+        };
+        let made = guarded(&format!("{family}/{key}"), || {
+            let d = Dressed::new(puppet, outlines, &family, outfit.map(|o| (o, &kit)));
+            let templates = d.templates_dir(data_root, &family);
+            if !exported.contains(&(family.clone(), d.outfit.clone())) {
+                write_templates(&templates, &family, &d)?;
+            }
+            Ok((d, templates))
+        });
+        let (d, templates) = match made {
+            Ok(m) => m,
+            Err(e) => {
+                skipped.push(e);
+                continue;
+            }
+        };
+        exported.insert((family.clone(), d.outfit.clone()));
         let mut views = serde_json::Map::new();
         for (name, view, _) in VIEWS {
             let Some(m) = d.mask(view) else { continue };
@@ -533,6 +641,7 @@ pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<(PathBuf, us
             "outfit": outfit.map(|o| o.pieces.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>()).unwrap_or_default(),
             "outfit_key": d.outfit,
             "views": views,
+            "projection_order": order.map(view_name),
             "marks": relative(data_root, &templates.join("marks.json")),
             "out_dir": relative(data_root, &creature_dir(data_root, &family, &key)),
         }));
@@ -541,21 +650,19 @@ pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<(PathBuf, us
     let path = data_root.join("textures").join("jobs.json");
     std::fs::create_dir_all(path.parent().expect("a folder")).map_err(|e| e.to_string())?;
     std::fs::write(&path, serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok((path, jobs.len()))
+    Ok(JobsExport { path, jobs: jobs.len(), skipped })
 }
 
-/// `--project <family>[/<creature>]:side|back` (the command line, for a
-/// generator to call): build the family's puppet from `<data>/rigs/`, dress
-/// the creature in its outfit, and write its projection renders into the
-/// creature's folder (or the family's). Returns the files written.
+/// `--project <family>[/<creature>]:front|side|back` (the command line, for
+/// a generator to call): build the family's puppet from `<data>/rigs/`,
+/// dress the creature in its outfit, and write its projection renders -- of
+/// that view, from the paintings before it in the family's order
+/// ([`projection_order`]) -- into the creature's folder (or the family's).
+/// Returns the files written.
 pub fn project_cli(data_root: &Path, target: &str, grazing: Option<f32>) -> Result<Vec<PathBuf>, String> {
-    let usage = || format!("--project wants <family>[/<creature>]:side|back, got '{target}'");
+    let usage = || format!("--project wants <family>[/<creature>]:front|side|back, got '{target}'");
     let (who, view) = target.rsplit_once(':').ok_or_else(usage)?;
-    let view = match view {
-        "side" => PaintView::Side,
-        "back" => PaintView::Back,
-        _ => return Err(usage()),
-    };
+    let view = DEFAULT_ORDER.into_iter().find(|v| view_name(*v) == view).ok_or_else(usage)?;
     let (family, creature) = match who.split_once('/') {
         Some((f, c)) => (f, Some(c)),
         None => (who, None),
@@ -567,7 +674,7 @@ pub fn project_cli(data_root: &Path, target: &str, grazing: Option<f32>) -> Resu
         Some(c) => (Dressed::creature(data_root, &puppet, &outlines, family, c)?, creature_dir(data_root, family, c)),
         None => (Dressed::new(&puppet, &outlines, family, None), dir(data_root, family)),
     };
-    export_projected(&folder, &d, view, grazing.unwrap_or(gs_puppet::GRAZING))
+    export_projected(&folder, &d, view, grazing.unwrap_or(gs_puppet::GRAZING), projection_order(data_root, family)?)
 }
 
 /// The family's `sheet.png` as a texture for `puppet`. Ok(None) when there
@@ -693,14 +800,64 @@ mod tests {
         let data = scratch("project");
         let folder = export_templates(&data, "humanoid", &puppet, &outlines).unwrap();
         let d = Dressed::new(&puppet, &outlines, "humanoid", None);
-        assert!(export_projected(&folder, &d, PaintView::Back, gs_puppet::GRAZING).unwrap_err().contains("front"));
+        assert!(export_projected(&folder, &d, PaintView::Back, gs_puppet::GRAZING, DEFAULT_ORDER).unwrap_err().contains("front"));
         paint_red(&folder.join("front_paint.png"), &folder.join("front.png"));
-        let files = export_projected(&folder, &d, PaintView::Side, gs_puppet::GRAZING).unwrap();
+        let files = export_projected(&folder, &d, PaintView::Side, gs_puppet::GRAZING, DEFAULT_ORDER).unwrap();
         let (tw, th, _) = read_png(&folder.join("side_paint.png")).unwrap();
         for f in &files {
             let (w, h, _) = read_png(f).unwrap();
             assert_eq!((w, h), (tw * DEPTH_SCALE, th * DEPTH_SCALE), "{}", f.display());
         }
         let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// A side-first family (a quadruped's front sees only its face and
+    /// chest): the side is painted first and the front is rendered from it;
+    /// a front painting from an earlier round does not paint its own render.
+    #[test]
+    fn a_side_first_family_projects_its_front_from_the_side() {
+        let (puppet, outlines) = humanoid();
+        let data = scratch("side_first");
+        let folder = export_templates(&data, "humanoid", &puppet, &outlines).unwrap();
+        let d = Dressed::new(&puppet, &outlines, "humanoid", None);
+        let order = [PaintView::Side, PaintView::Front, PaintView::Back];
+        assert!(export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap_err().contains("paint the side first"));
+        assert!(export_projected(&folder, &d, PaintView::Side, gs_puppet::GRAZING, order).unwrap_err().contains("painted first"));
+        paint_red(&folder.join("side_paint.png"), &folder.join("side.png"));
+        let files = export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap();
+        assert!(files[0].ends_with("projected/front_render.png"), "{}", files[0].display());
+        let (_, _, render) = read_png(&files[0]).unwrap();
+        let red = render.chunks_exact(4).filter(|c| c[3] > 0 && c[0] > 180 && c[1] < 80).count();
+        assert!(red > 0, "the side's paint shows on the front render");
+        // A front painted in an earlier round is not a view before the front.
+        let (w, h, px) = read_png(&folder.join("front_paint.png")).unwrap();
+        let blue: Vec<u8> = px.chunks_exact(4).flat_map(|c| if c[3] > 0 { [0, 0, 255, 255] } else { [0, 0, 0, 0] }).collect();
+        write_png(&folder.join("front.png"), w, h, &blue).unwrap();
+        let again = export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap();
+        let (_, _, render) = read_png(&again[0]).unwrap();
+        assert!(!render.chunks_exact(4).any(|c| c[3] > 0 && c[2] > 200 && c[0] < 60), "the old front painting leaked into its own render");
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    /// `projection_order` in generator.toml: a family's own order, the
+    /// default for the rest, and a clear error for a bad one.
+    #[test]
+    fn a_family_s_projection_order_comes_from_generator_toml() {
+        let data = scratch("order");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("generator.toml"), "projection_order = { canine = [\"side\", \"front\", \"back\"], worm = [\"side\", \"side\", \"back\"] }\n").unwrap();
+        assert_eq!(projection_order(&data, "canine").unwrap(), [PaintView::Side, PaintView::Front, PaintView::Back]);
+        assert_eq!(projection_order(&data, "humanoid").unwrap(), DEFAULT_ORDER);
+        assert!(projection_order(&data, "worm").unwrap_err().contains("once each"));
+        let _ = std::fs::remove_dir_all(&data);
+        assert_eq!(projection_order(&data, "canine").unwrap(), DEFAULT_ORDER, "no file: the default");
+    }
+
+    /// A panic while exporting is an error naming what it was working on.
+    #[test]
+    fn a_panic_in_the_export_is_named_not_fatal() {
+        let e = guarded("giant/goliath", || -> Result<(), String> { panic!("no such station") }).unwrap_err();
+        assert!(e.contains("giant/goliath") && e.contains("no such station"), "{e}");
+        assert_eq!(guarded("x", || Ok::<_, String>(3)), Ok(3));
     }
 }

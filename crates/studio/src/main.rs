@@ -105,8 +105,11 @@ fn main() -> eframe::Result {
     if cli.export_jobs {
         let outlines = rig::Outlines::load(&data.path.join("outlines.json")).unwrap_or_else(|e| fail(&format!("gs-studio: outlines.json: {e}")));
         match editor::texture::export_jobs(&data.path, &outlines) {
-            Ok((path, n)) => {
-                println!("{n} jobs: {}", path.display());
+            Ok(done) => {
+                for s in &done.skipped {
+                    eprintln!("gs-studio: --export-jobs: skipped {s}");
+                }
+                println!("{} jobs: {}", done.jobs, done.path.display());
                 std::process::exit(0);
             }
             Err(e) => fail(&format!("gs-studio: --export-jobs: {e}")),

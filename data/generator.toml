@@ -5,3 +5,43 @@
 # jobs. A depth guide of an unapproved shape would teach the generator its
 # defects.
 depth_families = ["humanoid"]
+
+# The order each family's views are painted in, projection-first (see
+# docs/projection-first-export-spec.md): the first is painted from scratch,
+# and each after it is rendered from the ones before it, so only what they
+# could not see is left to paint. Paint first the view that sees the most of
+# the body (its silhouette's area): a quadruped's front sees only its face
+# and chest -- painted first, it smears the face down the chest and leaves
+# seams along the belly and spine -- so its side goes first. The back is
+# always last (it is the front's silhouette, seen from behind). A family not
+# listed paints front, side, back.
+[projection_order]
+# Bipeds: the front is the larger view and holds the face.
+elemental = ["front", "side", "back"]
+ghost = ["front", "side", "back"]
+giant = ["front", "side", "back"]
+golem = ["front", "side", "back"]
+humanoid = ["front", "side", "back"]
+ogre = ["front", "side", "back"]
+orc = ["front", "side", "back"]
+treekin = ["front", "side", "back"]
+troll = ["front", "side", "back"]
+# Quadrupeds: the side is 1.4-2.7 times the front.
+canine = ["side", "front", "back"]
+caprine = ["side", "front", "back"]
+elephantid = ["side", "front", "back"]
+equine = ["side", "front", "back"]
+feline = ["side", "front", "back"]
+reptilian = ["side", "front", "back"]
+suine = ["side", "front", "back"]
+ursine = ["side", "front", "back"]
+# A bird's side (body, folded wing, tail) is 1.65 times its front.
+avian = ["side", "front", "back"]
+# A spider's and a crab's front is the larger view, and holds the face and
+# claws.
+arachnid = ["front", "side", "back"]
+crustacean = ["front", "side", "back"]
+# The worm is longer than it is tall; the serpent is drawn raised, front and
+# side the same size, and its front holds the face.
+worm = ["side", "front", "back"]
+serpent = ["front", "side", "back"]

@@ -12,6 +12,20 @@ in section 10).
     gs-studio.exe --data <data root> --project giant/grim_gigas_skald:side   # a creature, in its outfit
     ... [--grazing 0.35]
 
+**Painting order** (2026-09-24): not every family starts at the front. A
+quadruped's front sees only its face and chest, so front paint projected
+round it smears the face down the chest and leaves seams along the belly
+and spine. Each family has an order -- `projection_order` in
+`<data>/generator.toml`, e.g. `canine = ["side", "front", "back"]`, default
+front, side, back -- also written into each job in `jobs.json`. The first
+view is painted from scratch; `--project <family>[/<creature>]:<view>` works
+for any other view, rendering it from the paintings of the views BEFORE it
+in that order (a later view's painting from an earlier round is ignored).
+The Rigs tab's two buttons follow the family's order.
+
+    gs-studio.exe --data <data root> --project canine:front   # from side.png
+    gs-studio.exe --data <data root> --project canine:back    # from side.png and front.png
+
 It runs headless, prints the two files it wrote and exits (exit code 2 and a
 message on error). It reads `front.png` (and, for `back`, `side.png`) from
 `textures/<family>/` or, for a creature, `textures/<family>/<creature>/`,

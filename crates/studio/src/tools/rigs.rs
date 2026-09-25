@@ -59,7 +59,7 @@ pub struct RigTool {
     /// The shown creature's figure (the puppet in its outfit).
     dressed: Option<Figure>,
     /// A running "Export jobs" (every family's templates and jobs.json).
-    jobs_export: Option<std::sync::mpsc::Receiver<Result<(std::path::PathBuf, usize), String>>>,
+    jobs_export: Option<std::sync::mpsc::Receiver<Result<crate::editor::texture::JobsExport, String>>>,
     /// Publish target / saved bake / saved puppet, re-checked at most every
     /// couple of seconds and after a save or publish -- never per frame.
     /// Asked on a worker thread: a stalled `stat` must not freeze a frame.
@@ -723,12 +723,26 @@ impl RigTool {
                     .clicked();
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label("Projection-first:");
-                if ui.button("front -> side").on_hover_text("Render what front.png shows from the side, and what is left to paint: projected/side_*.png").clicked() {
-                    project = Some(gs_puppet::PaintView::Side);
+                use crate::editor::texture::view_name;
+                // The family's painting order (generator.toml's
+                // projection_order): each view after the first is rendered
+                // from the paintings before it.
+                let order = crate::editor::texture::projection_order(&data_root, &family);
+                if let Err(e) = &order {
+                    ui.colored_label(ui.visuals().warn_fg_color, e);
                 }
-                if ui.button("front + side -> back").on_hover_text("The same from behind, from front.png and side.png: projected/back_*.png").clicked() {
-                    project = Some(gs_puppet::PaintView::Back);
+                let order = order.unwrap_or(crate::editor::texture::DEFAULT_ORDER);
+                let [a, b, c] = order.map(view_name);
+                ui.label("Projection-first:");
+                if ui.button(format!("{a} -> {b}")).on_hover_text(format!("Render what {a}.png shows from the {b}, and what is left to paint: projected/{b}_*.png")).clicked() {
+                    project = Some((order[1], order));
+                }
+                if ui
+                    .button(format!("{a} + {b} -> {c}"))
+                    .on_hover_text(format!("The same from the {c}, from {a}.png and {b}.png: projected/{c}_*.png"))
+                    .clicked()
+                {
+                    project = Some((order[2], order));
                 }
                 let running = self.jobs_export.is_some();
                 export_jobs = ui
@@ -755,7 +769,7 @@ impl RigTool {
                 Ok(puppet) => {
                     let outlines = &self.session.outlines;
                     match project {
-                        Some(view) => {
+                        Some((view, order)) => {
                             let creature = &self.puppet_view.creature;
                             let dressed = if creature.is_empty() {
                                 Ok((crate::editor::texture::Dressed::new(&puppet, outlines, &family, None), crate::editor::texture::dir(&data_root, &family)))
@@ -763,7 +777,7 @@ impl RigTool {
                                 crate::editor::texture::Dressed::creature(&data_root, &puppet, outlines, &family, creature)
                                     .map(|d| (d, crate::editor::texture::creature_dir(&data_root, &family, creature)))
                             };
-                            dressed.and_then(|(d, folder)| crate::editor::texture::export_projected(&folder, &d, view, gs_puppet::GRAZING)).map(|files| {
+                            dressed.and_then(|(d, folder)| crate::editor::texture::export_projected(&folder, &d, view, gs_puppet::GRAZING, order)).map(|files| {
                                 format!("Projected: {}", files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "))
                             })
                         }
@@ -793,7 +807,8 @@ impl RigTool {
             match rx.try_recv() {
                 Ok(result) => {
                     self.session.status = match result {
-                        Ok((path, n)) => format!("{n} jobs written to {}", path.display()),
+                        Ok(done) if done.skipped.is_empty() => format!("{} jobs written to {}", done.jobs, done.path.display()),
+                        Ok(done) => format!("{} jobs written to {}; SKIPPED: {}", done.jobs, done.path.display(), done.skipped.join("; ")),
                         Err(e) => format!("EXPORT FAILED: {e}"),
                     };
                     self.jobs_export = None;

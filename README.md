@@ -122,12 +122,19 @@ view.
 Two headless commands, for a texture generator to call; each does its job
 and exits without opening a window (exit code 2 and a message on error):
 
-    gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
+    gs-studio [--data <dir>] --project <family>[/<creature>]:front|side|back [--grazing <facing>]
     gs-studio [--data <dir>] --export-jobs
 
 `--project` writes the projection-first renders of a family's (or a
-creature's, in its outfit) paintings, `--export-jobs` every template and
-`textures/jobs.json` -- see *Texture painting* under the Rigs tab.
+creature's, in its outfit) paintings: the view named, rendered from the
+paintings of the views before it in the family's order (`projection_order`
+in `<data>/generator.toml`, set for every family: each paints first the
+view that sees the most of it -- the quadrupeds, the bird and the worm their
+side, since their front sees only the face and chest). `--export-jobs` writes every template and
+`textures/jobs.json`, each job with its `projection_order`; a family whose
+rig fails to build, or a creature whose templates fail, is skipped and
+named on stderr, and the rest are written -- see *Texture painting* under
+the Rigs tab.
 
 The top bar holds the tool tabs, the two directory boxes and *Import from
 VellumFE...*. It is one row when the window is wide enough (1480 px) and

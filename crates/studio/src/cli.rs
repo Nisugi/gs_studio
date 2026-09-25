@@ -8,7 +8,7 @@ use crate::stage::StudioRoomContext;
 pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>]\n\
     \x20                [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]\n\
     \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]\n\
-    \x20      gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]\n\
+    \x20      gs-studio [--data <dir>] --project <family>[/<creature>]:front|side|back [--grazing <facing>]\n\
     \x20                (headless: projection-first renders for a texture generator, then exit)\n\
     \x20      gs-studio [--data <dir>] --export-jobs\n\
     \x20                (headless: every template and textures/jobs.json for the generator, then exit)";
@@ -29,7 +29,7 @@ pub struct Cli {
     /// `--room-uid`, `--room-title`, `--room-location`: new-scene prefill,
     /// the same three a client passes to VellumFE's `studio` subcommand.
     pub room: StudioRoomContext,
-    /// `--project <family>[/<creature>]:side|back`: write the projection-first
+    /// `--project <family>[/<creature>]:front|side|back`: write the projection-first
     /// renders (`editor::texture::export_projected`) and exit, no window.
     pub project: Option<String>,
     /// `--grazing`: the facing below which projected paint counts as unpainted.
