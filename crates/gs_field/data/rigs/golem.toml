@@ -15,7 +15,7 @@ height = 496
 
 [anchors]
 feet = [0.5, 0.9994]
-head = [0.287, 0.0101]
+head = [0.5, 0.0235]
 mouth = [0.4978, 0.0879]
 saddle = [0.4977, 0.1211]
 
@@ -29,9 +29,9 @@ name = "skull"
 part = "head"
 parent = "neck"
 pivot = [0.4978, 0.0879]
-tip = [0.287, 0.0101]
-joints = [[0.287, 0.0101], [0.4978, 0.0879]]
-pixels = 5134
+tip = [0.5, 0.0235]
+joints = [[0.5, 0.0235], [0.4978, 0.0879]]
+pixels = 1312
 
 [[bones]]
 index = 2
@@ -41,7 +41,7 @@ parent = "torso_upper"
 pivot = [0.4977, 0.1211]
 tip = [0.4978, 0.0879]
 joints = [[0.4978, 0.0879], [0.4977, 0.1211]]
-pixels = 209
+pixels = 269
 
 [[bones]]
 index = 3
@@ -51,7 +51,7 @@ parent = "torso_upper"
 pivot = [0.4977, 0.1211]
 tip = [0.7943, 0.1991]
 joints = [[0.2072, 0.1991], [0.4977, 0.1211], [0.7943, 0.1991]]
-pixels = 27739
+pixels = 31501
 
 [[bones]]
 index = 4
