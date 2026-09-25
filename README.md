@@ -70,9 +70,12 @@ is next shown -- unsaved calibration edits do not survive a pool change).
     cargo build --release -p studio --features bundled-art
 
 packs an art pool into the executable (`crates/studio/build.rs`): its
-`global/images` minus the injury dolls (`dolls/`, ~680 MB of overlays),
-`global/scenes` and `global/skins`, plus the data root's `outlines.json`,
-`rigs/` and `poses/`. `.bak` files are skipped. The source pool is
+`global/images` minus the injury dolls (`dolls/`, ~680 MB of overlays) and
+the creature art (`creatures/`: the stage draws every creature as its
+puppet), `global/scenes` and `global/skins`, plus the data root's
+`outlines.json`, `rigs/`, `poses/`, `props/`, `outfits/` and `textures/` --
+of the textures only the generator's own files (templates, paintings,
+sheets), not reference art left beside them. `.bak` files are skipped. The source pool is
 `GS_STUDIO_EMBED_POOL`, set per machine in `.cargo/config.toml` under
 `[env]` (git-ignored); `GS_STUDIO_EMBED_DATA` overrides the data source
 (default: the workspace's `data/`). On startup such a build ADDS any missing

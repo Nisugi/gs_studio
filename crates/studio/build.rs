@@ -5,11 +5,14 @@
 //!
 //! Sources, read at BUILD time:
 //!   GS_STUDIO_EMBED_POOL  a pool (VellumFE-shaped): global/images (minus
-//!                         the injury dolls, ~720 MB of overlays),
-//!                         global/scenes and global/skins are packed.
-//!                         Required with the feature.
-//!   GS_STUDIO_EMBED_DATA  a data root: outlines.json, rigs/, poses/, props/.
-//!                         Default: the workspace's data/.
+//!                         the injury dolls, ~720 MB of overlays, and the
+//!                         creature art), global/scenes and global/skins
+//!                         are packed. Required with the feature.
+//!   GS_STUDIO_EMBED_DATA  a data root: outlines.json, rigs/, poses/, props/,
+//!                         outfits/ and textures/ (only the files the texture
+//!                         generator reads and writes -- not the reference
+//!                         art dropped beside them). Default: the
+//!                         workspace's data/.
 //! Backups (`*.bak` files and directories) are skipped.
 //!
 //! Without the feature both outputs are empty, so a normal build stays small
@@ -20,10 +23,15 @@ use std::path::{Path, PathBuf};
 
 /// Pool subtrees packed, relative to the pool root.
 const POOL_PARTS: &[&str] = &["global/images", "global/scenes", "global/skins"];
-/// Left out of those, relative to the pool root.
-const POOL_EXCLUDED: &[&str] = &["global/images/dolls"];
+/// Left out of those, relative to the pool root: the injury dolls, and the
+/// creature art (the stage draws every creature as its puppet instead).
+const POOL_EXCLUDED: &[&str] = &["global/images/dolls", "global/images/creatures"];
 /// Data-root entries packed, relative to the data root.
-const DATA_PARTS: &[&str] = &["outlines.json", "rigs", "poses", "props"];
+const DATA_PARTS: &[&str] = &["outlines.json", "rigs", "poses", "props", "outfits", "textures"];
+/// Under `textures/`, the only files packed: the texture generator's own
+/// (`studio/src/editor/texture.rs`), by name or by ending.
+const TEXTURE_NAMES: &[&str] = &["front.png", "side.png", "back.png", "sheet.png", "pattern.png", "patches.txt", "marks.json"];
+const TEXTURE_ENDINGS: &[&str] = &["_paint.png", "_depth.png", "_render.png", "_unpainted.png"];
 
 fn main() {
     let out = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
@@ -50,6 +58,7 @@ fn main() {
         for part in DATA_PARTS {
             collect(&data, part, "data", &[], &mut files);
         }
+        files.retain(|(root, rel, _)| *root != "data" || !rel.starts_with("textures/") || is_texture_file(rel));
         if !files.iter().any(|(root, _, _)| *root == "pool") {
             panic!("GS_STUDIO_EMBED_POOL={} holds no global/images, global/scenes or global/skins", pool.display());
         }
@@ -72,6 +81,12 @@ fn main() {
     if !files.is_empty() {
         println!("cargo:warning=bundled-art: packed {} files, {} MB", files.len(), offset / (1024 * 1024));
     }
+}
+
+/// Is `rel` (under `textures/`) one of the texture generator's files?
+fn is_texture_file(rel: &str) -> bool {
+    let name = rel.rsplit('/').next().unwrap_or(rel);
+    TEXTURE_NAMES.contains(&name) || TEXTURE_ENDINGS.iter().any(|e| name.ends_with(e))
 }
 
 /// Every file under `base/part` (or `part` itself when it is a file), as
