@@ -20,8 +20,8 @@ elbow_l = [0.8005, 3.7007]
 elbow_r = [-0.7930, 3.7007]
 eye_l = [0.1041, 5.6183]
 eye_r = [-0.1359, 5.6183]
-fingertip_l = [0.9285, 2.5304]
-fingertip_r = [-0.9894, 2.5133]
+fingertip_l = [0.9285, 2.4858]
+fingertip_r = [-0.9894, 2.4687]
 hip_l = [0.3428, 2.7122]
 hip_r = [-0.3633, 2.6865]
 knee_l = [0.4036, 1.6512]
@@ -33,26 +33,26 @@ shoulder_r = [-0.6282, 4.7537]
 sternum = [0.0, 4.1772]
 toe_l = [0.6634, 0.0413]
 toe_r = [-0.5446, 0.0328]
-wrist_l = [0.9075, 3.0343]
-wrist_r = [-0.8968, 3.0343]
+wrist_l = [0.9075, 2.9897]
+wrist_r = [-0.8968, 2.9897]
 
 [depth]
 ankle_l = -0.3119
 ankle_r = -0.1813
 crown = 0.0238
-elbow_l = 0.1679
+elbow_l = -0.1889
 elbow_r = 0.1738
-fingertip_l = -0.0258
+fingertip_l = -0.0704
 fingertip_r = -0.1150
 hip_l = 0.0765
-hip_r = -0.0515
+hip_r = -0.0753
 knee_l = 0.0143
 neck_base = 0.0156
 pelvis = 0.0319
 shoulder_l = -0.0947
 shoulder_r = -0.2285
 toe_l = 0.0494
-wrist_r = 0.1152
+wrist_r = 0.1598
 
 [[bones]]
 name = "skull"

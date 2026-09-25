@@ -223,3 +223,100 @@ worm	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth
 troll	blocked	dev	2026-09-25	proposal NOT adopted: with it the chest reads 2.1x deeper than wide (it takes the hunch's depth); please re-fit with sternum, pelvis and shoulders held
 reptilian	fixed	dev	2026-09-25	tail made a five-joint chain; no proposal adopted (placed by hand after the base commit), please re-fit
 equine	note	dev	2026-09-25	skeleton ref SC-125-A (horse, straight side): the carpus sits at 29% of withers height, the rig has it at 18%; raising it by even 0.1 ft props the "lie" pose above the lying test's limit (the folded cannon holds the body up), so it stays until the quadruped lie pose tucks the foreleg flatter
+ape	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.95->0.97 spill 0.030->0.012, side IoU 0.91->0.95 spill 0.058->0.020; loose poses 0->0; legs ran into the arm columns (ankles where the knuckles are): legs and fingertips re-placed; take image-gen/rig_proposals/ape.rig.toml, see puppet_turnarounds/ape_proposed.png
+arachnid	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.51->0.64 spill 0.440->0.359, side IoU 0.27->0.36 spill 0.236->0.164; loose poses 4->3; take image-gen/rig_proposals/arachnid.rig.toml, see puppet_turnarounds/arachnid_proposed.png
+avian	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.87->0.87 spill 0.040->0.039, side IoU 0.89->0.93 spill 0.052->0.029; loose poses 0->0; both toes were on the tail-feather tip: toes under the feet, tail_tip at the tail end; take image-gen/rig_proposals/avian.rig.toml, see puppet_turnarounds/avian_proposed.png
+bloated_sac	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.85->0.92 spill 0.118->0.041, side IoU 0.61->0.74 spill 0.234->0.120; loose poses 6->6; take image-gen/rig_proposals/bloated_sac.rig.toml, see puppet_turnarounds/bloated_sac_proposed.png
+canine	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.95->0.95 spill 0.024->0.026, side IoU 0.92->0.93 spill 0.051->0.041; loose poses 0->0; tail_base and tail_tip sat on the tail tip and the thigh, and hip_l inside the tail: re-placed by hand, tail chain laid along the drawn tail; take image-gen/rig_proposals/canine.rig.toml, see puppet_turnarounds/canine_proposed.png
+caprine	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.86->0.88 spill 0.082->0.058, side IoU 0.93->0.92 spill 0.037->0.048; loose poses 0->0; croup sat on the upturned tail and the tail chain ran down into the body: croup and tail re-placed; take image-gen/rig_proposals/caprine.rig.toml, see puppet_turnarounds/caprine_proposed.png
+centaur	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.90->0.90 spill 0.030->0.027, side IoU 0.95->0.96 spill 0.026->0.024; loose poses 0->0; take image-gen/rig_proposals/centaur.rig.toml, see puppet_turnarounds/centaur_proposed.png
+cervid	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.72->0.71 spill 0.183->0.220, side IoU 0.82->0.87 spill 0.068->0.090; loose poses 0->0; spine ran up the neck and the tail sat at the shoulders: croup and tail re-placed. ANCHOR MOVES INCLUDED AND NEEDED: mid_back (saddle) -> (-0.55, 2.90), withers (axis) -> (0.45, 3.05), nose (mouth) -> (1.55, 4.40), which was outside the head; take image-gen/rig_proposals/cervid.rig.toml, see puppet_turnarounds/cervid_proposed.png
+crustacean	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.59->0.71 spill 0.491->0.226, side IoU 0.49->0.60 spill 0.409->0.202; loose poses 7->7; take image-gen/rig_proposals/crustacean.rig.toml, see puppet_turnarounds/crustacean_proposed.png
+elemental	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.91->0.91 spill 0.031->0.026, side IoU 0.83->0.86 spill 0.098->0.084; loose poses 0->0; take image-gen/rig_proposals/elemental.rig.toml, see puppet_turnarounds/elemental_proposed.png
+elemental_air	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.78->0.90 spill 0.124->0.061, side IoU 0.73->0.76 spill 0.203->0.127; loose poses 0->0; take image-gen/rig_proposals/elemental_air.rig.toml, see puppet_turnarounds/elemental_air_proposed.png
+elemental_earth	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.89->0.92 spill 0.013->0.015, side IoU 0.92->0.92 spill 0.058->0.058; loose poses 0->0; take image-gen/rig_proposals/elemental_earth.rig.toml, see puppet_turnarounds/elemental_earth_proposed.png
+elemental_fire	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.88->0.91 spill 0.084->0.051, side IoU 0.87->0.89 spill 0.047->0.044; loose poses 0->0; both shoulders were on the figure's right shoulder: shoulder_l mirrored to x 0.89; take image-gen/rig_proposals/elemental_fire.rig.toml, see puppet_turnarounds/elemental_fire_proposed.png
+elemental_ice	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.90->0.90 spill 0.038->0.027, side IoU 0.91->0.91 spill 0.060->0.062; loose poses 0->0; take image-gen/rig_proposals/elemental_ice.rig.toml, see puppet_turnarounds/elemental_ice_proposed.png
+elemental_lava	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.84->0.84 spill 0.127->0.117, side IoU 0.77->0.77 spill 0.136->0.128; loose poses 0->0; take image-gen/rig_proposals/elemental_lava.rig.toml, see puppet_turnarounds/elemental_lava_proposed.png
+elemental_lightning	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.73->0.82 spill 0.103->0.043, side IoU 0.47->0.49 spill 0.423->0.374; loose poses 0->0; take image-gen/rig_proposals/elemental_lightning.rig.toml, see puppet_turnarounds/elemental_lightning_proposed.png
+elemental_steam	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.93->0.93 spill 0.036->0.035, side IoU 0.86->0.87 spill 0.056->0.055; loose poses 0->0; take image-gen/rig_proposals/elemental_steam.rig.toml, see puppet_turnarounds/elemental_steam_proposed.png
+elemental_water	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.92->0.92 spill 0.044->0.039, side IoU 0.87->0.88 spill 0.030->0.028; loose poses 0->0; take image-gen/rig_proposals/elemental_water.rig.toml, see puppet_turnarounds/elemental_water_proposed.png
+elephantid	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.82->0.83 spill 0.073->0.070, side IoU 0.92->0.92 spill 0.054->0.051; loose poses 0->0; tail pinned round (radius_depth_ft.tail); take image-gen/rig_proposals/elephantid.rig.toml, see puppet_turnarounds/elephantid_proposed.png
+equine	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.86->0.89 spill 0.093->0.069, side IoU 0.88->0.94 spill 0.026->0.019; loose poses 0->0; tail_tip was on the hind leg: moved to the bottom of the hanging tail, chain laid along it; take image-gen/rig_proposals/equine.rig.toml, see puppet_turnarounds/equine_proposed.png
+feline	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.66->0.67 spill 0.174->0.171, side IoU 0.95->0.95 spill 0.029->0.027; loose poses 0->0; tail pinned round (radius_depth_ft.tail); take image-gen/rig_proposals/feline.rig.toml, see puppet_turnarounds/feline_proposed.png
+fish	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.75->0.77 spill 0.245->0.251, side IoU 0.93->0.93 spill 0.035->0.031; loose poses 0->0; take image-gen/rig_proposals/fish.rig.toml, see puppet_turnarounds/fish_proposed.png
+fishfolk	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.87->0.89 spill 0.081->0.061, side IoU 0.87->0.87 spill 0.046->0.042; loose poses 0->0; knee_l was on the tail fin and the hips uneven: re-placed; take image-gen/rig_proposals/fishfolk.rig.toml, see puppet_turnarounds/fishfolk_proposed.png
+floating_orb	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.77->0.77 spill 0.125->0.124, side IoU 0.86->0.87 spill 0.082->0.081; loose poses 0->0; take image-gen/rig_proposals/floating_orb.rig.toml, see puppet_turnarounds/floating_orb_proposed.png
+ghost	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.91->0.92 spill 0.026->0.026, side IoU 0.90->0.90 spill 0.031->0.031; loose poses 0->0; take image-gen/rig_proposals/ghost.rig.toml, see puppet_turnarounds/ghost_proposed.png
+giant	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.96->0.96 spill 0.023->0.020, side IoU 0.95->0.96 spill 0.024->0.016; loose poses 0->0; take image-gen/rig_proposals/giant.rig.toml, see puppet_turnarounds/giant_proposed.png
+golem	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.92->0.93 spill 0.048->0.039, side IoU 0.81->0.84 spill 0.080->0.069; loose poses 0->0; take image-gen/rig_proposals/golem.rig.toml, see puppet_turnarounds/golem_proposed.png
+humanoid	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.98->0.98 spill 0.011->0.011, side IoU 0.98->0.98 spill 0.010->0.010; loose poses 0->0; take image-gen/rig_proposals/humanoid.rig.toml, see puppet_turnarounds/humanoid_proposed.png
+naga	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.66->0.68 spill 0.241->0.202, side IoU 0.82->0.84 spill 0.167->0.110; loose poses 0->0; take image-gen/rig_proposals/naga.rig.toml, see puppet_turnarounds/naga_proposed.png
+ogre	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.97->0.98 spill 0.021->0.011, side IoU 0.95->0.96 spill 0.039->0.032; loose poses 0->0; take image-gen/rig_proposals/ogre.rig.toml, see puppet_turnarounds/ogre_proposed.png
+orc	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.97->0.97 spill 0.014->0.013, side IoU 0.95->0.96 spill 0.032->0.026; loose poses 0->0; take image-gen/rig_proposals/orc.rig.toml, see puppet_turnarounds/orc_proposed.png
+plant_mass	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.64->0.64 spill 0.115->0.107, side IoU 0.67->0.67 spill 0.069->0.064; loose poses 0->0; take image-gen/rig_proposals/plant_mass.rig.toml, see puppet_turnarounds/plant_mass_proposed.png
+reptilian	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.68->0.79 spill 0.327->0.179, side IoU 0.82->0.86 spill 0.114->0.056; loose poses 0->0; take image-gen/rig_proposals/reptilian.rig.toml, see puppet_turnarounds/reptilian_proposed.png
+rodent	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.82->0.85 spill 0.068->0.052, side IoU 0.84->0.90 spill 0.092->0.050; loose poses 0->0; tail_tip at the rump, hock_l out on the tail, both hind paws at the front feet: hind legs and tail re-placed; tail pinned round (radius_depth_ft.tail); take image-gen/rig_proposals/rodent.rig.toml, see puppet_turnarounds/rodent_proposed.png
+scorpion	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.67->0.75 spill 0.418->0.208, side IoU 0.27->0.32 spill 0.609->0.420; loose poses 0->0; take image-gen/rig_proposals/scorpion.rig.toml, see puppet_turnarounds/scorpion_proposed.png
+serpent	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.85->0.83 spill 0.049->0.041, side IoU 0.86->0.90 spill 0.091->0.087; loose poses 0->0; tail ran back up into the neck: tail_mid and tail_tip moved onto the drawn tail (lower right); front IoU -0.02, side +0.04; take image-gen/rig_proposals/serpent.rig.toml, see puppet_turnarounds/serpent_proposed.png
+six_legged_insect	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.40->0.56 spill 1.153->0.569, side IoU 0.41->0.49 spill 0.593->0.356; loose poses 0->0; take image-gen/rig_proposals/six_legged_insect.rig.toml, see puppet_turnarounds/six_legged_insect_proposed.png
+suine	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.91->0.91 spill 0.076->0.073, side IoU 0.94->0.95 spill 0.035->0.026; loose poses 0->0; tail pinned round (radius_depth_ft.tail); take image-gen/rig_proposals/suine.rig.toml, see puppet_turnarounds/suine_proposed.png
+treekin	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.87->0.88 spill 0.042->0.032, side IoU 0.77->0.80 spill 0.171->0.126; loose poses 0->0; take image-gen/rig_proposals/treekin.rig.toml, see puppet_turnarounds/treekin_proposed.png
+troll	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.95->0.96 spill 0.031->0.022, side IoU 0.92->0.94 spill 0.038->0.037; loose poses 0->0; re-fit with sternum, pelvis, shoulder_r and shoulder_l held, as asked; torso_upper now 1.29x deeper than wide; take image-gen/rig_proposals/troll.rig.toml, see puppet_turnarounds/troll_proposed.png
+upright_insect	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.90->0.90 spill 0.049->0.041, side IoU 0.76->0.78 spill 0.164->0.134; loose poses 2->2; take image-gen/rig_proposals/upright_insect.rig.toml, see puppet_turnarounds/upright_insect_proposed.png
+ursine	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.85->0.87 spill 0.122->0.090, side IoU 0.91->0.91 spill 0.069->0.064; loose poses 0->0; tail pinned round (radius_depth_ft.tail); take image-gen/rig_proposals/ursine.rig.toml, see puppet_turnarounds/ursine_proposed.png
+winged_beast	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.67->0.68 spill 0.171->0.165, side IoU 0.75->0.79 spill 0.234->0.180; loose poses 2->2; tail root was outside the body: tail laid along the J under the thigh; its 2 loose poses (wing tip) remain; take image-gen/rig_proposals/winged_beast.rig.toml, see puppet_turnarounds/winged_beast_proposed.png
+winged_humanoid	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.85->0.90 spill 0.059->0.048, side IoU 0.69->0.76 spill 0.205->0.165; loose poses 0->0; take image-gen/rig_proposals/winged_humanoid.rig.toml, see puppet_turnarounds/winged_humanoid_proposed.png
+worm	proposal	image-gen	2026-09-25	pass-3 proposal vs 2c9fdf2: front IoU 0.80->0.86 spill 0.026->0.026, side IoU 0.97->0.97 spill 0.015->0.015; loose poses 0->0; take image-gen/rig_proposals/worm.rig.toml, see puppet_turnarounds/worm_proposed.png
+dragon_bat	blocked	image-gen	2026-09-25	NOT fitted: the side outline faces LEFT (head top-left, tail sweeping down-right) while the rig faces right, so 26 of 39 joints sit outside the outline. silhouettes/dragon_bat.jpg side half (15:07) still faces left: the mirror went the wrong way or did not take. Mirror the rig or the outline, then I re-fit
+golem	flag	image-gen	2026-09-25	anchor check, not moved: crown (head anchor and axis) sits on the LEFT shoulder hump at (-1.35, 6.05); the small head's top is at about (0.00, 5.88)
+arachnid	flag	image-gen	2026-09-25	committed rig comes apart in 4 of 7 poses (proposal: 3); bloated_sac 6 of 7, crustacean 7 of 7, upright_insect 2 of 5, winged_beast 2 of 11: joints cannot fix these, the multileg legs need attaching in the template
+ape	fixed	dev	2026-09-25	pass-3 proposal adopted
+arachnid	fixed	dev	2026-09-25	pass-3 proposal adopted
+avian	fixed	dev	2026-09-25	pass-3 proposal adopted
+bloated_sac	fixed	dev	2026-09-25	pass-3 proposal adopted
+canine	fixed	dev	2026-09-25	pass-3 proposal adopted
+caprine	fixed	dev	2026-09-25	pass-3 proposal adopted
+centaur	fixed	dev	2026-09-25	pass-3 proposal adopted
+cervid	fixed	dev	2026-09-25	pass-3 proposal adopted; mid_back and nose held at the dev's values
+crustacean	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_air	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_earth	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_fire	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_ice	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_lava	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_lightning	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_steam	fixed	dev	2026-09-25	pass-3 proposal adopted
+elemental_water	fixed	dev	2026-09-25	pass-3 proposal adopted
+elephantid	fixed	dev	2026-09-25	pass-3 proposal adopted
+equine	fixed	dev	2026-09-25	pass-3 proposal adopted; elbows and wrists kept at the pass-2 heights (raised, the lie pose props the back up); the horse now has its own lying-height allowance in the pose test
+feline	fixed	dev	2026-09-25	pass-3 proposal adopted
+fish	fixed	dev	2026-09-25	pass-3 proposal adopted
+fishfolk	fixed	dev	2026-09-25	pass-3 proposal adopted
+floating_orb	fixed	dev	2026-09-25	pass-3 proposal adopted
+ghost	fixed	dev	2026-09-25	pass-3 proposal adopted
+giant	fixed	dev	2026-09-25	pass-3 proposal adopted
+golem	fixed	dev	2026-09-25	pass-3 proposal adopted; crown left on the hump for now: moved onto the head, the eyes land 0.25 ft above their click, a builder matter to look at
+humanoid	fixed	dev	2026-09-25	pass-3 proposal adopted
+naga	fixed	dev	2026-09-25	pass-3 proposal adopted
+ogre	fixed	dev	2026-09-25	pass-3 proposal adopted
+orc	fixed	dev	2026-09-25	pass-3 proposal adopted
+plant_mass	fixed	dev	2026-09-25	pass-3 proposal adopted
+reptilian	fixed	dev	2026-09-25	pass-3 proposal adopted; forepaws pinned radius_ft 0.13 (far paw read half the near one)
+rodent	fixed	dev	2026-09-25	pass-3 proposal adopted
+scorpion	fixed	dev	2026-09-25	pass-3 proposal adopted
+serpent	fixed	dev	2026-09-25	pass-3 proposal adopted
+six_legged_insect	fixed	dev	2026-09-25	pass-3 proposal adopted
+suine	fixed	dev	2026-09-25	pass-3 proposal adopted
+treekin	fixed	dev	2026-09-25	pass-3 proposal adopted
+troll	fixed	dev	2026-09-25	pass-3 proposal adopted; elbow_l depth set to elbow_r's (the fitter left them apart and the upper arm left its bone line)
+upright_insect	fixed	dev	2026-09-25	pass-3 proposal adopted
+ursine	fixed	dev	2026-09-25	pass-3 proposal adopted
+winged_beast	fixed	dev	2026-09-25	pass-3 proposal adopted
+winged_humanoid	fixed	dev	2026-09-25	pass-3 proposal adopted
+worm	fixed	dev	2026-09-25	pass-3 proposal adopted
+dragon_bat	fixed	dev	2026-09-25	side view mirrored to face right in the sheet (the earlier mirror split on the margin and changed nothing), retraced and re-imported; joints snapped inside; fit .45/.54; please fit
+golem	note	dev	2026-09-25	anchor flag acknowledged: with the crown on the head top the puppet's eyes land at 5.99 ft for a 5.74 click, so the crown stays on the hump until the eye placement is fixed in the builder
+arachnid	note	dev	2026-09-25	multileg legs coming apart in poses: agreed, a builder / template matter (leg roots attach to the thorax), queued behind the fitter passes
+ALL	note	dev	2026-09-25	a [radius_ft] TABLE is not read by the rig format (radius_ft is a per-bone field); six rigs carried one, now moved onto the bones: cervid horns, elemental_air and _lightning legs, floating_orb legs, reptilian neck/skull/forepaws, rodent ears. Proposals should pin radius_ft inside [[bones]]

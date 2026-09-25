@@ -13,36 +13,36 @@ saddle = "mid_back"
 
 [joints]
 belly = [-0.3967, 1.3154]
-chest_front = [0.4372, 1.7553]
-croup = [-1.0914, 2.5130]
-elbow_l = [0.5884, 1.2267]
-elbow_r = [0.0344, 1.2563]
+chest_front = [0.3962, 1.7553]
+croup = [-1.0094, 2.4515]
+elbow_l = [0.5474, 1.2267]
+elbow_r = [0.0235, 1.2563]
 eye_r = [2.1344, 2.3134]
 forepaw_l = [0.6464, 0.1583]
-forepaw_r = [0.4830, 0.0994]
-groin = [-0.7622, 1.2025]
+forepaw_r = [0.3505, 0.0775]
+groin = [-0.7417, 1.1205]
 hindpaw_l = [-1.7362, 0.0878]
 hindpaw_r = [-0.9880, 0.0878]
-hip_l = [-1.5742, 1.9234]
-hip_r = [-1.2963, 1.9234]
-hock_l = [-1.7171, 0.5593]
-hock_r = [-0.9711, 0.5281]
+hip_l = [-1.6562, 1.9234]
+hip_r = [-1.2758, 1.8318]
+hock_l = [-1.7171, 0.6003]
+hock_r = [-0.9711, 0.6101]
 mid_back = [-0.1416, 2.6627]
 nose = [1.5875, 1.9641]
 poll = [1.6892, 2.5629]
-shoulder_l = [0.2836, 2.0140]
-shoulder_r = [-0.0652, 1.8624]
-sternum = [0.3480, 1.2655]
-stifle_l = [-1.5952, 0.9940]
-stifle_r = [-0.9180, 1.2267]
-tail_base = [-1.7692, 2.0639]
-tail_1 = [-1.8214, 1.9936]
-tail_2 = [-1.8736, 1.9234]
-tail_3 = [-1.9258, 1.8531]
-tail_tip = [-1.9780, 1.7829]
+shoulder_l = [0.3465, 1.9306]
+shoulder_r = [-0.0242, 1.7913]
+sternum = [0.3371, 1.2655]
+stifle_l = [-1.5337, 0.9325]
+stifle_r = [-0.9795, 1.2267]
+tail_base = [-1.7282, 2.0639]
+tail_1 = [-1.7943, 1.9607]
+tail_2 = [-1.8610, 1.7300]
+tail_3 = [-1.7747, 2.1552]
+tail_tip = [-1.8140, 1.8649]
 withers = [1.1964, 2.7329]
 wrist_l = [0.3704, 0.3988]
-wrist_r = [0.3779, 0.4487]
+wrist_r = [0.3779, 0.4692]
 
 # Depth notes (the rig file loses comments on a re-bake; re-add them).
 # No [depth] overrides: the guess puts every leg on the inner front-view
@@ -52,37 +52,39 @@ wrist_r = [0.3779, 0.4487]
 # every leg a flat paddle in the lying poses.
 
 [depth]
-belly = -0.0203
-croup = 0.1831
-elbow_l = 0.8252
-elbow_r = -0.8311
+belly = 0.1437
+croup = 0.3676
+elbow_l = 0.7227
+elbow_r = -0.7286
 forepaw_l = 0.3519
 forepaw_r = -0.3928
-groin = 0.1017
-hip_l = 0.7667
-hip_r = -0.7667
-hock_l = 0.3428
-hock_r = -0.3428
+groin = 0.1222
+hip_l = 0.5508
+hip_r = -0.5508
+hock_l = 0.2608
+hock_r = -0.2608
 mid_back = 0.1424
-shoulder_l = 0.7550
-shoulder_r = -0.7667
-sternum = -0.0109
-stifle_l = 0.8135
-stifle_r = -0.8252
+shoulder_l = 0.5391
+shoulder_r = -0.5508
+sternum = 0.1435
+stifle_l = 0.7110
+stifle_r = -0.7227
 tail_base = -0.1628
-tail_1 = -0.1475
-tail_2 = -0.1323
-tail_3 = -0.117
-tail_tip = -0.1017
+tail_1 = -0.1584
+tail_2 = -0.2252
+tail_3 = 0.0060
+tail_tip = 0.0623
 withers = 0.1017
 wrist_l = 0.4356
 wrist_r = -0.4444
 
+chest_front = 0.0205
 [radius_depth_ft]
 foreleg_l = 0.28
 foreleg_r = 0.28
 hindleg_l = 0.28
 hindleg_r = 0.28
+tail = 0.176
 
 [[bones]]
 name = "skull"

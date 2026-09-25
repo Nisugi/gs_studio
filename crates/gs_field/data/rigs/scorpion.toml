@@ -38,136 +38,136 @@ index = 2
 name = "thorax"
 part = "chest"
 pivot = [0.5, 0.5386]
-tip = [0.5, 0.7993]
-joints = [[0.5, 0.5386], [0.5, 0.7993]]
-pixels = 12655
+tip = [0.5, 0.7922]
+joints = [[0.5, 0.5386], [0.5, 0.7922]]
+pixels = 12949
 
 [[bones]]
 index = 3
 name = "abdomen"
 part = "abdomen"
 parent = "thorax"
-pivot = [0.5, 0.7993]
-tip = [0.5, 0.0471]
-joints = [[0.5, 0.7993], [0.5, 0.0471]]
-pixels = 11899
+pivot = [0.5, 0.7922]
+tip = [0.5, 0.0581]
+joints = [[0.5, 0.7922], [0.5, 0.0581]]
+pixels = 11903
 
 [[bones]]
 index = 4
 name = "leg1_r"
 part = "rightArm"
 parent = "thorax"
-pivot = [0.3851, 0.6489]
-tip = [0.1935, 0.4984]
-joints = [[0.3851, 0.6489], [0.1935, 0.4984]]
-pixels = 4262
+pivot = [0.3746, 0.6527]
+tip = [0.1935, 0.5128]
+joints = [[0.3746, 0.6527], [0.1935, 0.5128]]
+pixels = 4165
 
 [[bones]]
 index = 5
 name = "leg1_tip_r"
 part = "rightHand"
 parent = "leg1_r"
-pivot = [0.1935, 0.4984]
-tip = [0.1648, 0.1976]
-joints = [[0.1935, 0.4984], [0.1648, 0.1976]]
-pixels = 11093
+pivot = [0.1935, 0.5128]
+tip = [0.1989, 0.2619]
+joints = [[0.1935, 0.5128], [0.1989, 0.2619]]
+pixels = 11172
 
 [[bones]]
 index = 6
 name = "leg1_l"
 part = "leftArm"
 parent = "thorax"
-pivot = [0.6149, 0.6489]
-tip = [0.8065, 0.4984]
-joints = [[0.6149, 0.6489], [0.8065, 0.4984]]
-pixels = 4043
+pivot = [0.6254, 0.6527]
+tip = [0.8065, 0.5128]
+joints = [[0.6254, 0.6527], [0.8065, 0.5128]]
+pixels = 4055
 
 [[bones]]
 index = 7
 name = "leg1_tip_l"
 part = "leftHand"
 parent = "leg1_l"
-pivot = [0.8065, 0.4984]
-tip = [0.8352, 0.1976]
-joints = [[0.8065, 0.4984], [0.8352, 0.1976]]
-pixels = 11200
+pivot = [0.8065, 0.5128]
+tip = [0.8011, 0.2619]
+joints = [[0.8065, 0.5128], [0.8011, 0.2619]]
+pixels = 11203
 
 [[bones]]
 index = 8
 name = "leg2_r"
 part = "rightLeg"
 parent = "thorax"
-pivot = [0.3659, 0.699]
-tip = [0.1169, 0.9798]
-joints = [[0.3659, 0.699], [0.1935, 0.6188], [0.1169, 0.9798]]
-pixels = 3341
+pivot = [0.3623, 0.6952]
+tip = [0.0623, 0.9084]
+joints = [[0.3623, 0.6952], [0.2176, 0.6188], [0.0623, 0.9084]]
+pixels = 1750
 
 [[bones]]
 index = 9
 name = "leg2_l"
 part = "leftLeg"
 parent = "thorax"
-pivot = [0.6341, 0.699]
-tip = [0.8831, 0.9798]
-joints = [[0.6341, 0.699], [0.8065, 0.6188], [0.8831, 0.9798]]
-pixels = 3552
+pivot = [0.6377, 0.6952]
+tip = [0.9377, 0.9084]
+joints = [[0.6377, 0.6952], [0.7824, 0.6188], [0.9377, 0.9084]]
+pixels = 2413
 
 [[bones]]
 index = 10
 name = "leg3_r"
 part = "rightLeg"
 parent = "thorax"
-pivot = [0.3659, 0.7291]
-tip = [0.0211, 0.9798]
-joints = [[0.3659, 0.7291], [0.1169, 0.699], [0.0211, 0.9798]]
-pixels = 5042
+pivot = [0.3555, 0.7434]
+tip = [0.0757, 0.9436]
+joints = [[0.3555, 0.7434], [0.1478, 0.699], [0.0757, 0.9436]]
+pixels = 4845
 
 [[bones]]
 index = 11
 name = "leg3_l"
 part = "leftLeg"
 parent = "thorax"
-pivot = [0.6341, 0.7291]
-tip = [0.9789, 0.9798]
-joints = [[0.6341, 0.7291], [0.8831, 0.699], [0.9789, 0.9798]]
-pixels = 4315
+pivot = [0.6445, 0.7434]
+tip = [0.9243, 0.9436]
+joints = [[0.6445, 0.7434], [0.8522, 0.699], [0.9243, 0.9436]]
+pixels = 3776
 
 [[bones]]
 index = 12
 name = "leg4_r"
 part = "rightLeg"
 parent = "thorax"
-pivot = [0.3851, 0.7692]
-tip = [0.0977, 0.9798]
-joints = [[0.3851, 0.7692], [0.1552, 0.7993], [0.0977, 0.9798]]
-pixels = 3073
+pivot = [0.3715, 0.755]
+tip = [0.0431, 0.9513]
+joints = [[0.3715, 0.755], [0.1825, 0.7993], [0.0431, 0.9513]]
+pixels = 3303
 
 [[bones]]
 index = 13
 name = "leg4_l"
 part = "leftLeg"
 parent = "thorax"
-pivot = [0.6149, 0.7692]
-tip = [0.9023, 0.9798]
-joints = [[0.6149, 0.7692], [0.8448, 0.7993], [0.9023, 0.9798]]
-pixels = 2112
+pivot = [0.6285, 0.755]
+tip = [0.9569, 0.9513]
+joints = [[0.6285, 0.755], [0.8175, 0.7993], [0.9569, 0.9513]]
+pixels = 3273
 
 [[bones]]
 index = 14
 name = "leg5_r"
 part = "rightLeg"
 parent = "thorax"
-pivot = [0.4042, 0.7993]
+pivot = [0.4315, 0.7917]
 tip = [0.1648, 0.9798]
-joints = [[0.4042, 0.7993], [0.2126, 0.8495], [0.1648, 0.9798]]
-pixels = 1845
+joints = [[0.4315, 0.7917], [0.2126, 0.8171], [0.1648, 0.9798]]
+pixels = 3286
 
 [[bones]]
 index = 15
 name = "leg5_l"
 part = "leftLeg"
 parent = "thorax"
-pivot = [0.5958, 0.7993]
+pivot = [0.5685, 0.7917]
 tip = [0.8352, 0.9798]
-joints = [[0.5958, 0.7993], [0.7874, 0.8495], [0.8352, 0.9798]]
-pixels = 1000
+joints = [[0.5685, 0.7917], [0.7874, 0.8171], [0.8352, 0.9798]]
+pixels = 1339

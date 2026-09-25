@@ -12,58 +12,54 @@ mouth = "chin"
 saddle = "neck_base"
 
 [joints]
-ankle_l = [0.02, 0.54]
-ankle_r = [-0.18, 0.64]
+ankle_l = [0.1387, 0.8089]
+ankle_r = [-0.2986, 0.9089]
 chin = [0.0, 7.1]
 crown = [-0.00, 7.91]
-elbow_l = [2.35, 5.14]
-elbow_r = [-2.38, 5.14]
+elbow_l = [2.3184, 5.2903]
+elbow_r = [-2.3484, 5.2903]
 eye_l = [0.25, 7.5]
 eye_r = [-0.25, 7.5]
-fingertip_l = [3.52, 4.01]
-fingertip_r = [-3.55, 4.04]
-hip_l = [0.5, 3.8]
-hip_r = [-0.5, 3.8]
-knee_l = [0.4, 2.0]
-knee_r = [-0.35, 1.99]
+fingertip_l = [3.5516, 4.0416]
+fingertip_r = [-3.5816, 4.0716]
+hip_l = [0.6187, 3.8000]
+hip_r = [-0.6187, 3.8000]
+knee_l = [0.4000, 2.1186]
+knee_r = [-0.3500, 2.1086]
 neck_base = [0.0, 6.7]
-pelvis = [0.0, 4.0]
-shoulder_l = [1.6, 6.3]
-shoulder_r = [-1.6, 6.3]
-sternum = [0.0, 5.5]
-toe_l = [-0.08, 0.24]
-toe_r = [-0.08, 0.24]
-wrist_l = [3.25, 4.34]
-wrist_r = [-3.28, 4.36]
+pelvis = [0.0000, 4.2373]
+shoulder_l = [1.6000, 6.0311]
+shoulder_r = [-1.6000, 6.0311]
+sternum = [0.0000, 5.7966]
+toe_l = [0.0070, 1.1022]
+toe_r = [-0.1670, 1.1022]
+wrist_l = [3.0127, 4.3400]
+wrist_r = [-3.0427, 4.3600]
 
 [depth]
-ankle_l = -0.3
-ankle_r = -0.3
+ankle_l = -0.2407
+ankle_r = -0.2367
 chin = 0.3
 crown = 0.19
-elbow_l = 0.3
-elbow_r = 0.3
+elbow_l = -0.0283
+elbow_r = -0.0876
 eye_l = 0.6
 eye_r = 0.6
 fingertip_l = 1.32
 fingertip_r = 1.32
-hip_l = -0.2
-hip_r = -0.2
-knee_l = -0.3
-knee_r = -0.3
+hip_l = 0.1283
+hip_r = -0.3780
+knee_l = -0.2407
+knee_r = -0.2723
 neck_base = 0.0
-pelvis = -0.2
-shoulder_l = 0.0
-shoulder_r = 0.0
-sternum = 0.0
+pelvis = 0.2153
+shoulder_l = 0.3006
+shoulder_r = 0.2373
+sternum = 0.3559
 toe_l = -0.2
-toe_r = -0.2
-wrist_l = 0.74
-wrist_r = 0.74
-
-[radius_ft]
-leg_r = 0.55
-leg_l = 0.55
+toe_r = -0.3503
+wrist_l = 1.3332
+wrist_r = 1.3332
 
 [radius_depth_ft]
 leg_r = 0.5
@@ -133,9 +129,11 @@ name = "leg_r"
 part = "rightLeg"
 parent = "torso_lower"
 joints = ["hip_r", "knee_r", "ankle_r", "toe_r"]
+radius_ft = 0.55
 
 [[bones]]
 name = "leg_l"
 part = "leftLeg"
 parent = "torso_lower"
 joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]
+radius_ft = 0.55

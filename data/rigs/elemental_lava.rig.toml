@@ -22,25 +22,25 @@ eye_l = [1.5, 12.0]
 eye_r = [-1.5, 12.0]
 fingertip_l = [12.6000, 3.2810]
 fingertip_r = [-12.6000, 3.2810]
-shoulder_l = [5.5475, 8.6679]
-shoulder_r = [-5.5475, 8.6679]
+shoulder_l = [5.6059, 8.6679]
+shoulder_r = [-5.6059, 8.6679]
 wrist_l = [12.2190, 4.5000]
 wrist_r = [-12.2190, 4.5000]
 
 [depth]
-base = -0.2190
-belly = -0.8466
+base = 0.8249
+belly = 0.3068
 crest = -3
 crown = -3
-elbow_l = 7.9050
+elbow_l = 7.5765
 elbow_r = 7.9050
 eye_l = 7.0
 eye_r = 7.0
 fingertip_l = 13.4380
-fingertip_r = 11.9050
-shoulder_l = 5.6715
-shoulder_r = 5.1240
-wrist_l = 10.3466
+fingertip_r = 11.2480
+shoulder_l = 5.2335
+shoulder_r = 5.5620
+wrist_l = 10.2882
 wrist_r = 10.4050
 
 [[bones]]

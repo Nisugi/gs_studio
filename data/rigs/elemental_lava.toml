@@ -41,7 +41,7 @@ parent = "core"
 pivot = [0.5, 0.5985]
 tip = [0.5, 0.1641]
 joints = [[0.5, 0.5985], [0.5, 0.1641]]
-pixels = 41874
+pixels = 42119
 
 [[bones]]
 index = 3
@@ -57,20 +57,20 @@ index = 4
 name = "arm_r"
 part = "rightArm"
 parent = "mass"
-pivot = [0.2908, 0.4202]
+pivot = [0.2886, 0.4202]
 tip = [0.0391, 0.6987]
-joints = [[0.2908, 0.4202], [0.1252, 0.5304], [0.0391, 0.6987]]
-pixels = 12667
+joints = [[0.2886, 0.4202], [0.1252, 0.5304], [0.0391, 0.6987]]
+pixels = 12518
 
 [[bones]]
 index = 5
 name = "arm_l"
 part = "leftArm"
 parent = "mass"
-pivot = [0.7092, 0.4202]
+pivot = [0.7114, 0.4202]
 tip = [0.9609, 0.6987]
-joints = [[0.7092, 0.4202], [0.8748, 0.5304], [0.9609, 0.6987]]
-pixels = 12562
+joints = [[0.7114, 0.4202], [0.8748, 0.5304], [0.9609, 0.6987]]
+pixels = 12466
 
 [[bones]]
 index = 6

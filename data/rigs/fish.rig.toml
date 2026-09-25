@@ -16,27 +16,27 @@ dorsal_base = [0.3, 2.9]
 dorsal_tip = [0.4280, 3.8000]
 eye_r = [4.0, 2.45]
 gill = [2.9, 2]
-mid = [0.5, 2.0]
-pec_root_l = [1.5570, 1.0860]
-pec_root_r = [1.5000, 1.0860]
-pec_tip_l = [0.985, 0.0]
-pec_tip_r = [0.7, 0.0]
+mid = [0.5000, 2.0133]
+pec_root_l = [1.5285, 1.0860]
+pec_root_r = [1.3860, 1.0290]
+pec_tip_l = [0.9128, 0.0285]
+pec_tip_r = [0.7000, 0.1140]
 peduncle = [-2.8425, 1.9000]
 snout = [4.7, 1.85]
 tail_end = [-4.6582, 2.9275]
 
 [depth]
-pec_root_l = 0.7570
-pec_root_r = -0.7570
+pec_root_l = 0.8710
+pec_root_r = -0.8710
 pec_tip_l = 2.6
 pec_tip_r = -2.6
 
 dorsal_base = -0.2565
 dorsal_tip = -0.0285
 gill = 0.1140
-mid = 0.1862
-peduncle = -0.2432
-tail_end = 0.2280
+mid = 0.1558
+peduncle = -0.1292
+tail_end = 0.0000
 [radius_depth_ft]
 dorsal = 0.06
 tail = 0.08

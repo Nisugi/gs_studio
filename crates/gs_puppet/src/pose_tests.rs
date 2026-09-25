@@ -324,8 +324,13 @@ fn a_lying_quadruped_keeps_its_back_low() {
         let spine = p.segments.iter().position(|s| s.name.starts_with("spine")).unwrap();
         let back = posed.xf[spine].point(p.segments[spine].head)[1] + posed.lift;
         // Under half its standing height (a deep-chested boar lies a little
-        // higher: its body is most of its height).
-        let limit = if family == "suine" { 0.56 } else { 0.45 };
+        // higher: its body is most of its height; a horse folded sternal
+        // keeps its back at about half, its chest is deep and its knees high).
+        let limit = match family {
+            "suine" => 0.56,
+            "equine" => 0.50,
+            _ => 0.45,
+        };
         assert!(back < limit * p.height, "{family}: back at {back:.2} ft lying down, standing height {:.2}", p.height);
     }
 }

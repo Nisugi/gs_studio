@@ -15,23 +15,23 @@ saddle = "chest_end"
 snout = [0.5664, 3.5054]
 skull_base = [-0.4476, 3.3057]
 eye_r = [0.3538, 3.5553]
-neck_end = [-0.2750, 2.1519]
+neck_end = [-0.3550, 2.2586]
 chest_end = [-0.3252, 1.9778]
 belly_mid = [-0.1374, 1.2788]
-belly_end = [0.0618, 1.3331]
-back_1 = [0.3015, 0.3893]
-back_2 = [-1.9992, 0.4944]
-tail_mid = [-2.0104, 0.1074]
-tail_tip = [-0.2385, 1.4190]
+belly_end = [0.0885, 1.3331]
+back_1 = [0.3015, 0.4017]
+back_2 = [-1.9850, 0.4660]
+tail_mid = [0.9924, 0.1800]
+tail_tip = [2.1358, 1.0367]
 
 
 [depth]
-back_1 = 0.0772
-back_2 = -0.0246
-belly_end = 0.0023
-belly_mid = -0.0048
+back_1 = -0.2037
+back_2 = 0.2580
+belly_end = 0.1890
+belly_mid = 0.1694
 chest_end = -0.0768
-tail_mid = -0.3768
+tail_mid = -0.4177
 
 neck_end = -0.1475
 skull_base = -0.2400
