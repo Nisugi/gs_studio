@@ -154,27 +154,15 @@ joints = ["leg1_knee_l", "leg1_tip_l"]
 
 [[bones]]
 name = "leg2_r"
-part = "rightArm"
+part = "rightLeg"
 parent = "thorax"
-joints = ["leg2_base_r", "leg2_knee_r"]
+joints = ["leg2_base_r", "leg2_knee_r", "leg2_tip_r"]
 
 [[bones]]
 name = "leg2_l"
-part = "leftArm"
+part = "leftLeg"
 parent = "thorax"
-joints = ["leg2_base_l", "leg2_knee_l"]
-
-[[bones]]
-name = "leg2_tip_r"
-part = "rightHand"
-parent = "leg2_r"
-joints = ["leg2_knee_r", "leg2_tip_r"]
-
-[[bones]]
-name = "leg2_tip_l"
-part = "leftHand"
-parent = "leg2_l"
-joints = ["leg2_knee_l", "leg2_tip_l"]
+joints = ["leg2_base_l", "leg2_knee_l", "leg2_tip_l"]
 
 [[bones]]
 name = "leg3_r"

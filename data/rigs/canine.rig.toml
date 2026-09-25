@@ -143,3 +143,4 @@ joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
 
 [mirror]
 foreleg_r = "foreleg_l"
+hindleg_l = "hindleg_r"

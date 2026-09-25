@@ -639,13 +639,14 @@ ONE tree:
 | `quadruped` | `spine` | `neck` (*withers*), `tail`, `brisket` (*sternum*), `underline`, `foreleg_*`, `hindleg_*` <- `spine`; `skull` (*poll*) <- `neck`; `forepaw_*` <- `foreleg_*` |
 | `avian` | `spine` | `neck` (*nape*), `tail`, `breast` (*breast*), `underline`, `wing_*`, `leg_*` <- `spine`; `skull` (*crown*) <- `neck`; `wing_hand_*` <- `wing_*` |
 | `serpentine` | `mid_body` (*belly_mid*) | `fore_body` (*chest_end*), `hind_body` <- `mid_body`; `neck` (*neck_end*) <- `fore_body`; `skull` (*skull_base*) <- `neck` |
-| `multileg` | `thorax` | `skull` (*mouth*), `abdomen`, `leg1_*` .. `leg5_*` <- `thorax`; `leg1_tip_*`, `leg2_tip_*` <- their leg |
+| `multileg` | `thorax` | `skull` (*mouth*), `abdomen`, `leg1_*` .. `leg5_*` <- `thorax`; `leg1_tip_*` <- `leg1_*` |
 
  `_r`/`_l` suffixes are mirror
 pairs; in a side view `_r` is the near limb. Quadruped forelegs are
 `rightArm`/`leftArm` with the paw segment as the hand; spine + tail are
-`back`. `multileg` has 5 leg pairs (pairs 1-2 arms with the tip segment as
-hand, 3-5 legs); leave unused pairs unplaced.
+`back`. `multileg` has 5 leg pairs: pair 1 arms with the tip segment as
+hand (a crab's claws, a spider's pedipalps), 2-5 the four walking pairs;
+leave unused pairs unplaced.
 
 ## File formats
 

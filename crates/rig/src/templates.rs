@@ -310,8 +310,9 @@ fn serpentine() -> Template {
     }
 }
 
-/// Leg pairs on a multileg body. Pairs 1-2 are arms (tip segment = hand),
-/// 3-5 are legs. Unused pairs are simply left unplaced.
+/// Leg pairs on a multileg body. Pair 1 is arms (a crab's claws, a spider's
+/// pedipalps; tip segment = hand), 2-5 the four walking pairs. Unused pairs
+/// are simply left unplaced.
 const MULTILEG_PAIRS: usize = 5;
 
 fn multileg() -> Template {
@@ -331,7 +332,7 @@ fn multileg() -> Template {
     }
     for n in 1..=MULTILEG_PAIRS {
         let (base, knee, tip) = (format!("leg{n}_base"), format!("leg{n}_knee"), format!("leg{n}_tip"));
-        if n <= 2 {
+        if n == 1 {
             bones.extend(sided(&format!("leg{n}"), "Arm", &[base.as_str(), knee.as_str()]));
             bones.extend(sided(&format!("leg{n}_tip"), "Hand", &[knee.as_str(), tip.as_str()]));
         } else {
@@ -343,7 +344,7 @@ fn multileg() -> Template {
     link(&mut bones, "abdomen", "thorax", None);
     for n in 1..=MULTILEG_PAIRS {
         link(&mut bones, &format!("leg{n}"), "thorax", None);
-        if n <= 2 {
+        if n == 1 {
             link(&mut bones, &format!("leg{n}_tip"), &format!("leg{n}"), None);
         }
     }
@@ -463,8 +464,8 @@ mod tests {
         assert_eq!(parent("arm_r").as_deref(), Some("clavicle"));
         assert_eq!(parent("leg_r").as_deref(), Some("torso_lower"));
         let leg = multileg();
-        let tip = leg.bones.iter().find(|b| b.name == "leg2_tip_l").unwrap();
-        assert_eq!(tip.parent.as_deref(), Some("leg2_l"));
+        let tip = leg.bones.iter().find(|b| b.name == "leg1_tip_l").unwrap();
+        assert_eq!(tip.parent.as_deref(), Some("leg1_l"));
     }
 
     #[test]
@@ -505,7 +506,11 @@ mod tests {
         assert_eq!(t.joints.iter().filter(|j| j.starts_with("leg")).count(), 30);
         let part = |name: &str| t.bones.iter().find(|b| b.name == name).unwrap().part;
         assert_eq!(part("leg1_r"), "rightArm");
-        assert_eq!(part("leg2_tip_l"), "leftHand");
+        assert_eq!(part("leg1_tip_l"), "leftHand");
+        // Four walking pairs: a crab's and a spider's second pair is one.
+        assert_eq!(part("leg2_r"), "rightLeg");
+        assert_eq!(t.bones.iter().find(|b| b.name == "leg2_r").unwrap().joints.len(), 3);
+        assert!(!t.bones.iter().any(|b| b.name == "leg2_tip_r"));
         assert_eq!(part("leg3_r"), "rightLeg");
         assert_eq!(part("leg5_l"), "leftLeg");
     }

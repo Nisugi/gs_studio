@@ -106,6 +106,16 @@ abdomen = 0.45
 skull = 0.2
 thorax = 0.6
 
+[radius_tip_ft]
+leg2_l = 0.05
+leg2_r = 0.05
+leg3_l = 0.05
+leg3_r = 0.05
+leg4_l = 0.05
+leg4_r = 0.05
+leg5_l = 0.05
+leg5_r = 0.05
+
 [[bones]]
 name = "skull"
 part = "head"
@@ -151,27 +161,15 @@ joints = ["leg1_knee_l", "leg1_tip_l"]
 
 [[bones]]
 name = "leg2_r"
-part = "rightArm"
+part = "rightLeg"
 parent = "thorax"
-joints = ["leg2_base_r", "leg2_knee_r"]
+joints = ["leg2_base_r", "leg2_knee_r", "leg2_tip_r"]
 
 [[bones]]
 name = "leg2_l"
-part = "leftArm"
+part = "leftLeg"
 parent = "thorax"
-joints = ["leg2_base_l", "leg2_knee_l"]
-
-[[bones]]
-name = "leg2_tip_r"
-part = "rightHand"
-parent = "leg2_r"
-joints = ["leg2_knee_r", "leg2_tip_r"]
-
-[[bones]]
-name = "leg2_tip_l"
-part = "leftHand"
-parent = "leg2_l"
-joints = ["leg2_knee_l", "leg2_tip_l"]
+joints = ["leg2_base_l", "leg2_knee_l", "leg2_tip_l"]
 
 [[bones]]
 name = "leg3_r"

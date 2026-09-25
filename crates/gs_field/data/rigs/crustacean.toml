@@ -95,45 +95,25 @@ pixels = 7534
 [[bones]]
 index = 8
 name = "leg2_r"
-part = "rightArm"
+part = "rightLeg"
 parent = "thorax"
 pivot = [0.2763, 0.5536]
-tip = [0.1532, 0.4173]
-joints = [[0.2763, 0.5536], [0.1532, 0.4173]]
-pixels = 1157
+tip = [0.1234, 0.1991]
+joints = [[0.2763, 0.5536], [0.1532, 0.4173], [0.1234, 0.1991]]
+pixels = 2035
 
 [[bones]]
 index = 9
 name = "leg2_l"
-part = "leftArm"
+part = "leftLeg"
 parent = "thorax"
 pivot = [0.7237, 0.5536]
-tip = [0.8468, 0.4173]
-joints = [[0.7237, 0.5536], [0.8468, 0.4173]]
-pixels = 1144
+tip = [0.8766, 0.1991]
+joints = [[0.7237, 0.5536], [0.8468, 0.4173], [0.8766, 0.1991]]
+pixels = 2017
 
 [[bones]]
 index = 10
-name = "leg2_tip_r"
-part = "rightHand"
-parent = "leg2_r"
-pivot = [0.1532, 0.4173]
-tip = [0.1234, 0.1991]
-joints = [[0.1532, 0.4173], [0.1234, 0.1991]]
-pixels = 878
-
-[[bones]]
-index = 11
-name = "leg2_tip_l"
-part = "leftHand"
-parent = "leg2_l"
-pivot = [0.8468, 0.4173]
-tip = [0.8766, 0.1991]
-joints = [[0.8468, 0.4173], [0.8766, 0.1991]]
-pixels = 873
-
-[[bones]]
-index = 12
 name = "leg3_r"
 part = "rightLeg"
 parent = "thorax"
@@ -143,7 +123,7 @@ joints = [[0.3546, 0.6559], [0.2539, 0.7718], [0.3024, 0.9695]]
 pixels = 3200
 
 [[bones]]
-index = 13
+index = 11
 name = "leg3_l"
 part = "leftLeg"
 parent = "thorax"
@@ -153,7 +133,7 @@ joints = [[0.6454, 0.6559], [0.7461, 0.7718], [0.6976, 0.9695]]
 pixels = 3227
 
 [[bones]]
-index = 14
+index = 12
 name = "leg4_r"
 part = "rightLeg"
 parent = "thorax"
@@ -163,7 +143,7 @@ joints = [[0.377, 0.5809], [0.116, 0.7582], [0.1048, 0.9354]]
 pixels = 3268
 
 [[bones]]
-index = 15
+index = 13
 name = "leg4_l"
 part = "leftLeg"
 parent = "thorax"
@@ -173,7 +153,7 @@ joints = [[0.623, 0.5809], [0.884, 0.7582], [0.8952, 0.9354]]
 pixels = 3230
 
 [[bones]]
-index = 16
+index = 14
 name = "leg5_r"
 part = "rightLeg"
 parent = "thorax"
@@ -183,7 +163,7 @@ joints = [[0.2949, 0.5673], [0.0712, 0.6695], [0.0041, 0.8672]]
 pixels = 3043
 
 [[bones]]
-index = 17
+index = 15
 name = "leg5_l"
 part = "leftLeg"
 parent = "thorax"
