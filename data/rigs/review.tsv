@@ -179,3 +179,5 @@ six_legged_insect	ready	dev	2026-09-25	multileg rig by hand: three walking pairs
 bloated_sac	ready	dev	2026-09-25	multileg rig by hand: three walking pairs (2-4), pairs 1 and 5 unused
 arachnid	ready	dev	2026-09-25	joints placed by hand on the new silhouette; side view mirrored to face right in its sheet
 crustacean	ready	dev	2026-09-25	joints placed by hand on the new silhouette
+elemental_air	ready	dev	2026-09-25	biped placed by hand; the funnel below the waist is both legs merged (leg radii pinned)
+elemental_lightning	ready	dev	2026-09-25	biped placed by hand; side fit .47 from the silhouette's lean and forward arm

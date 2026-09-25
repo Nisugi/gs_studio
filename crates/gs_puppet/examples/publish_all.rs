@@ -16,9 +16,25 @@ use std::path::{Path, PathBuf};
 use gs_puppet::{Puppet, MASK_PX};
 use rig::{bake_mask, write_baked, Outlines, Rig, View};
 
+/// Copy `file` into `dir` by reading and writing it: on Windows a watcher
+/// (an editor, an indexer, the virus scanner) can hold a just-written bake
+/// open in a way `CopyFile` refuses (a sharing violation) while plain reads
+/// go through, so this never calls `fs::copy`; a violation is still retried
+/// for a few seconds before it counts.
 fn copy_into(file: &Path, dir: &Path) {
     std::fs::create_dir_all(dir).expect("create dir");
-    std::fs::copy(file, dir.join(file.file_name().expect("file name"))).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    let to = dir.join(file.file_name().expect("file name"));
+    let mut tries = 0;
+    loop {
+        match std::fs::read(file).and_then(|bytes| std::fs::write(&to, bytes)) {
+            Ok(()) => return,
+            Err(e) if tries < 50 && e.raw_os_error() == Some(32) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => panic!("{}: {e}", file.display()),
+        }
+    }
 }
 
 fn main() {
