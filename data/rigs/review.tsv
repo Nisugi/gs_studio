@@ -222,3 +222,4 @@ winged_humanoid	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (
 worm	fixed	dev	2026-09-25	joint_fit proposal adopted; anchor joints (head, mouth, saddle) kept the dev's values; joints under the floor lifted to it
 troll	blocked	dev	2026-09-25	proposal NOT adopted: with it the chest reads 2.1x deeper than wide (it takes the hunch's depth); please re-fit with sternum, pelvis and shoulders held
 reptilian	fixed	dev	2026-09-25	tail made a five-joint chain; no proposal adopted (placed by hand after the base commit), please re-fit
+equine	note	dev	2026-09-25	skeleton ref SC-125-A (horse, straight side): the carpus sits at 29% of withers height, the rig has it at 18%; raising it by even 0.1 ft props the "lie" pose above the lying test's limit (the folded cannon holds the body up), so it stays until the quadruped lie pose tucks the foreleg flatter
