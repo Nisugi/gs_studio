@@ -416,17 +416,35 @@ impl Session {
         if !self.has_saved_bake(&family) {
             return Err(format!("{family} has no saved bake yet: save first"));
         }
-        let mut shipped = Vec::new();
-        for (name, sub) in self.shipped_files(&family) {
+        let (mut shipped, mut removed) = (Vec::new(), Vec::new());
+        // What the family no longer has goes too. Left behind, a puppet of
+        // a rig that could no longer build one, and a texture whose sheet
+        // was gone, stayed published under a report of success.
+        let mut take_away = |stale: PathBuf, what: String| -> Result<(), String> {
+            if stale.is_file() {
+                std::fs::remove_file(&stale).map_err(|e| format!("{}: {e}", stale.display()))?;
+                removed.push(what);
+            }
+            Ok(())
+        };
+        let files = self.shipped_files(&family);
+        if !files.iter().any(|(_, sub)| *sub == "puppets") {
+            let puppet = Puppet::baked_file_name(&family);
+            take_away(dir.join("puppets").join(&puppet), format!("puppets/{puppet}"))?;
+        }
+        for (name, sub) in files {
             copy_into(&self.rigs_dir().join(&name), &dir.join(sub))?;
             shipped.push(format!("{sub}/{name}"));
         }
         let texture = super::texture::sheet_path(&self.data_root, &family);
+        let published = gs_field::puppets::texture_file_name(&family);
         if texture.is_file() {
-            let to = dir.join("puppets").join(gs_field::puppets::texture_file_name(&family));
+            let to = dir.join("puppets").join(&published);
             std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
             std::fs::copy(&texture, &to).map_err(|e| format!("{} -> {}: {e}", texture.display(), to.display()))?;
-            shipped.push(format!("puppets/{}", gs_field::puppets::texture_file_name(&family)));
+            shipped.push(format!("puppets/{published}"));
+        } else {
+            take_away(dir.join("puppets").join(&published), format!("puppets/{published}"))?;
         }
         let skins = super::texture::ship_skins(&self.data_root, &family, &dir.join("puppets"))?;
         if skins > 0 {
@@ -452,6 +470,9 @@ impl Session {
             shipped.push("props/weapons.toml".into());
         }
         self.status = format!("Published {} to {}", shipped.join(", "), dir.display());
+        if !removed.is_empty() {
+            self.status += &format!("; removed {}", removed.join(", "));
+        }
         Ok(dir)
     }
 
@@ -759,6 +780,57 @@ mod tests {
         again.request(DocAction::NewFromTemplate { template: "biped".into(), view: View::Front });
         assert!(again.editor.rig().joints.is_empty());
         assert!(again.has_saved_rig("humanoid"));
+    }
+
+    /// What the puppet builder reads from a rig beyond its joints and bones
+    /// -- `[mirror]`, `[[ignore]]` -- survives a save and a reopen. A save
+    /// from an app built before those tables existed dropped the canine's
+    /// mirrored foreleg (its loader passes over what it does not know).
+    #[test]
+    fn a_save_keeps_the_mirror_and_ignore_tables() {
+        let data = TempData::new("save_tables");
+        let mut s = open(&data.0).unwrap();
+        s.editor.place_current([0.0, 5.8]);
+        s.editor.rig.mirror.insert("arm_r".into(), "arm_l".into());
+        s.editor.rig.ignore.push(rig::IgnoreArea { view: View::Side, points: vec![[0.0, 4.0], [2.0, 4.0], [2.0, 5.0]] });
+        s.save().unwrap();
+        let mut again = open(&data.0).unwrap();
+        assert_eq!(again.editor.rig().mirror.get("arm_r").map(String::as_str), Some("arm_l"));
+        assert_eq!(again.editor.rig().ignore.len(), 1, "{:?}", again.editor.rig().ignore);
+        // And through the family list, the way a family is opened in the app.
+        again.request(DocAction::NewFromTemplate { template: "biped".into(), view: View::Front });
+        again.request(DocAction::OpenFamily("humanoid".into()));
+        assert_eq!(again.editor.rig().mirror.get("arm_r").map(String::as_str), Some("arm_l"));
+        assert_eq!(again.editor.rig().ignore.len(), 1);
+        again.save().unwrap();
+        assert!(std::fs::read_to_string(data.0.join("rigs/humanoid.rig.toml")).unwrap().contains("[mirror]"));
+    }
+
+    /// Publish takes away what the family no longer has: a puppet its rig
+    /// can no longer build, a texture whose sheet is gone. Left behind, the
+    /// stage kept a puppet of a rig that no longer existed, under a report
+    /// of success.
+    #[test]
+    fn publish_removes_what_the_family_no_longer_has() {
+        let data = TempData::new("publish_stale");
+        let out = data.0.join("published");
+        let mut s = open(&data.0).unwrap();
+        s.publish_dir = out.clone();
+        s.publish_on_save = false;
+        std::fs::create_dir_all(data.0.join("textures/humanoid")).unwrap();
+        std::fs::write(data.0.join("textures/humanoid/sheet.png"), b"png").unwrap();
+        s.editor.place_current([0.0, 5.8]);
+        s.editor.place_current([0.0, 5.0]);
+        s.save().unwrap();
+        s.publish().unwrap();
+        assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml", "humanoid.texture.png"]);
+        // The sheet goes, and the rig loses its puppet (as a save of a rig
+        // that can no longer build one leaves it).
+        std::fs::remove_file(data.0.join("textures/humanoid/sheet.png")).unwrap();
+        std::fs::remove_file(data.0.join("rigs/humanoid.puppet.toml")).unwrap();
+        s.publish().unwrap();
+        assert!(names(&out.join("puppets")).is_empty(), "{:?}", names(&out.join("puppets")));
+        assert!(s.status.contains("removed puppets/humanoid.puppet.toml, puppets/humanoid.texture.png"), "{}", s.status);
     }
 
     #[test]

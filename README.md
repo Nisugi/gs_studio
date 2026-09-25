@@ -422,7 +422,9 @@ parents loads with its hierarchy, pivots and joint order filled in from its
 template by name (the status line says so); it is rewritten in the new form
 the next time it is saved.
 
-**Publish** copies what is SAVED -- `rigs/<family>.png` + `.toml`, the
+**Publish** removes from the publish directory what the family no longer
+has (a puppet its rig can no longer build, a texture or creature skin whose
+sheet is gone) and says so; the pool install does the same. It copies what is SAVED -- `rigs/<family>.png` + `.toml`, the
 puppet `puppets/<family>.puppet.toml`, and every pose set in `<data>/poses/`
 into `poses/` -- never the `.rig.toml` source, into the publish directory:
 the folder whose contents game clients embed. Default
