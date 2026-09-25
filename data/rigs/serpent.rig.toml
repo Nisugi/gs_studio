@@ -12,26 +12,26 @@ mouth = "snout"
 saddle = "chest_end"
 
 [joints]
-snout = [1.6, 3.55]
-skull_base = [0.3, 3.35]
-eye_r = [1.25, 3.6]
-neck_end = [0.6, 2.1]
-chest_end = [-2.1, 2.02]
-belly_mid = [-2.6, 1.4]
-belly_end = [1.1, 1.36]
-back_1 = [1.4, 0.55]
-back_2 = [-3.2, 0.52]
-tail_mid = [1.85, 0.2]
-tail_tip = [3.36, 1.3]
+snout = [0.5664, 3.5054]
+skull_base = [-0.4476, 3.3057]
+eye_r = [0.3538, 3.5553]
+neck_end = [-0.1826, 2.0577]
+chest_end = [-0.3252, 1.9778]
+belly_mid = [-0.2441, 1.3588]
+belly_end = [0.1685, 1.3189]
+back_1 = [0.3157, 0.5102]
+back_2 = [-1.9459, 0.4802]
+tail_mid = [-2.0104, 0.1607]
+tail_tip = [0.0548, 1.259]
 
 
 [depth]
-back_1 = 2.8
-back_2 = -2.8
-belly_end = 2.0
-belly_mid = -2.0
-chest_end = -1.1
-tail_mid = -1.4
+back_1 = 0.3581
+back_2 = -0.2664
+belly_end = 0.2689
+belly_mid = -0.1772
+chest_end = -0.0768
+tail_mid = -0.1102
 
 [[bones]]
 name = "skull"

@@ -2,71 +2,71 @@ family = "serpent"
 view = "side"
 ref_ft = 1.0
 axis = "diameter"
-px_per_ft = 74.6791
-aspect = 1.8286
-span = 0.8438
-ground_frac = 1.0079
+px_per_ft = 117.8095
+aspect = 1.1636
+span = 0.8281
+ground_frac = 0.9998
 eye_radius_ft = 0.0486
 parts = ["head", "rightEye", "neck", "chest", "abdomen", "back"]
 
 [map]
 width = 512
-height = 280
+height = 440
 
 [anchors]
-feet = [0.5, 1.0079]
-head = [0.5438, 0.1144]
-mouth = [0.7334, 0.0611]
-saddle = [0.1937, 0.4691]
+feet = [0.5, 0.9998]
+head = [0.397, 0.1147]
+mouth = [0.6303, 0.0612]
+saddle = [0.4252, 0.4702]
 
 [eyes]
-rightEye = [0.6823, 0.0477]
+rightEye = [0.5814, 0.0478]
 
 [[bones]]
 index = 1
 name = "skull"
 part = "head"
 parent = "neck"
-pivot = [0.5438, 0.1144]
-tip = [0.7334, 0.0611]
-joints = [[0.7334, 0.0611], [0.5438, 0.1144]]
-pixels = 3936
+pivot = [0.397, 0.1147]
+tip = [0.6303, 0.0612]
+joints = [[0.6303, 0.0612], [0.397, 0.1147]]
+pixels = 5347
 
 [[bones]]
 index = 2
 name = "neck"
 part = "neck"
 parent = "fore_body"
-pivot = [0.5875, 0.4478]
-tip = [0.5438, 0.1144]
-joints = [[0.5438, 0.1144], [0.5875, 0.4478]]
-pixels = 4168
+pivot = [0.458, 0.4488]
+tip = [0.397, 0.1147]
+joints = [[0.397, 0.1147], [0.458, 0.4488]]
+pixels = 7231
 
 [[bones]]
 index = 3
 name = "fore_body"
 part = "chest"
 parent = "mid_body"
-pivot = [0.1937, 0.4691]
-tip = [0.5875, 0.4478]
-joints = [[0.5875, 0.4478], [0.1937, 0.4691]]
-pixels = 10901
+pivot = [0.4252, 0.4702]
+tip = [0.458, 0.4488]
+joints = [[0.458, 0.4488], [0.4252, 0.4702]]
+pixels = 1334
 
 [[bones]]
 index = 4
 name = "mid_body"
 part = "abdomen"
-pivot = [0.1208, 0.6345]
-tip = [0.6604, 0.6452]
-joints = [[0.1937, 0.4691], [0.1208, 0.6345], [0.6604, 0.6452]]
-pixels = 15816
+pivot = [0.4438, 0.636]
+tip = [0.5388, 0.6466]
+joints = [[0.4252, 0.4702], [0.4438, 0.636], [0.5388, 0.6466]]
+pixels = 1566
 
 [[bones]]
 index = 5
 name = "hind_body"
 part = "back"
 parent = "mid_body"
-pivot = [0.6604, 0.6452]
-tip = [0.9901, 0.6612]
-joints = [[0.6604, 0.6452], [0.7042, 0.8612], [0.0333, 0.8692], [0.7698, 0.9546], [0.9901, 0.6612]]
-pixels = 28777
+pivot = [0.5388, 0.6466]
+tip = [0.5126, 0.6627]
+joints = [[0.5388, 0.6466], [0.5726, 0.8632], [0.0523, 0.8712], [0.0374, 0.9567], [0.5126, 0.6627]]
+pixels = 46505

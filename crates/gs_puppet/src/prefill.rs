@@ -881,6 +881,17 @@ mod tests {
     #[test]
     fn a_depth_guide_closes_the_outlines_seams() {
         let (p, front, side) = humanoid();
+        // A hairline seam cut down the side view's arm, as the old outline
+        // had (the redrawn one is a single mass): two columns of outside
+        // pixels through the body, well inside the guide's seam width.
+        let mut side = side;
+        let (w, h) = (side.grid.w, side.grid.h);
+        let col = (0..w).max_by_key(|&x| (0..h).filter(|&y| side.inside[y * w + x]).count()).unwrap();
+        for y in (h / 3)..(2 * h / 3) {
+            for x in [col, col + 1] {
+                side.inside[y * w + x] = false;
+            }
+        }
         let seam = |m: &rig_bake::Mask| (0..m.inside.len()).filter(|&i| !m.inside[i] && seams_closed(m)[i]).count();
         assert!(seam(&side) > 300, "the side outline has its arm seam: {}", seam(&side));
         let rgba = depth_guide(&p, &side, PaintView::Side, 1);

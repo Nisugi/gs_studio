@@ -2,125 +2,125 @@ family = "humanoid"
 view = "front"
 ref_ft = 6.0
 axis = "crown"
-px_per_ft = 84.8525
-aspect = 0.3633
-span = 0.828
-ground_frac = 0.9995
-eye_radius_ft = 0.0433
+px_per_ft = 85.376
+aspect = 0.3555
+span = 0.6374
+ground_frac = 1.0
+eye_radius_ft = 0.046
 parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
 
 [map]
-width = 186
+width = 182
 height = 512
 
 [anchors]
-feet = [0.4991, 0.9995]
-head = [0.4991, 0.0085]
-mouth = [0.5067, 0.1225]
-saddle = [0.4991, 0.1792]
+feet = [0.4987, 1.0]
+head = [0.495, 0.0085]
+mouth = [0.5025, 0.1225]
+saddle = [0.4985, 0.1792]
 
 [eyes]
-leftEye = [0.5538, 0.0631]
-rightEye = [0.4443, 0.0631]
+leftEye = [0.5475, 0.0631]
+rightEye = [0.4349, 0.0631]
 
 [[bones]]
 index = 1
 name = "skull"
 part = "head"
 parent = "neck"
-pivot = [0.5067, 0.1225]
-tip = [0.4991, 0.0085]
-joints = [[0.4991, 0.0085], [0.5067, 0.1225]]
-pixels = 2717
+pivot = [0.5025, 0.1225]
+tip = [0.495, 0.0085]
+joints = [[0.495, 0.0085], [0.5025, 0.1225]]
+pixels = 2791
 
 [[bones]]
 index = 2
 name = "neck"
 part = "neck"
 parent = "torso_upper"
-pivot = [0.4991, 0.1792]
-tip = [0.5067, 0.1225]
-joints = [[0.5067, 0.1225], [0.4991, 0.1792]]
-pixels = 884
+pivot = [0.4985, 0.1792]
+tip = [0.5025, 0.1225]
+joints = [[0.5025, 0.1225], [0.4985, 0.1792]]
+pixels = 844
 
 [[bones]]
 index = 3
 name = "clavicle"
 part = "chest"
 parent = "torso_upper"
-pivot = [0.4991, 0.1792]
-tip = [0.791, 0.2073]
-joints = [[0.2071, 0.2073], [0.4991, 0.1792], [0.791, 0.2073]]
-pixels = 2294
+pivot = [0.4985, 0.1792]
+tip = [0.7931, 0.2073]
+joints = [[0.204, 0.2073], [0.4985, 0.1792], [0.7931, 0.2073]]
+pixels = 2449
 
 [[bones]]
 index = 4
 name = "torso_upper"
 part = "chest"
 parent = "torso_lower"
-pivot = [0.4991, 0.3034]
-tip = [0.4991, 0.1792]
-joints = [[0.4991, 0.1792], [0.4991, 0.3034]]
-pixels = 4736
+pivot = [0.4987, 0.3035]
+tip = [0.4985, 0.1792]
+joints = [[0.4985, 0.1792], [0.4987, 0.3035]]
+pixels = 4556
 
 [[bones]]
 index = 5
 name = "torso_lower"
 part = "abdomen"
-pivot = [0.4952, 0.5171]
-tip = [0.4991, 0.3034]
-joints = [[0.4991, 0.3034], [0.4952, 0.5171]]
-pixels = 10504
+pivot = [0.4946, 0.5171]
+tip = [0.4987, 0.3035]
+joints = [[0.4987, 0.3035], [0.4946, 0.5171]]
+pixels = 10534
 
 [[bones]]
 index = 6
 name = "arm_r"
 part = "rightArm"
 parent = "clavicle"
-pivot = [0.2071, 0.2073]
-tip = [0.0657, 0.494]
-joints = [[0.2071, 0.2073], [0.1159, 0.3532], [0.0657, 0.494]]
-pixels = 3955
+pivot = [0.204, 0.2073]
+tip = [0.078, 0.494]
+joints = [[0.204, 0.2073], [0.1267, 0.3532], [0.078, 0.494]]
+pixels = 3940
 
 [[bones]]
 index = 7
 name = "hand_r"
 part = "rightHand"
 parent = "arm_r"
-pivot = [0.0657, 0.494]
-tip = [0.1135, 0.5923]
-joints = [[0.0657, 0.494], [0.1135, 0.5923]]
-pixels = 911
+pivot = [0.078, 0.494]
+tip = [0.0764, 0.5923]
+joints = [[0.078, 0.494], [0.0764, 0.5923]]
+pixels = 940
 
 [[bones]]
 index = 8
 name = "arm_l"
 part = "leftArm"
 parent = "clavicle"
-pivot = [0.791, 0.2073]
-tip = [0.9325, 0.494]
-joints = [[0.791, 0.2073], [0.8823, 0.3532], [0.9325, 0.494]]
-pixels = 3944
+pivot = [0.7931, 0.2073]
+tip = [0.9244, 0.494]
+joints = [[0.7931, 0.2073], [0.8742, 0.3532], [0.9244, 0.494]]
+pixels = 3906
 
 [[bones]]
 index = 9
 name = "hand_l"
 part = "leftHand"
 parent = "arm_l"
-pivot = [0.9325, 0.494]
-tip = [0.8886, 0.5895]
-joints = [[0.9325, 0.494], [0.8886, 0.5895]]
-pixels = 900
+pivot = [0.9244, 0.494]
+tip = [0.8924, 0.5895]
+joints = [[0.9244, 0.494], [0.8924, 0.5895]]
+pixels = 946
 
 [[bones]]
 index = 10
 name = "leg_r"
 part = "rightLeg"
 parent = "torso_lower"
-pivot = [0.3308, 0.5223]
-tip = [0.2134, 0.9945]
-joints = [[0.3308, 0.5223], [0.299, 0.7274], [0.268, 0.9549], [0.2134, 0.9945]]
-pixels = 8728
+pivot = [0.3282, 0.5223]
+tip = [0.3269, 0.9945]
+joints = [[0.3282, 0.5223], [0.3218, 0.7274], [0.346, 0.9549], [0.3269, 0.9945]]
+pixels = 8863
 
 [[bones]]
 index = 11
@@ -128,6 +128,6 @@ name = "leg_l"
 part = "leftLeg"
 parent = "torso_lower"
 pivot = [0.6595, 0.518]
-tip = [0.8279, 0.9931]
-joints = [[0.6595, 0.518], [0.7068, 0.7247], [0.7384, 0.9508], [0.8279, 0.9931]]
-pixels = 8853
+tip = [0.7262, 0.9931]
+joints = [[0.6595, 0.518], [0.688, 0.7247], [0.6684, 0.9508], [0.7262, 0.9931]]
+pixels = 8989

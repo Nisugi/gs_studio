@@ -2,67 +2,67 @@ family = "worm"
 view = "side"
 ref_ft = 2.0
 axis = "diameter"
-px_per_ft = 35.5062
-aspect = 1.8286
-span = 0.6563
-ground_frac = 1.0037
+px_per_ft = 47.6989
+aspect = 1.3653
+span = 0.8457
+ground_frac = 0.9993
 parts = ["head", "neck", "chest", "abdomen", "back"]
 
 [map]
 width = 512
-height = 280
+height = 375
 
 [anchors]
-feet = [0.5, 1.0037]
-head = [0.8675, 0.1287]
-mouth = [0.9646, 0.116]
-saddle = [0.7358, 0.6233]
+feet = [0.5, 0.9993]
+head = [0.8522, 0.1289]
+mouth = [0.9533, 0.1162]
+saddle = [0.8121, 0.6244]
 
 [[bones]]
 index = 1
 name = "skull"
 part = "head"
 parent = "neck"
-pivot = [0.8675, 0.1287]
-tip = [0.9646, 0.116]
-joints = [[0.9646, 0.116], [0.8675, 0.1287]]
-pixels = 3466
+pivot = [0.8522, 0.1289]
+tip = [0.9533, 0.1162]
+joints = [[0.9533, 0.1162], [0.8522, 0.1289]]
+pixels = 4906
 
 [[bones]]
 index = 2
 name = "neck"
 part = "neck"
 parent = "fore_body"
-pivot = [0.7774, 0.3443]
-tip = [0.8675, 0.1287]
-joints = [[0.8675, 0.1287], [0.7774, 0.3443]]
-pixels = 4821
+pivot = [0.7645, 0.3449]
+tip = [0.8522, 0.1289]
+joints = [[0.8522, 0.1289], [0.7645, 0.3449]]
+pixels = 7384
 
 [[bones]]
 index = 3
 name = "fore_body"
 part = "chest"
 parent = "mid_body"
-pivot = [0.7358, 0.6233]
-tip = [0.7774, 0.3443]
-joints = [[0.7774, 0.3443], [0.7358, 0.6233]]
-pixels = 6816
+pivot = [0.8121, 0.6244]
+tip = [0.7645, 0.3449]
+joints = [[0.7645, 0.3449], [0.8121, 0.6244]]
+pixels = 9154
 
 [[bones]]
 index = 4
 name = "mid_body"
 part = "abdomen"
-pivot = [0.6664, 0.8388]
-tip = [0.5347, 0.8769]
-joints = [[0.7358, 0.6233], [0.6664, 0.8388], [0.5347, 0.8769]]
-pixels = 9149
+pivot = [0.8082, 0.8403]
+tip = [0.6715, 0.8784]
+joints = [[0.8121, 0.6244], [0.8082, 0.8403], [0.6715, 0.8784]]
+pixels = 14038
 
 [[bones]]
 index = 5
 name = "hind_body"
 part = "back"
 parent = "mid_body"
-pivot = [0.5347, 0.8769]
-tip = [0.0215, 0.9339]
-joints = [[0.5347, 0.8769], [0.396, 0.8832], [0.2573, 0.8832], [0.1186, 0.8959], [0.0215, 0.9339]]
-pixels = 15740
+pivot = [0.6715, 0.8784]
+tip = [0.0396, 0.9356]
+joints = [[0.6715, 0.8784], [0.4989, 0.8848], [0.3321, 0.8848], [0.1533, 0.8975], [0.0396, 0.9356]]
+pixels = 22465

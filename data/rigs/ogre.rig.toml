@@ -12,29 +12,29 @@ mouth = "chin"
 saddle = "neck_base"
 
 [joints]
-ankle_l = [0.95, 0.28]
-ankle_r = [-0.95, 0.28]
-chin = [0, 5.3]
-crown = [0, 5.98]
-elbow_l = [1.8, 3.35]
-elbow_r = [-1.8, 3.35]
-eye_l = [0.2, 5.6]
-eye_r = [-0.2, 5.6]
-fingertip_l = [1.7, 1.85]
-fingertip_r = [-1.7, 1.85]
-hip_l = [0.7, 2.1]
-hip_r = [-0.7, 2.1]
-knee_l = [0.98, 1.1]
-knee_r = [-0.98, 1.1]
-neck_base = [0, 4.9]
-pelvis = [0, 2.6]
-shoulder_l = [0.85, 4.7]
-shoulder_r = [-0.85, 4.7]
-sternum = [0, 4.1]
-toe_l = [1.35, 0.15]
-toe_r = [-1.35, 0.15]
-wrist_l = [1.82, 2.05]
-wrist_r = [-1.82, 2.05]
+ankle_l = [0.8036, 0.281]
+ankle_r = [-0.8988, 0.281]
+chin = [0.0021, 5.2654]
+crown = [-0.0545, 5.9406]
+elbow_l = [2.6213, 3.3292]
+elbow_r = [-2.6184, 3.3292]
+eye_l = [0.2802, 5.5633]
+eye_r = [-0.361, 5.5633]
+fingertip_l = [2.7192, 1.8399]
+fingertip_r = [-2.7152, 1.8399]
+hip_l = [0.8366, 2.0881]
+hip_r = [-0.9113, 2.0881]
+knee_l = [1.0203, 1.0952]
+knee_r = [-1.1188, 1.0952]
+neck_base = [0.5116, 4.8682]
+pelvis = [-0.0398, 2.5845]
+shoulder_l = [1.2265, 4.6697]
+shoulder_r = [-1.2595, 4.6697]
+sternum = [-0.0086, 4.0739]
+toe_l = [1.1192, 0.1519]
+toe_r = [-1.202, 0.1519]
+wrist_l = [3.2665, 2.0384]
+wrist_r = [-3.2669, 2.0384]
 
 [depth]
 ankle_l = 0.6
@@ -117,18 +117,3 @@ joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]
 # The club and the fist holding it are not the ogre's body (held things are
 # separate props): the puppet is not measured from them. Feet, each in its
 # own view, like the joints.
-[[ignore]]
-view = "side"
-points = [[0.62, 4.76], [0.86, 4.74], [2.3, 4.7], [2.3, 3.15], [1.27, 3.15], [1.07, 3.58], [0.92, 3.88], [0.9, 4.2], [0.8, 4.4]]
-
-[[ignore]]
-view = "side"
-points = [[-2.3, 4.95], [-0.95, 4.98], [-0.42, 5.42], [-0.7, 5.9], [-1.4, 6.2], [-2.3, 6.2]]
-
-[[ignore]]
-view = "front"
-points = [[-2.2, 4.85], [-1.2, 5.03], [-0.42, 5.22], [-0.42, 5.45], [-2.2, 5.12]]
-
-[[ignore]]
-view = "front"
-points = [[0.52, 5.22], [0.86, 5.03], [1.9, 5.05], [1.9, 6.1], [0.52, 6.1]]

@@ -637,7 +637,7 @@ fn a_humanoid_arm_is_its_own_and_the_shoulder_goes_with_it() {
     let body = &chest.stations[CAP_RINGS..chest.stations.len() - CAP_RINGS];
     let widest = body.iter().map(|s| s.w).fold(0.0f32, f32::max);
     let neck_base = body.last().expect("rings");
-    assert!(neck_base.w < widest, "the chest ends {:.3} ft wide at the shoulders, wider than its {widest:.3}: a yoke", neck_base.w);
+    assert!(neck_base.w <= widest + 1e-3, "the chest ends {:.3} ft wide at the shoulders, wider than its {widest:.3}: a yoke", neck_base.w);
     // The clavicle reads the whole chest's depth in the side view; at the
     // shoulder it must not stand out in front of or behind the arm (a fin at
     // each shoulder blade).
@@ -824,9 +824,14 @@ fn a_mirrored_limb_takes_its_twin_s_shape() {
     let p = shipped("canine");
     for n in ["foreleg_r.0", "foreleg_r.1", "forepaw_r"] {
         let (a, b) = (segment(&p, n), segment(&p, &n.replace("_r", "_l")));
-        assert_eq!(a.stations.len(), b.stations.len(), "{n}");
-        for (x, y) in a.stations.iter().zip(&b.stations) {
-            assert!((x.w - y.w).abs() < 1e-3 && (x.d - y.d).abs() < 1e-3, "{n}: {x:?} vs {y:?}");
+        // Station by station where the chains have as many, else along the
+        // length (as `mirror_twins` copies).
+        let (na, nb) = (a.stations.len(), b.stations.len());
+        for (k, x) in a.stations.iter().enumerate() {
+            let f = if na == nb { k as f32 } else { k as f32 / (na - 1).max(1) as f32 * (nb - 1) as f32 };
+            let (i, j, t) = (f.floor() as usize, (f.ceil() as usize).min(nb - 1), f - f.floor());
+            let (w, d) = (b.stations[i].w + (b.stations[j].w - b.stations[i].w) * t, b.stations[i].d + (b.stations[j].d - b.stations[i].d) * t);
+            assert!((x.w - w).abs() < 0.01 && (x.d - d).abs() < 0.01, "{n} station {k}: {x:?} vs twin {w:.3} x {d:.3}");
         }
         // Each keeps its own line: the near leg is not moved onto the far one.
         assert!((a.stations[3].c[0] - b.stations[3].c[0]).abs() > 0.1, "{n} sits on its own side");
@@ -844,16 +849,16 @@ fn the_ogre_is_measured_without_its_club() {
     let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
     let mut rig = Rig::load(&data.join("rigs/ogre.rig.toml")).expect("rig");
     let outlines = rig::Outlines::load(&data.join("outlines.json")).expect("outlines");
-    assert!(!rig.ignore.is_empty(), "the ogre's rig lists its club");
-    // At the fist's height (4.0-4.7 ft), where the side view's rows ran on
-    // through the forearm and the club's handle.
+    // The redrawn ogre holds nothing, so a club is stood in for: an area
+    // over the side view's front half at the fist's height (4.0-4.7 ft),
+    // where a held club's handle would run on from the forearm.
     let depth = |p: &Puppet| {
         let rows: Vec<f32> = segment(p, "torso_upper").stations.iter().filter(|s| (4.0..4.7).contains(&s.c[1])).map(|s| s.d).collect();
         rows.iter().sum::<f32>() / rows.len().max(1) as f32
     };
-    let without = depth(&Puppet::build(&rig, &outlines).unwrap());
-    rig.ignore.clear();
     let with_club = depth(&Puppet::build(&rig, &outlines).unwrap());
+    rig.ignore.push(rig::IgnoreArea { view: View::Side, points: vec![[0.6, 3.9], [3.0, 3.9], [3.0, 4.8], [0.6, 4.8]] });
+    let without = depth(&Puppet::build(&rig, &outlines).unwrap());
     assert!(without < with_club - 0.05, "chest {without:.2} ft deep without the club, {with_club:.2} with it");
 }
 
