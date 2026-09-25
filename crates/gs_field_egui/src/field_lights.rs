@@ -14,6 +14,22 @@
 //! would light it. Flicker is that opacity moving, so it costs nothing per
 //! frame: no re-baking.
 //!
+//! A puppet is lit as a body instead ([`puppet_lamps`]): each flame is a
+//! point in the figure's own space, and every pixel of its skin takes the
+//! light that reaches it there -- by its distance from the flame and how
+//! squarely it faces it (`gs_puppet::SkinSurface::lamp_light`) -- added
+//! over the lit skin, the flicker scaling it.
+//!
+//! The ground pool, over a lit backdrop, is the backdrop as it is by day
+//! (its lit twin's original), fire-tinted and fading out: the fire lights
+//! the painted ground rather than laying colour on it. A glow hangs in the
+//! air round each flame, added. A puppet casts a shadow on the ground away
+//! from each lamp that reaches it (`gs_puppet::ShadowCaster`).
+//!
+//! A lamp with a beam (`PointLight::spread` under 360) lights only what lies
+//! within it, by bearing across the floor (`PointLight::beam`): its pool is
+//! a wedge, and creatures outside it take none of its light or shadow.
+//!
 //! Hooks in `creature_field.rs` (marked regions): [`set_creature`] as a
 //! card starts, [`paint_sprite_glow`] after its base art,
 //! [`paint_prop_glow`] after a scenery prop's, [`paint_back`] before the
@@ -31,6 +47,42 @@ const MAX_GLOW: f32 = 0.8;
 /// World height a campfire's flame reaches (the depth axis's units).
 const FLAME_H: f32 = 0.3;
 const TORCH_POLE_H: f32 = 0.34;
+/// Opacity of the day-lit backdrop at the middle of a ground pool.
+const POOL_REVEAL: f32 = 0.85;
+/// How far a pool's fire tint is lifted toward white, so the ground keeps
+/// its own colours under it.
+const POOL_TINT_LIFT: f32 = 0.3;
+/// The glow in the air round a flame: its strength, and its radius in
+/// flame heights.
+const HALO: f32 = 0.45;
+const HALO_FLAMES: f32 = 3.2;
+
+/// The backdrop as it is by day (the lit twin's original) and where it is
+/// drawn on the stage, `[x0, y0, x1, y1]`: what a ground pool shows.
+#[derive(Debug, Clone, Copy)]
+pub struct Backdrop {
+    pub texture: egui::TextureId,
+    pub stage: [f32; 4],
+}
+
+/// A lamp as the creature being drawn sees it, in floor units about its
+/// foot: `across` (+ = screen-right), `up`, `deeper` (+ = farther from the
+/// viewer).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Near {
+    across: f32,
+    up: f32,
+    deeper: f32,
+    reach: f32,
+    rgb: [u8; 3],
+    strength: f32,
+    /// Its flicker now, and how much it counts toward the figure's.
+    flicker: f32,
+    weight: f32,
+    /// Its beam's bearing and width, degrees (360 = all round).
+    aim: f32,
+    spread: f32,
+}
 
 /// The fire light on the creature being drawn, per side.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -48,6 +100,19 @@ thread_local! {
     /// The scene's lights this frame (set by [`paint_back`]): a prop's
     /// draw has no scene of its own to ask.
     static LIGHTS: RefCell<Vec<PointLight>> = const { RefCell::new(Vec::new()) };
+    /// The lamps near the creature being drawn (set by [`set_creature`]).
+    static NEAR: RefCell<Vec<Near>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Height of a lamp's light above the floor, world units: the middle of
+/// its flame as [`paint_lamp`] draws it.
+fn flame_height(kind: LampKind) -> f32 {
+    match kind {
+        // The upper part of the flame: a tall fire lights from high in it.
+        LampKind::Campfire => FLAME_H,
+        LampKind::Torch => TORCH_POLE_H * 2.2 + FLAME_H * 0.4,
+        LampKind::Glow => FLAME_H,
+    }
 }
 
 fn hex(c: &str) -> [u8; 3] {
@@ -72,7 +137,7 @@ fn reach(field: &gs_field::solver::CreatureField, light: &PointLight, x: f32, z:
     let (dx, dz) = ((light.x - x) / ppu, light.z - z);
     let d = dx.hypot(dz);
     let r = light.radius.max(0.05);
-    let fall = (1.0 - (d / r).powi(2)).max(0.0).powi(2);
+    let fall = (1.0 - (d / r).powi(2)).max(0.0).powi(2) * light.beam(-dx, -dz);
     (fall * light.intensity.clamp(0.0, 1.0), if d > 1e-3 { (dx / d).clamp(-1.0, 1.0) } else { 0.0 })
 }
 
@@ -85,8 +150,73 @@ pub fn set_creature(
     now_ms: f64,
 ) {
     let (fx, _) = field.foot(unit);
-    let glow = scene.and_then(|s| glow_at(&s.lights, field, fx, field.ground_z(unit), now_ms as f32 / 1000.0));
+    let (z, t) = (field.ground_z(unit), now_ms as f32 / 1000.0);
+    let lights = scene.map(|s| s.lights.as_slice()).unwrap_or_default();
+    let glow = glow_at(lights, field, fx, z, t);
     CURRENT.with(|g| *g.borrow_mut() = glow);
+    let near = near_lamps(lights, field, fx, z, t);
+    NEAR.with(|n| *n.borrow_mut() = near);
+}
+
+/// The lamps that may reach something standing at floor point (x, z):
+/// within their reach, with room for a body's own size.
+fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Vec<Near> {
+    let (_, ppu_c) = field.project_ground(x, z);
+    lights
+        .iter()
+        .enumerate()
+        .filter_map(|(i, light)| {
+            let (_, ppu_l) = field.project_ground(light.x, light.z);
+            let ppu = ((ppu_l + ppu_c) * 0.5).max(1e-3);
+            let (across, deeper) = ((light.x - x) / ppu, light.z - z);
+            let r = light.radius.max(0.05);
+            let d = across.hypot(deeper);
+            // Its beam must reach near the creature (it lies at -across,
+            // -deeper from the lamp); a body's width of slack.
+            let aimed = light.beam(-across, -deeper).max(light.beam(-across * 0.8, -deeper * 1.2)).max(light.beam(-across * 1.2, -deeper * 0.8));
+            (d < r * 1.3 && light.intensity > 0.0 && aimed > 0.0).then(|| Near {
+                across,
+                up: flame_height(light.kind),
+                deeper,
+                reach: r,
+                rgb: hex(&light.color),
+                strength: light.intensity.clamp(0.0, 1.0),
+                flicker: flicker(light, i, t),
+                weight: light.intensity.max(0.0) * (1.0 - (d / (r * 1.3)).min(1.0)),
+                aim: light.aim,
+                spread: light.spread,
+            })
+        })
+        .collect()
+}
+
+/// The lamps near the creature being drawn ([`set_creature`]) as a puppet
+/// standing there sees them: in its skin's frame (feet about its foot, +x
+/// screen-right, +z toward the viewer), `ft_per_unit` feet to a floor unit
+/// there; and their flicker now, one for the lot (weighted by reach).
+pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, f32) {
+    NEAR.with(|n| {
+        let near = n.borrow();
+        let ft = ft_per_unit.max(1e-3);
+        let lamps = near
+            .iter()
+            .map(|l| gs_puppet::Lamp {
+                pos: [l.across * ft, l.up * ft, -l.deeper * ft],
+                rgb: l.rgb,
+                reach: l.reach * ft,
+                strength: l.strength,
+                // Across the floor (+x right, +z toward the viewer): a bearing
+                // of 90 points away from the viewer, to -z.
+                beam: (l.spread < 360.0).then(|| {
+                    let (s, c) = l.aim.to_radians().sin_cos();
+                    gs_puppet::Beam { dir: [c, 0.0, -s], spread: l.spread, soft: gs_field::lighting::BEAM_SOFT_DEG }
+                }),
+            })
+            .collect();
+        let weight: f32 = near.iter().map(|l| l.weight).sum();
+        let flicker = if weight > 1e-6 { near.iter().map(|l| l.flicker * l.weight).sum::<f32>() / weight } else { 1.0 };
+        (lamps, flicker)
+    })
 }
 
 /// The fire glow on something standing at floor point (x, z) at time `t`.
@@ -176,27 +306,92 @@ fn place(
 }
 
 /// The warm pool a light casts: an ellipse lying on the floor, bright in
-/// the middle, fading to nothing at its radius.
-fn ground_pool(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, f: f32) {
+/// the middle, fading to nothing at its radius. Over a lit backdrop it is
+/// the backdrop by day, fire-tinted (the fire lights the ground); without
+/// one, the fire's colour laid on.
+fn ground_pool(
+    painter: &egui::Painter,
+    field: &gs_field::solver::CreatureField,
+    to_screen: &dyn Fn(f32, f32) -> Pos2,
+    scale: f32,
+    light: &PointLight,
+    f: f32,
+    backdrop: Option<Backdrop>,
+) {
     let rgb = hex(&light.color);
-    let (centre, _) = place(field, to_screen, scale, light.x, light.z);
     let r = light.radius.max(0.05);
     let rings = 6;
-    let around = 28;
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(centre, Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], (140.0 * light.intensity * f) as u8));
+    // A beam's wedge needs its edges drawn finer than a round pool.
+    let around = if light.all_round() { 28 } else { 72 };
+    let tint = rgb.map(|c| c as f32 + (255.0 - c as f32) * POOL_TINT_LIFT);
+    let (mut mesh, strength) = match backdrop {
+        Some(b) => (egui::Mesh::with_texture(b.texture), POOL_REVEAL * 255.0),
+        None => (egui::Mesh::default(), 140.0),
+    };
+    let colour = |a: f32| match backdrop {
+        Some(_) => Color32::from_rgba_unmultiplied(tint[0] as u8, tint[1] as u8, tint[2] as u8, a.clamp(0.0, 255.0) as u8),
+        None => Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a.clamp(0.0, 255.0) as u8),
+    };
+    // Stage point -> where it is on the backdrop's texture.
+    let uv = |sx: f32, sy: f32| match backdrop {
+        Some(b) => pos2((sx - b.stage[0]) / (b.stage[2] - b.stage[0]).max(1e-3), (sy - b.stage[1]) / (b.stage[3] - b.stage[1]).max(1e-3)),
+        None => egui::epaint::WHITE_UV,
+    };
+    let vertex = |mesh: &mut egui::Mesh, x: f32, z: f32, a: f32| {
+        let ((sx, sy), _) = field.project_ground(x, z);
+        let (p, _) = place(field, to_screen, scale, x, z);
+        mesh.vertices.push(egui::epaint::Vertex { pos: p, uv: uv(sx, sy), color: colour(a) });
+    };
+    vertex(&mut mesh, light.x, light.z, strength * light.intensity * f);
     for ring in 1..=rings {
         let u = ring as f32 / rings as f32;
-        let a = 140.0 * light.intensity * f * (1.0 - u * u).powi(2);
-        let c = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a as u8);
+        let a = strength * light.intensity * f * (1.0 - u * u).powi(2);
         for k in 0..around {
             let ang = k as f32 / around as f32 * std::f32::consts::TAU;
             // A circle ON THE FLOOR, through the floor's perspective.
             let wz = (light.z + ang.sin() * r * u).max(0.45);
             let (_, ppu) = field.project_ground(light.x, wz);
             let wx = light.x + ang.cos() * r * u * ppu;
-            let (p, _) = place(field, to_screen, scale, wx, wz);
-            mesh.colored_vertex(p, c);
+            vertex(&mut mesh, wx, wz, a * light.beam(ang.cos(), ang.sin()));
+        }
+    }
+    for ring in 0..rings {
+        let base = 1 + ring * around;
+        for k in 0..around {
+            let (a, b) = ((base + k) as u32, (base + (k + 1) % around) as u32);
+            if ring == 0 {
+                mesh.add_triangle(0, a, b);
+            } else {
+                let (pa, pb) = ((a as usize - around) as u32, (b as usize - around) as u32);
+                mesh.add_triangle(pa, pb, b);
+                mesh.add_triangle(pa, b, a);
+            }
+        }
+    }
+    // A backdrop's texture must not show past the stage's edges.
+    let stage = egui::Rect::from_two_pos(to_screen(0.0, 0.0), to_screen(gs_field::solver::STAGE_W, gs_field::solver::STAGE_H));
+    painter.with_clip_rect(painter.clip_rect().intersect(stage)).add(egui::Shape::mesh(mesh));
+}
+
+/// The glow in the air round a flame, `radius` pixels, ADDED (premultiplied
+/// colours with alpha 0), strongest at the flame.
+fn halo(painter: &egui::Painter, at: Pos2, radius: f32, rgb: [u8; 3], strength: f32) {
+    if radius < 1.0 || strength <= 0.0 {
+        return;
+    }
+    let rings = 5;
+    let around = 24;
+    let colour = |u: f32| {
+        let k = strength * (1.0 - u).powi(2);
+        Color32::from_rgba_premultiplied((rgb[0] as f32 * k) as u8, (rgb[1] as f32 * k) as u8, (rgb[2] as f32 * k) as u8, 0)
+    };
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(at, colour(0.0));
+    for ring in 1..=rings {
+        let u = ring as f32 / rings as f32;
+        for k in 0..around {
+            let ang = k as f32 / around as f32 * std::f32::consts::TAU;
+            mesh.colored_vertex(at + vec2(ang.cos(), ang.sin()) * radius * u, colour(u));
         }
     }
     for ring in 0..rings {
@@ -215,11 +410,25 @@ fn ground_pool(painter: &egui::Painter, field: &gs_field::solver::CreatureField,
     painter.add(egui::Shape::mesh(mesh));
 }
 
-/// A flame: layered tongues, dark red outside to a pale core, swaying.
+/// A flame's tongues in the light's colour, outside in: `(rgb, alpha,
+/// size)`. The outer one is the colour deepened (each channel squared, so
+/// its strongest channel leads), the middle the colour, the core it paled
+/// toward white -- the default fire colour gives the old red / orange /
+/// pale yellow.
+fn flame_layers(rgb: [u8; 3]) -> [([u8; 3], u8, f32); 3] {
+    let c = rgb.map(|v| v as f32 / 255.0);
+    let byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
+    let outer = c.map(|v| byte(v * v * 0.82));
+    let core = c.map(|v| byte(v + (1.0 - v) * 0.7));
+    [(outer, 210, 1.0), (rgb, 235, 0.72), (core, 255, 0.44)]
+}
+
+/// A flame: layered tongues in its light's colour, deep outside to a pale
+/// core, swaying.
 /// Each tongue is round at the base, widest just above it, and tapers to a
 /// tip that sways further than its root.
-fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32) {
-    let layers: [([u8; 4], f32); 3] = [([210, 70, 22, 210], 1.0), ([255, 150, 40, 235], 0.72), ([255, 236, 170, 255], 0.44)];
+fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32, rgb: [u8; 3]) {
+    let layers: [([u8; 4], f32); 3] = flame_layers(rgb).map(|(c, a, size)| ([c[0], c[1], c[2], a], size));
     let steps = 12;
     for (k, (c, size)) in layers.iter().enumerate() {
         let hh = h * size * (0.85 + 0.15 * f) * (1.0 + 0.08 * (t * 9.0 + seed + k as f32).sin());
@@ -238,6 +447,8 @@ fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32)
 pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
     let (foot, ppu) = place(field, to_screen, scale, light.x, light.z);
     let f = flicker(light, i, t);
+    let flame_at = foot + vec2(0.0, -flame_height(light.kind) * ppu);
+    halo(painter, flame_at, FLAME_H * ppu * HALO_FLAMES, hex(&light.color), HALO * light.intensity.clamp(0.0, 1.0) * f);
     match light.kind {
         LampKind::Glow => {}
         LampKind::Campfire => {
@@ -248,12 +459,12 @@ pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::Crea
                 let d = vec2(tilt.cos(), tilt.sin()) * w * 0.55;
                 painter.line_segment([c - d, c + d], egui::Stroke::new((w * 0.16).max(1.5), Color32::from_rgb(70, 44, 28)));
             }
-            flame(painter, foot + vec2(0.0, -w * 0.08), FLAME_H * ppu * 1.6, t, i as f32, f);
+            flame(painter, foot + vec2(0.0, -w * 0.08), FLAME_H * ppu * 1.6, t, i as f32, f, hex(&light.color));
         }
         LampKind::Torch => {
             let top = foot + vec2(0.0, -TORCH_POLE_H * ppu * 2.2);
             painter.line_segment([foot, top], egui::Stroke::new((ppu * 0.025).max(1.5), Color32::from_rgb(82, 56, 34)));
-            flame(painter, top, FLAME_H * ppu * 1.2, t, i as f32 + 3.0, f);
+            flame(painter, top, FLAME_H * ppu * 1.2, t, i as f32 + 3.0, f, hex(&light.color));
         }
     }
 }
@@ -267,6 +478,7 @@ pub fn paint_back(
     scale: f32,
     field: &gs_field::solver::CreatureField,
     scene: Option<&gs_field::scenes::StageScene>,
+    backdrop: Option<Backdrop>,
     ctx: &egui::Context,
 ) -> bool {
     let lights = scene.map(|s| s.lights.as_slice()).unwrap_or_default();
@@ -286,7 +498,7 @@ pub fn paint_back(
     }
     let t = ctx.input(|i| i.time) as f32;
     for (i, light) in lights.iter().enumerate() {
-        ground_pool(painter, field, to_screen, scale, light, flicker(light, i, t));
+        ground_pool(painter, field, to_screen, scale, light, flicker(light, i, t), backdrop);
     }
     true
 }
@@ -358,6 +570,62 @@ mod tests {
         let steady = PointLight { flicker: 0.0, ..light.clone() };
         assert_eq!(flicker(&steady, 0, 1.23), 1.0);
         assert!((0..50).map(|k| flicker(&light, 0, k as f32 * 0.07)).any(|f| f < 0.97), "a fire flickers");
+    }
+
+    #[test]
+    fn a_puppet_sees_a_lamp_where_it_stands() {
+        let field = gs_field::solver::CreatureField::default();
+        let lights = vec![
+            PointLight::new(LampKind::Campfire, 400.0, 3.5),
+            PointLight::new(LampKind::Torch, 480.0, 2.5),
+            PointLight::new(LampKind::Campfire, 440.0, 3.0 + 10.0),
+        ];
+        let near = near_lamps(&lights, &field, 440.0, 3.0, 0.0);
+        assert_eq!(near.len(), 2, "the far fire reaches nothing here");
+        let (fire, torch) = (near[0], near[1]);
+        assert!(fire.across < 0.0 && fire.deeper > 0.0, "the fire is left of it and farther away: {fire:?}");
+        assert!(torch.across > 0.0 && torch.deeper < 0.0, "the torch is right of it and nearer: {torch:?}");
+        assert!(torch.up > fire.up, "a torch's flame is up on its pole");
+        NEAR.with(|n| *n.borrow_mut() = near);
+        let (lamps, flicker) = puppet_lamps(2.0);
+        // In the skin's frame: +x screen-right, +z toward the viewer, feet.
+        assert!(lamps[0].pos[0] < 0.0 && lamps[0].pos[2] < 0.0, "{:?}", lamps[0]);
+        assert!(lamps[1].pos[0] > 0.0 && lamps[1].pos[2] > 0.0, "{:?}", lamps[1]);
+        assert!((lamps[0].reach - fire.reach * 2.0).abs() < 1e-4, "reach in feet");
+        assert!(flicker > 0.0 && flicker <= 1.0);
+        NEAR.with(|n| n.borrow_mut().clear());
+        assert!(puppet_lamps(2.0).0.is_empty());
+
+        // A beam pointed away from it does not reach it; pointed at it, it
+        // does, and hands its bearing over in the skin's frame.
+        let mut aimed = PointLight::new(LampKind::Glow, 400.0, 3.0);
+        aimed.spread = 60.0;
+        aimed.aim = 180.0; // screen-left, away from the creature at 440
+        assert!(near_lamps(std::slice::from_ref(&aimed), &field, 440.0, 3.0, 0.0).is_empty());
+        aimed.aim = 0.0;
+        let near = near_lamps(std::slice::from_ref(&aimed), &field, 440.0, 3.0, 0.0);
+        assert_eq!(near.len(), 1);
+        NEAR.with(|n| *n.borrow_mut() = near);
+        let beam = puppet_lamps(2.0).0[0].beam.expect("a beam");
+        assert!(beam.dir[0] > 0.99 && beam.spread == 60.0, "{beam:?}");
+        NEAR.with(|n| n.borrow_mut().clear());
+    }
+
+    #[test]
+    fn a_flame_burns_in_its_light_s_colour() {
+        // The default fire keeps the old red / orange / pale yellow.
+        let [outer, mid, core] = flame_layers(hex(&fire_colour_for_test()));
+        assert!(outer.0[0] > 180 && outer.0[1] < 100 && outer.0[2] < 40, "{outer:?}");
+        assert_eq!(mid.0, [255, 160, 74]);
+        assert!(core.0.iter().all(|c| *c > 190), "{core:?}");
+        // A blue light burns blue: its strongest channel leads every tongue.
+        for (c, _, _) in flame_layers([74, 140, 255]) {
+            assert!(c[2] >= c[0] && c[2] >= c[1], "{c:?}");
+        }
+    }
+
+    fn fire_colour_for_test() -> String {
+        PointLight::new(LampKind::Campfire, 0.0, 1.0).color
     }
 
     #[test]

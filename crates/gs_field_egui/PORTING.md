@@ -523,6 +523,34 @@ or prop, drawing the lamps not yet drawn that stand at least as far away,
 and `paint_front` draws what is left. Props take firelight too (a region
 after `paint_scene_prop`'s draw calls `paint_prop_glow`). Sixteen regions.
 
+Later: puppets are lit as bodies. With scene lighting on, a puppet's skin
+is rendered with `gs_puppet::Posed::skin_surface`, and `PosedPuppet` keeps
+that `surface` (`skin_day` and its texture are gone). `set_creature` also
+notes the lamps near the creature (`near_lamps`); `puppet_lamps(ft_per_unit)`
+hands them over in the skin's own frame (feet about its foot, the card's
+standing height fixing feet per floor unit), and
+`PuppetPlacement::paint_figure_lamps` (replacing `paint_figure_glow`) draws
+`SkinSurface::lamp_light` over the skin -- premultiplied with alpha 0, so it
+is ADDED -- tinted by the flicker, worked out once per lamp set (a few kept
+per posed figure). Dead puppets are lit too: their own colour is already the
+corpse grey. Ground pools over a lit backdrop draw the backdrop's
+`original_of` texture, fire-tinted, instead of a colour wash (`paint_back`
+takes a `Backdrop`, found inside the existing region after the backdrop
+draw), and `paint_lamp` adds a glow round each flame. No new regions.
+
+Later: shadows and beams. `PosedPuppet` also keeps a `caster`
+(`gs_puppet::Posed::shadow_caster`, beside the surface); the lamp-layer
+cache now holds the cast shadow (`ShadowCaster::cast` through the unit
+camera, a black texture) with the light, and
+`PuppetPlacement::paint_figure_shadows` lays it after the contact shadow,
+before the figure (inside `paint_creature_puppet`, already a marked region).
+Lamps with a beam (gs_field `PointLight::aim` / `spread`): `reach` and
+`near_lamps` weigh `PointLight::beam`, `puppet_lamps` hands it over as a
+`gs_puppet::Beam`, and `ground_pool` draws a wedge. The campfire's light
+point rose to the upper part of its flame (`flame_height`). Scene
+`darkness` (gs_field) needs nothing here: it rides the time-of-day
+keyframes every layer is already lit with.
+
 ### 7.17 Falling down dead
 
 A puppet seen alive that dies falls into its dead pose instead of snapping

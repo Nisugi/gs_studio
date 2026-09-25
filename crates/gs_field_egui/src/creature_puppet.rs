@@ -374,10 +374,13 @@ pub struct PosedPuppet {
     pub skin: Option<Arc<gs_puppet::Skin>>,
     /// The skin's texture, uploaded the first time it is painted.
     skin_texture: SkinTexture,
-    /// The same skin before scene lighting, when lighting applied: what
-    /// firelight lays back over the lit one (`field_lights`).
-    pub skin_day: Option<Arc<gs_puppet::Skin>>,
-    skin_day_texture: SkinTexture,
+    /// What each pixel of the skin shows, kept when scene lighting applied:
+    /// what lamps (campfires, torches) light, from where each flame is
+    /// (`field_lights::puppet_lamps`, [`PuppetPlacement::paint_figure_lamps`]).
+    pub surface: Option<Arc<gs_puppet::SkinSurface>>,
+    /// The posed body as lamps cast its shadow, kept with the surface.
+    pub caster: Option<Arc<gs_puppet::ShadowCaster>>,
+    lamp_layers: LampLayers,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
     /// The puppet's own standing height in feet (the bake's `height`), which
@@ -399,7 +402,85 @@ impl std::fmt::Debug for SkinTexture {
     }
 }
 
+/// What one lamp set does to one posed figure: the light it adds to the
+/// skin, and the shadow it casts (None = nothing to draw).
+#[derive(Clone)]
+struct LampLayer {
+    light: Option<egui::TextureHandle>,
+    /// The shadow's texture, and its origin and size in the skin's pixels.
+    shadow: Option<(egui::TextureHandle, [f32; 2], [usize; 2])>,
+}
+
+/// Lamp layers worked out for one posed figure, per lamp set, newest last.
+/// A few are kept: one posed figure is shared by every creature of its
+/// kind, pose and size, and each stands somewhere else.
+#[derive(Clone, Default)]
+struct LampLayers(Arc<std::sync::Mutex<Vec<(u64, LampLayer)>>>);
+
+const LAMP_LAYERS_KEPT: usize = 6;
+
+impl std::fmt::Debug for LampLayers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.0.lock().map_or(0, |l| l.len());
+        write!(f, "LampLayers({n})")
+    }
+}
+
+/// A lamp set's identity, to a tenth of a foot: what a lamp layer is
+/// worked out for.
+fn lamps_key(lamps: &[gs_puppet::Lamp]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let q = |v: f32| (v * 10.0).round() as i32;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for l in lamps {
+        l.pos.map(q).hash(&mut h);
+        l.rgb.hash(&mut h);
+        (q(l.reach), (l.strength * 50.0).round() as i32).hash(&mut h);
+        l.beam.map(|b| (b.dir.map(|v| (v * 100.0).round() as i32), q(b.spread))).hash(&mut h);
+    }
+    h.finish()
+}
+
 impl PosedPuppet {
+    /// What `lamps` do to this figure (its added light and cast shadow),
+    /// worked out on first use and kept per lamp set. None when it was
+    /// posed without scene lighting or no lamp is near.
+    fn lamp_layer(&self, ctx: &egui::Context, lamps: &[gs_puppet::Lamp]) -> Option<LampLayer> {
+        let skin = self.skin.as_ref().filter(|s| !s.is_empty())?;
+        let surface = self.surface.as_ref()?;
+        if lamps.is_empty() {
+            return None;
+        }
+        let key = lamps_key(lamps);
+        let mut layers = self.lamp_layers.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, layer)) = layers.iter().find(|(k, _)| *k == key) {
+            return Some(layer.clone());
+        }
+        let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
+        let light = surface.lamp_light(lamps, skin);
+        let light = light.iter().any(|v| *v > 0).then(|| {
+            // Premultiplied with alpha 0: drawn, it is added.
+            ctx.load_texture("gs_puppet_lamps", egui::ColorImage::from_rgba_premultiplied([skin.w, skin.h], &light), options)
+        });
+        // Cast through the camera the skin was drawn with, softened by about
+        // a hundredth of the figure's height.
+        let shadow = self.caster.as_ref().and_then(|caster| {
+            let camera = unit_camera(self.standing_ft, self.px_per_ft);
+            let project = camera.projector();
+            let soft = (self.standing_ft * self.px_per_ft * 0.012).clamp(1.0, 8.0);
+            let s = caster.cast(&project, lamps, soft)?;
+            let rgba: Vec<u8> = s.alpha.iter().flat_map(|a| [0, 0, 0, *a]).collect();
+            let tex = ctx.load_texture("gs_puppet_shadow", egui::ColorImage::from_rgba_unmultiplied([s.w, s.h], &rgba), options);
+            Some((tex, s.origin, [s.w, s.h]))
+        });
+        let layer = LampLayer { light, shadow };
+        if layers.len() >= LAMP_LAYERS_KEPT {
+            layers.remove(0);
+        }
+        layers.push((key, layer.clone()));
+        Some(layer)
+    }
+
     /// Content width / height of the DRAWN pose, for the geometry contract.
     pub fn aspect(&self) -> Option<f32> {
         let (w, h) = (
@@ -505,24 +586,36 @@ impl PuppetPlacement {
         painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, egui::Color32::WHITE);
     }
 
-    /// Firelight on a lit puppet: its unlit skin laid over, fire-tinted,
-    /// stronger on the side facing the fire (see `field_lights`).
-    pub fn paint_figure_glow(&self, painter: &egui::Painter, posed: &PosedPuppet, glow: crate::field_lights::FireGlow) {
-        let Some(skin) = posed.skin_day.as_ref().filter(|s| !s.is_empty()) else { return };
-        let tex = posed.skin_day_texture.0.get_or_init(|| {
-            let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
-            let options = egui::TextureOptions {
-                mipmap_mode: Some(egui::TextureFilter::Linear),
-                ..egui::TextureOptions::LINEAR
-            };
-            painter.ctx().load_texture("gs_puppet_skin_day", image, options)
-        });
+    /// Lamp light on a lit puppet (`field_lights::puppet_lamps`): the light
+    /// each flame throws on every point of the body, from where the flame is
+    /// -- bright on what faces it and is near it, nothing on what turns away
+    /// -- ADDED over the skin, at `flicker`. Worked out once per lamp set
+    /// (a creature moving, a lamp edited); the flicker costs nothing. Needs
+    /// the skin's surface, kept only when scene lighting applied.
+    pub fn paint_figure_lamps(&self, painter: &egui::Painter, posed: &PosedPuppet, lamps: &[gs_puppet::Lamp], flicker: f32) {
+        let Some(skin) = posed.skin.as_ref().filter(|s| !s.is_empty()) else { return };
+        let Some(tex) = posed.lamp_layer(painter.ctx(), lamps).and_then(|l| l.light) else { return };
         let min = egui::pos2(
             self.foot.x + skin.origin[0] * self.scale,
             self.foot.y + skin.origin[1] * self.scale,
         );
         let size = egui::vec2(skin.w as f32 * self.scale, skin.h as f32 * self.scale);
-        crate::field_lights::paint_glow_texture(painter, tex.id(), egui::Rect::from_min_size(min, size), glow);
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        let f = (flicker.clamp(0.0, 1.0) * 255.0).round() as u8;
+        painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, egui::Color32::from_gray(f));
+    }
+
+    /// The shadows the lamps cast from a lit puppet, on the ground under it
+    /// (paint before the figure): away from each flame, longer the lower
+    /// and nearer it, as dark as the light they block, dimming with the
+    /// flicker. Worked out with the lamp light, once per lamp set.
+    pub fn paint_figure_shadows(&self, painter: &egui::Painter, posed: &PosedPuppet, lamps: &[gs_puppet::Lamp], flicker: f32) {
+        let Some((tex, origin, [w, h])) = posed.lamp_layer(painter.ctx(), lamps).and_then(|l| l.shadow) else { return };
+        let min = egui::pos2(self.foot.x + origin[0] * self.scale, self.foot.y + origin[1] * self.scale);
+        let size = egui::vec2(w as f32 * self.scale, h as f32 * self.scale);
+        let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        let a = (flicker.clamp(0.0, 1.0) * 255.0).round() as u8;
+        painter.image(tex.id(), egui::Rect::from_min_size(min, size), uv, egui::Color32::from_white_alpha(a));
     }
 
     /// Paint a display list through this placement.
@@ -611,14 +704,19 @@ pub fn pose_puppet_with(
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
-    let mut skin_day = None;
+    let mut surface = None;
+    let mut caster = None;
     let skin = skin.then(|| {
-        let mut skin = posed.skin_with(&project, &look, texture, key.effects);
+        let Some(light) = light else {
+            return Arc::new(posed.skin_with(&project, &look, texture, key.effects));
+        };
         // Scene lighting: the skin is its own standing base, lit exactly as
-        // a sprite would be. The unlit one is kept for firelight.
-        if let Some(light) = light.filter(|_| !skin.is_empty()) {
-            skin_day = Some(Arc::new(skin.clone()));
+        // a sprite would be. What each pixel shows is kept for the lamps.
+        let (mut skin, kept) = posed.skin_surface(&project, &look, texture, key.effects);
+        if !skin.is_empty() {
             light.light_image(&mut skin.rgba, skin.w);
+            surface = Some(Arc::new(kept));
+            caster = Some(Arc::new(posed.shadow_caster(&look)));
         }
         Arc::new(skin)
     });
@@ -627,8 +725,9 @@ pub fn pose_puppet_with(
         shadow: shadow.into(),
         skin,
         skin_texture: SkinTexture::default(),
-        skin_day,
-        skin_day_texture: SkinTexture::default(),
+        surface,
+        caster,
+        lamp_layers: LampLayers::default(),
         bounds,
         standing_ft: puppet.height.max(0.01),
         px_per_ft,

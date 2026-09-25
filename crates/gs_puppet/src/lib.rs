@@ -55,6 +55,7 @@ pub mod prefill;
 pub mod prop;
 pub mod puppet;
 pub mod raster;
+pub mod shadow;
 pub mod skin;
 pub mod uv;
 
@@ -69,7 +70,8 @@ pub use paint::paint;
 pub use pose::{BonePose, FamilyPoses, Limit, Pose, PoseOverride, PoseSet, Posed, SHIPPED_POSES};
 pub use prefill::{depth_guide, dressed_silhouette, prefill, project_view, puppet_eyes, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
-pub use skin::{Effects, Skin};
+pub use shadow::{Shadow, ShadowCaster};
+pub use skin::{Beam, Effects, Lamp, Skin, SkinSurface};
 pub use uv::{silhouette_template, Texture, UvLayout, SHEET_SIDE};
 pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 

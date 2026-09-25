@@ -229,8 +229,17 @@ pub fn render_creature_field_content(
     // Weather behind the creatures: the far half of the rain / snow / fog.
     let weather_on = crate::field_weather::paint_back(&painter, map.stage_rect(), ui.ctx());
     // Point lights: their warm pools on the ground, and the lamps behind
-    // the nearest creature.
-    crate::field_lights::paint_back(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, ui.ctx());
+    // the nearest creature. A pool shows the backdrop as it is by day
+    // (the lit twin's original), fire-tinted: the fire lights the ground.
+    let unlit_backdrop = scene.and_then(|s| s.background.as_deref()).and_then(|bg| {
+        let cache = art_cache?;
+        let lit = cache.scene_background(bg)?;
+        let ts = lit.size_vec2();
+        let (x0, y0, x1, y1) = backdrop_stage_rect(ts.x, ts.y)?;
+        let unlit = cache.light.original_of(lit.id())?;
+        Some(crate::field_lights::Backdrop { texture: unlit.id(), stage: [x0, y0, x1, y1] })
+    });
+    crate::field_lights::paint_back(&painter, &|x, y| map.pt(x, y), map.scale, field, scene, unlit_backdrop, ui.ctx());
     // The painted things standing in front of creatures (the backdrop's
     // occluder mask), placed by where each meets the floor.
     let occluders = crate::field_occluders::Prepared::new(ui.ctx(), scene, art_cache, &backdrop_stage_rect, field);
@@ -1378,15 +1387,17 @@ fn paint_creature_puppet(
     let drawn = puppets.parts(&family);
     drop(puppets);
     let place = PuppetPlacement::fit(&posed, foot, standing_px);
+    // Lamps light the figure from where their flames are, and it casts
+    // their shadows. The card's standing height is the puppet's, so that
+    // fixes feet per floor unit.
+    let ft_per_unit = posed.standing_ft / unit.standing.h.max(1e-3);
+    let (lamps, flicker) = crate::field_lights::puppet_lamps(ft_per_unit);
     // The figure's own contact shadow, under it: the card's generic ellipse
     // is already down, and this one is shaped like the pose.
     place.paint(painter, &posed.shadow);
+    place.paint_figure_shadows(painter, &posed, &lamps, flicker);
     place.paint_figure(painter, &posed);
-    if !dead {
-        if let Some(glow) = crate::field_lights::current() {
-            place.paint_figure_glow(painter, &posed, glow);
-        }
-    }
+    place.paint_figure_lamps(painter, &posed, &lamps, flicker);
 
     // Skin status overlays ride the same code as sprite cards, over the
     // posed body rect. The puppet has no texture, so anchors come from the

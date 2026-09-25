@@ -93,6 +93,11 @@ impl StageTool {
                 stage.scene_name
             );
         }
+        // A lighting check with no one at the slider: GS_STUDIO_LIGHT_HOUR
+        // holds the stage at that game hour (23 = night).
+        if let Some(hour) = std::env::var("GS_STUDIO_LIGHT_HOUR").ok().and_then(|h| h.trim().parse::<f32>().ok()) {
+            stage.light_hour = Some(hour.rem_euclid(24.0));
+        }
         let lighting = gs_field::lighting::GlobalLighting::load();
         art.set_global_lighting(lighting.clone());
         StageTool { stage, art, lighting }
@@ -341,6 +346,14 @@ fn light_ui(
     let mut outdoor = edited.outdoor.unwrap_or(true);
     if ui.checkbox(&mut outdoor, "Outdoor").on_hover_text("Dawn, dusk and night apply").changed() {
         edited.outdoor = Some(outdoor);
+    }
+    let mut dark = edited.darkness.unwrap_or(0.0);
+    if ui
+        .add(egui::Slider::new(&mut dark, 0.0..=1.0).text("Darkness"))
+        .on_hover_text("How black the dark is beyond the lamps: outdoors at night (half at dusk and dawn), indoors always. 1 = pitch black but for the lamps")
+        .changed()
+    {
+        edited.darkness = (dark > 0.0).then_some(dark);
     }
     egui::CollapsingHeader::new("More").id_salt("light_more").show(ui, |ui| {
         light_opt_slider(ui, "Strength", &mut edited.strength, SCENE_STRENGTH, 0.0..=1.0);
@@ -774,6 +787,15 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.add(egui::Slider::new(&mut edited.radius, 0.3..=6.0).text("Reach"));
     ui.add(egui::Slider::new(&mut edited.intensity, 0.0..=1.0).text("Brightness"));
     ui.add(egui::Slider::new(&mut edited.flicker, 0.0..=1.0).text("Flicker"));
+    let mut beam = !edited.all_round();
+    if ui.checkbox(&mut beam, "Beam").on_hover_text("Shine one way (a lantern, a lit window) instead of all round").changed() {
+        edited.spread = if beam { 90.0 } else { 360.0 };
+    }
+    if beam {
+        ui.add(egui::Slider::new(&mut edited.spread, 10.0..=350.0).text("Width (deg)"));
+        ui.add(egui::Slider::new(&mut edited.aim, 0.0..=359.0).text("Aim (deg)"))
+            .on_hover_text("Which way across the floor: 0 = right, 90 = away from you, 180 = left, 270 = toward you");
+    }
     ui.weak("Drag on the stage to move the selected light");
     if edited != light {
         stage.scene_mut().lights[k] = edited;

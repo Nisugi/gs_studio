@@ -449,7 +449,10 @@ across -- and differ only in the right-hand panel:
   scene file's `[light]` table (Niffy's creature-field lighting,
   `gs_field::lighting` + `vellum_light`). Key, Ambient and Ground swatches and
   Saturation show the values read from the backdrop ("auto") and can each be
-  overridden or reset; Intensity; Outdoor (time of day applies); *More*
+  overridden or reset; Intensity; Outdoor (time of day applies); Darkness
+  (`darkness`, 0..1: how black the dark is beyond the lamps -- outdoors at
+  night, half of it at dusk and dawn, indoors always, so a torch-lit cave is
+  dark at noon; 1 = pitch black but for the lamps); *More*
   (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
   / Night rows over `global/lighting.toml`, "Use default" per row); *Global
   time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;
@@ -460,10 +463,20 @@ across -- and differ only in the right-hand panel:
   in when ready (`gs_field_egui::creature_light`).
 - **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*; select
   one to set its kind, colour, reach, brightness and flicker, or drag it on
-  the stage. It lights a pool of ground and the creatures and props within
-  reach, most on the side facing it, and its flame stands in depth order
-  among them; best seen at night (`[[lights]]` in the scene file,
-  `gs_field_egui::field_lights`).
+  the stage. *Beam* makes it shine one way (a lantern, a lit window): Width
+  and Aim (degrees across the floor: 0 = right, 90 = away, 180 = left, 270 =
+  toward the viewer; `spread` and `aim`), and only what lies within the
+  beam is lit -- its ground pool is a wedge. It lights a pool of ground -- the painted ground as it looks by
+  day, warmed, fading out -- and the creatures and props within reach, and
+  its flame stands in depth order among them with a glow in the air round
+  it; best seen at night (`[[lights]]` in the scene file,
+  `gs_field_egui::field_lights`). Art is lit most on the side facing it. A
+  puppet is lit as a body: the flame is a point beside it, so what faces the
+  flame and is near it is brightest and what turns away gets none
+  (`gs_puppet::SkinSurface::lamp_light`), and it casts a shadow on the ground
+  away from each lamp -- only what is lower than the flame reaches the
+  floor, so a low campfire throws long leg shadows -- as dark as the light
+  it blocks (`gs_puppet::ShadowCaster`).
 - **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
   holds in front of creatures. Paint white over a rock, cactus or tree trunk
   in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create

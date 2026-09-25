@@ -209,7 +209,8 @@ pub enum LampKind {
 
 /// A light standing on the floor: a campfire, a torch. It warms the ground
 /// around it and the creatures near it, most on the side that faces it,
-/// and flickers. `[[lights]]` in a scene file.
+/// and flickers -- all round it, or only within a beam (`spread` below 360,
+/// pointed by `aim`). `[[lights]]` in a scene file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointLight {
     #[serde(default)]
@@ -228,7 +229,27 @@ pub struct PointLight {
     /// 0 = steady .. 1 = a lively fire.
     #[serde(default = "lamp_flicker")]
     pub flicker: f32,
+    /// Which way its beam points across the floor, degrees: 0 = screen-right,
+    /// 90 = away from the viewer, 180 = screen-left, 270 = toward the viewer.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub aim: f32,
+    /// How wide the beam is, degrees: 360 (or more) = all round, a fire's.
+    #[serde(default = "all_round", skip_serializing_if = "is_all_round")]
+    pub spread: f32,
 }
+
+fn is_zero(v: &f32) -> bool {
+    *v == 0.0
+}
+fn all_round() -> f32 {
+    360.0
+}
+fn is_all_round(v: &f32) -> bool {
+    *v >= 360.0
+}
+
+/// Degrees over which a beam's edge fades out.
+pub const BEAM_SOFT_DEG: f32 = 14.0;
 
 fn fire_colour() -> String {
     "#ffa04a".into()
@@ -248,7 +269,27 @@ impl PointLight {
             LampKind::Torch => (1.8, 0.35),
             LampKind::Glow => (2.0, 0.0),
         };
-        PointLight { kind, x, z, color: fire_colour(), radius, intensity: 1.0, flicker }
+        PointLight { kind, x, z, color: fire_colour(), radius, intensity: 1.0, flicker, aim: 0.0, spread: all_round() }
+    }
+
+    /// Does it shine all round?
+    pub fn all_round(&self) -> bool {
+        self.spread >= 360.0
+    }
+
+    /// How much of its beam reaches a point `across` (+ = screen-right) and
+    /// `deeper` (+ = farther from the viewer) from it, in floor units: 1
+    /// inside, fading to 0 over [`BEAM_SOFT_DEG`] at the edge. 1 all round,
+    /// and at the lamp itself.
+    pub fn beam(&self, across: f32, deeper: f32) -> f32 {
+        if self.all_round() || across.hypot(deeper) < 1e-4 {
+            return 1.0;
+        }
+        let off = (deeper.atan2(across).to_degrees() - self.aim).rem_euclid(360.0);
+        let off = off.min(360.0 - off);
+        let half = self.spread.max(1.0) * 0.5;
+        let t = ((half + BEAM_SOFT_DEG * 0.5 - off) / BEAM_SOFT_DEG).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 }
 
@@ -278,6 +319,11 @@ pub struct SceneLight {
     /// "Obvious paths" outdoors, "Obvious exits" indoors), else outdoor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outdoor: Option<bool>,
+    /// How black the dark is, 0 = as the time of day has it .. 1 = pitch
+    /// black but for the lamps (`[[lights]]`): outdoors at night (half of
+    /// it at dusk and dawn), indoors always -- a torch-lit cave.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub darkness: Option<f32>,
     /// Per-scene time-of-day overrides, laid over `lighting.toml`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dawn: Option<LightFields>,
@@ -307,6 +353,7 @@ impl Default for SceneLight {
             exposure: None,
             haze: None,
             outdoor: None,
+            darkness: None,
             dawn: None,
             day: None,
             dusk: None,
@@ -493,21 +540,103 @@ impl SceneLighting {
         outdoor_guess: Option<bool>,
     ) -> Option<SceneLighting> {
         let light = scene.light.as_ref()?;
-        let keyframes = match game_hour.filter(|_| light.is_outdoor(outdoor_guess)) {
+        let outdoor = light.is_outdoor(outdoor_guess);
+        let dark = light.darkness.unwrap_or(0.0).clamp(0.0, 1.0);
+        let mut keyframes: Vec<(Phase, Option<LightEnv>, f32)> = match game_hour.filter(|_| outdoor) {
             None => Vec::new(),
             Some(h) => vellum_light::phase_keyframes(h, vellum_light::PhaseBoundaries::default())
                 .into_iter()
                 .filter(|(_, w)| *w > 0.0)
-                .map(|(p, w)| (p, global.phase_light(p, Some(light)), w))
+                .map(|(p, w)| {
+                    let share = match p {
+                        Phase::Night => 1.0,
+                        Phase::Dawn | Phase::Dusk => 0.5,
+                        Phase::Day => 0.0,
+                    };
+                    (p, darkened(global.phase_light(p, Some(light)), dark * share), w)
+                })
                 .collect(),
         };
+        // Indoors there is no time of day; the dark is always there.
+        if !outdoor && dark > 0.0 {
+            keyframes.push((Phase::Night, darkened(None, dark), 1.0));
+        }
         Some(SceneLighting { scene: light.resolve(auto), keyframes })
     }
+}
+
+/// Exposure at full darkness, as a fraction of the light's own.
+pub const DARKNESS_FLOOR: f32 = 0.03;
+
+/// `env` (None = no change) with its exposure cut by `dark` (0..1): to
+/// [`DARKNESS_FLOOR`] of itself at 1, geometrically between, so each step
+/// of the slider looks like the same step darker. A light is used at its
+/// `intensity` (exposure scaled geometrically toward 1), and a softened
+/// night must not soften the dark: the cut is made deep enough that it
+/// lands whole at that intensity. Only the player's Lighting strength
+/// lightens it.
+fn darkened(env: Option<LightEnv>, dark: f32) -> Option<LightEnv> {
+    if dark <= 0.0 {
+        return env;
+    }
+    let mut env = env.unwrap_or_else(LightEnv::identity);
+    let own = vellum_light::Derived::new(&env).exposure;
+    let at = env.intensity.clamp(0.05, 1.0);
+    env.exposure = Some(own * DARKNESS_FLOOR.powf(dark / at));
+    Some(env)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scene's darkness cuts the night's exposure (half of it at dusk),
+    /// never the day's; indoors it is always there.
+    #[test]
+    fn darkness_falls_at_night_and_indoors() {
+        let global = GlobalLighting::default();
+        let mut light = SceneLight { darkness: Some(1.0), ..SceneLight::default() };
+        let scene = |light: &SceneLight| crate::scenes::StageScene { light: Some(light.clone()), ..Default::default() };
+        // As used: at the light's own intensity, full player strength.
+        let exposure = |l: &SceneLighting, p: Phase| {
+            l.keyframes.iter().find(|k| k.0 == p).and_then(|k| k.1.as_ref()).map(|e| vellum_light::with_intensity(Some(e), 1.0).1.exposure)
+        };
+        let plain = SceneLight::default();
+        let night = |l: &SceneLight| SceneLighting::resolve(&scene(l), &desert(), &global, Some(23.0), None).unwrap();
+        let (dark, lit) = (exposure(&night(&light), Phase::Night).unwrap(), exposure(&night(&plain), Phase::Night).unwrap());
+        assert!((dark / lit - DARKNESS_FLOOR).abs() < 1e-3, "night {lit} -> {dark}");
+        let noon = SceneLighting::resolve(&scene(&light), &desert(), &global, Some(12.0), None).unwrap();
+        assert!(noon.keyframes.iter().all(|k| k.1.is_none()), "the day is untouched");
+        let dusk = |l: &SceneLight| exposure(&SceneLighting::resolve(&scene(l), &desert(), &global, Some(19.0), None).unwrap(), Phase::Dusk).unwrap();
+        let ratio = dusk(&light) / dusk(&plain);
+        assert!((ratio - DARKNESS_FLOOR.powf(0.5)).abs() < 1e-3, "dusk takes half: {ratio}");
+        light.outdoor = Some(false);
+        let inside = SceneLighting::resolve(&scene(&light), &desert(), &global, Some(12.0), None).unwrap();
+        assert_eq!(inside.keyframes.len(), 1, "indoors, the dark itself");
+        assert!((exposure(&inside, Phase::Night).unwrap() - DARKNESS_FLOOR).abs() < 1e-4);
+    }
+
+    /// A lamp shines all round unless its spread is under 360; then only
+    /// within its beam, pointed by its aim, fading at the edge.
+    #[test]
+    fn a_lamp_shines_within_its_beam() {
+        let mut lamp = PointLight::new(LampKind::Torch, 0.0, 1.0);
+        assert_eq!(lamp.beam(-1.0, 0.0), 1.0, "all round");
+        lamp.spread = 90.0;
+        lamp.aim = 90.0; // away from the viewer
+        assert_eq!(lamp.beam(0.0, 1.0), 1.0, "straight down the beam");
+        assert_eq!(lamp.beam(0.0, -1.0), 0.0, "behind it");
+        assert_eq!(lamp.beam(1.0, 0.1), 0.0, "well off to the side");
+        let edge = lamp.beam(1.0, 1.0); // exactly 45 degrees off: the edge
+        assert!(edge > 0.3 && edge < 0.7, "the edge fades: {edge}");
+        assert_eq!(lamp.beam(0.0, 0.0), 1.0, "at the lamp");
+        let text = toml::to_string(&lamp).unwrap();
+        assert!(text.contains("spread = 90") && text.contains("aim = 90"), "{text}");
+        let round = toml::to_string(&PointLight::new(LampKind::Torch, 0.0, 1.0)).unwrap();
+        assert!(!round.contains("spread") && !round.contains("aim"), "an all-round lamp's file is as before: {round}");
+        let back: PointLight = toml::from_str(&text).unwrap();
+        assert_eq!(back, lamp);
+    }
 
     fn desert() -> SceneColours {
         SceneColours { key: "#c69c67".into(), ambient: "#81abc6".into(), bounce: "#b68855".into(), chroma: 0.98 }

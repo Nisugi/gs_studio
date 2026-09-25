@@ -24,6 +24,12 @@
 //! Shading is the shape list's cel look (a light fixed to the view, a lit
 //! and a shaded band), softened at the band edges. Everything is egui-free;
 //! the result is straight RGBA for any host to upload as a texture.
+//!
+//! Lights standing round the figure -- a campfire, a torch -- are not in
+//! that look: [`Posed::skin_surface`] also keeps what every pixel shows
+//! (where its surface point is, which way it faces, its colour), and
+//! [`SkinSurface::lamp_light`] lights that from any [`Lamp`]s, as often as
+//! they move, without drawing the figure again.
 
 use crate::draw::{surfaces, view_basis, Look, BOSS_OUTLINE, BODY_DEAD, DARK_BELOW, DEPTH_SHADE, EYE, LIGHT_ABOVE};
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
@@ -193,6 +199,8 @@ struct Vert {
     p: [f32; 2],
     z: f32,
     n: V3,
+    /// The surface point, world feet.
+    w: V3,
     col: [f32; 3],
     seg: u32,
     /// Surface address for a texture: (station, ring angle); NaN = none
@@ -215,12 +223,22 @@ struct Samples {
     n: Vec<V3>,
     col: Vec<[f32; 3]>,
     seg: Vec<u32>,
+    /// Surface points, world feet; empty unless a [`SkinSurface`] is kept.
+    pos: Vec<V3>,
 }
 
 impl Samples {
-    fn new(w: usize, h: usize) -> Samples {
+    fn new(w: usize, h: usize, keep_pos: bool) -> Samples {
         let n = w * h;
-        Samples { w, h, z: vec![f32::INFINITY; n], n: vec![[0.0; 3]; n], col: vec![[0.0; 3]; n], seg: vec![u32::MAX; n] }
+        Samples {
+            w,
+            h,
+            z: vec![f32::INFINITY; n],
+            n: vec![[0.0; 3]; n],
+            col: vec![[0.0; 3]; n],
+            seg: vec![u32::MAX; n],
+            pos: if keep_pos { vec![[0.0; 3]; n] } else { Vec::new() },
+        }
     }
 
     fn tri(&mut self, v: [&Vert; 3], paint: &Paint) {
@@ -273,6 +291,9 @@ impl Samples {
                 }
                 self.z[i] = z;
                 self.n[i] = add(add(scale(v[0].n, w0), scale(v[1].n, w1)), scale(v[2].n, w2));
+                if !self.pos.is_empty() {
+                    self.pos[i] = add(add(scale(v[0].w, w0), scale(v[1].w, w1)), scale(v[2].w, w2));
+                }
                 let lerp = |f: fn(&Vert) -> f32| w0 * f(v[0]) + w1 * f(v[1]) + w2 * f(v[2]);
                 let station = lerp(|c| c.addr[0]);
                 let angle = w0 * theta[0] + w1 * theta[1] + w2 * theta[2];
@@ -318,6 +339,8 @@ struct Pixels {
     seg: Vec<u32>,
     n: Vec<V3>,
     col: Vec<[f32; 3]>,
+    /// The nearest sample's surface point; empty unless the samples kept them.
+    pos: Vec<V3>,
 }
 
 impl Pixels {
@@ -331,6 +354,7 @@ impl Pixels {
             seg: vec![u32::MAX; len],
             n: vec![[0.0; 3]; len],
             col: vec![[0.0; 3]; len],
+            pos: if s.pos.is_empty() { Vec::new() } else { vec![[0.0; 3]; len] },
         };
         for y in 0..h {
             for x in 0..w {
@@ -351,6 +375,9 @@ impl Pixels {
                         if s.z[j] < out.z[i] {
                             out.z[i] = s.z[j];
                             out.seg[i] = s.seg[j];
+                            if !s.pos.is_empty() {
+                                out.pos[i] = s.pos[j];
+                            }
                         }
                     }
                 }
@@ -541,6 +568,30 @@ impl Posed<'_> {
         texture: Option<&Texture>,
         effects: Effects,
     ) -> Skin {
+        self.render(project, look, texture, effects, false).0
+    }
+
+    /// [`Posed::skin_with`], and what each of its pixels shows, for lamps
+    /// to light ([`SkinSurface::lamp_light`]).
+    pub fn skin_surface(
+        &self,
+        project: &dyn Fn(V3) -> ([f32; 2], f32),
+        look: &Look,
+        texture: Option<&Texture>,
+        effects: Effects,
+    ) -> (Skin, SkinSurface) {
+        let (skin, surface) = self.render(project, look, texture, effects, true);
+        (skin, surface.unwrap_or_default())
+    }
+
+    fn render(
+        &self,
+        project: &dyn Fn(V3) -> ([f32; 2], f32),
+        look: &Look,
+        texture: Option<&Texture>,
+        effects: Effects,
+        keep_surface: bool,
+    ) -> (Skin, Option<SkinSurface>) {
         // A sheet laid out for another puppet would put paint anywhere.
         // Held props come after the body and are never on the sheet.
         let body_segments = self.puppet.segments.iter().take_while(|s| !s.kind.is_prop()).count();
@@ -611,7 +662,7 @@ impl Posed<'_> {
                     let (sp, z) = project(p);
                     let theta = j as f32 / m as f32 * std::f32::consts::TAU;
                     let addr = if addressed { [k as f32, theta] } else { [f32::NAN; 2] };
-                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, col, seg: surf.index as u32, addr, wound });
+                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound });
                 }
             }
             let at = |k: usize, j: usize| base + (k * m + j % m) as u32;
@@ -631,6 +682,7 @@ impl Posed<'_> {
                     p: [sp[0] * ss, sp[1] * ss],
                     z,
                     n: out,
+                    w: ring.c,
                     col: ring.color(body, surf.base).map(|c| c as f32),
                     seg: surf.index as u32,
                     addr: [f32::NAN; 2],
@@ -652,13 +704,13 @@ impl Posed<'_> {
             }
         }
         if lo[0] > hi[0] {
-            return Skin::default();
+            return (Skin::default(), None);
         }
         let origin = [(lo[0] - margin).floor(), (lo[1] - margin).floor()];
         let w = ((hi[0] + margin).ceil() - origin[0]) as usize;
         let h = ((hi[1] + margin).ceil() - origin[1]) as usize;
         if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE {
-            return Skin::default();
+            return (Skin::default(), None);
         }
         for v in &mut verts {
             v.p = [v.p[0] - origin[0] * ss, v.p[1] - origin[1] * ss];
@@ -679,7 +731,7 @@ impl Posed<'_> {
             // At least about a pixel wide, however small the figure.
             strand_ft: (0.9 / px_per_ft.max(1e-3)).max(0.018),
         };
-        let mut samples = Samples::new(w * SS, h * SS);
+        let mut samples = Samples::new(w * SS, h * SS, keep_surface);
         for t in &tris {
             let v = t.map(|i| &verts[i as usize]);
             if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
@@ -705,6 +757,7 @@ impl Posed<'_> {
         let inner = px.inner_contour(look.outline_px, CONTOUR_DEPTH_OF_HEIGHT * height, &is_joined);
         let gold = BOSS_OUTLINE.map(|c| c as f32);
         let mut rgba = vec![0u8; w * h * 4];
+        let mut kept = keep_surface.then(|| SkinSurface::blank(w, h, view.to_cam));
         for i in 0..w * h {
             let mut under = ([0.0; 3], 0.0);
             if look.boss_outline {
@@ -730,6 +783,11 @@ impl Posed<'_> {
                     c = [0, 1, 2].map(|k| c[k] + (line[k] - c[k]) * inner[i]);
                 }
                 top = (c, px.cov[i]);
+                if let Some(s) = kept.as_mut() {
+                    // Its own colour, unshaded: what a lamp's light shows.
+                    let albedo = [0, 1, 2].map(|k| px.col[i][k] + (line[k] - px.col[i][k]) * inner[i]);
+                    s.set(i, px.pos[i], px.n[i], albedo, px.cov[i]);
+                }
             }
             let (c, a) = over(top, under);
             let o = i * 4;
@@ -792,8 +850,168 @@ impl Posed<'_> {
                 }
             }
         }
-        Skin { origin, w, h, rgba }
+        (Skin { origin, w, h, rgba }, kept)
     }
+}
+
+/// A light standing near a figure -- a campfire, a torch -- in the frame
+/// its skin was drawn in ([`SkinSurface::lamp_light`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Lamp {
+    /// Where its flame is, world feet.
+    pub pos: V3,
+    /// Its colour, sRGB.
+    pub rgb: [u8; 3],
+    /// How far it reaches, feet: it fades smoothly to nothing there.
+    pub reach: f32,
+    /// 1 = an ordinary fire.
+    pub strength: f32,
+    /// Shines one way only; None = all round.
+    pub beam: Option<Beam>,
+}
+
+/// A lamp's beam, for one that shines one way ([`Lamp::beam`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Beam {
+    /// Which way it points across the floor (world; y is ignored).
+    pub dir: V3,
+    /// Its full width, and the width of its fading edge, degrees.
+    pub spread: f32,
+    pub soft: f32,
+}
+
+impl Beam {
+    /// How much of the beam reaches a point `off` from the lamp, 0..=1, by
+    /// its bearing across the floor: 1 inside, fading out over `soft` at
+    /// the edge, and 1 at the lamp itself.
+    pub fn at(&self, off: V3) -> f32 {
+        let (l, dl) = (off[0].hypot(off[2]), self.dir[0].hypot(self.dir[2]));
+        if l < 1e-4 || dl < 1e-6 {
+            return 1.0;
+        }
+        let cos = ((off[0] * self.dir[0] + off[2] * self.dir[2]) / (l * dl)).clamp(-1.0, 1.0);
+        let t = ((self.spread * 0.5 + self.soft.max(1e-3) * 0.5 - cos.acos().to_degrees()) / self.soft.max(1e-3)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+}
+
+/// How far round a surface a lamp's light wraps past the line where it
+/// meets the surface edge-on (0 = a hard terminator).
+const LAMP_WRAP: f32 = 0.3;
+/// A lamp's light on a surface facing it squarely, at the flame, as a
+/// multiple of the surface's own colour.
+const LAMP_GAIN: f32 = 2.4;
+/// The sheen a lamp leaves where the surface mirrors it toward the viewer.
+const LAMP_SHEEN: f32 = 0.16;
+const LAMP_SHINE: f32 = 18.0;
+
+/// What each pixel of a [`Skin`] shows, from [`Posed::skin_surface`]: the
+/// surface point (world feet, the frame the skin was projected from), which
+/// way it faces, its own colour before shading, and how much of the pixel
+/// the body covers (0 = none of it).
+#[derive(Debug, Clone, Default)]
+pub struct SkinSurface {
+    pub w: usize,
+    pub h: usize,
+    /// Toward the viewer, world.
+    to_cam: V3,
+    pos: Vec<V3>,
+    /// Unit normals, packed to a byte per axis.
+    normal: Vec<[i8; 3]>,
+    albedo: Vec<[u8; 3]>,
+    cov: Vec<u8>,
+}
+
+impl SkinSurface {
+    fn blank(w: usize, h: usize, to_cam: V3) -> SkinSurface {
+        let n = w * h;
+        SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n] }
+    }
+
+    fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32) {
+        self.pos[i] = pos;
+        self.normal[i] = n.map(|v| (v.clamp(-1.0, 1.0) * 127.0).round() as i8);
+        self.albedo[i] = albedo.map(|v| v.round().clamp(0.0, 255.0) as u8);
+        self.cov[i] = (cov * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+
+    /// The light `lamps` add to `skin` (the skin this surface came with, as
+    /// it is drawn -- lit by the scene or not): brightest where a surface
+    /// faces a flame and is near it, fading to nothing at a lamp's reach,
+    /// with a sheen where the surface mirrors a flame toward the viewer.
+    ///
+    /// RGBA8, PREMULTIPLIED, with alpha 0 everywhere: each pixel's colour is
+    /// how far the lamps lift the skin's there (sRGB steps, so that laid
+    /// over it by addition it shows `skin + light` in linear light), scaled
+    /// by the body's coverage. A premultiplied-alpha compositor draws alpha 0
+    /// as pure addition; scaling it (a flicker) dims the lamps' light alone.
+    pub fn lamp_light(&self, lamps: &[Lamp], skin: &Skin) -> Vec<u8> {
+        let mut out = vec![0u8; self.w * self.h * 4];
+        if skin.w != self.w || skin.h != self.h || lamps.is_empty() {
+            return out;
+        }
+        let decode = srgb_lut();
+        let lamps: Vec<(Lamp, [f32; 3])> =
+            lamps.iter().filter(|l| l.reach > 0.0 && l.strength > 0.0).map(|l| (*l, l.rgb.map(|c| decode[c as usize]))).collect();
+        for i in 0..self.w * self.h {
+            if self.cov[i] == 0 {
+                continue;
+            }
+            let (p, n) = (self.pos[i], self.normal[i].map(|v| v as f32 / 127.0));
+            let n = norm_or(n, self.to_cam);
+            let albedo = self.albedo[i].map(|c| decode[c as usize]);
+            let mut light = [0.0f32; 3];
+            for (lamp, rgb) in &lamps {
+                let to = sub(lamp.pos, p);
+                let d = len(to);
+                if d >= lamp.reach {
+                    continue;
+                }
+                let u = d / lamp.reach;
+                let reach = (1.0 - u * u).powi(2) * lamp.strength * lamp.beam.map_or(1.0, |b| b.at(sub(p, lamp.pos)));
+                let l = if d > 1e-4 { scale(to, 1.0 / d) } else { n };
+                let facing = dot(n, l);
+                let diffuse = ((facing + LAMP_WRAP) / (1.0 + LAMP_WRAP)).max(0.0);
+                let sheen = if facing > 0.0 {
+                    dot(n, norm_or(add(l, self.to_cam), n)).max(0.0).powf(LAMP_SHINE) * LAMP_SHEEN
+                } else {
+                    0.0
+                };
+                for k in 0..3 {
+                    light[k] += rgb[k] * reach * (albedo[k] * diffuse * LAMP_GAIN + sheen);
+                }
+            }
+            if light.iter().all(|v| *v <= 1e-5) {
+                continue;
+            }
+            let o = i * 4;
+            let cov = self.cov[i] as f32 / 255.0;
+            for k in 0..3 {
+                let under = skin.rgba[o + k];
+                let lifted = linear_to_srgb8(decode[under as usize] + light[k]);
+                out[o + k] = ((lifted.saturating_sub(under)) as f32 * cov).round() as u8;
+            }
+        }
+        out
+    }
+}
+
+/// sRGB8 -> linear, per level.
+fn srgb_lut() -> [f32; 256] {
+    std::array::from_fn(|i| {
+        let c = i as f32 / 255.0;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    })
+}
+
+fn linear_to_srgb8(v: f32) -> u8 {
+    let v = v.clamp(0.0, 1.0);
+    let s = if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
+    (s * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
 /// Threads across a webbed figure, each spanning from where it first meets

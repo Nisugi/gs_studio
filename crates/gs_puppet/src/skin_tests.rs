@@ -213,3 +213,89 @@ fn a_front_and_a_back_painting_land_on_the_front_and_the_back() {
         .count();
     assert_eq!(holes, 0);
 }
+
+/// A lamp lights the side of the figure that faces it, more where it is
+/// nearer; one past its reach adds nothing; and its light is ADDED (alpha
+/// 0), never painted over the skin.
+#[test]
+fn a_lamp_lights_the_side_that_faces_it() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let cam = camera(&p);
+    let project = |q| cam.project(q);
+    let look = Look { outline_px: 0.0, ..Look::default() };
+    let (skin, surface) = posed.skin_surface(&project, &look, None, crate::Effects::default());
+    assert_eq!((surface.w, surface.h), (skin.w, skin.h));
+    // Screen x of the figure's middle, in the skin's own pixels.
+    let (mid, _) = project([0.0, p.height * 0.5, 0.0]);
+    let mid = mid[0] - skin.origin[0];
+    let lamp = |x: f32| crate::Lamp { pos: [x, p.height * 0.5, 1.0], rgb: [255, 160, 74], reach: 8.0, strength: 1.0, beam: None };
+    let sides = |light: &[u8]| {
+        let (mut left, mut right) = (0u64, 0u64);
+        for (i, c) in light.chunks_exact(4).enumerate() {
+            assert_eq!(c[3], 0, "lamp light is added, not laid over");
+            if ((i % skin.w) as f32) < mid {
+                left += c[0] as u64;
+            } else {
+                right += c[0] as u64;
+            }
+        }
+        (left, right)
+    };
+    // World -x is screen-left (the creature's right).
+    let (left, right) = sides(&surface.lamp_light(&[lamp(-3.0)], &skin));
+    assert!(left > right * 3 / 2 && left > 0, "a lamp on the left lights the left: {left} vs {right}");
+    let (left, right) = sides(&surface.lamp_light(&[lamp(3.0)], &skin));
+    assert!(right > left * 3 / 2, "and on the right, the right: {left} vs {right}");
+    let (near, _) = sides(&surface.lamp_light(&[lamp(-1.5)], &skin));
+    let (far, _) = sides(&surface.lamp_light(&[lamp(-5.0)], &skin));
+    assert!(near > far, "nearer is brighter: {near} vs {far}");
+    let gone = surface.lamp_light(&[lamp(-20.0)], &skin);
+    assert!(gone.iter().all(|v| *v == 0), "out of reach, nothing");
+    // A lamp behind the figure lights little of what faces the viewer.
+    let behind = crate::Lamp { pos: [0.0, p.height * 0.5, -3.0], ..lamp(0.0) };
+    let front = crate::Lamp { pos: [0.0, p.height * 0.5, 3.0], ..lamp(0.0) };
+    let sum = |l: crate::Lamp| surface.lamp_light(&[l], &skin).iter().map(|v| *v as u64).sum::<u64>();
+    assert!(sum(front) > sum(behind) * 3, "front {} vs behind {}", sum(front), sum(behind));
+}
+
+/// A lamp beside a figure throws its shadow away from it along the ground,
+/// longer the lower the flame; nothing past the lamp's reach, and nothing
+/// from a lamp whose beam points away.
+#[test]
+fn a_lamp_casts_the_figure_s_shadow_away_from_it() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let cam = camera(&p);
+    let project = |q| cam.project(q);
+    let caster = posed.shadow_caster(&Look::default());
+    assert!(!caster.is_empty());
+    let lamp = |x: f32, y: f32| crate::Lamp { pos: [x, y, 0.0], rgb: [255, 160, 74], reach: 20.0, strength: 1.0, beam: None };
+    // The shadow's centre of mass, in pixels, and how far it spreads.
+    let spread = |s: &crate::Shadow| {
+        let (mut sum, mut n, mut lo, mut hi) = (0.0f32, 0.0f32, f32::MAX, f32::MIN);
+        for (i, a) in s.alpha.iter().enumerate() {
+            if *a > 8 {
+                let x = s.origin[0] + (i % s.w) as f32;
+                sum += x * *a as f32;
+                n += *a as f32;
+                lo = lo.min(x);
+                hi = hi.max(x);
+            }
+        }
+        (sum / n.max(1.0), hi - lo)
+    };
+    let (foot, _) = project([0.0, 0.0, 0.0]);
+    // Flames above the head (the figure is 6 ft), one well above, one just.
+    let high = caster.cast(&project, &[lamp(-4.0, 12.0)], 2.0).expect("a shadow");
+    let (centre, long) = spread(&high);
+    assert!(centre > foot[0], "a lamp on the left throws it right: {centre} vs the foot at {}", foot[0]);
+    let low = caster.cast(&project, &[lamp(-4.0, 7.0)], 2.0).expect("a shadow");
+    let (_, longer) = spread(&low);
+    assert!(longer > long * 1.3, "a lower flame throws it further: {longer} vs {long}");
+    assert!(caster.cast(&project, &[lamp(-40.0, 3.0)], 2.0).is_none(), "out of reach, none");
+    let away = crate::Lamp { beam: Some(crate::Beam { dir: [-1.0, 0.0, 0.0], spread: 60.0, soft: 10.0 }), ..lamp(-4.0, 3.0) };
+    assert!(caster.cast(&project, &[away], 2.0).is_none(), "a beam pointed away casts none");
+    let toward = crate::Lamp { beam: Some(crate::Beam { dir: [1.0, 0.0, 0.0], spread: 60.0, soft: 10.0 }), ..away };
+    assert!(caster.cast(&project, &[toward], 2.0).is_some(), "pointed at it, it does");
+}

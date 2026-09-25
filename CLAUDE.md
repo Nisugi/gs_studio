@@ -49,7 +49,8 @@ Dependency chain (bottom up):
   side), posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
   drawn either as 2D shapes (`draw.rs`) or as one smooth z-buffered surface
   rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
-  compares the two). `uv.rs` cuts the skin open into a flat pattern sheet
+  compares the two; `SkinSurface::lamp_light` lights it from campfires and
+  torches placed round it, and `shadow.rs` casts their shadows on the ground). `uv.rs` cuts the skin open into a flat pattern sheet
   (`UvLayout`) that `Posed::skin_textured` reads paint from
   (`examples/uv_sheet` writes a template and a checker check); `prop.rs`
   builds held weapons and shields onto a hand from `data/props/weapons.toml`

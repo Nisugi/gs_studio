@@ -522,7 +522,10 @@ impl StudioApp {
 
         if let Some(shot) = &mut self.shot {
             shot.frames += 1;
-            if !shot.requested && shot.frames >= 30 {
+            // GS_STUDIO_SHOT_FRAMES waits longer, for work done off the UI
+            // thread (scene lighting) to arrive.
+            let wait = std::env::var("GS_STUDIO_SHOT_FRAMES").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(30);
+            if !shot.requested && shot.frames >= wait {
                 shot.requested = true;
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
             }
