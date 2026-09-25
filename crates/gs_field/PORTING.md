@@ -334,8 +334,11 @@ decode it (no image dependency); the frontend does.
 ### 6.12 Point lights
 
 `StageScene.lights: Vec<PointLight>` (`[[lights]]`, skip-serialized when
-empty): kind (campfire / torch / glow), floor position (stage x, world z, as
-a prop), colour, radius (world units), intensity, flicker.
+empty): kind (campfire / torch / glow / lantern / wisp), floor position
+(stage x, world z, as a prop), colour, radius (world units), intensity,
+flicker, and a beam (`aim`, `spread`; `PointLight::beam` is how much
+reaches a bearing). `PointLight::drift` is a wisp's wander and bob at a
+moment, floor units; a lantern is made with its beam.
 
 ### 6.13 Held props
 

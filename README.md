@@ -473,12 +473,15 @@ across -- and differ only in the right-hand panel:
   buttons or the slider, plus the player's Lighting strength. Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
-- **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*; select
-  one to set its kind, colour, reach, brightness and flicker, or drag it on
-  the stage. *Beam* makes it shine one way (a lantern, a lit window): Width
-  and Aim (degrees across the floor: 0 = right, 90 = away, 180 = left, 270 =
-  toward the viewer; `spread` and `aim`), and only what lies within the
-  beam is lit -- its ground pool is a wedge. It lights a pool of ground -- the painted ground as it looks by
+- **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*,
+  *+ Lantern* (a shuttered lantern hung on a post, made with its beam),
+  *+ Wisp* (a will-o'-the-wisp: no flame, a ball of light that floats,
+  drifts and bobs on its own); select one to set its kind, colour, reach,
+  brightness and flicker, or drag it on the stage. *Beam* makes it shine one
+  way (a lit window, a lantern): Width and Aim (degrees across the floor:
+  0 = right, 90 = away, 180 = left, 270 = toward the viewer; `spread` and
+  `aim`), and only what lies within the beam is lit -- its ground pool is a
+  wedge and the glow in the air round it goes the same way. It lights a pool of ground -- the painted ground as it looks by
   day, warmed, fading out -- and the creatures and props within reach, and
   its flame stands in depth order among them with a glow in the air round
   it; best seen at night (`[[lights]]` in the scene file,

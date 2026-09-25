@@ -205,37 +205,74 @@ pub enum LampKind {
     Torch,
     /// Light only, nothing drawn (a lit window, a glowing pool).
     Glow,
+    /// A shuttered lantern hung on a post, its lens throwing a beam: the
+    /// watchman's light. Made with its beam.
+    Lantern,
+    /// A will-o'-the-wisp: a floating light with no flame, drifting and
+    /// bobbing of its own accord ([`PointLight::drift`]).
+    Wisp,
 }
 
-/// A light standing on the floor: a campfire, a torch. It warms the ground
-/// around it and the creatures near it, most on the side that faces it,
-/// and flickers -- all round it, or only within a beam (`spread` below 360,
-/// pointed by `aim`). `[[lights]]` in a scene file.
+/// A light standing on the floor: a campfire, a torch, a lantern, a wisp
+/// floating over the spot. It warms the ground around it and the creatures
+/// near it, most on the side that faces it, and flickers -- all round it,
+/// or only within a beam (`spread` below 360, pointed by `aim`).
+/// `[[lights]]` in a scene file.
+/// In a file, a light is what `+ <Kind>` makes ([`PointLight::new`]) with
+/// the fields it gives laid over that: a wisp with only a place is a wisp's
+/// colour and reach, a lantern one has its beam.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "PointLightFile")]
 pub struct PointLight {
-    #[serde(default)]
     pub kind: LampKind,
     /// Stage x of its foot (0..880), and its world depth, as a prop's.
     pub x: f32,
     pub z: f32,
-    #[serde(default = "fire_colour")]
+    /// `#rrggbb`.
     pub color: String,
     /// Reach, world units (the depth axis's).
-    #[serde(default = "lamp_radius")]
     pub radius: f32,
     /// 0..1.
-    #[serde(default = "one")]
     pub intensity: f32,
     /// 0 = steady .. 1 = a lively fire.
-    #[serde(default = "lamp_flicker")]
     pub flicker: f32,
     /// Which way its beam points across the floor, degrees: 0 = screen-right,
     /// 90 = away from the viewer, 180 = screen-left, 270 = toward the viewer.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(skip_serializing_if = "is_zero")]
     pub aim: f32,
     /// How wide the beam is, degrees: 360 (or more) = all round, a fire's.
-    #[serde(default = "all_round", skip_serializing_if = "is_all_round")]
+    #[serde(skip_serializing_if = "is_all_round")]
     pub spread: f32,
+}
+
+/// [`PointLight`] as a file has it: anything but the place may be left out.
+#[derive(Deserialize)]
+struct PointLightFile {
+    #[serde(default)]
+    kind: LampKind,
+    x: f32,
+    z: f32,
+    color: Option<String>,
+    radius: Option<f32>,
+    intensity: Option<f32>,
+    flicker: Option<f32>,
+    aim: Option<f32>,
+    spread: Option<f32>,
+}
+
+impl From<PointLightFile> for PointLight {
+    fn from(f: PointLightFile) -> PointLight {
+        let made = PointLight::new(f.kind, f.x, f.z);
+        PointLight {
+            color: f.color.unwrap_or(made.color),
+            radius: f.radius.unwrap_or(made.radius),
+            intensity: f.intensity.unwrap_or(made.intensity),
+            flicker: f.flicker.unwrap_or(made.flicker),
+            aim: f.aim.unwrap_or(made.aim),
+            spread: f.spread.unwrap_or(made.spread),
+            ..made
+        }
+    }
 }
 
 fn is_zero(v: &f32) -> bool {
@@ -250,26 +287,56 @@ fn is_all_round(v: &f32) -> bool {
 
 /// Degrees over which a beam's edge fades out.
 pub const BEAM_SOFT_DEG: f32 = 14.0;
+/// A lantern's beam as made, degrees, and its candle's colour.
+pub const LANTERN_SPREAD: f32 = 70.0;
+pub const LANTERN_COLOUR: &str = "#ffd98a";
+/// A wisp's colour, and how far it wanders from its floor point (floor
+/// units, either way) and bobs above its height.
+pub const WISP_COLOUR: &str = "#9cf2ff";
+pub const WISP_DRIFT: f32 = 0.45;
+pub const WISP_BOB: f32 = 0.08;
 
-fn fire_colour() -> String {
-    "#ffa04a".into()
-}
-fn lamp_radius() -> f32 {
-    2.5
-}
-fn lamp_flicker() -> f32 {
-    0.5
+/// A flame's colour: what a campfire, a torch and a glow are made with.
+pub const FIRE_COLOUR: &str = "#ffa04a";
+
+impl LampKind {
+    /// The colour a light of this kind is made with.
+    pub fn colour(self) -> &'static str {
+        match self {
+            LampKind::Campfire | LampKind::Torch | LampKind::Glow => FIRE_COLOUR,
+            LampKind::Lantern => LANTERN_COLOUR,
+            LampKind::Wisp => WISP_COLOUR,
+        }
+    }
 }
 
 impl PointLight {
     /// A new light of `kind` at a floor point, with that kind's defaults.
     pub fn new(kind: LampKind, x: f32, z: f32) -> PointLight {
-        let (radius, flicker) = match kind {
-            LampKind::Campfire => (2.5, 0.5),
-            LampKind::Torch => (1.8, 0.35),
-            LampKind::Glow => (2.0, 0.0),
+        let (radius, flicker, spread) = match kind {
+            LampKind::Campfire => (2.5, 0.5, all_round()),
+            LampKind::Torch => (1.8, 0.35, all_round()),
+            LampKind::Glow => (2.0, 0.0, all_round()),
+            LampKind::Lantern => (3.0, 0.15, LANTERN_SPREAD),
+            LampKind::Wisp => (1.6, 0.6, all_round()),
         };
-        PointLight { kind, x, z, color: fire_colour(), radius, intensity: 1.0, flicker, aim: 0.0, spread: all_round() }
+        PointLight { kind, x, z, color: kind.colour().into(), radius, intensity: 1.0, flicker, aim: 0.0, spread }
+    }
+
+    /// How far the light has wandered from its floor point `t` seconds in,
+    /// in floor units `[across, up, deeper]`: a wisp drifts about within
+    /// [`WISP_DRIFT`] and bobs by [`WISP_BOB`], slowly and never quite the
+    /// same way twice (`index` keeps two wisps out of step); everything else
+    /// stands still.
+    pub fn drift(&self, index: usize, t: f32) -> [f32; 3] {
+        if self.kind != LampKind::Wisp {
+            return [0.0; 3];
+        }
+        let s = t * 0.35 + index as f32 * 2.1;
+        let across = (s.sin() * 0.7 + (s * 2.3 + 1.0).sin() * 0.3) * WISP_DRIFT;
+        let deeper = ((s * 0.8 + 2.0).cos() * 0.7 + (s * 1.9).sin() * 0.3) * WISP_DRIFT * 0.6;
+        let up = (t * 1.7 + index as f32).sin() * WISP_BOB;
+        [across, up, deeper]
     }
 
     /// Does it shine all round?
@@ -636,6 +703,35 @@ mod tests {
         assert!(!round.contains("spread") && !round.contains("aim"), "an all-round lamp's file is as before: {round}");
         let back: PointLight = toml::from_str(&text).unwrap();
         assert_eq!(back, lamp);
+    }
+
+    /// A lantern is made with its beam and a wisp with none; a wisp wanders,
+    /// within bounds and out of step with the next one; nothing else moves.
+    #[test]
+    fn a_lantern_is_born_with_a_beam_and_a_wisp_wanders() {
+        let lantern = PointLight::new(LampKind::Lantern, 0.0, 1.0);
+        assert!(!lantern.all_round() && lantern.spread == LANTERN_SPREAD && lantern.color == LANTERN_COLOUR);
+        let wisp = PointLight::new(LampKind::Wisp, 0.0, 1.0);
+        assert!(wisp.all_round() && wisp.color == WISP_COLOUR);
+        assert_eq!(lantern.drift(0, 3.0), [0.0; 3], "a lantern stands still");
+        let (mut far, mut moved) = (0.0f32, false);
+        for k in 0..200 {
+            let d = wisp.drift(0, k as f32 * 0.1);
+            far = far.max(d[0].abs()).max(d[2].abs());
+            moved |= d != wisp.drift(0, 0.0);
+            assert!(d[1].abs() <= WISP_BOB + 1e-6);
+        }
+        assert!(moved && far > 0.1 && far <= WISP_DRIFT + 1e-6, "wanders as far as {far}");
+        assert_ne!(wisp.drift(0, 1.0), wisp.drift(1, 1.0), "two wisps do not move in step");
+        let text = toml::to_string(&wisp).unwrap();
+        assert!(text.contains("kind = \"wisp\""), "{text}");
+        assert_eq!(toml::from_str::<PointLight>(&toml::to_string(&lantern).unwrap()).unwrap(), lantern);
+        // A file that names only the kind and the place gets the rest as
+        // "+ Kind" makes it: a wisp's colour, a lantern's beam.
+        let from_file: PointLight = toml::from_str("kind = \"wisp\"\nx = 10.0\nz = 2.0\n").unwrap();
+        assert_eq!(from_file, PointLight::new(LampKind::Wisp, 10.0, 2.0));
+        let lit: PointLight = toml::from_str("kind = \"lantern\"\nx = 10.0\nz = 2.0\naim = 180.0\n").unwrap();
+        assert_eq!((lit.spread, lit.aim, lit.color.as_str()), (LANTERN_SPREAD, 180.0, LANTERN_COLOUR));
     }
 
     fn desert() -> SceneColours {

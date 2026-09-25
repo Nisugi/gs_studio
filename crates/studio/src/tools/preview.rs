@@ -727,7 +727,13 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.separator();
     ui.heading("Lights");
     ui.horizontal(|ui| {
-        for (label, kind) in [("+ Campfire", LampKind::Campfire), ("+ Torch", LampKind::Torch), ("+ Glow", LampKind::Glow)] {
+        for (label, kind) in [
+            ("+ Campfire", LampKind::Campfire),
+            ("+ Torch", LampKind::Torch),
+            ("+ Glow", LampKind::Glow),
+            ("+ Lantern", LampKind::Lantern),
+            ("+ Wisp", LampKind::Wisp),
+        ] {
             if ui.button(label).clicked() {
                 stage.add_light(kind);
             }
@@ -742,7 +748,7 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         .lights
         .iter()
         .enumerate()
-        .map(|(k, l)| format!("{} {}", match l.kind { LampKind::Campfire => "Campfire", LampKind::Torch => "Torch", LampKind::Glow => "Glow" }, k + 1))
+        .map(|(k, l)| format!("{} {}", kind_name(l.kind), k + 1))
         .collect();
     let mut remove = None;
     for (k, name) in names.iter().enumerate() {
@@ -767,11 +773,13 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     let mut edited = light.clone();
     ui.horizontal(|ui| {
         egui::ComboBox::from_id_salt("light_kind")
-            .selected_text(match edited.kind { LampKind::Campfire => "Campfire", LampKind::Torch => "Torch", LampKind::Glow => "Glow" })
+            .selected_text(kind_name(edited.kind))
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut edited.kind, LampKind::Campfire, "Campfire");
                 ui.selectable_value(&mut edited.kind, LampKind::Torch, "Torch");
                 ui.selectable_value(&mut edited.kind, LampKind::Glow, "Glow (no flame)");
+                ui.selectable_value(&mut edited.kind, LampKind::Lantern, "Lantern (shines one way)");
+                ui.selectable_value(&mut edited.kind, LampKind::Wisp, "Wisp (floats and drifts)");
             });
         let mut rgb = parse_hex_rgb(&edited.color).unwrap_or([255, 160, 74]);
         if ui.color_edit_button_srgb(&mut rgb).changed() {
@@ -799,6 +807,17 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.weak("Drag on the stage to move the selected light");
     if edited != light {
         stage.scene_mut().lights[k] = edited;
+    }
+}
+
+fn kind_name(kind: gs_field::lighting::LampKind) -> &'static str {
+    use gs_field::lighting::LampKind;
+    match kind {
+        LampKind::Campfire => "Campfire",
+        LampKind::Torch => "Torch",
+        LampKind::Glow => "Glow",
+        LampKind::Lantern => "Lantern",
+        LampKind::Wisp => "Wisp",
     }
 }
 

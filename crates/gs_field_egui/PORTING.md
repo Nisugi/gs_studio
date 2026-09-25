@@ -506,7 +506,10 @@ text unchanged.
 
 `src/field_lights.rs` (new) draws `StageScene.lights` (gs_field 6.12): a warm
 pool on the floor through the solver's ground projection, an animated flame
-(campfire on logs, torch on a pole; none for a glow), and firelight on the
+(campfire on logs, torch on a pole, a lantern hung on a post, a wisp as a
+pulsing orb; none for a glow; a wisp's place is asked for now, `at`, from
+`PointLight::drift`, and a beamed lamp's glow in the air is thrown the way
+its wedge points), and firelight on the
 creatures within reach -- the UNLIT art (`LightState::original_of`) laid
 over the lit art, fire-tinted, at an opacity that falls off with distance
 and is stronger on the side facing the light (a per-vertex gradient), so
