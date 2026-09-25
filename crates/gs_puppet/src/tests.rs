@@ -1039,3 +1039,18 @@ fn a_taper_runs_from_the_chain_s_root_to_its_free_end() {
         assert!((end - 0.02).abs() < 0.015, "{name} ends at the tip, not {end:.3}");
     }
 }
+
+/// The fit counts the figure wherever it is, not only on the silhouette's
+/// grid: rendered on that grid alone, whatever stood outside it was
+/// clipped away, and a figure twice as wide as its outline scored 1.0.
+#[test]
+fn the_fit_counts_the_figure_beyond_the_silhouette_s_grid() {
+    let slab = |half: f32| rig_bake::Outline { subpaths: vec![vec![[-half, 0.0], [half, 0.0], [half, 4.0], [-half, 4.0]]] };
+    let (wide, narrow) = (rig_bake::rasterize(&slab(0.8), 256), rig_bake::rasterize(&slab(0.4), 256));
+    let rig = plain_rig(View::Front, &[("top", [0.0, 4.0]), ("bottom", [0.0, 0.0])], vec![bone("spine", "chest", None, &["top", "bottom"])]);
+    let p = Puppet::build_masks(&rig, Some(&wide), Some(&wide)).expect("builds");
+    let own = crate::fit::rest_iou(&p, View::Front, &wide);
+    let half = crate::fit::rest_iou(&p, View::Front, &narrow);
+    assert!(own > 0.8, "against its own outline: {own:.3}");
+    assert!((0.35..0.6).contains(&half), "twice as wide as the outline: {half:.3}, about a half");
+}

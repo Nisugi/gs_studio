@@ -35,6 +35,9 @@ puppets, and skin pieces floating free in any pose -- run it after a rig
 or puppet-builder change), `turnaround` (one family's smooth skin from every
 side, in one pose), `dump_segments` (a family's
 fresh-built stations, by segment -- a builder change by numbers),
+`fit_diff` (every family's committed puppet against a fresh build: rest
+IoU per view and the segments that moved most -- run it before
+republishing after a builder change),
 `gs_field_egui` `stage_demo` /
 `puppet_tune`, `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
 

@@ -44,12 +44,47 @@ pub fn rest_coverage(puppet: &Puppet, view: View, mask: &Mask) -> Vec<bool> {
 }
 
 /// Intersection over union of the rest-pose puppet and the silhouette.
+///
+/// The figure counts wherever it is, not only on the silhouette's grid:
+/// rendered on that grid alone, whatever stood outside it was clipped
+/// away, and a figure twice as wide as its outline scored 1.0.
 pub fn rest_iou(puppet: &Puppet, view: View, mask: &Mask) -> f32 {
-    let cover = rest_coverage(puppet, view, mask);
+    let g = mask.grid;
+    if g.w == 0 || g.h == 0 || !(g.px_per_ft > 0.0) {
+        return 0.0;
+    }
+    let posed = puppet.pose(&Pose::default());
+    let lift = posed.lift;
+    // How far the figure reaches past the grid on each side, in pixels.
+    let [lo, hi] = posed.bounds();
+    let project = ortho(view, g.min_x, g.max_y, g.px_per_ft);
+    let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
+    for corner in 0..8 {
+        let pick = |axis: usize| if corner & (1 << axis) == 0 { lo[axis] } else { hi[axis] };
+        let (px, _) = project([pick(0), pick(1) - lift, pick(2)]);
+        min = [min[0].min(px[0]), min[1].min(px[1])];
+        max = [max[0].max(px[0]), max[1].max(px[1])];
+    }
+    // A pixel of slack for the rasterizer; never more than a few grids over
+    // (a figure that blew up is wrong however far it reaches).
+    let pad = |v: f32| (v + 1.0).max(0.0).ceil().min((4 * (g.w + g.h)) as f32) as usize;
+    let (left, top) = (pad(-min[0]), pad(-min[1]));
+    let (right, bottom) = (pad(max[0] - g.w as f32), pad(max[1] - g.h as f32));
+    let (w, h) = (g.w + left + right, g.h + top + bottom);
+    let look = Look { outline_px: 0.0, min_station_px: 0.0, ..Look::default() };
+    let padded = ortho(view, g.min_x - left as f32 / g.px_per_ft, g.max_y + top as f32 / g.px_per_ft, g.px_per_ft);
+    let mut canvas = Canvas::new(w, h, 1, [0, 0, 0]);
+    canvas.draw(&posed.draw_list(&|p: V3| padded([p[0], p[1] - lift, p[2]]), &look));
+    let figure: Vec<bool> = canvas.to_rgba8().chunks_exact(4).map(|px| px[0] != 0 || px[1] != 0 || px[2] != 0).collect();
     let (mut both, mut either) = (0usize, 0usize);
-    for (a, b) in cover.iter().zip(&mask.inside) {
-        both += usize::from(*a && *b);
-        either += usize::from(*a || *b);
+    for y in 0..h {
+        for x in 0..w {
+            let on_grid = (left..left + g.w).contains(&x) && (top..top + g.h).contains(&y);
+            let inside = on_grid && mask.inside[(y - top) * g.w + (x - left)];
+            let drawn = figure[y * w + x];
+            both += usize::from(drawn && inside);
+            either += usize::from(drawn || inside);
+        }
     }
     if either == 0 {
         0.0
