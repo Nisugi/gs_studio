@@ -1,0 +1,93 @@
+family = "plant_mass"
+view = "front"
+ref_ft = 3.0
+axis = "crown"
+px_per_ft = 159.8002
+aspect = 1.0689
+span = 0.7773
+ground_frac = 0.9988
+eye_radius_ft = 0.0125
+parts = ["chest", "abdomen", "leftArm", "rightArm"]
+
+[map]
+width = 512
+height = 479
+
+[anchors]
+feet = [0.5, 0.9988]
+head = [0.5, 0.1314]
+mouth = [0.5, 0.365]
+saddle = [0.5, 0.365]
+
+[eyes]
+leftEye = [0.5468, 0.2315]
+rightEye = [0.4532, 0.2315]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "mass"
+pivot = [0.5, 0.365]
+tip = [0.5, 0.1314]
+joints = [[0.5, 0.365], [0.5, 0.1314]]
+pixels = 0
+
+[[bones]]
+index = 2
+name = "mass"
+part = "chest"
+parent = "core"
+pivot = [0.5, 0.6986]
+tip = [0.5, 0.365]
+joints = [[0.5, 0.6986], [0.5, 0.365]]
+pixels = 20514
+
+[[bones]]
+index = 3
+name = "core"
+part = "abdomen"
+pivot = [0.5, 0.9655]
+tip = [0.5, 0.6986]
+joints = [[0.5, 0.9655], [0.5, 0.6986]]
+pixels = 48115
+
+[[bones]]
+index = 4
+name = "arm_r"
+part = "rightArm"
+parent = "mass"
+pivot = [0.3908, 0.4984]
+tip = [0.0787, 0.1314]
+joints = [[0.3908, 0.4984], [0.1879, 0.2649], [0.0787, 0.1314]]
+pixels = 9428
+
+[[bones]]
+index = 5
+name = "arm_l"
+part = "leftArm"
+parent = "mass"
+pivot = [0.6092, 0.4984]
+tip = [0.9213, 0.1314]
+joints = [[0.6092, 0.4984], [0.8121, 0.2649], [0.9213, 0.1314]]
+pixels = 9481
+
+[[bones]]
+index = 6
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+pivot = [0.0787, 0.1314]
+tip = [0.0006, 0.0314]
+joints = [[0.0787, 0.1314], [0.0006, 0.0314]]
+pixels = 0
+
+[[bones]]
+index = 7
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+pivot = [0.9213, 0.1314]
+tip = [0.9994, 0.0314]
+joints = [[0.9213, 0.1314], [0.9994, 0.0314]]
+pixels = 0

@@ -1,0 +1,88 @@
+version = 2
+family = "elemental_steam"
+body_type = "mound"
+view = "front"
+ref_ft = 15.0
+axis = "crown"
+joint_order = ["crown", "crest", "belly", "base", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l"]
+
+[anchors]
+head = "crown"
+mouth = "crest"
+saddle = "crest"
+
+[joints]
+base = [0.0, 0.3]
+belly = [0.0, 5.0]
+crest = [0.0, 12.0]
+crown = [0.0, 14.7]
+elbow_l = [6.5, 10.3]
+elbow_r = [-6.5, 10.3]
+eye_l = [1.2, 12.5]
+eye_r = [-1.2, 12.5]
+fingertip_l = [5.5, 13.0]
+fingertip_r = [-5.5, 13.0]
+shoulder_l = [4.5, 8.5]
+shoulder_r = [-4.5, 8.5]
+wrist_l = [6.4, 12.2]
+wrist_r = [-6.4, 12.2]
+
+[depth]
+base = 0.0
+belly = 0.0
+crest = 0.0
+crown = 0.0
+elbow_l = 3.0
+elbow_r = 3.0
+eye_l = 3.5
+eye_r = 3.5
+fingertip_l = 6.0
+fingertip_r = 6.0
+shoulder_l = 1.0
+shoulder_r = 1.0
+wrist_l = 5.0
+wrist_r = 5.0
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "mass"
+joints = ["crest", "crown"]
+pivot = "crest"
+
+[[bones]]
+name = "mass"
+part = "chest"
+parent = "core"
+joints = ["belly", "crest"]
+pivot = "belly"
+
+[[bones]]
+name = "core"
+part = "abdomen"
+joints = ["base", "belly"]
+pivot = "base"
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "mass"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "mass"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]

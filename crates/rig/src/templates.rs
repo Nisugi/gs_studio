@@ -319,6 +319,32 @@ fn winged_quadruped() -> Template {
     t
 }
 
+/// A mass with two arms: a lava or steam elemental, a thorny clump. The
+/// core stands on the ground, the mass above it carries the arms, and a
+/// head bump (with the eyes) tops it; no legs.
+fn mound() -> Template {
+    let mut bones = vec![
+        bone("skull", "head", &["crest", "crown"]),
+        bone("mass", "chest", &["belly", "crest"]),
+        bone("core", "abdomen", &["base", "belly"]),
+    ];
+    bones.extend(sided("arm", "Arm", &["shoulder", "elbow", "wrist"]));
+    bones.extend(sided("hand", "Hand", &["wrist", "fingertip"]));
+    root_pivot(&mut bones, "core", "base");
+    link(&mut bones, "mass", "core", Some("belly"));
+    link(&mut bones, "skull", "mass", Some("crest"));
+    link(&mut bones, "arm", "mass", None);
+    link(&mut bones, "hand", "arm", None);
+    Template {
+        name: "mound",
+        blurb: "A mass on the ground with two arms and a head bump, front view",
+        view: View::Front,
+        joints: both_sides(&["crown", "crest", "belly", "base"], &["eye", "shoulder", "elbow", "wrist", "fingertip"]),
+        bones,
+        anchors: AnchorDef { head: "crown", mouth: "crest", saddle: "crest" },
+    }
+}
+
 fn serpentine() -> Template {
     let mut bones = vec![
         bone("skull", "head", &["snout", "skull_base"]),
@@ -397,7 +423,7 @@ fn multileg() -> Template {
 }
 
 pub fn templates() -> Vec<Template> {
-    vec![biped(), quadruped(), avian(), serpentine(), multileg(), winged_biped(), winged_quadruped()]
+    vec![biped(), quadruped(), avian(), serpentine(), multileg(), winged_biped(), winged_quadruped(), mound()]
 }
 
 pub fn template(name: &str) -> Option<Template> {

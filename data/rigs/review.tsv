@@ -79,3 +79,6 @@ upright_insect	audited	image-gen	2026-09-25	side .45 miss .44: humanoid donor la
 winged_humanoid	ready	dev	2026-09-25	new winged_biped template; joints by hand; wings are the back part
 winged_beast	ready	dev	2026-09-25	new winged_quadruped template; joints by hand; wing thickness pinned; a wing tip still floats seen from the side
 dragon_bat	ready	dev	2026-09-25	new winged_quadruped template; side view mirrored to face right in its sheet; front and side drawings disagree on the wings, side wins
+elemental_lava	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand
+elemental_steam	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand
+plant_mass	ready	dev	2026-09-25	new mound template (core, mass, head bump, two arms); joints by hand

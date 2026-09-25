@@ -1,0 +1,93 @@
+family = "elemental_steam"
+view = "front"
+ref_ft = 15.0
+axis = "crown"
+px_per_ft = 33.8177
+aspect = 1.0099
+span = 0.1445
+ground_frac = 0.9987
+eye_radius_ft = 0.2864
+parts = ["head", "leftEye", "rightEye", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand"]
+
+[map]
+width = 512
+height = 507
+
+[anchors]
+feet = [0.5, 0.9987]
+head = [0.5, 0.0181]
+mouth = [0.5, 0.1982]
+saddle = [0.5, 0.1982]
+
+[eyes]
+leftEye = [0.5793, 0.1649]
+rightEye = [0.4207, 0.1649]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "mass"
+pivot = [0.5, 0.1982]
+tip = [0.5, 0.0181]
+joints = [[0.5, 0.1982], [0.5, 0.0181]]
+pixels = 14075
+
+[[bones]]
+index = 2
+name = "mass"
+part = "chest"
+parent = "core"
+pivot = [0.5, 0.6651]
+tip = [0.5, 0.1982]
+joints = [[0.5, 0.6651], [0.5, 0.1982]]
+pixels = 98806
+
+[[bones]]
+index = 3
+name = "core"
+part = "abdomen"
+pivot = [0.5, 0.9786]
+tip = [0.5, 0.6651]
+joints = [[0.5, 0.9786], [0.5, 0.6651]]
+pixels = 32917
+
+[[bones]]
+index = 4
+name = "arm_r"
+part = "rightArm"
+parent = "mass"
+pivot = [0.2028, 0.4317]
+tip = [0.0773, 0.1849]
+joints = [[0.2028, 0.4317], [0.0707, 0.3116], [0.0773, 0.1849]]
+pixels = 8644
+
+[[bones]]
+index = 5
+name = "arm_l"
+part = "leftArm"
+parent = "mass"
+pivot = [0.7972, 0.4317]
+tip = [0.9227, 0.1849]
+joints = [[0.7972, 0.4317], [0.9293, 0.3116], [0.9227, 0.1849]]
+pixels = 8610
+
+[[bones]]
+index = 6
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+pivot = [0.0773, 0.1849]
+tip = [0.1367, 0.1315]
+joints = [[0.0773, 0.1849], [0.1367, 0.1315]]
+pixels = 13
+
+[[bones]]
+index = 7
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+pivot = [0.9227, 0.1849]
+tip = [0.8633, 0.1315]
+joints = [[0.9227, 0.1849], [0.8633, 0.1315]]
+pixels = 11

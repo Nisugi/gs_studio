@@ -1,0 +1,93 @@
+family = "elemental_lava"
+view = "front"
+ref_ft = 15.0
+axis = "crown"
+px_per_ft = 19.312
+aspect = 1.7716
+span = 0.0781
+ground_frac = 0.9994
+eye_radius_ft = 0.2517
+parts = ["head", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand"]
+
+[map]
+width = 512
+height = 289
+
+[anchors]
+feet = [0.5, 0.9994]
+head = [0.5, 0.0238]
+mouth = [0.5, 0.1641]
+saddle = [0.5, 0.1641]
+
+[eyes]
+leftEye = [0.5566, 0.1975]
+rightEye = [0.4434, 0.1975]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "mass"
+pivot = [0.5, 0.1641]
+tip = [0.5, 0.0238]
+joints = [[0.5, 0.1641], [0.5, 0.0238]]
+pixels = 3864
+
+[[bones]]
+index = 2
+name = "mass"
+part = "chest"
+parent = "core"
+pivot = [0.5, 0.5985]
+tip = [0.5, 0.1641]
+joints = [[0.5, 0.5985], [0.5, 0.1641]]
+pixels = 41828
+
+[[bones]]
+index = 3
+name = "core"
+part = "abdomen"
+pivot = [0.5, 0.986]
+tip = [0.5, 0.5985]
+joints = [[0.5, 0.986], [0.5, 0.5985]]
+pixels = 12858
+
+[[bones]]
+index = 4
+name = "arm_r"
+part = "rightArm"
+parent = "mass"
+pivot = [0.3114, 0.4314]
+tip = [0.0474, 0.6987]
+joints = [[0.3114, 0.4314], [0.1417, 0.545], [0.0474, 0.6987]]
+pixels = 12726
+
+[[bones]]
+index = 5
+name = "arm_l"
+part = "leftArm"
+parent = "mass"
+pivot = [0.6886, 0.4314]
+tip = [0.9526, 0.6987]
+joints = [[0.6886, 0.4314], [0.8583, 0.545], [0.9526, 0.6987]]
+pixels = 12623
+
+[[bones]]
+index = 6
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+pivot = [0.0474, 0.6987]
+tip = [0.0247, 0.7655]
+joints = [[0.0474, 0.6987], [0.0247, 0.7655]]
+pixels = 735
+
+[[bones]]
+index = 7
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+pivot = [0.9526, 0.6987]
+tip = [0.9753, 0.7655]
+joints = [[0.9526, 0.6987], [0.9753, 0.7655]]
+pixels = 731

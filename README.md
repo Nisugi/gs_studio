@@ -38,7 +38,7 @@ Front views face the viewer, so the creature's right (`_r`) is screen-left,
 at negative x.
 
 **Vocabulary.** Three levels: a **body type** (biped, quadruped, avian,
-serpentine, multileg, winged_biped, winged_quadruped: a rig template and a pose set), a **form** (one
+serpentine, multileg, winged_biped, winged_quadruped, mound: a rig template and a pose set), a **form** (one
 silhouette pair, its rig `<form>.rig.toml`, its puppet and texture; what
 the code and file names still call a *family*), and a **creature** (a
 bestiary entry, with its own skin and outfit). A creature finds its form by
@@ -687,6 +687,7 @@ rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
 | `multileg` | front | arachnid crustacean |
 | `winged_biped` | front | winged_humanoid |
 | `winged_quadruped` | side | winged_beast dragon_bat |
+| `mound` | front | elemental_lava elemental_steam plant_mass |
 
 Templates are data (`crates/rig/src/templates.rs`): the ordered joint list,
 the bones with default parts, parents and pivots, the anchor joints. Each is
@@ -701,6 +702,7 @@ ONE tree:
 | `multileg` | `thorax` | `skull` (*mouth*), `abdomen`, `leg1_*` .. `leg5_*` <- `thorax`; `leg1_tip_*` <- `leg1_*` |
 | `winged_biped` | as `biped` | the biped, plus `wing_*` <- `torso_upper`; `wing_hand_*` <- `wing_*` |
 | `winged_quadruped` | as `quadruped` | the quadruped, plus `wing_*` <- `spine`; `wing_hand_*` <- `wing_*` |
+| `mound` | `core` (*base*) | `mass` (*belly*) <- `core`; `skull` (*crest*), `arm_*` <- `mass`; `hand_*` <- `arm_*` |
 
  `_r`/`_l` suffixes are mirror
 pairs; in a side view `_r` is the near limb. Quadruped forelegs are

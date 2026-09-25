@@ -1,0 +1,88 @@
+version = 2
+family = "plant_mass"
+body_type = "mound"
+view = "front"
+ref_ft = 3.0
+axis = "crown"
+joint_order = ["crown", "crest", "belly", "base", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "fingertip_r", "eye_l", "shoulder_l", "elbow_l", "wrist_l", "fingertip_l"]
+
+[anchors]
+head = "crown"
+mouth = "crest"
+saddle = "crest"
+
+[joints]
+base = [0.0, 0.1]
+belly = [0.0, 0.9]
+crest = [0.0, 1.9]
+crown = [0.0, 2.6]
+elbow_l = [1.0, 2.2]
+elbow_r = [-1.0, 2.2]
+eye_l = [0.15, 2.3]
+eye_r = [-0.15, 2.3]
+fingertip_l = [1.6, 2.9]
+fingertip_r = [-1.6, 2.9]
+shoulder_l = [0.35, 1.5]
+shoulder_r = [-0.35, 1.5]
+wrist_l = [1.35, 2.6]
+wrist_r = [-1.35, 2.6]
+
+[depth]
+base = 0.0
+belly = 0.0
+crest = 0.0
+crown = 0.0
+elbow_l = 0.5
+elbow_r = 0.5
+eye_l = 0.6
+eye_r = 0.6
+fingertip_l = 0.7
+fingertip_r = 0.7
+shoulder_l = 0.3
+shoulder_r = 0.3
+wrist_l = 0.6
+wrist_r = 0.6
+
+[[bones]]
+name = "skull"
+part = "head"
+parent = "mass"
+joints = ["crest", "crown"]
+pivot = "crest"
+
+[[bones]]
+name = "mass"
+part = "chest"
+parent = "core"
+joints = ["belly", "crest"]
+pivot = "belly"
+
+[[bones]]
+name = "core"
+part = "abdomen"
+joints = ["base", "belly"]
+pivot = "base"
+
+[[bones]]
+name = "arm_r"
+part = "rightArm"
+parent = "mass"
+joints = ["shoulder_r", "elbow_r", "wrist_r"]
+
+[[bones]]
+name = "arm_l"
+part = "leftArm"
+parent = "mass"
+joints = ["shoulder_l", "elbow_l", "wrist_l"]
+
+[[bones]]
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+joints = ["wrist_r", "fingertip_r"]
+
+[[bones]]
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+joints = ["wrist_l", "fingertip_l"]
