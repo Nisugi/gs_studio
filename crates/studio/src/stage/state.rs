@@ -610,15 +610,24 @@ impl StageState {
     pub fn clear_scene(&mut self) {
         self.scene = Arc::new(StageScene::default());
         self.scene_name.clear();
-        self.selected_prop = None;
+        self.deselect();
     }
 
-    /// New props spawn at stage centre, mid depth, selected.
+    /// Nothing placed is selected. A selection is an index into the scene's
+    /// props or lights, so it must not outlive the scene it points into.
+    fn deselect(&mut self) {
+        self.selected_prop = None;
+        self.selected_light = None;
+    }
+
+    /// New props spawn at stage centre, mid depth, selected (and the only
+    /// thing selected: a drag moves a selected light first).
     pub fn add_prop(&mut self, image: String) {
         let (z_near, z_far) = self.field.depth_range();
         let scene = Arc::make_mut(&mut self.scene);
         scene.props.push(SceneProp { image, x: STAGE_W / 2.0, z: (z_near + z_far) / 2.0, scale: 1.0, shadow: false });
         self.selected_prop = Some(scene.props.len() - 1);
+        self.selected_light = None;
     }
 
     /// Remove prop `k`; the selection follows the prop it pointed at.
@@ -755,7 +764,7 @@ impl StageState {
                 }
                 self.scene = Arc::new(scene);
                 self.scene_name = name.to_string();
-                self.selected_prop = None;
+                self.deselect();
             }
             Err(err) => self.push_status(format!("Scene load failed: {err:#}")),
         }
@@ -1063,6 +1072,22 @@ mod tests {
         assert!(s.scene().props.is_empty());
     }
 
+    /// A drag moves a selected light before a selected prop, so adding a
+    /// prop, or leaving the scene, must not leave a light selected.
+    #[test]
+    fn a_new_prop_or_a_cleared_scene_leaves_no_light_selected() {
+        let mut s = stage();
+        s.add_light(gs_field::lighting::LampKind::Torch);
+        assert_eq!(s.selected_light, Some(0));
+        s.add_prop("scenery/a.png".into());
+        assert_eq!((s.selected_prop, s.selected_light), (Some(0), None), "the new prop is what a drag moves");
+
+        s.add_light(gs_field::lighting::LampKind::Campfire);
+        assert_eq!((s.selected_prop, s.selected_light), (None, Some(1)));
+        s.clear_scene();
+        assert_eq!((s.selected_prop, s.selected_light), (None, None));
+    }
+
     #[test]
     fn prop_clamping_and_dragging_stay_on_the_floor() {
         let mut s = stage();
@@ -1140,11 +1165,12 @@ mod tests {
         // A fresh stage loading the room scene sees default layer + room.
         let mut fresh = stage();
         fresh.selected_prop = Some(3);
+        fresh.selected_light = Some(2);
         fresh.load_scene_by_name("Barley_Field");
         assert_eq!((fresh.field.params.focal, fresh.field.params.horizon), (60.0, 160.0));
         assert_eq!(fresh.scene_name, "Barley_Field");
         assert_eq!(fresh.scene().background.as_deref(), Some("scenes/desert.png"));
-        assert_eq!(fresh.selected_prop, None);
+        assert_eq!((fresh.selected_prop, fresh.selected_light), (None, None), "no selection survives into another scene");
 
         fresh.load_scene_by_name("no_such_scene");
         assert!(fresh.status_lines().last().unwrap().starts_with("Scene load failed"));
