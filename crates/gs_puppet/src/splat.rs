@@ -14,7 +14,7 @@
 //! effects and the contour are not drawn -- this is the look test, not the
 //! stage's renderer.
 
-use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
+use crate::math::{add, cross, dot, len, lerp as lerp3, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
 use crate::skin::Skin;
 use crate::uv::Texture;
@@ -59,6 +59,43 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
     let alpha = params.alpha.clamp(0.05, 1.0);
     let body = body.map(|c| c as f32);
     let puppet = posed.puppet;
+    // Every body ring in posed space, for the inside test below: a sample
+    // that lands inside another segment's tube (a neck ring the side view
+    // read as wide as the hunch, a thigh's top in the pelvis) is interior
+    // geometry a surface hides and a cloud would show.
+    struct Tube {
+        c: V3,
+        axis: V3,
+        w: V3,
+        d: V3,
+        hw: f32,
+        hd: f32,
+        seg: usize,
+    }
+    let mut tubes: Vec<Tube> = Vec::new();
+    for (i, s) in puppet.segments.iter().enumerate() {
+        if s.hidden || !s.kind.is_body() {
+            continue;
+        }
+        let xf = &posed.xf[i];
+        let axis = norm_or(xf.dir(sub(s.tail, s.head)), [0.0, 1.0, 0.0]);
+        for st in &s.stations {
+            tubes.push(Tube { c: xf.point(st.c), axis, w: xf.dir(s.axis_w), d: xf.dir(s.axis_d), hw: st.w, hd: st.d, seg: i });
+        }
+    }
+    let inside_other = |p: V3, seg: usize| {
+        tubes.iter().any(|t| {
+            if t.seg == seg {
+                return false;
+            }
+            let e = sub(p, t.c);
+            if dot(e, t.axis).abs() > crate::puppet::STATION_STEP_FT {
+                return false;
+            }
+            let (u, v) = (dot(e, t.w) / t.hw.max(1e-3), dot(e, t.d) / t.hd.max(1e-3));
+            u * u + v * v < 0.7
+        })
+    };
     let mut out = Vec::new();
     for (i, s) in puppet.segments.iter().enumerate() {
         if s.hidden || !s.kind.is_body() {
@@ -66,34 +103,46 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
         }
         let xf = &posed.xf[i];
         let n = s.stations.len();
-        for (k, st) in s.stations.iter().enumerate() {
-            if k < s.bare {
-                continue;
-            }
-            let c = xf.point(st.c);
-            let a = scale(xf.dir(s.axis_w), st.w);
-            let b = scale(xf.dir(s.axis_d), st.d);
-            // Along the bone: half the gap to the neighbouring rings.
-            let along = {
-                let prev = if k > 0 { xf.point(s.stations[k - 1].c) } else { c };
-                let next = if k + 1 < n { xf.point(s.stations[k + 1].c) } else { c };
-                scale(sub(next, prev), 0.5)
-            };
-            let along = if len(along) < 1e-4 { scale(norm_or(xf.dir(sub(s.tail, s.head)), [0.0, 1.0, 0.0]), spacing * 0.5) } else { along };
-            // Ramanujan's ellipse perimeter.
-            let circ = std::f32::consts::PI * (3.0 * (st.w + st.d) - ((3.0 * st.w + st.d) * (st.w + 3.0 * st.d)).sqrt());
-            let m = ((circ / spacing).ceil() as usize).clamp(6, 400);
-            for j in 0..m {
-                let theta = j as f32 / m as f32 * std::f32::consts::TAU;
-                let (sin, cos) = theta.sin_cos();
-                let radial = add(scale(a, cos), scale(b, sin));
-                let p = add(c, radial);
-                let tangent = sub(scale(b, cos), scale(a, sin));
-                let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
-                let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
-                let rgb = texture.and_then(|t| t.layout.locate(i, k as f32, theta).and_then(|at| t.sample(at))).unwrap_or(body);
-                let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * overlap);
-                out.push(Gaussian { c: p, axes: [half_ring, scale(along, overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha });
+        let aw = xf.dir(s.axis_w);
+        let ad = xf.dir(s.axis_d);
+        let bone = norm_or(xf.dir(sub(s.tail, s.head)), [0.0, 1.0, 0.0]);
+        // Rings sit STATION_STEP_FT apart, coarser than the samples round
+        // them; sub-rings are interpolated between neighbours so the cloud
+        // is as even along the bone as round it (no streaks, no bands).
+        for k in s.bare.max(0)..n {
+            let st = &s.stations[k];
+            let next = s.stations.get(k + 1);
+            let c0 = xf.point(st.c);
+            let gap = next.map_or(0.0, |nx| len(sub(xf.point(nx.c), c0)));
+            let subs = if next.is_some() { ((gap / spacing).round() as usize).max(1) } else { 1 };
+            for sub_k in 0..subs {
+                let t = sub_k as f32 / subs as f32;
+                let (c, hw, hd) = match next {
+                    Some(nx) if t > 0.0 => (lerp3(c0, xf.point(nx.c), t), st.w + (nx.w - st.w) * t, st.d + (nx.d - st.d) * t),
+                    _ => (c0, st.w, st.d),
+                };
+                let a = scale(aw, hw);
+                let b = scale(ad, hd);
+                let along_len = if gap > 1e-4 { gap / subs as f32 } else { spacing };
+                let along = scale(bone, along_len * 0.5);
+                // Ramanujan's ellipse perimeter.
+                let circ = std::f32::consts::PI * (3.0 * (hw + hd) - ((3.0 * hw + hd) * (hw + 3.0 * hd)).sqrt());
+                let m = ((circ / spacing).ceil() as usize).clamp(6, 400);
+                for j in 0..m {
+                    let theta = j as f32 / m as f32 * std::f32::consts::TAU;
+                    let (sin, cos) = theta.sin_cos();
+                    let radial = add(scale(a, cos), scale(b, sin));
+                    let p = add(c, radial);
+                    if inside_other(p, i) {
+                        continue;
+                    }
+                    let tangent = sub(scale(b, cos), scale(a, sin));
+                    let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
+                    let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
+                    let rgb = texture.and_then(|tx| tx.layout.locate(i, k as f32 + t, theta).and_then(|at| tx.sample(at))).unwrap_or(body);
+                    let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * overlap);
+                    out.push(Gaussian { c: p, axes: [half_ring, scale(along, 2.0 * overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha });
+                }
             }
         }
     }
