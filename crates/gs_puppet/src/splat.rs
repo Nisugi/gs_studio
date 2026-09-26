@@ -47,11 +47,95 @@ impl Default for SplatParams {
 pub struct Gaussian {
     pub c: V3,
     /// Half-extents as world vectors: along the ring, along the bone,
-    /// through the surface.
+    /// through the surface (one standard deviation each way).
     pub axes: [V3; 3],
+    /// Outward normal for the cel shading; all zero = unshaded (a fitted
+    /// cloud carries its own light).
     pub n: V3,
     pub rgb: [f32; 3],
     pub alpha: f32,
+}
+
+/// A fitted cloud from a 3D Gaussian Splatting `.ply` (binary little
+/// endian; the reference trainer's and Brush's layout: `x y z`,
+/// `f_dc_0..2` (zeroth-order spherical harmonics), `opacity` (a logit),
+/// `scale_0..2` (log standard deviations), `rot_0..3` (a quaternion,
+/// w first); higher-order harmonics are ignored, so colour is
+/// view-independent). Positions come back as they are in the file --
+/// see [`fit_to_height`] -- and every Gaussian is unshaded.
+pub fn load_ply(path: &std::path::Path) -> std::io::Result<Vec<Gaussian>> {
+    use std::io::{BufRead, Read};
+    let mut reader = std::io::BufReader::new(std::fs::File::open(path)?);
+    let bad = |what: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, what.to_owned());
+    let mut line = String::new();
+    let mut props: Vec<String> = Vec::new();
+    let mut count = 0usize;
+    let mut little = true;
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(bad("no end_header"));
+        }
+        let words: Vec<&str> = line.split_whitespace().collect();
+        match words.as_slice() {
+            ["format", f, ..] => little = f.starts_with("binary_little"),
+            ["element", "vertex", n] => count = n.parse().map_err(|_| bad("vertex count"))?,
+            ["property", "float", name] | ["property", "float32", name] => props.push((*name).to_owned()),
+            ["property", ..] => return Err(bad("only float properties are read")),
+            ["end_header"] => break,
+            _ => {}
+        }
+    }
+    let at = |name: &str| props.iter().position(|p| p == name);
+    let need = |name: &str| at(name).ok_or_else(|| bad(&format!("no property {name}")));
+    let (ix, iy, iz) = (need("x")?, need("y")?, need("z")?);
+    let (r0, r1, r2) = (need("f_dc_0")?, need("f_dc_1")?, need("f_dc_2")?);
+    let iop = need("opacity")?;
+    let (s0, s1, s2) = (need("scale_0")?, need("scale_1")?, need("scale_2")?);
+    let (q0, q1, q2, q3) = (need("rot_0")?, need("rot_1")?, need("rot_2")?, need("rot_3")?);
+    let stride = props.len();
+    let mut bytes = vec![0u8; count * stride * 4];
+    reader.read_exact(&mut bytes)?;
+    let f = |i: usize| {
+        let b: [u8; 4] = bytes[i * 4..i * 4 + 4].try_into().expect("4 bytes");
+        if little { f32::from_le_bytes(b) } else { f32::from_be_bytes(b) }
+    };
+    const SH_C0: f32 = 0.282_094_79;
+    let mut out = Vec::with_capacity(count);
+    for v in 0..count {
+        let g = |k: usize| f(v * stride + k);
+        let rot = crate::math::quat_to_m3(crate::math::quat_norm([g(q0), g(q1), g(q2), g(q3)]));
+        let sc = [g(s0).exp(), g(s1).exp(), g(s2).exp()];
+        // Column k of the rotation, scaled: the k-th principal axis.
+        let axes = [0, 1, 2].map(|k| [rot[0][k] * sc[k], rot[1][k] * sc[k], rot[2][k] * sc[k]]);
+        let rgb = [g(r0), g(r1), g(r2)].map(|c| ((0.5 + SH_C0 * c).clamp(0.0, 1.0)) * 255.0);
+        let alpha = 1.0 / (1.0 + (-g(iop)).exp());
+        out.push(Gaussian { c: [g(ix), g(iy), g(iz)], axes, n: [0.0; 3], rgb, alpha });
+    }
+    Ok(out)
+}
+
+/// Scale a cloud so it stands `height_ft` tall (its y extent), centred
+/// on x and z and with its feet at y = 0 -- what [`load_ply`] hands back
+/// is in whatever units it was fitted in.
+pub fn fit_to_height(cloud: &mut [Gaussian], height_ft: f32) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for g in cloud.iter() {
+        for k in 0..3 {
+            lo[k] = lo[k].min(g.c[k]);
+            hi[k] = hi[k].max(g.c[k]);
+        }
+    }
+    let span = hi[1] - lo[1];
+    if !(span > 1e-6) {
+        return;
+    }
+    let s = height_ft / span;
+    let centre = [(lo[0] + hi[0]) * 0.5, lo[1], (lo[2] + hi[2]) * 0.5];
+    for g in cloud.iter_mut() {
+        g.c = scale(sub(g.c, centre), s);
+        g.axes = g.axes.map(|a| scale(a, s));
+    }
 }
 
 /// The cloud for a posed puppet, sampled every `spacing` feet, wearing
@@ -184,10 +268,15 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         let r = [3.0 * cov[0][0].sqrt(), 3.0 * cov[1][1].sqrt()];
         lo = [lo[0].min(centre[0] - r[0]), lo[1].min(centre[1] - r[1])];
         hi = [hi[0].max(centre[0] + r[0]), hi[1].max(centre[1] + r[1])];
-        let gb = dot(g.n, light);
-        let lit = crate::skin::smoothstep(crate::draw::LIGHT_ABOVE - 0.09, crate::draw::LIGHT_ABOVE + 0.09, gb);
-        let dark = 1.0 - crate::skin::smoothstep(crate::draw::DARK_BELOW - 0.09, crate::draw::DARK_BELOW + 0.09, gb);
-        let shade = (1.0 + 0.13 * lit - 0.2 * dark) * (1.0 + 0.08 * gb);
+        let shade = if g.n == [0.0; 3] {
+            // Unshaded: a fitted cloud's colours carry their own light.
+            1.0
+        } else {
+            let gb = dot(g.n, light);
+            let lit = crate::skin::smoothstep(crate::draw::LIGHT_ABOVE - 0.09, crate::draw::LIGHT_ABOVE + 0.09, gb);
+            let dark = 1.0 - crate::skin::smoothstep(crate::draw::DARK_BELOW - 0.09, crate::draw::DARK_BELOW + 0.09, gb);
+            (1.0 + 0.13 * lit - 0.2 * dark) * (1.0 + 0.08 * gb)
+        };
         flats.push(Flat { c: centre, inv, r, z, shade, i });
     }
     if flats.is_empty() || !(lo[0].is_finite() && hi[0].is_finite()) {
