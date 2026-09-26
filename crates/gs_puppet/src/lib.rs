@@ -57,6 +57,7 @@ pub mod puppet;
 pub mod raster;
 pub mod shadow;
 pub mod skin;
+pub mod splat;
 pub mod uv;
 
 pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};

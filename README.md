@@ -574,7 +574,9 @@ elephantid or suine puppet never appeared on the stage however much art was
 in the pool.
 
 The **Puppets** list at the top of the Preview panel (with the *Held
-weapons* and *Breathing* checkboxes) is the direct way in:
+weapons*, *Breathing* and *Splats* checkboxes; *Splats* draws every puppet
+as a Gaussian splat cloud instead of its smooth skin, `gs_puppet::splat`,
+the look test for a splat renderer) is the direct way in:
 every published puppet (built in, or from the pool), grouped bestiary
 family -> form -> texture (`stage::cast::puppet_tree`: a form files under the
 family most of the creatures drawing with it claim, "Other" when none

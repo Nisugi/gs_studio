@@ -138,6 +138,8 @@ pub struct StageState {
     pub show_props: bool,
     /// Living puppets breathe (their body type's `[idle]` cycle).
     pub show_breath: bool,
+    /// Puppets drawn as Gaussian splat clouds instead of the smooth skin.
+    pub show_splats: bool,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
     /// Selected point light (index into scene.lights); drag moves it.
@@ -193,6 +195,7 @@ impl StageState {
             show_occluders: false,
             show_props: true,
             show_breath: true,
+            show_splats: false,
             selected_prop: None,
             selected_light: None,
             dragging_creature: None,

@@ -12,29 +12,19 @@
 //! the left, the splats on the right. Yaws default to 0 45 90 135.
 //! `SPLAT_SHEET=<sheet.png>` wears that sheet (default: the family's
 //! `data/textures/<family>/sheet.png` when present, else the body colour);
-//! `SPLAT_SPACING=<ft>` sets the sample spacing (default 0.04);
+//! `SPLAT_SPACING=<ft>` sets the sample spacing (default 0.03);
 //! `SPLAT_TILE=<px>` the tile size (default 320); `SPLAT_DATA=<dir>`
 //! another data root.
 
 use std::path::Path;
 
-use gs_puppet::math::{add, cross, dot, len, norm_or, scale, sub, V3};
+use gs_puppet::splat;
 use gs_puppet::raster::Canvas;
 use gs_puppet::{ground_grid, Camera, Look, Pose, PoseSet, Puppet, Texture, UvLayout, BODY_DEFAULT, MASK_PX, SHEET_SIDE};
 use rig::{Outlines, Rig, View};
 
 const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
 const GRID: [u8; 4] = [0x4a, 0x52, 0x5c, 255];
-
-struct Gaussian {
-    c: V3,
-    /// Half-extents as world vectors: along the ring, along the bone,
-    /// through the surface.
-    axes: [V3; 3],
-    n: V3,
-    rgb: [f32; 3],
-    alpha: f32,
-}
 
 fn read_png(path: &Path) -> Option<(usize, usize, Vec<u8>)> {
     let file = std::fs::File::open(path).ok()?;
@@ -62,7 +52,7 @@ fn main() {
         yaws = vec![0.0, 45.0, 90.0, 135.0];
     }
     let tile: usize = std::env::var("SPLAT_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(320);
-    let spacing: f32 = std::env::var("SPLAT_SPACING").ok().and_then(|v| v.parse().ok()).unwrap_or(0.04);
+    let spacing: f32 = std::env::var("SPLAT_SPACING").ok().and_then(|v| v.parse().ok()).unwrap_or(splat::SPACING_FT);
 
     let data = std::env::var_os("SPLAT_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"));
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");
@@ -84,53 +74,7 @@ fn main() {
             None
         }
     });
-    let body = BODY_DEFAULT.map(|c| c as f32);
-
-    // Rings -> Gaussians.
-    let mut cloud: Vec<Gaussian> = Vec::new();
-    for (i, s) in puppet.segments.iter().enumerate() {
-        if s.hidden || !s.kind.is_body() {
-            continue;
-        }
-        let xf = &posed.xf[i];
-        let n = s.stations.len();
-        for (k, st) in s.stations.iter().enumerate() {
-            // Buried rings (a thigh in the pelvis, a socket stub) are inside
-            // the body: a surface hides them, a cloud would show them.
-            if k < s.bare {
-                continue;
-            }
-            let c = xf.point(st.c);
-            let a = scale(xf.dir(s.axis_w), st.w);
-            let b = scale(xf.dir(s.axis_d), st.d);
-            // Along the bone: half the gap to the neighbouring rings.
-            let along = {
-                let prev = if k > 0 { xf.point(s.stations[k - 1].c) } else { c };
-                let next = if k + 1 < n { xf.point(s.stations[k + 1].c) } else { c };
-                scale(sub(next, prev), 0.5)
-            };
-            let along = if len(along) < 1e-4 { scale(norm_or(xf.dir(sub(s.tail, s.head)), [0.0, 1.0, 0.0]), spacing * 0.5) } else { along };
-            let circ = std::f32::consts::PI * (3.0 * (st.w + st.d) - ((3.0 * st.w + st.d) * (st.w + 3.0 * st.d)).sqrt());
-            let m = ((circ / spacing).ceil() as usize).clamp(6, 400);
-            for j in 0..m {
-                let theta = j as f32 / m as f32 * std::f32::consts::TAU;
-                let (sin, cos) = theta.sin_cos();
-                let radial = add(scale(a, cos), scale(b, sin));
-                let p = add(c, radial);
-                let tangent = sub(scale(b, cos), scale(a, sin));
-                let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
-                let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
-                let rgb = texture
-                    .as_ref()
-                    .and_then(|t| t.layout.locate(i, k as f32, theta).and_then(|at| t.sample(at)))
-                    .unwrap_or(body);
-                // Half-extents at about 0.6 of the sample spacing each way:
-                // neighbours overlap enough to close, not enough to blur.
-                let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * 0.6);
-                cloud.push(Gaussian { c: p, axes: [half_ring, scale(along, 0.6), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha: 0.9 });
-            }
-        }
-    }
+    let cloud = splat::cloud(&posed, texture.as_ref(), BODY_DEFAULT, spacing);
     println!("{family} {pose_name}: {} gaussians ({} px tiles)", cloud.len(), tile);
 
     // Frame as the turnaround does.
@@ -148,7 +92,6 @@ fn main() {
         cams.push(cam);
     }
     let mut rgba = canvas.to_rgba8();
-    let light = norm_or([0.3, 0.8, 0.6], [0.0, 1.0, 0.0]);
     for (t, yaw) in yaws.iter().enumerate() {
         // Left: the skin.
         let cam = &cams[t * 2];
@@ -169,63 +112,20 @@ fn main() {
         }
         // Right: the splats, the figure turned by `yaw` as the skin turns it.
         let cam = &cams[t * 2 + 1];
-        let rot = gs_puppet::math::rot_y(*yaw);
-        let turned = |v: V3| gs_puppet::math::mul_mv(&rot, v);
-        let project = |p: V3| cam.project(turned(p));
-        let mut order: Vec<(f32, usize)> = cloud.iter().enumerate().map(|(i, g)| (project(g.c).1, i)).collect();
-        order.sort_by(|a, b| b.0.total_cmp(&a.0));
-        // Straight float RGB over the background, back to front.
-        let mut fb: Vec<[f32; 3]> = rgba.chunks_exact(4).map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
-        let x0 = (t * 2 + 1) * tile;
-        for (_, i) in order {
-            let g = &cloud[i];
-            let (centre, _) = project(g.c);
-            // The 2D covariance from the projected axes.
-            let mut cov = [[0.0f32; 2]; 2];
-            for ax in g.axes {
-                let (q, _) = project(add(g.c, ax));
-                let v = [q[0] - centre[0], q[1] - centre[1]];
-                for r in 0..2 {
-                    for c in 0..2 {
-                        cov[r][c] += v[r] * v[c];
-                    }
+        let image = splat::render(&cloud, &|p| cam.project(p), *yaw);
+        for y in 0..image.h {
+            for x in 0..image.w {
+                let (tx, ty) = (image.origin[0] as i64 + x as i64, image.origin[1] as i64 + y as i64);
+                if tx < 0 || ty < 0 || tx >= w as i64 || ty >= h as i64 {
+                    continue;
+                }
+                let s = &image.rgba[(y * image.w + x) * 4..][..4];
+                let a = s[3] as u32;
+                let d = &mut rgba[(ty as usize * w + tx as usize) * 4..][..4];
+                for c in 0..3 {
+                    d[c] = ((s[c] as u32 * a + d[c] as u32 * (255 - a)) / 255) as u8;
                 }
             }
-            // Soften: a splat covers at least a pixel.
-            cov[0][0] += 0.3;
-            cov[1][1] += 0.3;
-            let det = cov[0][0] * cov[1][1] - cov[0][1] * cov[1][0];
-            if det <= 1e-6 {
-                continue;
-            }
-            let inv = [[cov[1][1] / det, -cov[0][1] / det], [-cov[1][0] / det, cov[0][0] / det]];
-            let rx = (3.0 * cov[0][0].sqrt()).ceil() as i64;
-            let ry = (3.0 * cov[1][1].sqrt()).ceil() as i64;
-            let shade = 0.55 + 0.45 * dot(turned(g.n), light).max(0.0);
-            let (cx, cy) = (centre[0], centre[1]);
-            let xa = ((cx as i64) - rx).max(x0 as i64);
-            let xb = ((cx as i64) + rx).min((x0 + tile) as i64 - 1);
-            let ya = ((cy as i64) - ry).max(0);
-            let yb = ((cy as i64) + ry).min(h as i64 - 1);
-            for py in ya..=yb {
-                for px in xa..=xb {
-                    let d = [px as f32 + 0.5 - cx, py as f32 + 0.5 - cy];
-                    let m = d[0] * (inv[0][0] * d[0] + inv[0][1] * d[1]) + d[1] * (inv[1][0] * d[0] + inv[1][1] * d[1]);
-                    if m > 9.0 {
-                        continue;
-                    }
-                    let a = (g.alpha * (-0.5 * m).exp()).min(0.99);
-                    let dst = &mut fb[py as usize * w + px as usize];
-                    for c in 0..3 {
-                        dst[c] = g.rgb[c] * shade * a + dst[c] * (1.0 - a);
-                    }
-                }
-            }
-        }
-        for (p, px) in fb.iter().zip(rgba.chunks_exact_mut(4)) {
-            px[0] = p[0].round().clamp(0.0, 255.0) as u8;
-            px[1] = p[1].round().clamp(0.0, 255.0) as u8;
-            px[2] = p[2].round().clamp(0.0, 255.0) as u8;
         }
     }
     let file = std::fs::File::create(out).expect("create png");

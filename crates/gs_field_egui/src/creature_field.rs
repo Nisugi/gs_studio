@@ -1362,7 +1362,7 @@ fn paint_creature_puppet(
         Some(deg) => key.with_facing(deg),
         None => key,
     };
-    let key = key.with_effects(PuppetKey::effects_of(&has));
+    let key = key.with_effects(PuppetKey::effects_of(&has)).with_splats(crate::creature_puppet::puppet_splats(ctx));
     // Alive, it breathes: the key steps round its family's idle cycle, and
     // the next frame is asked for when the step changes (not every frame).
     let breath = if crate::creature_puppet::puppet_breath(ctx) {

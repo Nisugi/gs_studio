@@ -118,6 +118,22 @@ pub fn puppet_breath(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(breath_id())).unwrap_or(true)
 }
 
+fn splats_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_splats")
+}
+
+/// Puppets draw as Gaussian splat clouds (`gs_puppet::splat`) instead of
+/// the smooth skin: the look test for a splat renderer, CPU-drawn like the
+/// skin. Off unless the host turns it on.
+pub fn set_puppet_splats(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(splats_id(), on));
+}
+
+/// See [`set_puppet_splats`].
+pub fn puppet_splats(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(splats_id())).unwrap_or(false)
+}
+
 fn facing_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_facings")
 }
@@ -280,6 +296,9 @@ pub struct PuppetKey {
     /// `1..=BREATH_STEPS` (see [`PuppetCache::breath`]). Quantized so a
     /// room full of one family shares one cycle's worth of display lists.
     pub breath: u8,
+    /// Drawn as a Gaussian splat cloud instead of the smooth skin (see
+    /// [`set_puppet_splats`]). Part of the key so toggling it redraws.
+    pub splats: bool,
 }
 
 /// A breathing cycle is drawn in this many steps; at rest the figure moves
@@ -333,7 +352,14 @@ impl PuppetKey {
             facing: None,
             effects: gs_puppet::Effects::default(),
             breath: 0,
+            splats: false,
         }
+    }
+
+    /// The same key drawn as a splat cloud (or not).
+    pub fn with_splats(mut self, on: bool) -> Self {
+        self.splats = on;
+        self
     }
 
     /// The same key at this step of its breathing cycle (0 = still).
@@ -737,6 +763,16 @@ pub fn pose_puppet_with(
     let mut surface = None;
     let mut caster = None;
     let skin = skin.then(|| {
+        if key.splats {
+            // The splat look: the same image slot as the skin, lit by the
+            // scene the same way; no wounds, effects or contour.
+            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, gs_puppet::splat::SPACING_FT);
+            let mut image = gs_puppet::splat::render(&cloud, &project, look.yaw);
+            if let (Some(light), false) = (light, image.is_empty()) {
+                light.light_image(&mut image.rgba, image.w);
+            }
+            return Arc::new(image);
+        }
         let Some(light) = light else {
             return Arc::new(posed.skin_with(&project, &look, texture, key.effects));
         };

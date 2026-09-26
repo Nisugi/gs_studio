@@ -680,3 +680,12 @@ worn (`gs_field::PuppetRig::normal` with the family's texture,
 `gs_puppet::Texture::normal` when its size matches the layout, else warns
 and leaves it out. Nothing else changes: `gs_puppet`'s skin leans its
 normals by the sheet before the cel shading and the lamps see them.
+
+### 7.27 Splat clouds
+
+`set_puppet_splats` / `puppet_splats` (off by default) draw every puppet
+as a Gaussian splat cloud (`gs_puppet::splat::cloud` + `render`) in the
+skin's image slot, scene-lit the same way; `PuppetKey::splats` carries it
+so toggling redraws. No wounds, effects or contour on the cloud: it is the
+look test for a splat renderer, CPU-drawn like the skin. VellumFE need not
+expose it.

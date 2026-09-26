@@ -21,7 +21,10 @@ projection-first export, texture generator plan).
 Headless smoke run of the app: `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the
 window by itself and prints what the stage / calibrators hold;
 `GS_STUDIO_SMOKE=1` pre-populates the stage (`GS_STUDIO_LIGHT_HOUR=23` holds
-it at a game hour, for lighting checks). Other env: `GS_STUDIO_DATA`,
+it at a game hour, for lighting checks; `GS_STUDIO_PUPPETS=humanoid,canine` spawns those
+forms' puppets, forced, since default art draws everything as a sprite;
+`GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
+*Splats* checkbox). Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
 Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
 (projection-first renders, in the family's order: `projection_order` in

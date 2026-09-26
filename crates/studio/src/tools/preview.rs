@@ -93,6 +93,20 @@ impl StageTool {
                 stage.scene_name
             );
         }
+        // Puppets with no one at the Spawn buttons: GS_STUDIO_PUPPETS=
+        // <form>[,<form>...] puts each form's puppet on the stage (forced,
+        // as the Puppets list's Spawn does), since a pool with default art
+        // otherwise draws every creature as a sprite.
+        if let Ok(forms) = std::env::var("GS_STUDIO_PUPPETS") {
+            for form in forms.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+                stage.spawn_puppet(form);
+            }
+        }
+        // A splat check with no one at the checkbox: GS_STUDIO_SPLATS=1
+        // draws every puppet as a splat cloud (the Splats checkbox).
+        if std::env::var_os("GS_STUDIO_SPLATS").is_some() {
+            stage.show_splats = true;
+        }
         // A lighting check with no one at the slider: GS_STUDIO_LIGHT_HOUR
         // holds the stage at that game hour (23 = night).
         if let Some(hour) = std::env::var("GS_STUDIO_LIGHT_HOUR").ok().and_then(|h| h.trim().parse::<f32>().ok()) {
@@ -204,6 +218,7 @@ impl StageTool {
         gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
         gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
         gs_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
+        gs_field_egui::creature_puppet::set_puppet_splats(&ctx, stage.show_splats);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -1010,6 +1025,11 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         ui.checkbox(&mut stage.show_breath, "Breathing").on_hover_text(
             "A living puppet breathes: the slow cycle in its body type's poses file ([idle] in \
              poses/<body_type>.toml), each creature at its own point in it",
+        );
+        ui.checkbox(&mut stage.show_splats, "Splats").on_hover_text(
+            "Draw every puppet as a Gaussian splat cloud instead of its smooth skin: one soft \
+             splat per ring sample, sorted and blended (no contour, wounds or effects). The look \
+             test for a splat renderer; drawn on the CPU like the skin",
         );
         let mut spawn: Option<(String, Option<(String, String)>)> = None;
         egui::ScrollArea::vertical().id_salt("stage_puppets").max_height(240.0).show(ui, |ui| {
