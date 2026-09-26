@@ -60,6 +60,28 @@ def iou(a, b):
     return (a & b).sum() / max(1, (a | b).sum())
 
 
+def hard_edged(im):
+    """A matted frame is premultiplied: its soft edge is near-black under a
+    partial alpha, and projected onto a surface that black smears along
+    every limb. Cut the alpha hard at half and give the edge pixels the
+    colour of the nearest opaque one."""
+    a = np.asarray(im.convert("RGBA")).copy()
+    alpha = a[..., 3]
+    opaque = alpha >= 200
+    keep = alpha >= 128
+    # Nearest opaque pixel for every pixel, via a distance transform on the
+    # inverse mask.
+    _, idx = cv2.distanceTransformWithLabels((~opaque).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    ys, xs = np.nonzero(opaque)
+    labels = np.zeros(idx.max() + 1, dtype=np.int64)
+    labels[idx[opaque]] = ys * a.shape[1] + xs
+    src_flat = a[..., :3].reshape(-1, 3)
+    filled = src_flat[labels[idx]].reshape(a.shape[0], a.shape[1], 3)
+    a[..., :3] = np.where(opaque[..., None], a[..., :3], filled)
+    a[..., 3] = np.where(keep, 255, 0).astype(np.uint8)
+    return Image.fromarray(a, "RGBA")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("frames_dir")
@@ -95,6 +117,7 @@ def main():
         src = Image.open(frames[k]).convert("RGBA")
         if flip:
             src = src.transpose(Image.FLIP_LEFT_RIGHT)
+        src = hard_edged(src)
         x0, x1, y0, y1 = bbox(np.asarray(src)[..., 3] > 8)
         crop = src.crop((x0, y0, x1 + 1, y1 + 1))
         ppf = a.long / max(wf, hf)
