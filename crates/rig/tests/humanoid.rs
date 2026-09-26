@@ -135,8 +135,9 @@ fn the_fixture_is_the_biped_template_fully_placed() {
 fn the_humanoid_bakes_every_part() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
-    assert_eq!(outlines.entries.len(), 92);
-    assert_eq!(outlines.families().len(), 46);
+    // 46 drawn forms and the lurk, traced from its fitted cloud.
+    assert_eq!(outlines.entries.len(), 94);
+    assert_eq!(outlines.families().len(), 47);
     let entry = outlines.get("humanoid", View::Front).unwrap();
     assert_eq!(entry.ref_ft, rig.ref_ft);
     let baked = bake(&rig, &entry.outline(), 512);

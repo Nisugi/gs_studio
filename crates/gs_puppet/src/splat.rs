@@ -23,6 +23,11 @@ use crate::uv::Texture;
 /// Default sample spacing along a ring and between rings, feet.
 pub const SPACING_FT: f32 = 0.03;
 
+/// How far behind a pixel's front-most splat another splat may sit and
+/// still be drawn, in the projection's depth units (feet for the
+/// cameras here): the thickness of the surface. Deeper is inside.
+pub const SURFACE_BAND: f32 = 0.25;
+
 
 /// What shapes the cloud. `spacing` is the sample step along a ring, feet
 /// (finer = more, smaller splats -- and it IS the cloud's resolution: each
@@ -304,7 +309,11 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                 let a = scale(aw, hw);
                 let b = scale(ad, hd);
                 let along_len = if gap > 1e-4 { gap / subs as f32 } else { spacing };
-                let along = scale(bone, along_len * 0.5);
+                // Along the STEP to the next ring, not the bone: on a curved
+                // trunk (a canine's neck into its head) the two differ, and
+                // splats laid along the bone left a dark seam at every ring.
+                let step = if gap > 1e-4 { norm_or(sub(xf.point(next.expect("gap > 0 has a next").c), c0), bone) } else { bone };
+                let along = scale(step, along_len * 0.5);
                 // Ramanujan's ellipse perimeter.
                 let circ = std::f32::consts::PI * (3.0 * (hw + hd) - ((3.0 * hw + hd) * (hw + 3.0 * hd)).sqrt());
                 let m = ((circ / spacing).ceil() as usize).clamp(6, 400);
@@ -407,6 +416,30 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
     let origin = [lo[0].floor(), lo[1].floor()];
     let w = ((hi[0] - origin[0]).ceil() as usize + 1).min(4096);
     let h = ((hi[1] - origin[1]).ceil() as usize + 1).min(4096);
+    // The front surface's depth per pixel, from every splat's core: a
+    // splat further behind it than SURFACE_BAND is inside or beyond the
+    // body and is not drawn. Between neighbouring splats a Gaussian
+    // surface never quite closes, and without this the rings inside a
+    // trunk (a neck in a chest) showed through it as a moire, worst when
+    // zoomed in; culling them by geometry instead tore joints open.
+    let mut front = vec![f32::MAX; w * h];
+    for f in &flats {
+        let (cx, cy) = (f.c[0] - origin[0], f.c[1] - origin[1]);
+        let xa = ((cx - f.r[0] * 0.5).floor() as i64).max(0);
+        let xb = ((cx + f.r[0] * 0.5).ceil() as i64).min(w as i64 - 1);
+        let ya = ((cy - f.r[1] * 0.5).floor() as i64).max(0);
+        let yb = ((cy + f.r[1] * 0.5).ceil() as i64).min(h as i64 - 1);
+        for py in ya..=yb {
+            for px in xa..=xb {
+                let d = [px as f32 + 0.5 - cx, py as f32 + 0.5 - cy];
+                let m = d[0] * (f.inv[0][0] * d[0] + f.inv[0][1] * d[1]) + d[1] * (f.inv[1][0] * d[0] + f.inv[1][1] * d[1]);
+                if m <= 2.25 {
+                    let at = &mut front[py as usize * w + px as usize];
+                    *at = at.min(f.z);
+                }
+            }
+        }
+    }
     // Back to front, premultiplied over transparent.
     flats.sort_by(|a, b| b.z.total_cmp(&a.z));
     let mut fb = vec![[0.0f32; 4]; w * h];
@@ -421,7 +454,7 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
             for px in xa..=xb {
                 let d = [px as f32 + 0.5 - cx, py as f32 + 0.5 - cy];
                 let m = d[0] * (f.inv[0][0] * d[0] + f.inv[0][1] * d[1]) + d[1] * (f.inv[1][0] * d[0] + f.inv[1][1] * d[1]);
-                if m > 9.0 {
+                if m > 9.0 || f.z > front[py as usize * w + px as usize] + SURFACE_BAND {
                     continue;
                 }
                 let a = (g.alpha * (-0.5 * m).exp()).min(0.99);
@@ -433,13 +466,20 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
             }
         }
     }
+    // A pixel under some splat's core is ON the surface: it is opaque,
+    // whatever the Gaussians summed to. Between neighbouring splats the
+    // sum falls short (0.86 at the default overlap), and drawn as is that
+    // shortfall showed the background through the body as dark rings
+    // round every station, worst when zoomed in. Outside every core the
+    // soft alpha stays: that is the edge.
     let mut rgba = vec![0u8; w * h * 4];
-    for (p, px) in fb.iter().zip(rgba.chunks_exact_mut(4)) {
+    for ((p, px), z) in fb.iter().zip(rgba.chunks_exact_mut(4)).zip(&front) {
         if p[3] > 1e-3 {
             for c in 0..3 {
                 px[c] = (p[c] / p[3]).round().clamp(0.0, 255.0) as u8;
             }
-            px[3] = (p[3] * 255.0).round().clamp(0.0, 255.0) as u8;
+            let a = if *z < f32::MAX { 1.0 } else { p[3] };
+            px[3] = (a * 255.0).round().clamp(0.0, 255.0) as u8;
         }
     }
     Skin { origin, w, h, rgba }
