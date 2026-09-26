@@ -49,6 +49,8 @@ pub struct RigTool {
     puppet_view: PuppetView,
     /// Its last smooth skin, and what it was rendered from.
     skin: Option<(SkinKey, egui::TextureHandle, Vec2)>,
+    /// How many splats the cached cloud holds (0 when the skin is drawn).
+    splat_count: usize,
     /// The painted sheet, and the texture it makes for the current rig.
     sheet: Option<SheetFile>,
     sheet_serial: u64,
@@ -165,6 +167,7 @@ impl RigTool {
             show_on_stage: None,
             puppet_view: PuppetView::default(),
             skin: None,
+            splat_count: 0,
             sheet: None,
             sheet_serial: 0,
             sheet_texture: None,
@@ -1073,8 +1076,10 @@ impl RigTool {
                         let _t = crate::perf_log::span("rigs: skin");
                         let skin = if self.puppet_view.splats {
                             let cloud = gs_puppet::splat::cloud(&posed, texture.as_deref(), look.body, &self.puppet_view.splat);
+                            self.splat_count = cloud.len();
                             gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
                         } else {
+                            self.splat_count = 0;
                             posed.skin_textured(&|p| local.project(p), &look, texture.as_deref())
                         };
                         let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
@@ -1111,7 +1116,11 @@ impl RigTool {
                 painter.text(
                     rect.left_bottom() + Vec2::new(8.0, -8.0),
                     egui::Align2::LEFT_BOTTOM,
-                    format!("{} segments, {:.1} ft", puppet.segments.len(), puppet.height),
+                    if self.puppet_view.skin && self.puppet_view.splats && self.splat_count > 0 {
+                        format!("{} segments, {:.1} ft, {} splats", puppet.segments.len(), puppet.height, self.splat_count)
+                    } else {
+                        format!("{} segments, {:.1} ft", puppet.segments.len(), puppet.height)
+                    },
                     egui::FontId::proportional(12.0),
                     guide_text(dark),
                 );
