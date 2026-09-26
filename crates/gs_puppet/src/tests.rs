@@ -121,6 +121,7 @@ fn buried_rig(view: View) -> Rig {
                 joints: vec!["top".into(), "hip".into()],
                 pivot: None,
                 radius_ft: None,
+                membrane: false,
             },
             RigBone {
                 name: "leg".to_owned(),
@@ -129,6 +130,7 @@ fn buried_rig(view: View) -> Rig {
                 joints: vec!["hip".into(), "knee".into(), "foot".into()],
                 pivot: None,
                 radius_ft: None,
+                membrane: false,
             },
         ],
     }
@@ -458,6 +460,7 @@ fn bone(name: &str, part: &str, parent: Option<&str>, joints: &[&str]) -> RigBon
         joints: joints.iter().map(|j| j.to_string()).collect(),
         pivot: None,
         radius_ft: None,
+        membrane: false,
     }
 }
 
@@ -1045,6 +1048,7 @@ fn a_taper_runs_from_the_chain_s_root_to_its_free_end() {
         joints: vec!["l".into(), "mid".into(), "r".into()],
         pivot: Some("mid".into()),
         radius_ft: None,
+        membrane: false,
     };
     let mut rig = plain_rig(View::Front, &[("l", [-0.8, 3.0]), ("mid", [0.0, 3.0]), ("r", [0.8, 3.0])], vec![across]);
     rig.radius_tip_ft.insert("bar".into(), 0.02);
@@ -1134,4 +1138,49 @@ fn shipped_plans_carry_their_side_registration() {
         assert_eq!(back.side_shift, p.side_shift, "{family}: baked and read back");
     }
     assert_eq!(shipped("canine").side_shift, 0.0);
+}
+
+/// A membrane's plane is the least-squares plane of its joints; joints on
+/// one line span none.
+#[test]
+fn a_membrane_plane_is_the_plane_of_its_joints() {
+    use crate::puppet::membrane_plane;
+    // z = x, a little off it: the normal is (1, 0, -1) either way round
+    let tilted = [[0.0, 0.0, 0.01], [1.0, 2.0, 1.0], [2.0, 0.5, 1.99], [0.5, 3.0, 0.5]];
+    let n = membrane_plane(&tilted).expect("a plane");
+    let want = std::f32::consts::FRAC_1_SQRT_2;
+    assert!((n[0].abs() - want).abs() < 0.02 && n[1].abs() < 0.02 && (n[2].abs() - want).abs() < 0.02, "{n:?}");
+    assert!(n[0] * n[2] < 0.0, "{n:?}");
+    assert_eq!(membrane_plane(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [3.0, 3.0, 3.0]]), None);
+    assert_eq!(membrane_plane(&[[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]]), None);
+}
+
+/// The winged humanoid's wings are flagged membrane: each is a sheet an inch
+/// through, in the plane of its joints (swept back, so tilted), folding in
+/// it -- where as tubes they were pillows 2.4 ft deep. And the sheet stops at
+/// the body: at shoulder height the drawing runs wingtip to wingtip, and a
+/// wing root reading all of it stood a blade out through the chest.
+#[test]
+fn a_wing_flagged_membrane_is_a_thin_sheet_in_the_plane_of_its_joints() {
+    use crate::math::dot;
+    let p = shipped("winged_humanoid");
+    let tube = shipped_where("winged_humanoid", |r| r.bones.iter_mut().for_each(|b| b.membrane = false));
+    for name in ["wing_r.0", "wing_r.1", "wing_hand_r", "wing_l.0", "wing_hand_l"] {
+        let s = p.segments.iter().find(|s| s.name == name).expect(name);
+        let deepest = |s: &Segment| s.stations.iter().map(|x| x.d).fold(0.0, f32::max);
+        assert!(deepest(s) <= 0.05, "{name}: {}", deepest(s));
+        assert!(deepest(tube.segments.iter().find(|s| s.name == name).unwrap()) > 1.0, "{name} as a tube");
+        assert!(dot(s.axis_w, s.axis_d).abs() < 1e-3, "{name}: the width lies in the sheet");
+        assert!(s.axis_d[0].abs() > 0.5 && s.axis_d[2].abs() > 0.5, "{name}: swept back, tilted: {:?}", s.axis_d);
+        assert!((dot(s.hinge, s.axis_d).abs() - 1.0).abs() < 1e-3, "{name}: folds in its plane");
+    }
+    let front = |pick: &dyn Fn(&str) -> bool| {
+        p.segments
+            .iter()
+            .filter(|s| pick(&s.bone))
+            .flat_map(|s| s.stations.iter().map(move |st| st.c[2] + (st.w * s.axis_w[2]).abs() + (st.d * s.axis_d[2]).abs()))
+            .fold(f32::MIN, f32::max)
+    };
+    let (chest, wing) = (front(&|b| b.starts_with("torso")), front(&|b| b.starts_with("wing")));
+    assert!(wing <= chest + 0.1, "a wing reaches {wing:.2} ft forward, the chest {chest:.2}");
 }

@@ -132,6 +132,69 @@ const MIN_CHAIN_FT: f32 = 0.2;
 const CHAIN_CALIBRE_MAX: f32 = 2.5;
 /// A mitten is this deep, as a share of its width.
 const HAND_DEPTH: f32 = 0.4;
+/// A membrane's half-thickness where the rig does not pin one
+/// (`radius_depth_ft`): about an inch through.
+const MEMBRANE_HALF_FT: f32 = 0.04;
+/// A membrane plane seen closer to edge-on than this (the |component| of its
+/// normal along the measuring view's line of sight) cannot take its widths
+/// from that view: it stays a flat plate in the view's own plane.
+const MEMBRANE_EDGE_ON: f32 = 0.2;
+
+/// The plane of a membrane's joints: its unit normal, least squares (the
+/// smallest-spread direction of the points about their centroid). None when
+/// they span no plane (fewer than three, or all on one line).
+pub(crate) fn membrane_plane(points: &[V3]) -> Option<V3> {
+    if points.len() < 3 {
+        return None;
+    }
+    let n = points.len() as f32;
+    let c = scale(points.iter().fold([0.0; 3], |a, p| add(a, *p)), 1.0 / n);
+    let mut m = [[0.0f32; 3]; 3];
+    for p in points {
+        let d = sub(*p, c);
+        for (i, row) in m.iter_mut().enumerate() {
+            for (j, v) in row.iter_mut().enumerate() {
+                *v += d[i] * d[j];
+            }
+        }
+    }
+    // The smallest eigenvector of m is the largest of (trace - m): power
+    // iteration, from each axis in turn so a start orthogonal to it cannot
+    // stall.
+    let tr = m[0][0] + m[1][1] + m[2][2];
+    if tr < 1e-6 {
+        return None;
+    }
+    let apply = |a: &[[f32; 3]; 3], v: V3| -> V3 { std::array::from_fn(|i| (0..3).map(|j| a[i][j] * v[j]).sum::<f32>()) };
+    let spread = |v: V3| dot(v, apply(&m, v));
+    // Power iteration from each axis in turn (a start orthogonal to the
+    // answer cannot stall all three): the largest spread on m itself, the
+    // smallest as the largest of (trace - m).
+    let mut flipped = m;
+    for (i, row) in flipped.iter_mut().enumerate() {
+        for (j, v) in row.iter_mut().enumerate() {
+            *v = if i == j { tr - *v } else { -*v };
+        }
+    }
+    let dominant = |a: &[[f32; 3]; 3], pick_max: bool| -> V3 {
+        let mut best: Option<(f32, V3)> = None;
+        for start in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] {
+            let mut v: V3 = start;
+            for _ in 0..64 {
+                v = norm_or(apply(a, v), v);
+            }
+            let s = spread(v);
+            if best.is_none_or(|(b, _)| if pick_max { s > b } else { s < b }) {
+                best = Some((s, v));
+            }
+        }
+        best.map_or([0.0, 0.0, 1.0], |(_, v)| v)
+    };
+    let (long, normal) = (dominant(&m, true), dominant(&flipped, false));
+    // A line, not a plane: the middle spread is next to nothing.
+    let middle = tr - spread(long) - spread(normal);
+    (middle > 0.01 * spread(long)).then_some(normal)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -577,6 +640,31 @@ impl Puppet {
         }
         let top = joints.values().map(|p| p[1]).fold(0.0, f32::max);
 
+        // ---- membranes: one sheet per wing, in the plane of the joints of
+        // every membrane bone joined to it by a shared joint.
+        let mut membrane_normal: Vec<Option<V3>> = vec![None; rig.bones.len()];
+        {
+            let flagged: Vec<usize> = (0..rig.bones.len()).filter(|&b| rig.bones[b].membrane).collect();
+            let mut label: Vec<usize> = (0..rig.bones.len()).collect();
+            let touches = |a: usize, b: usize| rig.bones[a].joints.iter().any(|j| rig.bones[b].joints.contains(j));
+            for _ in 0..flagged.len() {
+                for &a in &flagged {
+                    for &b in &flagged {
+                        if touches(a, b) && label[b] < label[a] {
+                            label[a] = label[b];
+                        }
+                    }
+                }
+            }
+            for &b in &flagged {
+                let mut names: Vec<&String> = flagged.iter().filter(|&&o| label[o] == label[b]).flat_map(|&o| &rig.bones[o].joints).collect();
+                names.sort();
+                names.dedup();
+                let points: Vec<V3> = names.iter().filter_map(|j| joints.get(*j).copied()).collect();
+                membrane_normal[b] = membrane_plane(&points);
+            }
+        }
+
         let kind_of = |r: &Raw| {
             let part = rig.bones[r.bone].part.as_deref();
             if !is_limb_part(part) {
@@ -720,6 +808,21 @@ impl Puppet {
             let bone = &rig.bones[r.bone];
             let m = measured[i].take().expect("measured");
             let kind = kinds[i];
+            // A membrane's widths were read in the view; its sheet lies in
+            // its plane. The width axis is lifted into that plane keeping its
+            // projection in the view, so the drawing is covered just as it
+            // was measured and the sheet tilts wherever its joints do.
+            let sheet = membrane_normal[r.bone].and_then(|nrm| {
+                let oa = off_axis(m.view);
+                (nrm[oa].abs() > MEMBRANE_EDGE_ON).then(|| {
+                    let mut v = m.axis_w;
+                    v[oa] -= dot(m.axis_w, nrm) / nrm[oa];
+                    let lift = len(v);
+                    (scale(v, 1.0 / lift), lift, nrm)
+                })
+            });
+            let (axis_w, lift) = sheet.map_or((m.axis_w, 1.0), |(v, l, _)| (v, l));
+            let axis_d = sheet.map_or(m.axis_d, |(_, _, nrm)| nrm);
             let leaf = !rig.bones.iter().any(|b| b.parent.as_deref() == Some(bone.name.as_str()));
             let part_is_head = bone.part.as_deref() == Some("head");
             // Nothing hangs off this segment's far end (its own chain's next
@@ -746,7 +849,7 @@ impl Puppet {
             // Depth, from the view the segment was NOT measured in.
             let oa = off_axis(m.view);
             let other = mask_of(other_view(m.view));
-            let centre = |k: usize| add(lerp(r.head, r.tail, k as f32 / (n - 1) as f32), scale(m.axis_w, m.off[k]));
+            let centre = |k: usize| add(lerp(r.head, r.tail, k as f32 / (n - 1) as f32), scale(axis_w, m.off[k] * lift));
             let mut depth: Vec<Option<f32>> = Vec::with_capacity(n);
             let mut shift: Vec<f32> = Vec::with_capacity(n);
             // How far each row runs out in front of the bone line.
@@ -1000,6 +1103,13 @@ impl Puppet {
             }
             box3(&mut d);
             box3(&mut shift);
+            // A membrane is no deeper than a skin and sits on its bones: the
+            // other view's rows run through the whole fan behind it.
+            if sheet.is_some() {
+                d = vec![MEMBRANE_HALF_FT; n];
+                shift = vec![0.0; n];
+                w.iter_mut().for_each(|x| *x *= lift);
+            }
             // Where a hand hangs from this limb, its far end must meet the
             // hand, which is never shifted: ease the shift out over the
             // segment's far half. Otherwise a limb lying along the trunk in
@@ -1080,7 +1190,9 @@ impl Puppet {
             // Antlers, horns and ears share its part and hang off it, and
             // they do take one (a stag's antlers floated over its head).
             let is_skull = part_is_head && r.parent.is_none_or(|p| segments[p].part.as_deref() != Some("head"));
-            if r.k == 0 && !is_skull {
+            // (Not a membrane: its root is an edge of the sheet, and a stub
+            // as wide as the sheet stood out of the chest as a shelf.)
+            if r.k == 0 && !is_skull && sheet.is_none() {
                 if let Some(p) = r.parent.filter(|p| segments[*p].kind == Kind::Trunk) {
                     let ps = &segments[p];
                     let pa = norm_or(sub(ps.tail, ps.head), [0.0, 1.0, 0.0]);
@@ -1164,7 +1276,7 @@ impl Puppet {
             // caps, which both move rings: a foot's first ring, moved onto
             // the shin's last, sat up to 0.18 ft under the floor. (Drawn
             // from above, y is not up yet: nothing to rest.)
-            let tilt = m.axis_w[1].abs();
+            let tilt = axis_w[1].abs();
             if tilt > 1e-3 && !rig.from_above {
                 for s in &mut stations {
                     let floor = s.c[1].max(0.0) / tilt;
@@ -1207,15 +1319,23 @@ impl Puppet {
                 .map(|up| cross(up, a))
                 .filter(|n| len(*n) > CHAIN_BEND_MIN)
                 .map(|n| norm_or(n, axis_rule));
-            let hinge = match chain_normal {
-                Some(n) if dot(n, axis_rule).abs() < 0.7 => {
+            let hinge = match (sheet, chain_normal) {
+                // A membrane folds in its own plane, as a fan closes.
+                (Some((_, _, nrm)), _) => {
+                    if dot(nrm, axis_rule) < 0.0 {
+                        scale(nrm, -1.0)
+                    } else {
+                        nrm
+                    }
+                }
+                (None, Some(n)) if dot(n, axis_rule).abs() < 0.7 => {
                     if dot(n, axis_rule) < 0.0 || (dot(n, axis_rule) == 0.0 && n[2] < 0.0) {
                         scale(n, -1.0)
                     } else {
                         n
                     }
                 }
-                _ => axis_rule,
+                (None, _) => axis_rule,
             };
 
             let group_key = if kind == Kind::Trunk {
@@ -1251,8 +1371,8 @@ impl Puppet {
                 chain_index: r.k,
                 head: q3(seg_head),
                 tail: q3(r.tail),
-                axis_w: q3(m.axis_w),
-                axis_d: q3(m.axis_d),
+                axis_w: q3(axis_w),
+                axis_d: q3(axis_d),
                 hinge: q3(hinge),
                 stations,
                 bare: 0,
@@ -1668,6 +1788,9 @@ fn measure_segment<'m>(
 ) -> Measured {
     let r = &raws[i];
     let kind = kinds[i];
+    // A membrane is measured where it is drawn spread, across its whole
+    // width: none of the rules below that keep a tube inside its own column.
+    let membrane = rig.bones[r.bone].membrane;
     let span = sub(r.tail, r.head);
     let length = len(span);
     let lp = len(embed(rig.view, flat(rig.view, span)));
@@ -1676,7 +1799,7 @@ fn measure_segment<'m>(
     // runs toward the viewer, so its profile is in the SIDE view. (Never
     // for a rig drawn from above: its side view is every leg over every
     // other, and a leg measured there read the whole body's height.)
-    let view = if !rig.from_above && mask_of(other_view(rig.view)).is_some() && lo > 1.5 * lp + 0.05 {
+    let view = if !membrane && !rig.from_above && mask_of(other_view(rig.view)).is_some() && lo > 1.5 * lp + 0.05 {
         other_view(rig.view)
     } else {
         rig.view
@@ -1714,7 +1837,13 @@ fn measure_segment<'m>(
         .enumerate()
         .filter(|(o, other)| {
             let shares = [&other.head_joint, &other.tail_joint].iter().any(|j| **j == r.head_joint || **j == r.tail_joint);
-            *o != i && other.bone != r.bone && !shares
+            // A membrane is not split with the limbs in front of it (an arm
+            // hangs in front of a wing, it does not share the wing's skin),
+            // but it does stop at the body: at shoulder height the drawing is
+            // one run from wingtip to wingtip, and a wing root reading all of
+            // it stood a blade through the chest.
+            let stops_membrane = kinds[*o] == Kind::Trunk && !rig.bones[other.bone].membrane;
+            (!membrane || stops_membrane) && *o != i && other.bone != r.bone && !shares
         })
         .filter_map(|(o, other)| {
             let (a, b) = (flat(view, other.head), flat(view, other.tail));
@@ -1744,6 +1873,7 @@ fn measure_segment<'m>(
     // clip above cannot catch it (those bones cross at right angles), so the
     // girdle's thickness is capped by its own length instead (below).
     let girdle = kind == Kind::Trunk
+        && !membrane
         && u[1].abs() < 0.5
         && raws.iter().zip(kinds).enumerate().any(|(o, (other, k))| {
             if o == i || *k != Kind::Trunk {
@@ -1904,6 +2034,7 @@ fn measure_segment<'m>(
     for k in 0..n {
         let bad = match (kind, half[k]) {
             (_, None) => true,
+            _ if membrane => false,
             (Kind::Trunk, Some(h)) => h > 1.5 * chain_len.max(0.5),
             // Absolute, not relative: a limb is never half as thick as the
             // chain it belongs to is long, nor much thicker than the

@@ -1557,6 +1557,17 @@ impl RigTool {
                     editor.set_bone_tip_radius(index, v);
                 }
                 ui.end_row();
+
+                ui.label("Membrane").on_hover_text(
+                    "A skin stretched between bones -- a bat's or a dragon's wing -- instead of a tube round this one. \
+                     Tick every bone of the wing: the 3D puppet lays them flat in the plane of their joints, as wide as \
+                     the drawing and about an inch thick (Depth sets the half-thickness), and they fold in that plane.",
+                );
+                let mut on = bone.membrane;
+                if ui.checkbox(&mut on, "skin, not a tube").changed() {
+                    editor.set_bone_membrane(index, on);
+                }
+                ui.end_row();
             });
             ui.weak("The 3D preview shows the change as you drag.");
         });

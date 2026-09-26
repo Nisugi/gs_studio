@@ -51,6 +51,11 @@ pub struct RigBone {
     /// None = let `rig_bake` measure the silhouette's half-thickness.
     #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_f32")]
     pub radius_ft: Option<f32>,
+    /// A skin stretched between bones (a bat's or a dragon's wing), not a
+    /// tube round one: the 3D builder lays it flat in the plane of its
+    /// joints, as wide as the drawing, and thin (`gs_puppet`'s membrane).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub membrane: bool,
 }
 
 /// Explicit eye points. Normally empty: eyes are the `eye_l` / `eye_r`

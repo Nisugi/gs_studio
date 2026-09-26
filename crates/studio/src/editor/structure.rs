@@ -311,6 +311,7 @@ impl Editor {
             joints: Vec::new(),
             pivot: None,
             radius_ft: None,
+            membrane: false,
         });
         let index = self.rig.bones.len() - 1;
         self.selected_bone = Some(index);

@@ -51,6 +51,7 @@ fn an_old_rig_file_gets_its_parents_from_the_template() {
         joints: vec!["wrist_r".into(), "club_tip".into()],
         pivot: None,
         radius_ft: None,
+        membrane: false,
     });
     let text = old.to_toml().unwrap();
     assert!(!text.contains("parent") && !text.contains("joint_order") && !text.contains("version = 2"), "{text}");

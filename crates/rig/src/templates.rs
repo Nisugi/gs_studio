@@ -107,6 +107,7 @@ impl Template {
                     joints: b.joints.clone(),
                     pivot: b.pivot.clone(),
                     radius_ft: None,
+                    membrane: false,
                 })
                 .collect(),
         }

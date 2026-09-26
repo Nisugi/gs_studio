@@ -301,6 +301,15 @@ impl Editor {
         }
     }
 
+    /// Whether the bone is a membrane (`RigBone::membrane`): a skin
+    /// stretched between bones (a wing), built flat in the plane of its
+    /// joints instead of as a tube.
+    pub fn set_bone_membrane(&mut self, bone: usize, on: bool) {
+        if self.rig.bones.get(bone).is_some_and(|b| b.membrane != on) {
+            self.edit(None).bones[bone].membrane = on;
+        }
+    }
+
     /// The bone's off-plane half-thickness (`Rig::radius_depth_ft`); None
     /// is Auto (measured from the other silhouette). Drags coalesce as
     /// [`Editor::set_bone_radius`].
@@ -665,6 +674,7 @@ mod tests {
             joints: vec!["wrist_r".into(), "club_tip".into()],
             pivot: None,
             radius_ft: None,
+            membrane: false,
         });
         let order = Editor::new(rig, t.clone()).joint_order();
         assert_eq!(&order[..t.joints.len()], &t.joints[..]);

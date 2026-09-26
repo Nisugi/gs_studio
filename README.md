@@ -800,6 +800,7 @@ limits, kept in step by hand.
     joints = ["crown", "chin"]
     pivot = "chin"               # omit for "the chain's first joint"
     radius_ft = 0.2              # omit for Auto
+    membrane = true              # a skin between bones (a wing), not a tube; omit = false
 
 A bone uses whichever of its joints are placed and is skipped with fewer than
 two. `parent` must name another bone and may not loop (a loop in a hand-edited
@@ -834,6 +835,21 @@ bone name, in feet, all optional:
 The avian's feathers use all three: a folded wing's silhouette says nothing
 about how broad the feathers are once spread, so the blade is set by hand --
 0.22 ft at the wrist tapering to 0.04 at the tip, 0.03 thick.
+**Membranes.** A bone with `membrane = true` (the bone panel's *Membrane*
+box) is a skin stretched between bones, not a tube round its own: a bat's or
+a dragon's wing. Every membrane bone joined to it by a shared joint makes one
+sheet, in the least-squares plane of their joints (so a wing swept back in
+depth tilts back). Each cross-section's width is read in the rig's view as
+usual -- past the limbs in front of it, stopping at the body's trunk bones --
+and lifted into that plane keeping its projection, so the drawing is covered
+exactly as measured while the side view sees the tilted sheet. It is
+`MEMBRANE_HALF_FT` (0.04 ft) through unless `[radius_depth_ft]` pins it,
+takes no depth from the other view and grows no socket stub, and folds
+about the plane's normal. A plane seen nearly edge-on from the rig's view
+cannot be measured there and stays a plate in the view's plane. The winged
+humanoid's four wing bones are membranes: rest fit front 0.909 -> 0.934,
+side 0.678 -> 0.791 against the tubes.
+
 The suine's fore trotters set `radius_depth_ft` too: face on, each has its
 hind trotter straight behind it, so the front view cannot say how deep one
 trotter is, and unset they came out no wider across than front to back.
