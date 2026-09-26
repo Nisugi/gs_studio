@@ -121,10 +121,12 @@ pub fn cloud_path(data_root: &std::path::Path, family: &str) -> std::path::PathB
 }
 
 /// A fitted cloud bound to a puppet: each Gaussian follows the body
-/// segment whose ring it sits nearest in the rest pose (distance over that
-/// ring's radius, plus a little along the bone), exactly as the puppet's
-/// own rings do. Hard binding: one segment per Gaussian, so a joint bent
-/// far opens a wedge. Built once per puppet; posed per frame.
+/// segment whose ring SURFACE it sits nearest in the rest pose, in feet
+/// (inside a ring counts as on it), exactly as the puppet's own rings do.
+/// Measured in radii instead, a torso ring four times an arm's width
+/// claimed the arm's outer side, and a raised arm left a second pair
+/// hanging. Hard binding: one segment per Gaussian, so a joint bent far
+/// opens a wedge. Built once per puppet; posed per frame.
 #[derive(Debug, Clone)]
 pub struct BoundCloud {
     /// The cloud in the puppet's rest space.
@@ -150,8 +152,11 @@ impl BoundCloud {
                     for st in &s.stations {
                         let e = sub(g.c, st.c);
                         let (u, v) = (dot(e, s.axis_w) / st.w.max(0.02), dot(e, s.axis_d) / st.d.max(0.02));
-                        let along = dot(e, *axis) / crate::puppet::STATION_STEP_FT;
-                        let d = u * u + v * v + 0.25 * along * along;
+                        // Feet outside the ring's ellipse (0 inside), and
+                        // feet past the ring's own slab along the bone.
+                        let radial = ((u * u + v * v).sqrt() - 1.0).max(0.0) * (st.w + st.d) * 0.5;
+                        let along = (dot(e, *axis).abs() - crate::puppet::STATION_STEP_FT * 0.5).max(0.0);
+                        let d = radial * radial + along * along;
                         if d < best.1 {
                             best = (*i, d);
                         }
