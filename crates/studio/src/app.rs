@@ -583,9 +583,6 @@ impl StudioApp {
             ToolId::Rigs => match &mut self.rigs {
                 Ok(tool) => {
                     tool.ui(ui);
-                    if tool.quit_approved() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
                     if let Some(family) = tool.take_show_on_stage() {
                         let room = &self.room;
                         self.stage.get_or_insert_with(|| StageTool::new(room.clone())).spawn_puppet(&family);
@@ -621,6 +618,15 @@ impl StudioApp {
                     _ => self.calibrators.dolls_ui(ui),
                 };
                 self.apply_effects(effects);
+            }
+        }
+
+        // Whatever tab is showing: the rig tool's unsaved-work questions,
+        // and the close they approve.
+        if let Ok(tool) = &mut self.rigs {
+            tool.modal_prompts(ui.ctx());
+            if tool.quit_approved() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
     }

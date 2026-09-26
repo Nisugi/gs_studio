@@ -340,9 +340,16 @@ impl RigTool {
             let _t = crate::perf_log::span("rigs: canvas");
             self.centre(ui)
         });
-        self.discard_prompt(ui.ctx());
         self.name_prompt(ui.ctx());
-        self.pose_quit_prompt(ui.ctx());
+    }
+
+    /// The questions that guard unsaved work (the rig, the poses), drawn by
+    /// the app over whichever tab is showing: a window close asked from
+    /// another tab waits on them, and drawn only here they left the window
+    /// seemingly refusing to close.
+    pub fn modal_prompts(&mut self, ctx: &egui::Context) {
+        self.discard_prompt(ctx);
+        self.pose_quit_prompt(ctx);
     }
 
     fn ask(&mut self, kind: PromptKind) {
