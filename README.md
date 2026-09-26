@@ -494,7 +494,10 @@ into `poses/` -- never the `.rig.toml` source, into the publish directory:
 the folder whose contents game clients embed. Default
 `<data>/../crates/gs_field/data`; `--publish`, `GS_STUDIO_PUBLISH` or the
 *Publish to* box override it (a path naming a `rigs` directory, the old
-meaning, is taken as its parent). With *publish on save* ticked (the
+meaning, is taken as its parent). A pose set, `props/weapons.toml` or
+outfit file that does not parse stops Publish before anything is copied,
+and the error names it; the published copies stay as they were. With
+*publish on save* ticked (the
 default) Save publishes too. The directory is created if its parent exists;
 if not even the parent exists, the button and the checkbox are disabled and
 their hover text says why -- Save still works.

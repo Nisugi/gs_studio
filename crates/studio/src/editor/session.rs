@@ -459,6 +459,13 @@ impl Session {
         if !self.has_saved_bake(&family) {
             return Err(format!("{family} has no saved bake yet: save first"));
         }
+        // The hand-edited files are checked before anything is copied: a
+        // pose set that did not parse replaced the good published one under
+        // a report of success, and the game lost that body type's poses.
+        let broken = self.broken_shared_files();
+        if !broken.is_empty() {
+            return Err(format!("nothing published; fix first: {}", broken.join("; ")));
+        }
         let (mut shipped, mut removed) = (Vec::new(), Vec::new());
         // What the family no longer has goes too. Left behind, a puppet of
         // a rig that could no longer build one, and a texture whose sheet
@@ -586,6 +593,47 @@ impl Session {
         self.data_root.join("props").join("weapons.toml")
     }
 
+    /// Every pose set in `<data>/poses/`, each with why it does not parse.
+    fn pose_sets(&self) -> Vec<(PathBuf, Result<(), String>)> {
+        std::fs::read_dir(self.data_root.join("poses"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .map(|p| {
+                let parsed = std::fs::read_to_string(&p).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PoseSet::from_toml(&t));
+                (p, parsed.map(|_| ()))
+            })
+            .collect()
+    }
+
+    /// The held-props file, when there is one, with why it does not parse.
+    fn props_file(&self) -> Option<(PathBuf, Result<(), String>)> {
+        let props = self.props_path();
+        props.is_file().then(|| {
+            let parsed = std::fs::read_to_string(&props).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PropSet::from_toml(&t));
+            (props, parsed.map(|_| ()))
+        })
+    }
+
+    /// What is wrong with the hand-edited files every publish ships (pose
+    /// sets, held props, clothing kit and outfits), one line per file.
+    fn broken_shared_files(&self) -> Vec<String> {
+        let mut broken: Vec<String> = self
+            .pose_sets()
+            .into_iter()
+            .filter_map(|(p, parsed)| parsed.err().map(|e| format!("poses/{}: {e}", p.file_name().unwrap_or_default().to_string_lossy())))
+            .collect();
+        if let Some((_, Err(e))) = self.props_file() {
+            broken.push(format!("props/weapons.toml: {e}"));
+        }
+        if let Err(e) = super::texture::outfits(&self.data_root) {
+            broken.push(format!("outfits: {e}"));
+        }
+        broken
+    }
+
     /// Put every pose set in `<data>/poses/` into `<pool>/global/puppets/`,
     /// where it replaces the built-in set of that body type on the stage, the
     /// held-props file into `<pool>/global/props/`, and the clothing kit and
@@ -598,26 +646,19 @@ impl Session {
         let into = pool.join("global").join("puppets");
         let mut installed = 0;
         let mut broken = Vec::new();
-        for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if !path.extension().is_some_and(|e| e == "toml") {
-                continue;
-            }
-            let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PoseSet::from_toml(&t)) {
-                Ok(_) => {
+        for (path, parsed) in self.pose_sets() {
+            match parsed {
+                Ok(()) => {
                     copy_into(&path, &into)?;
                     installed += 1;
                 }
-                Err(e) => broken.push(format!("{name}: {e}")),
+                Err(e) => broken.push(format!("{}: {e}", path.file_name().unwrap_or_default().to_string_lossy())),
             }
         }
-        let props = self.props_path();
-        if props.is_file() {
-            match std::fs::read_to_string(&props).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PropSet::from_toml(&t)) {
-                Ok(_) => copy_into(&props, &pool.join("global").join("props"))?,
-                Err(e) => broken.push(format!("props/weapons.toml: {e}")),
-            }
+        match self.props_file() {
+            Some((props, Ok(()))) => copy_into(&props, &pool.join("global").join("props"))?,
+            Some((_, Err(e))) => broken.push(format!("props/weapons.toml: {e}")),
+            None => {}
         }
         if let Err(e) = super::texture::ship_outfits(&self.data_root, &pool.join("global").join("outfits")) {
             broken.push(e);
@@ -917,6 +958,41 @@ neck = { rot = [1.0, 0.0, 0.0] }
         s.publish().unwrap();
         assert!(names(&out.join("puppets")).is_empty(), "{:?}", names(&out.join("puppets")));
         assert!(s.status.contains("removed puppets/humanoid.puppet.toml, puppets/humanoid.texture.png"), "{}", s.status);
+    }
+
+    /// A hand-edited file that does not parse stops the whole publish before
+    /// anything is copied: the good published pose set, and the rest of the
+    /// last publish, stay as they were.
+    #[test]
+    fn publish_ships_nothing_while_a_pose_set_does_not_parse() {
+        let data = TempData::new("publish_broken");
+        let out = data.0.join("published");
+        std::fs::create_dir_all(data.0.join("poses")).unwrap();
+        std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n").unwrap();
+        let mut s = open(&data.0).unwrap();
+        s.publish_dir = out.clone();
+        s.publish_on_save = false;
+        s.editor.place_current([0.0, 5.8]);
+        s.save().unwrap();
+        s.publish().unwrap();
+        let good = std::fs::read(out.join("poses/biped.toml")).unwrap();
+        let bake = std::fs::read(out.join("rigs/humanoid.toml")).unwrap();
+
+        std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n[pose.sit\n").unwrap();
+        s.editor.place_current([0.0, 5.0]);
+        s.save().unwrap();
+        let err = s.publish().unwrap_err();
+        assert!(err.contains("nothing published") && err.contains("poses/biped.toml"), "{err}");
+        assert_eq!(std::fs::read(out.join("poses/biped.toml")).unwrap(), good, "the good pose set stays");
+        assert_eq!(std::fs::read(out.join("rigs/humanoid.toml")).unwrap(), bake, "nothing else moved either");
+
+        std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n").unwrap();
+        std::fs::create_dir_all(data.0.join("props")).unwrap();
+        std::fs::write(data.0.join("props/weapons.toml"), "[weapon\n").unwrap();
+        assert!(s.publish().unwrap_err().contains("props/weapons.toml"));
+        std::fs::remove_file(data.0.join("props/weapons.toml")).unwrap();
+        s.publish().unwrap();
+        assert_ne!(std::fs::read(out.join("rigs/humanoid.toml")).unwrap(), bake, "fixed, it publishes");
     }
 
     #[test]

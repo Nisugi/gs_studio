@@ -9,7 +9,8 @@
 //! `<publish_dir>/puppets/`, and every `data/poses/*.toml` into
 //! `<publish_dir>/poses/`. Default publish dir: `crates/gs_field/data`.
 //! `PUBLISH_ONLY=elephantid,canine` limits it to those families (poses are
-//! still copied).
+//! still copied). A pose set that does not parse stops it before anything
+//! is written.
 
 use std::path::{Path, PathBuf};
 
@@ -54,6 +55,26 @@ fn main() {
         families.retain(|f| only.contains(&f.as_str()));
     }
 
+    // Every pose set parses, or nothing is published: a broken one would
+    // replace the good published copy and the game would lose its poses.
+    let poses: Vec<PathBuf> = std::fs::read_dir(data.join("poses"))
+        .expect("poses dir")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+        .collect();
+    let broken: Vec<String> = poses
+        .iter()
+        .filter_map(|p| {
+            let parsed = std::fs::read_to_string(p).map_err(|e| e.to_string()).and_then(|t| gs_puppet::PoseSet::from_toml(&t));
+            parsed.err().map(|e| format!("{}: {e}", p.display()))
+        })
+        .collect();
+    if !broken.is_empty() {
+        eprintln!("nothing published; fix first:\n  {}", broken.join("\n  "));
+        std::process::exit(1);
+    }
+
     let mut failed = Vec::new();
     for family in &families {
         let rig = Rig::load(&rigs_dir.join(Rig::file_name(family))).expect("rig loads");
@@ -79,10 +100,8 @@ fn main() {
         copy_into(&puppet_path, &publish.join("puppets"));
         println!("published {family}");
     }
-    for entry in std::fs::read_dir(data.join("poses")).expect("poses dir").flatten() {
-        if entry.path().extension().is_some_and(|e| e == "toml") {
-            copy_into(&entry.path(), &publish.join("poses"));
-        }
+    for path in &poses {
+        copy_into(path, &publish.join("poses"));
     }
     println!("{} rigs published to {}, poses copied", families.len() - failed.len(), publish.display());
     for f in &failed {
