@@ -1252,8 +1252,20 @@ impl Puppet {
             biped_neck_under_head(&mut segments);
         }
         mirror_twins(rig, &mut segments);
+        // A twin took its partner's shape at rings of its own, lower,
+        // centres (a canine's forepaw_r sat 0.1 ft lower than forepaw_l):
+        // ground them again.
+        if !rig.from_above {
+            ground_rings(&mut segments);
+        }
         for i in 0..segments.len() {
-            if segments[i].kind == Kind::Trunk || segments[i].chain_index != 0 {
+            // Limb roots, and a trunk-kind chain rooted in a trunk (the
+            // quadruped's tail off its spine), whose first rings sit inside
+            // the body the same way. Not the neck or head.
+            let trunk_tail = segments[i].kind == Kind::Trunk
+                && segments[i].parent.is_some_and(|p| segments[p].kind == Kind::Trunk)
+                && !matches!(segments[i].part.as_deref(), Some("head" | "neck"));
+            if (segments[i].kind == Kind::Trunk && !trunk_tail) || segments[i].chain_index != 0 {
                 continue;
             }
             let inside = |c: V3| {
@@ -1280,6 +1292,7 @@ impl Puppet {
             let bare = segments[i].stations.iter().take_while(|st| buried(st)).count().max(CAP_RINGS + sockets[i]);
             segments[i].bare = bare.min(segments[i].stations.len().saturating_sub(CAP_RINGS + 2));
         }
+        quadruped_tail_root(&mut segments, &rig.body_type);
 
         let mut eyes = build_eyes(rig, &segments, &joints);
         if rig.from_above {
@@ -1517,6 +1530,61 @@ fn is_skull(rig: &Rig, bone: usize) -> bool {
 
 /// `mask` without the areas `rig.ignore` lists for `view` (a club, a
 /// weapon: art that is not the body). Borrowed when there are none.
+/// Nothing rests below the ground: a ring reaches down its width axis no
+/// further than y = 0 (the rule the builder applies to each segment's
+/// stations, here again for rings moved since).
+fn ground_rings(segments: &mut [Segment]) {
+    for s in segments.iter_mut() {
+        let tilt = s.axis_w[1].abs();
+        if tilt <= 1e-3 {
+            continue;
+        }
+        for st in &mut s.stations {
+            let floor = st.c[1].max(0.0) / tilt;
+            if st.w > floor {
+                st.w = q(floor.max(MIN_HALF_FT));
+            }
+        }
+    }
+}
+
+/// A quadruped's tail is a trunk-kind chain off the spine, and its root
+/// rings, inside the rump, read the rump: a canine's were 0.38 x 0.62 ft
+/// on a tail 0.2 ft thick, poked out below the croup, and the next
+/// segment took them over at the joint -- a lump under the tail's base.
+/// The tail bone's root segment, and the joint-eased head of its second,
+/// are no fatter than the rest of the tail (its median ring, caps aside)
+/// plus a quarter. Quadruped body types only: a naga's or serpent's
+/// "tail" is its body.
+fn quadruped_tail_root(segments: &mut [Segment], body_type: &str) {
+    const OVER: f32 = 1.25;
+    if !matches!(body_type, "quadruped" | "winged_quadruped" | "centaur") {
+        return;
+    }
+    let Some(root) = segments.iter().position(|s| s.bone == "tail" && s.chain_index == 0) else { return };
+    let (mut ws, mut ds) = (Vec::new(), Vec::new());
+    for o in segments.iter().filter(|o| o.bone == "tail" && o.chain_index > 0) {
+        let to = o.stations.len().saturating_sub(CAP_RINGS);
+        for st in o.stations.iter().take(to) {
+            ws.push(st.w);
+            ds.push(st.d);
+        }
+    }
+    if ws.is_empty() {
+        return;
+    }
+    let (cw, cd) = (median(&mut ws) * OVER, median(&mut ds) * OVER);
+    let clamp = |st: &mut Station| {
+        st.w = q(st.w.min(cw).max(MIN_HALF_FT * 0.5));
+        st.d = q(st.d.min(cd).max(MIN_HALF_FT * 0.5));
+    };
+    segments[root].stations.iter_mut().for_each(clamp);
+    if let Some(next) = segments.iter().position(|o| o.bone == "tail" && o.chain_index == 1) {
+        let n = segments[next].stations.len().min(CAP_RINGS + 2);
+        segments[next].stations[..n].iter_mut().for_each(clamp);
+    }
+}
+
 /// A side silhouette turned a quarter turn so its front (drawing x, world
 /// z) runs UP and its height runs left: what a rig drawn from above is
 /// built against, so that the side view's columns line up with the plan's

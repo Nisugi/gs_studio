@@ -836,7 +836,10 @@ fn a_mirrored_limb_takes_its_twin_s_shape() {
             let f = if na == nb { k as f32 } else { k as f32 / (na - 1).max(1) as f32 * (nb - 1) as f32 };
             let (i, j, t) = (f.floor() as usize, (f.ceil() as usize).min(nb - 1), f - f.floor());
             let (w, d) = (b.stations[i].w + (b.stations[j].w - b.stations[i].w) * t, b.stations[i].d + (b.stations[j].d - b.stations[i].d) * t);
-            assert!((x.w - w).abs() < 0.01 && (x.d - d).abs() < 0.01, "{n} station {k}: {x:?} vs twin {w:.3} x {d:.3}");
+            // A ring grounded after the copy (its own joint sits lower than
+            // its twin's) may be slimmer, never fatter.
+            let grounded = x.w < w && x.c[1] - x.w * a.axis_w[1].abs() < 0.02;
+            assert!((grounded || (x.w - w).abs() < 0.01) && (x.d - d).abs() < 0.01, "{n} station {k}: {x:?} vs twin {w:.3} x {d:.3}");
         }
         // Each keeps its own line: the near leg is not moved onto the far one.
         assert!((a.stations[3].c[0] - b.stations[3].c[0]).abs() > 0.1, "{n} sits on its own side");
