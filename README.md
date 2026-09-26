@@ -576,7 +576,8 @@ in the pool.
 The **Puppets** list at the top of the Preview panel (with the *Held
 weapons*, *Breathing* and *Splats* checkboxes; *Splats* draws every puppet
 as a Gaussian splat cloud instead of its smooth skin, `gs_puppet::splat`,
-the look test for a splat renderer) is the direct way in:
+the look test for a splat renderer, with sliders for the sample spacing,
+each splat's overlap past its step and its opacity) is the direct way in:
 every published puppet (built in, or from the pool), grouped bestiary
 family -> form -> texture (`stage::cast::puppet_tree`: a form files under the
 family most of the creatures drawing with it claim, "Other" when none

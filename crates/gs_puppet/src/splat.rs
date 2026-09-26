@@ -2,8 +2,9 @@
 //!
 //! Every ring of every body segment is sampled round its circumference
 //! and each sample becomes one anisotropic Gaussian: long along the ring
-//! and along the bone (0.6 of the spacing each way, so neighbours overlap
-//! enough to close and not enough to blur), thin through the surface. Its
+//! and along the bone (`overlap` times the spacing each way; at the default
+//! 0.6 neighbours overlap enough to close and not enough to blur), thin
+//! through the surface. Its
 //! colour comes from the painted sheet where one fits, else the body
 //! colour. [`render`] projects the cloud, sorts it back to front and
 //! alpha-blends the 2D Gaussians into a [`Skin`]-shaped image, so a host
@@ -21,6 +22,23 @@ use crate::uv::Texture;
 /// Default sample spacing along a ring and between rings, feet.
 pub const SPACING_FT: f32 = 0.03;
 
+/// What shapes the cloud. `spacing` is the sample step along a ring, feet
+/// (finer = more, smaller splats); `overlap` how far each splat's
+/// half-extent reaches past its step (0.5 = neighbours just touch, more =
+/// softer and denser); `alpha` each splat's peak opacity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplatParams {
+    pub spacing: f32,
+    pub overlap: f32,
+    pub alpha: f32,
+}
+
+impl Default for SplatParams {
+    fn default() -> Self {
+        SplatParams { spacing: SPACING_FT, overlap: 0.6, alpha: 0.9 }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Gaussian {
     pub c: V3,
@@ -35,8 +53,10 @@ pub struct Gaussian {
 /// The cloud for a posed puppet, sampled every `spacing` feet, wearing
 /// `texture` where it fits (its layout must be the puppet's own), else
 /// `body`.
-pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], spacing: f32) -> Vec<Gaussian> {
-    let spacing = spacing.max(0.005);
+pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params: &SplatParams) -> Vec<Gaussian> {
+    let spacing = params.spacing.max(0.005);
+    let overlap = params.overlap.clamp(0.2, 2.0);
+    let alpha = params.alpha.clamp(0.05, 1.0);
     let body = body.map(|c| c as f32);
     let puppet = posed.puppet;
     let mut out = Vec::new();
@@ -72,8 +92,8 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], spacin
                 let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
                 let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
                 let rgb = texture.and_then(|t| t.layout.locate(i, k as f32, theta).and_then(|at| t.sample(at))).unwrap_or(body);
-                let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * 0.6);
-                out.push(Gaussian { c: p, axes: [half_ring, scale(along, 0.6), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha: 0.9 });
+                let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * overlap);
+                out.push(Gaussian { c: p, axes: [half_ring, scale(along, overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha });
             }
         }
     }

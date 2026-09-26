@@ -134,6 +134,57 @@ pub fn puppet_splats(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(splats_id())).unwrap_or(false)
 }
 
+fn splat_params_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::puppet_splat_params")
+}
+
+/// The splat cloud's shape ([`gs_puppet::splat::SplatParams`]) for a
+/// context; the defaults unless set. Quantized into the cache key
+/// ([`SplatKey`]), so a slider redraws only when a step changes.
+pub fn set_puppet_splat_params(ctx: &egui::Context, params: gs_puppet::splat::SplatParams) {
+    ctx.data_mut(|d| d.insert_temp(splat_params_id(), SplatKey::from(params)));
+}
+
+/// See [`set_puppet_splat_params`].
+pub fn puppet_splat_params(ctx: &egui::Context) -> SplatKey {
+    ctx.data(|d| d.get_temp::<SplatKey>(splat_params_id())).unwrap_or_default()
+}
+
+/// [`gs_puppet::splat::SplatParams`] quantized for the cache key: spacing
+/// in thousandths of a foot, overlap and opacity in hundredths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SplatKey {
+    pub spacing_mil: u16,
+    pub overlap_pct: u16,
+    pub alpha_pct: u8,
+}
+
+impl Default for SplatKey {
+    fn default() -> Self {
+        SplatKey::from(gs_puppet::splat::SplatParams::default())
+    }
+}
+
+impl From<gs_puppet::splat::SplatParams> for SplatKey {
+    fn from(p: gs_puppet::splat::SplatParams) -> Self {
+        SplatKey {
+            spacing_mil: (p.spacing * 1000.0).round().clamp(5.0, 500.0) as u16,
+            overlap_pct: (p.overlap * 100.0).round().clamp(20.0, 200.0) as u16,
+            alpha_pct: (p.alpha * 100.0).round().clamp(5.0, 100.0) as u8,
+        }
+    }
+}
+
+impl SplatKey {
+    pub fn params(self) -> gs_puppet::splat::SplatParams {
+        gs_puppet::splat::SplatParams {
+            spacing: self.spacing_mil as f32 / 1000.0,
+            overlap: self.overlap_pct as f32 / 100.0,
+            alpha: self.alpha_pct as f32 / 100.0,
+        }
+    }
+}
+
 fn facing_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_facings")
 }
@@ -299,6 +350,8 @@ pub struct PuppetKey {
     /// Drawn as a Gaussian splat cloud instead of the smooth skin (see
     /// [`set_puppet_splats`]). Part of the key so toggling it redraws.
     pub splats: bool,
+    /// The cloud's shape when `splats` is set (see [`set_puppet_splat_params`]).
+    pub splat: SplatKey,
 }
 
 /// A breathing cycle is drawn in this many steps; at rest the figure moves
@@ -353,12 +406,14 @@ impl PuppetKey {
             effects: gs_puppet::Effects::default(),
             breath: 0,
             splats: false,
+            splat: SplatKey::default(),
         }
     }
 
-    /// The same key drawn as a splat cloud (or not).
-    pub fn with_splats(mut self, on: bool) -> Self {
+    /// The same key drawn as a splat cloud (or not), shaped by `params`.
+    pub fn with_splats(mut self, on: bool, params: SplatKey) -> Self {
         self.splats = on;
+        self.splat = if on { params } else { SplatKey::default() };
         self
     }
 
@@ -766,7 +821,7 @@ pub fn pose_puppet_with(
         if key.splats {
             // The splat look: the same image slot as the skin, lit by the
             // scene the same way; no wounds, effects or contour.
-            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, gs_puppet::splat::SPACING_FT);
+            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params());
             let mut image = gs_puppet::splat::render(&cloud, &project, look.yaw);
             if let (Some(light), false) = (light, image.is_empty()) {
                 light.light_image(&mut image.rgba, image.w);

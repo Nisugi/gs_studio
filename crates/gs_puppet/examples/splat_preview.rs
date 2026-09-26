@@ -12,7 +12,9 @@
 //! the left, the splats on the right. Yaws default to 0 45 90 135.
 //! `SPLAT_SHEET=<sheet.png>` wears that sheet (default: the family's
 //! `data/textures/<family>/sheet.png` when present, else the body colour);
-//! `SPLAT_SPACING=<ft>` sets the sample spacing (default 0.03);
+//! `SPLAT_SPACING=<ft>` sets the sample spacing (default 0.03),
+//! `SPLAT_OVERLAP=<x>` the splat reach past its step (default 0.6) and
+//! `SPLAT_ALPHA=<a>` the peak opacity (default 0.9);
 //! `SPLAT_TILE=<px>` the tile size (default 320); `SPLAT_DATA=<dir>`
 //! another data root.
 
@@ -74,7 +76,9 @@ fn main() {
             None
         }
     });
-    let cloud = splat::cloud(&posed, texture.as_ref(), BODY_DEFAULT, spacing);
+    let overlap: f32 = std::env::var("SPLAT_OVERLAP").ok().and_then(|v| v.parse().ok()).unwrap_or(0.6);
+    let alpha: f32 = std::env::var("SPLAT_ALPHA").ok().and_then(|v| v.parse().ok()).unwrap_or(0.9);
+    let cloud = splat::cloud(&posed, texture.as_ref(), BODY_DEFAULT, &splat::SplatParams { spacing, overlap, alpha });
     println!("{family} {pose_name}: {} gaussians ({} px tiles)", cloud.len(), tile);
 
     // Frame as the turnaround does.

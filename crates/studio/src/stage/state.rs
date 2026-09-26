@@ -140,6 +140,8 @@ pub struct StageState {
     pub show_breath: bool,
     /// Puppets drawn as Gaussian splat clouds instead of the smooth skin.
     pub show_splats: bool,
+    /// The cloud's shape (`gs_puppet::splat::SplatParams`).
+    pub splat_params: gs_puppet::splat::SplatParams,
     /// Selected placed prop (index into scene.props); drag-to-place moves it.
     pub selected_prop: Option<usize>,
     /// Selected point light (index into scene.lights); drag moves it.
@@ -196,6 +198,7 @@ impl StageState {
             show_props: true,
             show_breath: true,
             show_splats: false,
+            splat_params: gs_puppet::splat::SplatParams::default(),
             selected_prop: None,
             selected_light: None,
             dragging_creature: None,

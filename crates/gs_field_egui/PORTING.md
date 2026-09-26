@@ -686,6 +686,8 @@ normals by the sheet before the cel shading and the lamps see them.
 `set_puppet_splats` / `puppet_splats` (off by default) draw every puppet
 as a Gaussian splat cloud (`gs_puppet::splat::cloud` + `render`) in the
 skin's image slot, scene-lit the same way; `PuppetKey::splats` carries it
-so toggling redraws. No wounds, effects or contour on the cloud: it is the
+so toggling redraws, and `PuppetKey::splat` (a `SplatKey`, the
+`gs_puppet::splat::SplatParams` quantized: spacing, overlap, opacity, set
+by `set_puppet_splat_params`) shapes the cloud. No wounds, effects or contour on the cloud: it is the
 look test for a splat renderer, CPU-drawn like the skin. VellumFE need not
 expose it.

@@ -219,6 +219,7 @@ impl StageTool {
         gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
         gs_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
         gs_field_egui::creature_puppet::set_puppet_splats(&ctx, stage.show_splats);
+        gs_field_egui::creature_puppet::set_puppet_splat_params(&ctx, stage.splat_params);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -1031,6 +1032,20 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
              splat per ring sample, sorted and blended (no contour, wounds or effects). The look \
              test for a splat renderer; drawn on the CPU like the skin",
         );
+        if stage.show_splats {
+            let p = &mut stage.splat_params;
+            ui.indent("splat_params", |ui| {
+                ui.add(egui::Slider::new(&mut p.spacing, 0.01..=0.12).logarithmic(true).text("spacing ft"))
+                    .on_hover_text("Sample step along each ring and between rings: finer = more, smaller splats (a 6 ft figure is about 12k at 0.03)");
+                ui.add(egui::Slider::new(&mut p.overlap, 0.3..=1.5).text("overlap"))
+                    .on_hover_text("How far each splat reaches past its step: 0.5 = neighbours just touch; more = softer, denser");
+                ui.add(egui::Slider::new(&mut p.alpha, 0.1..=1.0).text("opacity"))
+                    .on_hover_text("Each splat's peak opacity");
+                if ui.small_button("Defaults").clicked() {
+                    *p = gs_puppet::splat::SplatParams::default();
+                }
+            });
+        }
         let mut spawn: Option<(String, Option<(String, String)>)> = None;
         egui::ScrollArea::vertical().id_salt("stage_puppets").max_height(240.0).show(ui, |ui| {
             for family in cast::puppet_tree() {
