@@ -120,19 +120,32 @@ pub fn cloud_path(data_root: &std::path::Path, family: &str) -> std::path::PathB
     data_root.join("clouds").join(format!("{family}.ply"))
 }
 
-/// A fitted cloud bound to a puppet: each Gaussian follows the body
+/// How far from its nearest segment's surface a Gaussian still takes a
+/// share of a NEIGHBOURING segment's motion, feet: the width of the
+/// smooth band across a joint. Beyond it a Gaussian is that segment's
+/// alone.
+pub const BLEND_FT: f32 = 0.22;
+
+/// A fitted cloud bound to a puppet. Each Gaussian follows the body
 /// segment whose ring SURFACE it sits nearest in the rest pose, in feet
-/// (inside a ring counts as on it), exactly as the puppet's own rings do.
-/// Measured in radii instead, a torso ring four times an arm's width
+/// (inside a ring counts as on it), exactly as the puppet's own rings do
+/// -- measured in radii instead, a torso ring four times an arm's width
 /// claimed the arm's outer side, and a raised arm left a second pair
-/// hanging. Hard binding: one segment per Gaussian, so a joint bent far
-/// opens a wedge. Built once per puppet; posed per frame.
+/// hanging. Near a joint it also takes a share of the segments adjoining
+/// that one in the tree (its parent, its children), falling off with
+/// distance over [`BLEND_FT`], and its position and shape are the
+/// weighted blend of the segments' transforms (linear blend skinning): a
+/// bent elbow stretches the skin round it instead of opening a wedge.
+/// Built once per puppet; posed per frame.
 #[derive(Debug, Clone)]
 pub struct BoundCloud {
     /// The cloud in the puppet's rest space.
     pub rest: Vec<Gaussian>,
-    /// Per Gaussian, the segment it moves with.
+    /// Per Gaussian, the segment it sits nearest: what it mostly moves with.
     pub seg: Vec<usize>,
+    /// Per Gaussian, up to three (segment, weight) shares summing to one;
+    /// unused slots have weight 0.
+    pub weights: Vec<[(usize, f32); 3]>,
 }
 
 impl BoundCloud {
@@ -144,38 +157,68 @@ impl BoundCloud {
             .filter(|(_, s)| s.kind.is_body() && !s.hidden)
             .map(|(i, s)| (i, s, norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0])))
             .collect();
-        let seg = rest
-            .iter()
-            .map(|g| {
-                let mut best = (0usize, f32::MAX);
-                for (i, s, axis) in &bodies {
-                    for st in &s.stations {
-                        let e = sub(g.c, st.c);
-                        let (u, v) = (dot(e, s.axis_w) / st.w.max(0.02), dot(e, s.axis_d) / st.d.max(0.02));
-                        // Feet outside the ring's ellipse (0 inside), and
-                        // feet past the ring's own slab along the bone.
-                        let radial = ((u * u + v * v).sqrt() - 1.0).max(0.0) * (st.w + st.d) * 0.5;
-                        let along = (dot(e, *axis).abs() - crate::puppet::STATION_STEP_FT * 0.5).max(0.0);
-                        let d = radial * radial + along * along;
-                        if d < best.1 {
-                            best = (*i, d);
-                        }
-                    }
+        // Feet from the segment's surface: outside the nearest ring's
+        // ellipse (0 inside) and past the ring's own slab along the bone.
+        let surface = |s: &crate::puppet::Segment, axis: V3, p: V3| {
+            let mut best = f32::MAX;
+            for st in &s.stations {
+                let e = sub(p, st.c);
+                let (u, v) = (dot(e, s.axis_w) / st.w.max(0.02), dot(e, s.axis_d) / st.d.max(0.02));
+                let radial = ((u * u + v * v).sqrt() - 1.0).max(0.0) * (st.w + st.d) * 0.5;
+                let along = (dot(e, axis).abs() - crate::puppet::STATION_STEP_FT * 0.5).max(0.0);
+                best = best.min(radial * radial + along * along);
+            }
+            best.sqrt()
+        };
+        let adjoins = |a: usize, b: usize| puppet.segments[a].parent == Some(b) || puppet.segments[b].parent == Some(a);
+        let mut seg = Vec::with_capacity(rest.len());
+        let mut weights = Vec::with_capacity(rest.len());
+        for g in &rest {
+            let dists: Vec<(usize, f32)> = bodies.iter().map(|(i, s, axis)| (*i, surface(s, *axis, g.c))).collect();
+            let &(near, d0) = dists.iter().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(&(0, 0.0));
+            // Shares: the nearest segment, and those adjoining it in the
+            // tree within the blend band, each falling off with how much
+            // further away it is.
+            let mut shares: Vec<(usize, f32)> = vec![(near, 1.0)];
+            for &(i, d) in &dists {
+                if i != near && adjoins(i, near) && d - d0 < BLEND_FT {
+                    let t = (d - d0) / BLEND_FT;
+                    shares.push((i, (1.0 - t) * (1.0 - t)));
                 }
-                best.0
-            })
-            .collect();
-        BoundCloud { rest, seg }
+            }
+            shares.sort_by(|a, b| b.1.total_cmp(&a.1));
+            shares.truncate(3);
+            let total: f32 = shares.iter().map(|s| s.1).sum();
+            let mut w = [(near, 0.0f32); 3];
+            for (k, (i, share)) in shares.iter().enumerate() {
+                w[k] = (*i, share / total);
+            }
+            seg.push(near);
+            weights.push(w);
+        }
+        BoundCloud { rest, seg, weights }
     }
 
-    /// The cloud moved into `posed`'s pose.
+    /// The cloud moved into `posed`'s pose: each Gaussian's centre and axes
+    /// are the weighted blend of its segments' transforms.
     pub fn posed(&self, posed: &Posed<'_>) -> Vec<Gaussian> {
         self.rest
             .iter()
-            .zip(&self.seg)
-            .map(|(g, &s)| {
-                let xf = &posed.xf[s];
-                Gaussian { c: xf.point(g.c), axes: g.axes.map(|a| xf.dir(a)), n: g.n, rgb: g.rgb, alpha: g.alpha }
+            .zip(&self.weights)
+            .map(|(g, w)| {
+                let mut c = [0.0f32; 3];
+                let mut axes = [[0.0f32; 3]; 3];
+                for &(s, share) in w {
+                    if share <= 0.0 {
+                        continue;
+                    }
+                    let xf = &posed.xf[s];
+                    c = add(c, scale(xf.point(g.c), share));
+                    for k in 0..3 {
+                        axes[k] = add(axes[k], scale(xf.dir(g.axes[k]), share));
+                    }
+                }
+                Gaussian { c, axes, n: g.n, rgb: g.rgb, alpha: g.alpha }
             })
             .collect()
     }
