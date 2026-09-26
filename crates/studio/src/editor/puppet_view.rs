@@ -75,7 +75,7 @@ impl Default for PuppetView {
             splats: false,
             // Finer than the stage's default: here the figure fills the
             // view and is zoomed into, and the step is the resolution.
-            splat: gs_puppet::splat::SplatParams { spacing: 0.015, ..gs_puppet::splat::SplatParams::default() },
+            splat: gs_puppet::splat::SplatParams { spacing: 0.02, ..gs_puppet::splat::SplatParams::default() },
             creature: String::new(),
             hold: String::new(),
             hold_left: String::new(),

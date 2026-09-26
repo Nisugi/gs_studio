@@ -1136,12 +1136,23 @@ impl RigTool {
                             self.bound.as_ref().map(|(_, _, b)| b.clone())
                         });
                         let skin = if let (true, Some(bound)) = (self.puppet_view.splats, fitted) {
-                            // The family's fitted cloud, moved by the rig.
-                            let cloud = bound.posed(&posed);
+                            // The family's fitted cloud, moved by the rig. While
+                            // something moves, every fourth splat: the sort and
+                            // blend are per splat, and a 68k cloud is 130 ms.
+                            let mut cloud = bound.posed(&posed);
+                            if draft {
+                                cloud = cloud.into_iter().step_by(4).collect();
+                            }
                             self.splat_count = cloud.len();
                             gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
                         } else if self.puppet_view.splats {
-                            let cloud = gs_puppet::splat::cloud(&posed, texture.as_deref(), look.body, &self.puppet_view.splat);
+                            // Twice the spacing while something moves: a quarter
+                            // of the splats (a canine at 0.015 ft is 248k).
+                            let mut params = self.puppet_view.splat;
+                            if draft {
+                                params.spacing *= 2.0;
+                            }
+                            let cloud = gs_puppet::splat::cloud(&posed, texture.as_deref(), look.body, &params);
                             self.splat_count = cloud.len();
                             gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
                         } else {

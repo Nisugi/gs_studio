@@ -237,7 +237,9 @@ death*, *Reload poses*), **View** (*Smooth skin*, *Texture*, *Splats*, *Creature
 of the skin, `gs_puppet::splat`, with a row of sliders for the sample
 spacing, each splat's overlap and its opacity -- the place to spin and
 zoom the splat look; the spacing is the cloud's resolution, so it starts
-finer here, 0.015 ft, than on the stage. A family with a FITTED cloud,
+finer here, 0.02 ft, than on the stage, and while the view turns or a
+bone drags the cloud is drawn at twice the spacing, a quarter of the
+splats, then sharp when it stops. A family with a FITTED cloud,
 `<data>/clouds/<family>.ply` (a 3D Gaussian Splatting export), is drawn
 from that instead: each Gaussian bound to the puppet's nearest segment
 and moved by the pose, `gs_puppet::splat::BoundCloud`; the status line
