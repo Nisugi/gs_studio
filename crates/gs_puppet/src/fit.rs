@@ -24,13 +24,23 @@ pub fn ortho(view: View, min_x: f32, max_y: f32, px_per_ft: f32) -> impl Fn(V3) 
     }
 }
 
+/// [`ortho`] for a puppet: a figure drawn from above has its own view seen
+/// from above (screen up = +z, nearer = higher), its side view as ever.
+pub fn ortho_of(puppet: &Puppet, view: View, min_x: f32, max_y: f32, px_per_ft: f32) -> Box<dyn Fn(V3) -> ([f32; 2], f32)> {
+    if puppet.from_above && view == View::Front {
+        Box::new(move |p: V3| ([(p[0] - min_x) * px_per_ft, (max_y - p[2]) * px_per_ft], 100.0 - p[1]))
+    } else {
+        Box::new(ortho(view, min_x, max_y, px_per_ft))
+    }
+}
+
 /// The rest pose as flat primitives on `mask`'s grid. `unlifted` undoes the
 /// grounding so the figure sits where the artist clicked it.
 pub fn rest_prims(puppet: &Puppet, view: View, mask: &Mask, look: &Look) -> Vec<Prim> {
     let g = mask.grid;
     let posed = puppet.pose(&Pose::default());
     let lift = posed.lift;
-    let project = ortho(view, g.min_x, g.max_y, g.px_per_ft);
+    let project = ortho_of(puppet, view, g.min_x, g.max_y, g.px_per_ft);
     posed.draw_list(&|p: V3| project([p[0], p[1] - lift, p[2]]), look)
 }
 
@@ -57,7 +67,7 @@ pub fn rest_iou(puppet: &Puppet, view: View, mask: &Mask) -> f32 {
     let lift = posed.lift;
     // How far the figure reaches past the grid on each side, in pixels.
     let [lo, hi] = posed.bounds();
-    let project = ortho(view, g.min_x, g.max_y, g.px_per_ft);
+    let project = ortho_of(puppet, view, g.min_x, g.max_y, g.px_per_ft);
     let (mut min, mut max) = ([f32::MAX; 2], [f32::MIN; 2]);
     for corner in 0..8 {
         let pick = |axis: usize| if corner & (1 << axis) == 0 { lo[axis] } else { hi[axis] };
@@ -72,7 +82,7 @@ pub fn rest_iou(puppet: &Puppet, view: View, mask: &Mask) -> f32 {
     let (right, bottom) = (pad(max[0] - g.w as f32), pad(max[1] - g.h as f32));
     let (w, h) = (g.w + left + right, g.h + top + bottom);
     let look = Look { outline_px: 0.0, min_station_px: 0.0, ..Look::default() };
-    let padded = ortho(view, g.min_x - left as f32 / g.px_per_ft, g.max_y + top as f32 / g.px_per_ft, g.px_per_ft);
+    let padded = ortho_of(puppet, view, g.min_x - left as f32 / g.px_per_ft, g.max_y + top as f32 / g.px_per_ft, g.px_per_ft);
     let mut canvas = Canvas::new(w, h, 1, [0, 0, 0]);
     canvas.draw(&posed.draw_list(&|p: V3| padded([p[0], p[1] - lift, p[2]]), &look));
     let figure: Vec<bool> = canvas.to_rgba8().chunks_exact(4).map(|px| px[0] != 0 || px[1] != 0 || px[2] != 0).collect();

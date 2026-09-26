@@ -348,6 +348,13 @@ impl Editor {
         }
     }
 
+    /// Whether the rig's silhouette is a drawing from above (`Rig::from_above`).
+    pub fn set_from_above(&mut self, on: bool) {
+        if self.rig.from_above != on {
+            self.edit(None).from_above = on;
+        }
+    }
+
     pub fn undo(&mut self) -> bool {
         (self.drag, self.depth_drag) = (None, None);
         let done = self.history.undo(&mut self.rig);

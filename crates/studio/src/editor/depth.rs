@@ -49,6 +49,15 @@ impl EditView {
 
 }
 
+/// [`axis_label`] for a whole rig: one drawn from above is missing its height.
+pub fn axis_label_of(rig: &Rig) -> &'static str {
+    if rig.from_above {
+        "height (the side silhouette is shown turned head up: higher = further left)"
+    } else {
+        axis_label(rig.view)
+    }
+}
+
 /// What the off-plane axis MEANS for a rig, for the UI to say out loud.
 pub fn axis_label(view: View) -> &'static str {
     match view {
@@ -100,6 +109,9 @@ impl DepthModel {
     /// Guess every placed joint's depth from an already rasterized OTHER view.
     /// `other` = None is a family with only one silhouette.
     pub fn new(rig: &Rig, other: Option<Mask>) -> DepthModel {
+        // Drawn from above, the other (side) silhouette is worked on turned
+        // head up, as the builder reads it: heights run left-right.
+        let other = other.map(|m| if rig.from_above { gs_puppet::turned_head_up(&m) } else { m });
         DepthModel { guesses: guess_depths_mask(rig, other.as_ref()), other_mask: other }
     }
 

@@ -75,7 +75,7 @@ pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, Skin, SkinSurface};
 pub use uv::{silhouette_template, Texture, UvLayout, SHEET_SIDE};
-pub use puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
+pub use puppet::{turned_head_up, Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]
 mod pose_tests;

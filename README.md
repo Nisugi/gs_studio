@@ -393,6 +393,15 @@ toggle switches the canvas to a DEPTH pass where those guesses are corrected.
   across, y up -- and the bone chains between them. Dragging moves a joint
   along the off-plane axis ONLY; y belongs to the primary view and never
   changes here.
+- **Drawn from above** (the *from above* checkbox beside the view; the
+  multileg template sets it): the primary silhouette is a plan, so up in it
+  is the creature's front and what it cannot show is HEIGHT. The DEPTH
+  canvas then shows the side silhouette turned a quarter turn, head up, so
+  its heights run left-right (higher = further left, a depth of `-height`),
+  and joints sit at (height, their position along the body). The 3D puppet
+  is built as if the plan were a front view, laid flat and grounded
+  (`gs_puppet::turned_head_up`, `Puppet::from_above`); the bake is 2D and
+  unchanged.
 - **Guessed** joints are hollow and dim; **overridden** ones are filled and
   bright, with a faint tick and leader back to where the guess was, so the
   correction can be judged against it. The right panel says "*n* of *m*
@@ -697,7 +706,7 @@ rescan, the rescan confirmation -- are in `crates/studio/src/calib.rs`
 | `quadruped` | side | canine caprine elephantid equine feline reptilian suine ursine |
 | `avian` | side | avian |
 | `serpentine` | side | serpent worm |
-| `multileg` | front | arachnid crustacean |
+| `multileg` | front, drawn from above | arachnid crustacean |
 | `winged_biped` | front | winged_humanoid |
 | `winged_quadruped` | side | winged_beast dragon_bat |
 | `mound` | front | elemental_lava elemental_steam plant_mass |
@@ -743,12 +752,13 @@ limits, kept in step by hand.
 
 ### `<family>.rig.toml` -- the rig (source of truth)
 
-    version = 2                  # absent in files from before bones had parents
+    version = 3                  # absent in files from before bones had parents
     family = "humanoid"
     body_type = "biped"          # template it started from
     view = "front"               # or "side"
     ref_ft = 6.0
     axis = "crown"               # what ref_ft measures: crown | withers | diameter | carapace
+    from_above = true            # the silhouette is a plan (multileg); omitted = false
     eye_radius_ft = 0.05         # omit for Auto
     joint_order = ["crown", "chin", "neck_base"]   # EVERY joint, placed or not, in click order
 

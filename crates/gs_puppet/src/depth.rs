@@ -101,6 +101,7 @@ pub fn guess_depths(rig: &Rig, outlines: &Outlines) -> BTreeMap<String, DepthGue
         View::Side => View::Front,
     };
     let mask = outlines.get(&rig.family, other).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
+    let mask = mask.map(|m| if rig.from_above { crate::puppet::turned_head_up(&m) } else { m });
     guess_depths_mask(rig, mask.as_ref())
 }
 
@@ -120,7 +121,7 @@ pub fn guess_depths_mask(rig: &Rig, other: Option<&Mask>) -> BTreeMap<String, De
             }
             for (name, p) in &rig.joints {
                 let guess = match other.and_then(|m| widest_span(m, p[1])) {
-                    Some((a, b)) if p[1] < 0.15 && leaf_ends.contains(&name.as_str()) => {
+                    Some((a, b)) if p[1] < 0.15 && !rig.from_above && leaf_ends.contains(&name.as_str()) => {
                         DepthGuess { value: (b - TOE_INSET_FT).max((a + b) * 0.5), source: GuessSource::ForwardEnd }
                     }
                     Some((a, b)) => DepthGuess { value: (a + b) * 0.5, source: GuessSource::SpanCentre },

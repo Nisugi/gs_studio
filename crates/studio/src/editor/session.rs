@@ -340,6 +340,20 @@ impl Session {
         self.outlines.get(&rig.family, other_view(rig.view))
     }
 
+    /// [`Session::other_outline`] as DEPTH mode draws it: for a rig drawn
+    /// from above, turned head up (world (z, y) -> (-y, z)), the frame its
+    /// depths are read and edited in.
+    pub fn other_outline_shown(&self) -> Option<OutlineEntry> {
+        let entry = self.other_outline()?.clone();
+        if !self.editor.rig().from_above {
+            return Some(entry);
+        }
+        Some(OutlineEntry {
+            ref_ft: entry.ref_ft,
+            subpaths: entry.subpaths.iter().map(|sub| sub.iter().map(|p| [-p[1], p[0]]).collect()).collect(),
+        })
+    }
+
     /// Re-read the depth guesses if the rig has changed since they were
     /// taken. The other view's mask behind them is rasterized once per open
     /// document. Call this before drawing; then read [`Session::depth`],

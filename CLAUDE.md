@@ -146,6 +146,11 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
 
 ## Conventions
 
+- A rig drawn from above (`from_above = true`; the multileg template sets
+  it, arachnid and crustacean) keeps `view = "front"` for its outline and
+  bake, but the 3D builder reads drawing-up as the creature's front and its
+  depth as HEIGHT off the side silhouette turned head up (`gs_puppet::turned_head_up`);
+  the figure is laid flat and grounded. Depth values are `-height`.
 - Front views face the viewer: the creature's right (`_r`) is screen-left,
   negative x. In side views `_r` is the near limb.
 - Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.

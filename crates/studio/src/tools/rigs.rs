@@ -264,7 +264,7 @@ impl RigTool {
             ui.weak("saved");
         }
         ui.separator();
-        ui.label(format!("{} / {} / {}", rig.family, rig.view.as_str(), rig.body_type));
+        ui.label(format!("{} / {}{} / {}", rig.family, rig.view.as_str(), if rig.from_above { " (from above)" } else { "" }, rig.body_type));
         ui.separator();
         let mode = s.editor.edit_view();
         ui.label(mode.label());
@@ -478,6 +478,16 @@ impl RigTool {
                         s.request(DocAction::NewFromTemplate { template: body_type.clone(), view: v });
                     }
                 }
+                let mut above = s.editor.rig().from_above;
+                if ui
+                    .add_enabled(view == View::Front, egui::Checkbox::new(&mut above, "from above"))
+                    .on_hover_text(
+                        "The silhouette is a drawing from ABOVE (a spider, a crab): up in it is the                          creature's front, and the coordinate it cannot show is HEIGHT, read from the side                          silhouette. The 3D puppet lies flat; the bake is unchanged. Set by the multileg template.",
+                    )
+                    .changed()
+                {
+                    s.editor.set_from_above(above);
+                }
             });
             ui.end_row();
 
@@ -498,7 +508,7 @@ impl RigTool {
                         EditView::Primary => button.on_hover_text("Place and move joints on this rig's silhouette"),
                         EditView::Depth => button.on_hover_text(format!(
                             "Correct each joint's {}, against the {} silhouette. Dragging changes depth only.",
-                            axis_label(s.editor.rig().view),
+                            crate::editor::depth::axis_label_of(s.editor.rig()),
                             other_view(s.editor.rig().view).as_str(),
                         )),
                     };
@@ -1808,7 +1818,7 @@ impl RigTool {
         let rect = response.rect;
         let canvas = Canvas { min: [rect.min.x, rect.min.y], size: [rect.width(), rect.height()] };
         if fit {
-            if let Some(bounds) = self.session.other_outline().and_then(|o| o.bounds()) {
+            if let Some(bounds) = self.session.other_outline_shown().and_then(|o| o.bounds()) {
                 self.depth_view.fit(&canvas, bounds, FIT_MARGIN_PX);
             }
         }
@@ -1893,8 +1903,9 @@ impl RigTool {
         let zero_x = to_screen([0.0, 0.0]).x;
         painter.line_segment([Pos2::new(zero_x, rect.top()), Pos2::new(zero_x, rect.bottom())], Stroke::new(1.0, guide));
 
-        // The OTHER silhouette, drawn as it is.
-        if let Some(outline) = self.session.other_outline() {
+        // The OTHER silhouette, drawn as it is (turned head up for a rig
+        // drawn from above, the frame its depths live in).
+        if let Some(outline) = self.session.other_outline_shown() {
             for sub in &outline.subpaths {
                 let points: Vec<Pos2> = sub.iter().map(|p| to_screen(*p)).collect();
                 painter.add(egui::Shape::closed_line(points, Stroke::new(1.0, ink)));

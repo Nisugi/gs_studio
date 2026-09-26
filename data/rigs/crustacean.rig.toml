@@ -4,6 +4,7 @@ body_type = "multileg"
 view = "front"
 ref_ft = 1.0
 axis = "carapace"
+from_above = true
 joint_order = ["head_top", "mouth", "thorax_top", "thorax_bottom", "abdomen_tip", "eye_r", "leg1_base_r", "leg1_knee_r", "leg1_tip_r", "leg2_base_r", "leg2_knee_r", "leg2_tip_r", "leg3_base_r", "leg3_knee_r", "leg3_tip_r", "leg4_base_r", "leg4_knee_r", "leg4_tip_r", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "eye_l", "leg1_base_l", "leg1_knee_l", "leg1_tip_l", "leg2_base_l", "leg2_knee_l", "leg2_tip_l", "leg3_base_l", "leg3_knee_l", "leg3_tip_l", "leg4_base_l", "leg4_knee_l", "leg4_tip_l", "leg5_base_l", "leg5_knee_l", "leg5_tip_l"]
 
 [anchors]
@@ -49,45 +50,6 @@ leg5_tip_r = [-0.5282, 0.0200]
 mouth = [0.0, 0.95]
 thorax_bottom = [0.0000, 0.5950]
 thorax_top = [0.0, 1.0]
-
-[depth]
-abdomen_tip = -0.2327
-eye_l = 0.4
-eye_r = 0.4
-head_top = 0.35
-leg1_base_l = 0.2593
-leg1_base_r = 0.3823
-leg1_knee_l = 0.8421
-leg1_knee_r = 0.7995
-leg1_tip_l = 1.0265
-leg1_tip_r = 1.0426
-leg2_base_l = 0.0682
-leg2_base_r = 0.0839
-leg2_knee_l = 0.3423
-leg2_knee_r = 0.3321
-leg2_tip_l = 0.1576
-leg2_tip_r = 0.2423
-leg3_base_l = -0.0254
-leg3_base_r = -0.1886
-leg3_knee_l = -0.1829
-leg3_knee_r = -0.0738
-leg3_tip_l = -0.0950
-leg3_tip_r = -0.2840
-leg4_base_l = -0.6212
-leg4_base_r = -0.6210
-leg4_knee_l = -0.6057
-leg4_knee_r = -0.6059
-leg4_tip_l = -0.4998
-leg4_tip_r = -0.5424
-leg5_base_l = -1.0149
-leg5_base_r = -1.0207
-leg5_knee_l = -1.1210
-leg5_knee_r = -1.1210
-leg5_tip_l = -1.1
-leg5_tip_r = -1.1
-mouth = 0.4
-thorax_bottom = -0.0287
-thorax_top = 0.0
 
 [[bones]]
 name = "skull"

@@ -230,6 +230,10 @@ pub struct Puppet {
     pub family: String,
     pub body_type: String,
     pub view: View,
+    /// Built from a silhouette drawn from above (`Rig::from_above`): the
+    /// figure lies flat, its front toward +z, as any other puppet does,
+    /// but its own silhouette is its plan, not its elevation.
+    pub from_above: bool,
     /// Top of the rest figure, feet.
     pub height: f32,
     pub segments: Vec<Segment>,
@@ -516,7 +520,12 @@ impl Puppet {
     pub fn build_masks(rig: &Rig, front: Option<&Mask>, side: Option<&Mask>) -> Result<Puppet, PuppetError> {
         // What the rig says is not body (`Rig::ignore`) is not measured.
         let (front_kept, side_kept) = (front.map(|m| ignoring(rig, View::Front, m)), side.map(|m| ignoring(rig, View::Side, m)));
-        let (front, side) = (front_kept.as_deref(), side_kept.as_deref());
+        // A rig drawn from above is built as if its drawing were a front
+        // view -- up = forward -- against the side silhouette turned head
+        // up, so every row read off it is a row of heights; the finished
+        // figure is then laid down (below).
+        let side_turned = side_kept.as_deref().filter(|_| rig.from_above).map(turned_head_up);
+        let (front, side) = (front_kept.as_deref(), side_turned.as_ref().or(side_kept.as_deref()));
         let mask_of = |v: View| match v {
             View::Front => front,
             View::Side => side,
@@ -1141,9 +1150,10 @@ impl Puppet {
             // Nothing rests below the ground: a ring reaches down its width
             // axis no further than y = 0. Last, after the joint ease and the
             // caps, which both move rings: a foot's first ring, moved onto
-            // the shin's last, sat up to 0.18 ft under the floor.
+            // the shin's last, sat up to 0.18 ft under the floor. (Drawn
+            // from above, y is not up yet: nothing to rest.)
             let tilt = m.axis_w[1].abs();
-            if tilt > 1e-3 {
+            if tilt > 1e-3 && !rig.from_above {
                 for s in &mut stations {
                     let floor = s.c[1].max(0.0) / tilt;
                     if s.w > floor {
@@ -1271,15 +1281,54 @@ impl Puppet {
             segments[i].bare = bare.min(segments[i].stations.len().saturating_sub(CAP_RINGS + 2));
         }
 
-        let eyes = build_eyes(rig, &segments, &joints);
+        let mut eyes = build_eyes(rig, &segments, &joints);
+        if rig.from_above {
+            // Lay the figure down: what was up in the drawing is forward,
+            // and the depth read off the turned side view is height.
+            let lay = |p: V3| [p[0], -p[2], p[1]];
+            for s in &mut segments {
+                s.head = lay(s.head);
+                s.tail = lay(s.tail);
+                s.axis_w = lay(s.axis_w);
+                s.axis_d = lay(s.axis_d);
+                s.hinge = lay(s.hinge);
+                for st in &mut s.stations {
+                    st.c = lay(st.c);
+                }
+            }
+            for e in &mut eyes {
+                e.pos = lay(e.pos);
+                e.normal = lay(e.normal);
+            }
+            // And stand it on the ground: heights were read off the side
+            // silhouette, whose floor is wherever it was drawn.
+            let low = segments
+                .iter()
+                .flat_map(|s| s.stations.iter().map(|st| st.c[1] - st.w * s.axis_w[1].abs() - st.d * s.axis_d[1].abs()))
+                .fold(f32::MAX, f32::min);
+            if low.is_finite() {
+                for s in &mut segments {
+                    s.head[1] -= low;
+                    s.tail[1] -= low;
+                    for st in &mut s.stations {
+                        st.c[1] -= low;
+                        st.c = q3(st.c);
+                    }
+                }
+                for e in &mut eyes {
+                    e.pos[1] -= low;
+                }
+            }
+        }
         let height = segments
             .iter()
-            .flat_map(|s| s.stations.iter().map(|st| st.c[1] + st.w * s.axis_w[1].abs()))
+            .flat_map(|s| s.stations.iter().map(|st| st.c[1] + st.w * s.axis_w[1].abs() + st.d * s.axis_d[1].abs()))
             .fold(0.0, f32::max);
         Ok(Puppet {
             family: rig.family.clone(),
             body_type: rig.body_type.clone(),
             view: rig.view,
+            from_above: rig.from_above,
             height: q(height),
             segments,
             groups,
@@ -1468,6 +1517,25 @@ fn is_skull(rig: &Rig, bone: usize) -> bool {
 
 /// `mask` without the areas `rig.ignore` lists for `view` (a club, a
 /// weapon: art that is not the body). Borrowed when there are none.
+/// A side silhouette turned a quarter turn so its front (drawing x, world
+/// z) runs UP and its height runs left: what a rig drawn from above is
+/// built against, so that the side view's columns line up with the plan's
+/// rows. World (z, y) in the mask becomes (-y, z) in the turned one.
+pub fn turned_head_up(mask: &Mask) -> Mask {
+    let g = mask.grid;
+    let grid = rig_bake::Grid { w: g.h, h: g.w, px_per_ft: g.px_per_ft, min_x: -g.max_y, max_y: g.min_x + g.w as f32 / g.px_per_ft };
+    let mut inside = vec![false; grid.w * grid.h];
+    for j in 0..g.h {
+        for i in 0..g.w {
+            if mask.inside[j * g.w + i] {
+                let (ti, tj) = (j, g.w - 1 - i);
+                inside[tj * grid.w + ti] = true;
+            }
+        }
+    }
+    Mask { grid, inside }
+}
+
 fn ignoring<'m>(rig: &Rig, view: View, mask: &'m Mask) -> std::borrow::Cow<'m, Mask> {
     let areas: Vec<&rig::IgnoreArea> = rig.ignore.iter().filter(|a| a.view == view && a.points.len() >= 3).collect();
     if areas.is_empty() {
@@ -1504,8 +1572,10 @@ fn measure_segment<'m>(
     let lp = len(embed(rig.view, flat(rig.view, span)));
     let lo = len(embed(other_view(rig.view), flat(other_view(rig.view), span)));
     // Measure where the bone is seen best: a foot clicked on a front view
-    // runs toward the viewer, so its profile is in the SIDE view.
-    let view = if mask_of(other_view(rig.view)).is_some() && lo > 1.5 * lp + 0.05 {
+    // runs toward the viewer, so its profile is in the SIDE view. (Never
+    // for a rig drawn from above: its side view is every leg over every
+    // other, and a leg measured there read the whole body's height.)
+    let view = if !rig.from_above && mask_of(other_view(rig.view)).is_some() && lo > 1.5 * lp + 0.05 {
         other_view(rig.view)
     } else {
         rig.view

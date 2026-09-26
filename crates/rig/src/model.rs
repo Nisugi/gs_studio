@@ -12,7 +12,7 @@ use crate::templates::Template;
 /// Written into every rig file this code saves. Files without it (0) are
 /// from before bones had parents: loading one fills `joint_order`, and each
 /// bone's `parent` / `pivot`, from its template by name ([`Rig::migrate`]).
-pub const RIG_VERSION: u32 = 2;
+pub const RIG_VERSION: u32 = 3;
 
 /// Which silhouette the rig was clicked onto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -105,6 +105,13 @@ pub struct Rig {
     pub ref_ft: f32,
     /// What `ref_ft` measures: "crown", "withers", "diameter", "carapace".
     pub axis: String,
+    /// The primary silhouette is drawn from ABOVE (a spider, a crab): up in
+    /// the drawing is the creature's front, and the coordinate it cannot
+    /// show is HEIGHT, read from the side silhouette. The rig still says
+    /// `view = "front"` (that is the outline it is clicked onto and the
+    /// bake is 2D either way); this only changes how the 3D puppet reads it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_above: bool,
     /// Radius of the painted eye discs, in feet. None = Auto: a share of
     /// the head bone's measured radius (see `bake`).
     #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_f32")]
@@ -297,6 +304,10 @@ impl Rig {
                     self.joint_order = t.joints.clone();
                 }
             }
+            // Version 3 added `from_above`; it is set per rig (the arachnid
+            // and crustacean plans), not by body type: the scorpion, the
+            // bloated sac and the six-legged insect are multileg rigs drawn
+            // face on.
             self.version = RIG_VERSION;
         }
         let mentioned: Vec<String> =

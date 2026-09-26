@@ -101,6 +101,7 @@ fn buried_rig(view: View) -> Rig {
         view,
         ref_ft: 4.0,
         axis: "crown".to_owned(),
+        from_above: false,
         eye_radius_ft: None,
         joint_order: vec!["top".into(), "hip".into(), "knee".into(), "foot".into()],
         unused: Default::default(),
@@ -943,9 +944,11 @@ fn an_eye_sits_at_the_height_it_was_clicked() {
         let rig = Rig::load(&data.join("rigs").join(Rig::file_name(family))).expect("rig");
         let (l, r) = rig.eye_points();
         let p = shipped(family);
+        // (Drawn from above, the clicked height is a position along the body: z.)
+        let axis = if p.from_above { 2 } else { 1 };
         for (eye, clicked) in p.eyes.iter().zip([l, r]) {
             let y = clicked.expect("both eyes clicked")[1];
-            assert!((eye.pos[1] - y).abs() < 0.02, "{family}: an eye clicked at {y:.2} ft sits at {:.2}", eye.pos[1]);
+            assert!((eye.pos[axis] - y).abs() < 0.02, "{family}: an eye clicked at {y:.2} ft sits at {:.2}", eye.pos[axis]);
         }
     }
 }

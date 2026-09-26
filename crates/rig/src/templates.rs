@@ -42,6 +42,14 @@ pub struct Template {
     pub anchors: AnchorDef,
 }
 
+impl Template {
+    /// Whether this template's silhouette is a drawing from above (see
+    /// `Rig::from_above`): the many-legged one is.
+    pub fn from_above(&self) -> bool {
+        self.name == "multileg"
+    }
+}
+
 /// `shoulder_r` <-> `shoulder_l`; None for centre-line joints.
 pub fn mirror_name(joint: &str) -> Option<String> {
     if let Some(stem) = joint.strip_suffix("_r") {
@@ -76,6 +84,7 @@ impl Template {
             view,
             ref_ft,
             axis: axis.to_owned(),
+            from_above: self.from_above(),
             anchors: Anchors {
                 head: self.anchors.head.to_owned(),
                 mouth: self.anchors.mouth.to_owned(),

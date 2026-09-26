@@ -62,6 +62,9 @@ pub struct BakedPuppet {
     pub family: String,
     pub body_type: String,
     pub view: View,
+    /// Built from a silhouette drawn from above (`Puppet::from_above`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub from_above: bool,
     pub height: f64,
     pub groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -96,6 +99,7 @@ impl Puppet {
             family: self.family.clone(),
             body_type: self.body_type.clone(),
             view: self.view,
+            from_above: self.from_above,
             height: wide(self.height),
             groups: self.groups[..groups.min(self.groups.len())].to_vec(),
             eyes: self
@@ -212,6 +216,7 @@ impl Puppet {
             family: baked.family.clone(),
             body_type: baked.body_type.clone(),
             view: baked.view,
+            from_above: baked.from_above,
             height: baked.height as f32,
             segments,
             groups: baked.groups.clone(),
