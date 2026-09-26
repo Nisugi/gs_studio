@@ -1,0 +1,133 @@
+family = "lurk"
+view = "front"
+ref_ft = 6.0
+axis = "crown"
+px_per_ft = 85.1913
+aspect = 0.4238
+span = 0.9355
+ground_frac = 1.0
+eye_radius_ft = 0.0532
+parts = ["head", "leftEye", "rightEye", "neck", "chest", "abdomen", "leftArm", "rightArm", "leftHand", "rightHand", "leftLeg", "rightLeg"]
+
+[map]
+width = 217
+height = 512
+
+[anchors]
+feet = [0.4986, 1.0]
+head = [0.5221, 0.0042]
+mouth = [0.5221, 0.1972]
+saddle = [0.5202, 0.2471]
+
+[eyes]
+leftEye = [0.5693, 0.0541]
+rightEye = [0.475, 0.0541]
+
+[[bones]]
+index = 1
+name = "skull"
+part = "head"
+parent = "neck"
+pivot = [0.5221, 0.1972]
+tip = [0.5221, 0.0042]
+joints = [[0.5221, 0.0042], [0.5221, 0.1972]]
+pixels = 5745
+
+[[bones]]
+index = 2
+name = "neck"
+part = "neck"
+parent = "torso_upper"
+pivot = [0.5202, 0.2471]
+tip = [0.5221, 0.1972]
+joints = [[0.5221, 0.1972], [0.5202, 0.2471]]
+pixels = 1162
+
+[[bones]]
+index = 3
+name = "clavicle"
+part = "chest"
+parent = "torso_upper"
+pivot = [0.5202, 0.2471]
+tip = [0.8861, 0.277]
+joints = [[0.17, 0.277], [0.5202, 0.2471], [0.8861, 0.277]]
+pixels = 8606
+
+[[bones]]
+index = 4
+name = "torso_upper"
+part = "chest"
+parent = "torso_lower"
+pivot = [0.5202, 0.4002]
+tip = [0.5202, 0.2471]
+joints = [[0.5202, 0.2471], [0.5202, 0.4002]]
+pixels = 5306
+
+[[bones]]
+index = 5
+name = "torso_lower"
+part = "abdomen"
+pivot = [0.4888, 0.5749]
+tip = [0.5202, 0.4002]
+joints = [[0.5202, 0.4002], [0.4888, 0.5749]]
+pixels = 10404
+
+[[bones]]
+index = 6
+name = "arm_r"
+part = "rightArm"
+parent = "clavicle"
+pivot = [0.17, 0.277]
+tip = [0.2813, 0.6597]
+joints = [[0.17, 0.277], [0.1001, 0.4684], [0.2813, 0.6597]]
+pixels = 4920
+
+[[bones]]
+index = 7
+name = "hand_r"
+part = "rightHand"
+parent = "arm_r"
+pivot = [0.2813, 0.6597]
+tip = [0.3101, 0.7196]
+joints = [[0.2813, 0.6597], [0.3101, 0.7196]]
+pixels = 564
+
+[[bones]]
+index = 8
+name = "arm_l"
+part = "leftArm"
+parent = "clavicle"
+pivot = [0.8861, 0.277]
+tip = [0.7826, 0.6597]
+joints = [[0.8861, 0.277], [0.9265, 0.4684], [0.7826, 0.6597]]
+pixels = 5256
+
+[[bones]]
+index = 9
+name = "hand_l"
+part = "leftHand"
+parent = "arm_l"
+pivot = [0.7826, 0.6597]
+tip = [0.7479, 0.7196]
+joints = [[0.7826, 0.6597], [0.7479, 0.7196]]
+pixels = 861
+
+[[bones]]
+index = 10
+name = "leg_r"
+part = "rightLeg"
+parent = "torso_lower"
+pivot = [0.3443, 0.6048]
+tip = [0.1177, 0.9925]
+joints = [[0.3443, 0.6048], [0.2846, 0.8145], [0.2356, 0.9642], [0.1177, 0.9925]]
+pixels = 7370
+
+[[bones]]
+index = 11
+name = "leg_l"
+part = "leftLeg"
+parent = "torso_lower"
+pivot = [0.6941, 0.6048]
+tip = [0.9207, 0.9925]
+joints = [[0.6941, 0.6048], [0.7518, 0.8145], [0.8009, 0.9642], [0.9207, 0.9925]]
+pixels = 7103
