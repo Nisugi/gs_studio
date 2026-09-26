@@ -44,6 +44,10 @@ pub struct PuppetView {
     pub skin: bool,
     /// Dress the skin in the family's painted texture (`editor::texture`).
     pub texture: bool,
+    /// Draw the puppet as a Gaussian splat cloud (`gs_puppet::splat`)
+    /// instead of the smooth skin, shaped by `splat`.
+    pub splats: bool,
+    pub splat: gs_puppet::splat::SplatParams,
     /// The creature shown, by bestiary name token: the family's puppet in
     /// its outfit, wearing its own sheet; "" = the family bare.
     pub creature: String,
@@ -68,6 +72,8 @@ impl Default for PuppetView {
             pose: String::new(),
             skin: true,
             texture: true,
+            splats: false,
+            splat: gs_puppet::splat::SplatParams::default(),
             creature: String::new(),
             hold: String::new(),
             hold_left: String::new(),

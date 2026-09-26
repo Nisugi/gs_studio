@@ -107,6 +107,8 @@ struct SkinKey {
     creature: String,
     /// Rendered at half size while something moves (see `DRAFT_SCALE`).
     draft: bool,
+    /// As a splat cloud, with its shape (spacing, overlap, opacity, quantized).
+    splats: Option<[u32; 3]>,
 }
 
 /// While the preview is being turned, zoomed or its rig dragged, the skin is
@@ -209,6 +211,9 @@ impl RigTool {
         }
         let (pose, row) = spec.split_once(':').unwrap_or((spec, ""));
         self.puppet_view.show = true;
+        if std::env::var_os("GS_STUDIO_SPLATS").is_some() {
+            self.puppet_view.splats = true;
+        }
         self.pose_edit = true;
         self.puppet_view.pose = if pose.is_empty() { "stand".into() } else { pose.to_owned() };
         self.pose_row = (!row.is_empty()).then(|| row.to_owned());
@@ -669,6 +674,8 @@ impl RigTool {
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
             ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.texture, "Texture"))
                 .on_hover_text("Dress the skin in data/textures/<family>/sheet.png (a creature's own: <family>/<creature>/sheet.png)");
+            ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.splats, "Splats"))
+                .on_hover_text("Draw the puppet as a Gaussian splat cloud instead of the smooth skin: one soft splat per ring sample, coloured from the sheet, sorted and blended. The look test for a splat renderer");
             ui.label("Creature");
             let shown = if pv.creature.is_empty() { format!("({family})") } else { pv.creature.clone() };
             egui::ComboBox::from_id_salt("preview_creature").selected_text(shown).height(400.0).show_ui(ui, |ui| {
@@ -683,6 +690,19 @@ impl RigTool {
                 pv.reset_camera();
             }
         });
+        if pv.skin && pv.splats {
+            let p = &mut pv.splat;
+            ui.horizontal_wrapped(|ui| {
+                ui.strong("Splats");
+                ui.add(egui::Slider::new(&mut p.spacing, 0.01..=0.12).logarithmic(true).text("spacing ft"))
+                    .on_hover_text("Sample step along each ring and between rings: finer = more, smaller splats");
+                ui.add(egui::Slider::new(&mut p.overlap, 0.3..=1.5).text("overlap")).on_hover_text("How far each splat reaches past its step: 0.5 = neighbours just touch");
+                ui.add(egui::Slider::new(&mut p.alpha, 0.1..=1.0).text("opacity")).on_hover_text("Each splat's peak opacity");
+                if ui.small_button("Defaults").clicked() {
+                    *p = gs_puppet::splat::SplatParams::default();
+                }
+            });
+        }
         // What it holds: any weapon or shield the props file knows.
         let weapons: Vec<(String, String)> = match pv.props(&data_root) {
             Ok((set, _)) => {
@@ -1040,6 +1060,10 @@ impl RigTool {
                         hold: hold.clone(),
                         creature: creature.clone(),
                         draft,
+                        splats: self.puppet_view.splats.then(|| {
+                            let p = self.puppet_view.splat;
+                            [(p.spacing * 1000.0).round() as u32, (p.overlap * 100.0).round() as u32, (p.alpha * 100.0).round() as u32]
+                        }),
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let s = if draft { DRAFT_SCALE } else { 1.0 };
@@ -1047,7 +1071,12 @@ impl RigTool {
                         local.focal *= s;
                         local.center = [rect.width() * 0.5 * s, rect.height() * 0.5 * s];
                         let _t = crate::perf_log::span("rigs: skin");
-                        let skin = posed.skin_textured(&|p| local.project(p), &look, texture.as_deref());
+                        let skin = if self.puppet_view.splats {
+                            let cloud = gs_puppet::splat::cloud(&posed, texture.as_deref(), look.body, &self.puppet_view.splat);
+                            gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
+                        } else {
+                            posed.skin_textured(&|p| local.project(p), &look, texture.as_deref())
+                        };
                         let image = egui::ColorImage::from_rgba_unmultiplied([skin.w, skin.h], &skin.rgba);
                         let tex = ui.ctx().load_texture("rig_puppet_skin", image, egui::TextureOptions::LINEAR);
                         self.skin = Some((key, tex, Vec2::new(skin.origin[0], skin.origin[1])));
