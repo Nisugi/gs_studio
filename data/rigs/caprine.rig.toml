@@ -4,7 +4,7 @@ body_type = "quadruped"
 view = "side"
 ref_ft = 3.0
 axis = "withers"
-joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_2", "tail_3", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "horn_base_r", "horn_mid_r", "horn_bend_r", "horn_tip_r", "horn_base_l", "horn_mid_l", "horn_bend_l", "horn_tip_l", "ear_base_r", "ear_tip_r", "ear_base_l", "ear_tip_l"]
+joint_order = ["nose", "poll", "withers", "mid_back", "croup", "tail_base", "tail_1", "tail_tip", "chest_front", "sternum", "belly", "groin", "eye_r", "shoulder_r", "elbow_r", "wrist_r", "forepaw_r", "hip_r", "stifle_r", "hock_r", "hindpaw_r", "shoulder_l", "elbow_l", "wrist_l", "forepaw_l", "hip_l", "stifle_l", "hock_l", "hindpaw_l", "horn_base_r", "horn_mid_r", "horn_bend_r", "horn_tip_r", "horn_base_l", "horn_mid_l", "horn_bend_l", "horn_tip_l", "ear_base_r", "ear_tip_r", "ear_base_l", "ear_tip_l", "horn_bend2_r", "horn_bend2_l"]
 
 [anchors]
 head = "poll"
@@ -12,100 +12,93 @@ mouth = "nose"
 saddle = "mid_back"
 
 [joints]
-belly = [-0.6576, 2.0233]
-chest_front = [0.8508, 2.0695]
-croup = [-1.4799, 2.8389]
-ear_base_l = [1.1291, 3.5797]
-ear_base_r = [1.3787, 3.5797]
-ear_tip_l = [0.4428, 3.5847]
-ear_tip_r = [0.3341, 3.5847]
-elbow_l = [0.6060, 1.3785]
-elbow_r = [0.2703, 1.4455]
+belly = [-0.8893, 1.4464]
+chest_front = [0.6711, 2.2776]
+croup = [-1.3471, 2.7465]
+ear_base_l = [1.2619, 3.5566]
+ear_base_r = [1.269, 3.5566]
+ear_tip_l = [0.8644, 3.6771]
+ear_tip_r = [0.877, 3.6713]
+elbow_l = [0.6498, 1.3631]
+elbow_r = [0.3674, 1.4706]
 eye_r = [1.7253, 3.3113]
-forepaw_l = [0.7097, 0.4768]
-forepaw_r = [0.5195, 0.1434]
-groin = [-1.5535, 1.8133]
-hindpaw_l = [-1.6621, 0.1709]
-hindpaw_r = [-1.0558, 0.2107]
-hip_l = [-1.2593, 2.3237]
-hip_r = [-0.9777, 2.3257]
-hock_l = [-1.7276, 0.9440]
-hock_r = [-1.4621, 0.9958]
-horn_base_l = [1.0639, 3.6794]
-horn_base_r = [1.0472, 3.7108]
-horn_bend_l = [0.9567, 4.1913]
-horn_bend_r = [0.8173, 4.1289]
-horn_mid_l = [0.2697, 3.9438]
-horn_mid_r = [0.2697, 3.9604]
-horn_tip_l = [0.9960, 3.8306]
-horn_tip_r = [1.0605, 4.1114]
+forepaw_l = [0.7428, 0.1174]
+forepaw_r = [0.4229, 0.0451]
+groin = [-1.333, 1.6488]
+hindpaw_l = [-1.6479, 0.029]
+hindpaw_r = [-1.0842, 0.1019]
+hip_l = [-1.1194, 2.0636]
+hip_r = [-1.1101, 2.1082]
+hock_l = [-1.7891, 0.3292]
+hock_r = [-1.2374, 0.3009]
+horn_base_l = [1.3485, 3.655]
+horn_base_r = [1.4707, 3.7027]
+horn_bend2_l = [0.3705, 3.9363]
+horn_bend2_r = [0.2723, 4.0576]
+horn_bend_l = [0.7285, 4.1034]
+horn_bend_r = [0.7328, 4.205]
+horn_mid_l = [1.0575, 4.0214]
+horn_mid_r = [1.1501, 4.0838]
+horn_tip_l = [0.1517, 3.6569]
+horn_tip_r = [-0.0892, 3.6803]
 mid_back = [-0.3177, 2.7621]
 nose = [2.0858, 2.862]
 poll = [1.3106, 3.4611]
-shoulder_l = [0.5884, 2.2167]
-shoulder_r = [0.5796, 2.2935]
-sternum = [0.3697, 1.4575]
-stifle_l = [-0.662, 1.4639]
-stifle_r = [-0.6533, 1.5453]
-tail_base = [-2.0000, 2.7186]
-tail_1 = [-1.8002, 1.6624]
-tail_2 = [-2.0369, 2.7811]
-tail_3 = [-1.8944, 2.7221]
-tail_tip = [-1.9800, 2.9614]
-withers = [0.6370, 2.8370]
-wrist_l = [0.6894, 0.1610]
-wrist_r = [0.2666, 0.3988]
+shoulder_l = [0.6499, 2.4673]
+shoulder_r = [0.6458, 2.4685]
+sternum = [0.7607, 1.5262]
+stifle_l = [-1.7414, 1.0612]
+stifle_r = [-1.3903, 1.4651]
+tail_1 = [-2.0139, 2.6327]
+tail_base = [-1.717, 2.476]
+tail_tip = [-2.084, 2.8748]
+withers = [0.5566, 2.8985]
+wrist_l = [0.6147, 0.4524]
+wrist_r = [0.3034, 0.3931]
 
-# Depth notes (the rig file loses comments on a re-bake; re-add them).
-# Horns and ears are extra head bones; their spread is read off caprine-front
-# (horns rise from the crown and curl out to +-1.0, ears stick out to +-0.7).
-# Legs: forelegs +-0.20 (inner columns), hind legs +-0.38 (outer columns).
-# [radius_depth_ft]: slim legs where they merge into the body in the front
-# view, and an underline no wider than the belly (the leg outline slivers
-# otherwise merge into it).
 [depth]
+belly = -0.0055
+chest_front = -0.0151
+croup = -0.0091
 ear_base_l = 0.3858
-ear_base_r = -0.3858
-ear_tip_l = 0.6800
-ear_tip_r = -0.6800
-elbow_l = 0.3080
-elbow_r = -0.3080
-forepaw_l = 0.1858
-forepaw_r = -0.1858
-hindpaw_l = 0.5818
-hindpaw_r = -0.5818
-hip_l = 0.4585
-hip_r = -0.4585
-hock_l = 0.5360
-hock_r = -0.5360
-horn_base_l = 0.1978
-horn_base_r = -0.1978
-horn_bend_l = 0.5188
-horn_bend_r = -0.5188
+ear_base_r = -0.2479
+ear_tip_l = 0.68
+ear_tip_r = -0.65
+elbow_l = 0.8475
+elbow_r = -0.8049
+forepaw_l = 0.994
+forepaw_r = -0.9742
+groin = -0.0103
+hindpaw_l = 1.068
+hindpaw_r = -0.9648
+hip_l = 0.7421
+hip_r = -0.7797
+hock_l = 0.9875
+hock_r = -0.9004
+horn_base_l = 0.1618
+horn_base_r = -0.1738
+horn_bend2_l = 1.2854
+horn_bend2_r = -1.1998
+horn_bend_l = 0.6866
+horn_bend_r = -0.6327
 horn_mid_l = 0.3146
-horn_mid_r = -0.3146
-horn_tip_l = 0.95
-horn_tip_r = -0.95
-shoulder_l = -0.1446
-shoulder_r = 0.1446
-stifle_l = 0.3795
-stifle_r = -0.3795
-wrist_l = 0.1854
-wrist_r = -0.1854
-
-belly = -0.0651
-chest_front = -0.5006
-croup = -0.3006
-groin = 0.5323
-mid_back = 0.2496
-nose = 0.1747
+horn_mid_r = -0.3566
+horn_tip_l = 1.6873
+horn_tip_r = -1.7712
+mid_back = 0.0045
+nose = -0.0174
+shoulder_l = 0.562
+shoulder_r = -0.5289
 sternum = 0.0005
-tail_base = -0.0274
+stifle_l = 0.7991
+stifle_r = -0.8291
 tail_1 = -0.0548
-tail_2 = -0.0948
-tail_3 = -0.2290
+tail_base = -0.0274
 tail_tip = 0.1082
-withers = 0.0312
+withers = -0.0085
+wrist_l = 0.9217
+wrist_r = -0.8996
+
 [radius_depth_ft]
 foreleg_l = 0.1
 foreleg_r = 0.1
@@ -136,7 +129,7 @@ joints = ["withers", "mid_back", "croup", "tail_base"]
 name = "tail"
 part = "back"
 parent = "spine"
-joints = ["tail_base", "tail_1", "tail_2", "tail_3", "tail_tip"]
+joints = ["tail_base", "tail_1", "tail_tip"]
 
 [[bones]]
 name = "brisket"
@@ -191,13 +184,13 @@ joints = ["hip_l", "stifle_l", "hock_l", "hindpaw_l"]
 name = "horn_r"
 part = "head"
 parent = "skull"
-joints = ["horn_base_r", "horn_mid_r", "horn_bend_r", "horn_tip_r"]
+joints = ["horn_base_r", "horn_mid_r", "horn_bend_r", "horn_bend2_r", "horn_tip_r"]
 
 [[bones]]
 name = "horn_l"
 part = "head"
 parent = "skull"
-joints = ["horn_base_l", "horn_mid_l", "horn_bend_l", "horn_tip_l"]
+joints = ["horn_base_l", "horn_mid_l", "horn_bend_l", "horn_bend2_l", "horn_tip_l"]
 
 [[bones]]
 name = "ear_r"
