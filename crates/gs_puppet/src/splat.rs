@@ -93,7 +93,7 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                 return false;
             }
             let (u, v) = (dot(e, t.w) / t.hw.max(1e-3), dot(e, t.d) / t.hd.max(1e-3));
-            u * u + v * v < 0.7
+            u * u + v * v < 0.45
         })
     };
     let mut out = Vec::new();
@@ -133,7 +133,11 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                     let (sin, cos) = theta.sin_cos();
                     let radial = add(scale(a, cos), scale(b, sin));
                     let p = add(c, radial);
-                    if inside_other(p, i) {
+                    // Deep inside another segment only, and never at a
+                    // segment's ends: the junction rings are what closes
+                    // a shoulder or a crotch, and culling them left holes.
+                    let junction = k < s.bare + 2 || k + 3 >= n;
+                    if !junction && inside_other(p, i) {
                         continue;
                     }
                     let tangent = sub(scale(b, cos), scale(a, sin));
