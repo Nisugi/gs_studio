@@ -359,7 +359,9 @@ mod tests {
     /// chart's (the old single elemental beside the eight new ones).
     #[test]
     fn matches_the_checked_in_outlines_when_the_chart_is_here() {
-        let chart = std::path::Path::new(r"C:\Gemstone\image-gen\silhouettes\scale-chart.html");
+        // image-gen sits beside this repo (a fixed C:\Gemstone path went
+        // stale when both moved, and the test skipped itself unnoticed).
+        let chart = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../image-gen/silhouettes/scale-chart.html");
         let Ok(html) = std::fs::read_to_string(chart) else {
             return;
         };

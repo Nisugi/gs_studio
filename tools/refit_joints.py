@@ -6,8 +6,11 @@ where it was RELATIVE TO THE SILHOUETTE: at the same fraction of its height,
 in the same horizontal run of that row (the second of four leg columns, the
 one body run), the same fraction of the way across that run. Depth values
 (the other view's x) keep their offset from the other view's body centre
-line, scaled by the body's width there, and ignore areas move point by
-point. Everything else in the file is kept as written.
+line, scaled by the body's width there (a rig drawn from above keeps
+heights there instead, scaled with the side view's height), and ignore
+areas move point by point. Everything else in the file is kept as written;
+the result is parsed back and checked before anything is written.
+Tests: python -m unittest tools/test_refit_joints.py
 
     python tools/refit_joints.py --old old_outlines.json --new data/outlines.json canine
         (canine's rig, from its old silhouette onto its new one, in place)
@@ -20,17 +23,20 @@ Outlines files are gs-studio's `outlines.json` ({key: {ref_ft, subpaths}},
 feet, x centred, ground at 0; `<name>` is the side view, `<name>-front` the
 front). A rig's own view is `view = "front" | "side"` in the file.
 """
-import argparse, json, os, re, sys
+import argparse, json, os, re, sys, tomllib
 import numpy as np
 from PIL import Image, ImageDraw
 
 PX = 64            # raster px per foot
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-JOINT_LINE = re.compile(r"^(\w+) = \[(-?[\d.]+), (-?[\d.]+)\]", re.M)
-DEPTH_LINE = re.compile(r"^(\w+) = (-?[\d.]+)$", re.M)
-JOINTS_BLOCK = re.compile(r"(\[joints\]\n)((?:.*\n)*?)(?=\n?\[)")
-DEPTH_BLOCK = re.compile(r"(\[depth\]\n)((?:.*\n)*?)(?=\n?\[)")
+NUM = r"(-?[\d.]+(?:[eE][-+]?\d+)?)"
+JOINT_LINE = re.compile(rf"^(\w+) = \[{NUM}, {NUM}\]", re.M)
+DEPTH_LINE = re.compile(rf"^(\w+) = {NUM}$", re.M)
+# A table runs to the next header or the end of the file (the lookahead once
+# wanted another table after it, so a [depth] written last was skipped).
+JOINTS_BLOCK = re.compile(r"(\[joints\]\n)((?:.*\n)*?)(?=\n?\[|\Z)")
+DEPTH_BLOCK = re.compile(r"(\[depth\]\n)((?:.*\n)*?)(?=\n?\[|\Z)")
 IGNORE_BLOCK = re.compile(r'(\[\[ignore\]\]\nview = "(\w+)"\n)(points = .*\n)')
 
 
@@ -150,7 +156,10 @@ def body_line(sil):
 
 
 def other_view_key(name, view):
-    return name if view == "side" else f"{name}-front"
+    """The OTHER view's silhouette: the front for a side-view rig, the side
+    for a front-view one. (It once returned the rig's own view, so depths and
+    the other view's ignore areas were moved by the wrong silhouette.)"""
+    return f"{name}-front" if view == "side" else name
 
 
 def own_view_key(name, view):
@@ -158,7 +167,87 @@ def own_view_key(name, view):
 
 
 def fmt(v):
-    return f"{v:.4f}".rstrip("0").rstrip(".") if abs(v) >= 1e-4 else "0.0"
+    """Four places, trailing zeros dropped but never the point (1.0, as
+    gs-studio writes it, not the TOML integer 1)."""
+    s = f"{v:.4f}".rstrip("0") if abs(v) >= 1e-4 else "0.0"
+    return s + "0" if s.endswith(".") else s
+
+
+def refit(text, old, new, family, donor=None, keep_depth=False):
+    """The donor's rig file `text` (fitted to the `old` outlines) with its
+    joints, depths and ignore areas moved onto `family`'s silhouettes in
+    `new`. Returns (text, moves, view). The edit is textual, to keep the
+    file as written, so the result is parsed back and checked: every joint
+    and depth took its new value and nothing else changed, else ValueError."""
+    donor = donor or family
+    if not text.endswith("\n"):
+        text += "\n"
+    before = tomllib.loads(text)
+    view = before["view"]
+    for key, table, label in ((own_view_key(donor, view), old, "old"), (other_view_key(donor, view), old, "old"),
+                              (own_view_key(family, view), new, "new"), (other_view_key(family, view), new, "new")):
+        if key not in table:
+            raise KeyError(f"no silhouette '{key}' in the {label} outlines")
+    s_own, s_other = Sil(old[own_view_key(donor, view)]), Sil(old[other_view_key(donor, view)])
+    d_own, d_other = Sil(new[own_view_key(family, view)]), Sil(new[other_view_key(family, view)])
+    moves, depths = [], {}
+
+    # [joints]
+    def joints_block(m):
+        def line(lm):
+            name, x, y = lm.group(1), float(lm.group(2)), float(lm.group(3))
+            nx, ny = transfer((x, y), s_own, d_own)
+            moves.append((name, x, y, nx, ny))
+            return f"{name} = [{fmt(nx)}, {fmt(ny)}]"
+        return m.group(1) + JOINT_LINE.sub(line, m.group(2))
+    text = JOINTS_BLOCK.sub(joints_block, text, count=1)
+
+    # [depth]: an offset from the other view's body centre line, scaled by
+    # the body's width there (a leg set off to one side stays that side). A
+    # rig drawn from above keeps HEIGHTS there (off the side view), which
+    # scale with the side view's height.
+    (c_old, w_old), (c_new, w_new) = body_line(s_other), body_line(d_other)
+    def moved_depth(d):
+        if before.get("from_above"):
+            return d * d_other.height() / max(s_other.height(), 1e-6)
+        return c_new + (d - c_old) * (w_new / w_old)
+    def depth_block(m):
+        def line(lm):
+            name, d = lm.group(1), float(lm.group(2))
+            depths[name] = fmt(moved_depth(d))
+            return f"{name} = {depths[name]}"
+        return m.group(1) + DEPTH_LINE.sub(line, m.group(2))
+    if not keep_depth:
+        text = DEPTH_BLOCK.sub(depth_block, text, count=1)
+
+    # [[ignore]] areas, point by point in their view
+    def ignore_block(m):
+        src, dst = (s_own, d_own) if m.group(2) == view else (s_other, d_other)
+        pts = re.findall(rf"\[{NUM}, {NUM}\]", m.group(3))
+        moved = [transfer((float(x), float(y)), src, dst) for x, y in pts]
+        return m.group(1) + "points = [" + ", ".join(f"[{fmt(x)}, {fmt(y)}]" for x, y in moved) + "]\n"
+    text = IGNORE_BLOCK.sub(ignore_block, text)
+
+    if donor != family:
+        text = re.sub(r'^family = ".*"', f'family = "{family}"', text, count=1, flags=re.M)
+        text = re.sub(r"^ref_ft = .*", f"ref_ft = {new[own_view_key(family, view)]['ref_ft']}", text, count=1, flags=re.M)
+
+    after = tomllib.loads(text)
+    got = {n for n, *_ in moves}
+    if got != set(before.get("joints", {})):
+        raise ValueError(f"joints not moved: {sorted(set(before.get('joints', {})) - got)}")
+    for n, _, _, nx, ny in moves:
+        if after["joints"][n] != [float(fmt(nx)), float(fmt(ny))]:
+            raise ValueError(f"joint {n} did not take its new place")
+    if not keep_depth:
+        if set(depths) != set(before.get("depth", {})):
+            raise ValueError(f"depths not moved: {sorted(set(before.get('depth', {})) - set(depths))}")
+        if any(after["depth"][n] != float(v) for n, v in depths.items()):
+            raise ValueError("a depth did not take its new value")
+    edited = {"joints", "depth", "ignore", "family", "ref_ft"}
+    if any(after.get(k) != before.get(k) for k in set(before) | set(after) if k not in edited):
+        raise ValueError("the edit changed a table it should not have")
+    return text, moves, view
 
 
 def main():
@@ -175,47 +264,10 @@ def main():
     donor = a.donor or a.family
     old = json.load(open(a.old, encoding="utf-8")); new = json.load(open(a.new, encoding="utf-8"))
     text = open(os.path.join(a.rigs, f"{donor}.rig.toml"), encoding="utf-8").read()
-    view = re.search(r'^view = "(\w+)"', text, re.M).group(1)
-    for key, table, label in ((own_view_key(donor, view), old, "old"), (other_view_key(donor, view), old, "old"),
-                              (own_view_key(a.family, view), new, "new"), (other_view_key(a.family, view), new, "new")):
-        if key not in table:
-            sys.exit(f"no silhouette '{key}' in the {label} outlines")
-    s_own, s_other = Sil(old[own_view_key(donor, view)]), Sil(old[other_view_key(donor, view)])
-    d_own, d_other = Sil(new[own_view_key(a.family, view)]), Sil(new[other_view_key(a.family, view)])
-    moves = []
-
-    # [joints]
-    def joints_block(m):
-        def line(lm):
-            name, x, y = lm.group(1), float(lm.group(2)), float(lm.group(3))
-            nx, ny = transfer((x, y), s_own, d_own)
-            moves.append((name, x, y, nx, ny))
-            return f"{name} = [{fmt(nx)}, {fmt(ny)}]"
-        return m.group(1) + JOINT_LINE.sub(line, m.group(2))
-    text = JOINTS_BLOCK.sub(joints_block, text, count=1)
-
-    # [depth]: an offset from the other view's body centre line, scaled by
-    # the body's width there (a leg set off to one side stays that side).
-    (c_old, w_old), (c_new, w_new) = body_line(s_other), body_line(d_other)
-    def depth_block(m):
-        def line(lm):
-            name, d = lm.group(1), float(lm.group(2))
-            return f"{name} = {fmt(c_new + (d - c_old) * (w_new / w_old))}"
-        return m.group(1) + DEPTH_LINE.sub(line, m.group(2))
-    if not a.keep_depth:
-        text = DEPTH_BLOCK.sub(depth_block, text, count=1)
-
-    # [[ignore]] areas, point by point in their view
-    def ignore_block(m):
-        src, dst = (s_own, d_own) if m.group(2) == view else (s_other, d_other)
-        pts = re.findall(r"\[(-?[\d.]+), (-?[\d.]+)\]", m.group(3))
-        moved = [transfer((float(x), float(y)), src, dst) for x, y in pts]
-        return m.group(1) + "points = [" + ", ".join(f"[{fmt(x)}, {fmt(y)}]" for x, y in moved) + "]\n"
-    text = IGNORE_BLOCK.sub(ignore_block, text)
-
-    if donor != a.family:
-        text = re.sub(r'^family = ".*"', f'family = "{a.family}"', text, count=1, flags=re.M)
-        text = re.sub(r"^ref_ft = .*", f"ref_ft = {new[own_view_key(a.family, view)]['ref_ft']}", text, count=1, flags=re.M)
+    try:
+        text, moves, view = refit(text, old, new, a.family, donor, a.keep_depth)
+    except (KeyError, ValueError) as e:
+        sys.exit(f"refit_joints: {e.args[0]}")
 
     big = [t for t in moves if abs(t[3] - t[1]) + abs(t[4] - t[2]) > 0.15]
     print(f"{donor} -> {a.family} ({view} view): {len(moves)} joints moved, {len(big)} by more than 0.15 ft")
