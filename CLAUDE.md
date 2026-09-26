@@ -50,8 +50,11 @@ the same renderer, scaled to a height and grounded) and `ply_pose` (that
 cloud bound to a family's rig by nearest segment and posed by it, beside
 the puppet's skin in the same pose), `ply_silhouette` (its front and side
 masks; `tools/cloud_outlines.py` traces them into `outlines.json` and
-`tools/fit_biped.py` places a biped rig on a front outline -- how a
-fitted cloud becomes a form: the lurk),
+`tools/fit_biped.py` places a biped rig on a front outline,
+`tools/frames_to_paintings.py` makes its paintings from the orbit frames
+-- how a fitted cloud becomes a form: the lurk; its cloud lives at
+`<data>/clouds/<family>.ply`, which the Rigs tab's *Splats* draws bound
+to the puppet),
 `rig_check` (one rig's editor warnings, build result and rest IoU, plus
 overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
 Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),

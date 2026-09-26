@@ -5,3 +5,4 @@ renders/
 
 # Per-machine build settings (bundled-art source paths).
 .cargo/config.toml
+data/clouds/

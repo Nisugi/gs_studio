@@ -55,6 +55,11 @@ pub struct RigTool {
     sheet: Option<SheetFile>,
     sheet_serial: u64,
     sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
+    /// The family's fitted cloud (`<data>/clouds/<family>.ply`), read once
+    /// per family and file time; None inside = the family has none.
+    cloud: Option<CloudFile>,
+    /// That cloud bound to the puppet of a rig revision.
+    bound: Option<(u64, u64, std::sync::Arc<gs_puppet::splat::BoundCloud>)>,
     /// The creatures the preview can show on this family, and for which
     /// family and sheet serial they were listed.
     creatures: Option<(String, u64, Vec<String>)>,
@@ -111,6 +116,8 @@ struct SkinKey {
     draft: bool,
     /// As a splat cloud, with its shape (spacing, overlap, opacity, quantized).
     splats: Option<[u32; 3]>,
+    /// The fitted cloud file's stamp when one is drawn instead.
+    cloud: Option<u64>,
 }
 
 /// While the preview is being turned, zoomed or its rig dragged, the skin is
@@ -126,6 +133,13 @@ struct Figure {
     creature: String,
     serial: u64,
     puppet: Result<std::sync::Arc<gs_puppet::Puppet>, String>,
+}
+
+struct CloudFile {
+    family: String,
+    /// The file's modification time, as a serial: re-read when it changes.
+    stamp: u64,
+    gaussians: Result<Option<std::sync::Arc<Vec<gs_puppet::splat::Gaussian>>>, String>,
 }
 
 struct SheetFile {
@@ -171,6 +185,8 @@ impl RigTool {
             sheet: None,
             sheet_serial: 0,
             sheet_texture: None,
+            cloud: None,
+            bound: None,
             creatures: None,
             dressed: None,
             jobs_export: None,
@@ -1038,6 +1054,30 @@ impl RigTool {
             None
         };
         let texture_serial = texture.as_ref().map(|_| self.sheet_serial);
+        // A fitted cloud, when the family has one and splats are on: read
+        // once per file, bound once per rig revision (~70 ms for 70k).
+        if self.puppet_view.skin && self.puppet_view.splats {
+            let path = gs_puppet::splat::cloud_path(&data_root, &family);
+            let stamp = std::fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_secs());
+            if self.cloud.as_ref().is_none_or(|c| c.family != family || c.stamp != stamp) {
+                let gaussians = if stamp == 0 {
+                    Ok(None)
+                } else {
+                    let _t = crate::perf_log::span("rigs: read cloud");
+                    gs_puppet::splat::load_ply(&path).map(|mut g| {
+                        g.retain(|x| x.alpha >= 0.02);
+                        Some(std::sync::Arc::new(g))
+                    }).map_err(|e| e.to_string())
+                };
+                self.cloud = Some(CloudFile { family: family.clone(), stamp, gaussians });
+                self.bound = None;
+            }
+        }
+        let cloud_stamp = self.cloud.as_ref().filter(|c| matches!(c.gaussians, Ok(Some(_)))).map(|c| c.stamp);
         let held = self.puppet_view.held(&data_root);
         let hold = [self.puppet_view.hold.clone(), self.puppet_view.hold_left.clone()];
         match figure {
@@ -1077,6 +1117,7 @@ impl RigTool {
                             let p = self.puppet_view.splat;
                             [(p.spacing * 1000.0).round() as u32, (p.overlap * 100.0).round() as u32, (p.alpha * 100.0).round() as u32]
                         }),
+                        cloud: cloud_stamp,
                     };
                     if self.skin.as_ref().is_none_or(|(k, _, _)| *k != key) {
                         let s = if draft { DRAFT_SCALE } else { 1.0 };
@@ -1084,7 +1125,22 @@ impl RigTool {
                         local.focal *= s;
                         local.center = [rect.width() * 0.5 * s, rect.height() * 0.5 * s];
                         let _t = crate::perf_log::span("rigs: skin");
-                        let skin = if self.puppet_view.splats {
+                        let fitted = cloud_stamp.and_then(|stamp| {
+                            let gaussians = self.cloud.as_ref()?.gaussians.as_ref().ok()?.clone()?;
+                            if self.bound.as_ref().is_none_or(|(r, s, _)| *r != revision || *s != stamp) {
+                                let _t = crate::perf_log::span("rigs: bind cloud");
+                                let mut rest = gaussians.as_ref().clone();
+                                gs_puppet::splat::fit_to_height(&mut rest, puppet.height);
+                                self.bound = Some((revision, stamp, std::sync::Arc::new(gs_puppet::splat::BoundCloud::bind(puppet, rest))));
+                            }
+                            self.bound.as_ref().map(|(_, _, b)| b.clone())
+                        });
+                        let skin = if let (true, Some(bound)) = (self.puppet_view.splats, fitted) {
+                            // The family's fitted cloud, moved by the rig.
+                            let cloud = bound.posed(&posed);
+                            self.splat_count = cloud.len();
+                            gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
+                        } else if self.puppet_view.splats {
                             let cloud = gs_puppet::splat::cloud(&posed, texture.as_deref(), look.body, &self.puppet_view.splat);
                             self.splat_count = cloud.len();
                             gs_puppet::splat::render(&cloud, &|p| local.project(p), look.yaw)
@@ -1127,7 +1183,8 @@ impl RigTool {
                     rect.left_bottom() + Vec2::new(8.0, -8.0),
                     egui::Align2::LEFT_BOTTOM,
                     if self.puppet_view.skin && self.puppet_view.splats && self.splat_count > 0 {
-                        format!("{} segments, {:.1} ft, {} splats", puppet.segments.len(), puppet.height, self.splat_count)
+                        let fitted = if cloud_stamp.is_some() { "fitted cloud, " } else { "" };
+                        format!("{} segments, {:.1} ft, {fitted}{} splats", puppet.segments.len(), puppet.height, self.splat_count)
                     } else {
                         format!("{} segments, {:.1} ft", puppet.segments.len(), puppet.height)
                     },

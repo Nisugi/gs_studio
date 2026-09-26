@@ -115,6 +115,75 @@ pub fn load_ply(path: &std::path::Path) -> std::io::Result<Vec<Gaussian>> {
     Ok(out)
 }
 
+/// Where a family's fitted cloud lives: `<data>/clouds/<family>.ply`.
+pub fn cloud_path(data_root: &std::path::Path, family: &str) -> std::path::PathBuf {
+    data_root.join("clouds").join(format!("{family}.ply"))
+}
+
+/// A fitted cloud bound to a puppet: each Gaussian follows the body
+/// segment whose ring it sits nearest in the rest pose (distance over that
+/// ring's radius, plus a little along the bone), exactly as the puppet's
+/// own rings do. Hard binding: one segment per Gaussian, so a joint bent
+/// far opens a wedge. Built once per puppet; posed per frame.
+#[derive(Debug, Clone)]
+pub struct BoundCloud {
+    /// The cloud in the puppet's rest space.
+    pub rest: Vec<Gaussian>,
+    /// Per Gaussian, the segment it moves with.
+    pub seg: Vec<usize>,
+}
+
+impl BoundCloud {
+    pub fn bind(puppet: &crate::puppet::Puppet, rest: Vec<Gaussian>) -> BoundCloud {
+        let bodies: Vec<(usize, &crate::puppet::Segment, V3)> = puppet
+            .segments
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.kind.is_body() && !s.hidden)
+            .map(|(i, s)| (i, s, norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0])))
+            .collect();
+        let seg = rest
+            .iter()
+            .map(|g| {
+                let mut best = (0usize, f32::MAX);
+                for (i, s, axis) in &bodies {
+                    for st in &s.stations {
+                        let e = sub(g.c, st.c);
+                        let (u, v) = (dot(e, s.axis_w) / st.w.max(0.02), dot(e, s.axis_d) / st.d.max(0.02));
+                        let along = dot(e, *axis) / crate::puppet::STATION_STEP_FT;
+                        let d = u * u + v * v + 0.25 * along * along;
+                        if d < best.1 {
+                            best = (*i, d);
+                        }
+                    }
+                }
+                best.0
+            })
+            .collect();
+        BoundCloud { rest, seg }
+    }
+
+    /// The cloud moved into `posed`'s pose.
+    pub fn posed(&self, posed: &Posed<'_>) -> Vec<Gaussian> {
+        self.rest
+            .iter()
+            .zip(&self.seg)
+            .map(|(g, &s)| {
+                let xf = &posed.xf[s];
+                Gaussian { c: xf.point(g.c), axes: g.axes.map(|a| xf.dir(a)), n: g.n, rgb: g.rgb, alpha: g.alpha }
+            })
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.rest.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rest.is_empty()
+    }
+}
+
 /// Scale a cloud so it stands `height_ft` tall (its y extent), centred
 /// on x and z and with its feet at y = 0 -- what [`load_ply`] hands back
 /// is in whatever units it was fitted in.
