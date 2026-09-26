@@ -17,7 +17,7 @@ pub mod sparse;
 pub mod state;
 
 pub use naming::StudioRoomContext;
-pub use state::{ClassFlag, StageState};
+pub use state::{ClassFlag, SceneAction, StageState};
 
 #[cfg(test)]
 pub mod test_support {

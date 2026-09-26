@@ -523,7 +523,13 @@ across -- and differ only in the right-hand panel:
   select, remove, x / z / scale / contact shadow); Camera (focal, cam_h, z0,
   dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
-  and, behind a checkbox, the Solver tunables.
+  and, behind a checkbox, the Solver tunables. An edit Save would keep
+  (backdrop, props, lights, light, camera, solver) marks the scene
+  "* unsaved"; loading another scene, *Clear stage scene* and closing the
+  window then ask Save first / Discard / Cancel (Save needs a name: *New
+  scene...*). With an unsaved rig too, closing asks about the rig first,
+  then the scene, whichever tab is showing; Cancel on either keeps the
+  window open.
 - **Light** (Scenes, under Backdrop and Color): *Light this scene* adds the
   scene file's `[light]` table (Niffy's creature-field lighting,
   `gs_field::lighting` + `vellum_light`). Key, Ambient and Ground swatches and

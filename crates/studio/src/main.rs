@@ -44,6 +44,7 @@ mod editor;
 mod fs_cache;
 mod perf_log;
 mod pool_dir;
+mod quit;
 mod settings;
 mod stage;
 

@@ -23,6 +23,25 @@ use super::sparse;
 use crate::status_log::STATUS_CAP;
 use crate::status_log::StatusLog;
 
+/// Something that replaces the stage scene, and so would lose unsaved
+/// edits to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SceneAction {
+    Load(String),
+    Clear,
+    Quit,
+}
+
+impl SceneAction {
+    pub fn describe(&self) -> String {
+        match self {
+            SceneAction::Load(name) => format!("load '{}'", gs_field::scenes::display_name(name)),
+            SceneAction::Clear => "clear the stage scene".to_owned(),
+            SceneAction::Quit => "quit".to_owned(),
+        }
+    }
+}
+
 /// The class checkboxes of the simulator, in display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClassFlag {
@@ -146,6 +165,13 @@ pub struct StageState {
     pub selected_prop: Option<usize>,
     /// Selected point light (index into scene.lights); drag moves it.
     pub selected_light: Option<usize>,
+    /// The scene and the camera/solver tuning it saves, as last loaded,
+    /// saved or cleared: what [`StageState::scene_dirty`] compares against.
+    saved: (Arc<StageScene>, FieldParams),
+    /// A load, clear or quit held for the unsaved-scene question.
+    pub scene_pending: Option<SceneAction>,
+    /// A window close the scene agreed to.
+    pub scene_quit_approved: bool,
     /// Creature exist id being dragged on the stage (grabbed by its card).
     dragging_creature: Option<String>,
     /// Scene Arc the solver obstacles were last built from (`make_mut`
@@ -201,11 +227,15 @@ impl StageState {
             splat_params: gs_puppet::splat::SplatParams::default(),
             selected_prop: None,
             selected_light: None,
+            saved: (Arc::new(StageScene::default()), FieldParams::default()),
+            scene_pending: None,
+            scene_quit_approved: false,
             dragging_creature: None,
             obstacle_scene: None,
             status: StatusLog::default(),
             new_scene: NewSceneState::new(context),
         };
+        stage.mark_scene_saved();
         stage.push_status(format!("Stage ready: {} castable bases", stage.cast.len()));
         stage
     }
@@ -611,6 +641,57 @@ impl StageState {
         self.scene = Arc::new(StageScene::default());
         self.scene_name.clear();
         self.deselect();
+        self.mark_scene_saved();
+    }
+
+    /// The scene, or the camera and solver tuning a save embeds in it,
+    /// differs from what was last loaded, saved or cleared.
+    pub fn scene_dirty(&self) -> bool {
+        (!Arc::ptr_eq(&self.scene, &self.saved.0) && *self.scene != *self.saved.0) || self.field.params != self.saved.1
+    }
+
+    fn mark_scene_saved(&mut self) {
+        self.saved = (Arc::clone(&self.scene), self.field.params.clone());
+    }
+
+    /// Load, clear or quit: at once when the scene has nothing unsaved,
+    /// otherwise held in `scene_pending` for the Save / Discard / Cancel
+    /// question.
+    pub fn request_scene(&mut self, action: SceneAction) {
+        if self.scene_dirty() {
+            self.scene_pending = Some(action);
+        } else {
+            self.apply_scene(action);
+        }
+    }
+
+    /// Discard: carry on with the held action.
+    pub fn confirm_scene_pending(&mut self) {
+        if let Some(action) = self.scene_pending.take() {
+            self.apply_scene(action);
+        }
+    }
+
+    pub fn cancel_scene_pending(&mut self) {
+        self.scene_pending = None;
+    }
+
+    /// Save first, then carry on; a save that does not happen (no name
+    /// yet, a write error on the status line) calls the action off.
+    pub fn save_scene_then_confirm(&mut self) {
+        if self.save_current_scene() {
+            self.confirm_scene_pending();
+        } else {
+            self.cancel_scene_pending();
+        }
+    }
+
+    fn apply_scene(&mut self, action: SceneAction) {
+        match action {
+            SceneAction::Load(name) => self.load_scene_by_name(&name),
+            SceneAction::Clear => self.clear_scene(),
+            SceneAction::Quit => self.scene_quit_approved = true,
+        }
     }
 
     /// Nothing placed is selected. A selection is an index into the scene's
@@ -713,11 +794,12 @@ impl StageState {
     /// solver tuning SPARSELY: only what differs from the layer underneath
     /// (the default scene for room/location scenes, the built-in defaults
     /// for the default scene itself). Unset keys inherit live -- retune the
-    /// default and every scene that didn't pin a value follows.
-    pub fn save_current_scene(&mut self) {
+    /// default and every scene that didn't pin a value follows. True when
+    /// the scene was written.
+    pub fn save_current_scene(&mut self) -> bool {
         let name = self.scene_name.trim().to_string();
         if name.is_empty() {
-            return;
+            return false;
         }
         // Validate before serialization with the same limits loading uses:
         // whatever previews is exactly what a reload will produce.
@@ -738,8 +820,13 @@ impl StageState {
                 // scene files; re-seed geometry (same call the game's
                 // `reload_creature_field_files` makes).
                 gs_field::geometry::invalidate_calibrations();
+                self.mark_scene_saved();
+                true
             }
-            Err(err) => self.push_status(format!("Scene save failed: {err:#}")),
+            Err(err) => {
+                self.push_status(format!("Scene save failed: {err:#}"));
+                false
+            }
         }
     }
 
@@ -765,6 +852,7 @@ impl StageState {
                 self.scene = Arc::new(scene);
                 self.scene_name = name.to_string();
                 self.deselect();
+                self.mark_scene_saved();
             }
             Err(err) => self.push_status(format!("Scene load failed: {err:#}")),
         }
@@ -802,6 +890,30 @@ impl StageState {
         params.dz = base.dz;
         params.horizon = base.horizon;
         params.cell_w = base.cell_w;
+    }
+}
+
+impl crate::quit::QuitGuard for StageState {
+    fn approve_quit(&mut self) -> bool {
+        if !self.scene_quit_approved {
+            self.request_scene(SceneAction::Quit);
+        }
+        self.scene_quit_approved
+    }
+
+    fn quit_asking(&self) -> bool {
+        self.scene_pending == Some(SceneAction::Quit)
+    }
+
+    fn quit_approved(&self) -> bool {
+        self.scene_quit_approved
+    }
+
+    fn cancel_quit(&mut self) {
+        self.scene_quit_approved = false;
+        if self.quit_asking() {
+            self.scene_pending = None;
+        }
     }
 }
 
@@ -1086,6 +1198,69 @@ mod tests {
         assert_eq!((s.selected_prop, s.selected_light), (None, Some(1)));
         s.clear_scene();
         assert_eq!((s.selected_prop, s.selected_light), (None, None));
+    }
+
+    /// Every edit a scene save keeps -- props, lights, the backdrop, the
+    /// camera -- marks the scene unsaved, and nothing that replaces the
+    /// scene goes ahead on it without the question.
+    #[test]
+    fn unsaved_scene_edits_are_asked_about_before_they_are_lost() {
+        let _base = TempBase::new();
+        let mut s = stage();
+        assert!(!s.scene_dirty(), "a fresh stage has nothing to lose");
+        s.request_scene(SceneAction::Clear);
+        assert_eq!(s.scene_pending, None, "nothing unsaved: done at once");
+
+        s.add_prop("scenery/a.png".into());
+        assert!(s.scene_dirty());
+        s.request_scene(SceneAction::Clear);
+        assert_eq!(s.scene_pending, Some(SceneAction::Clear));
+        s.cancel_scene_pending();
+        assert_eq!(s.scene().props.len(), 1, "cancelled: the prop stays");
+        s.request_scene(SceneAction::Clear);
+        s.confirm_scene_pending();
+        assert!(s.scene().props.is_empty() && !s.scene_dirty(), "discarded");
+
+        // The camera is saved with the scene, so it counts.
+        s.field.params.horizon += 12.0;
+        assert!(s.scene_dirty());
+        // No name yet: "Save first" cannot save, so the clear is called off.
+        s.request_scene(SceneAction::Clear);
+        s.save_scene_then_confirm();
+        assert_eq!(s.scene_pending, None);
+        assert!(s.scene_dirty(), "still unsaved");
+
+        s.adopt_scene_name("Barley_Field".into());
+        assert!(s.scene_dirty(), "a name alone saves nothing");
+        s.request_scene(SceneAction::Load("no_such_scene".into()));
+        s.save_scene_then_confirm();
+        assert!(!s.scene_dirty(), "saved (the load after it failed, and said so)");
+        assert_eq!(gs_field::scenes::list_scenes(), ["Barley_Field"]);
+
+        s.scene_mut().background = Some("scenes/desert.png".into());
+        s.request_scene(SceneAction::Load("Barley_Field".into()));
+        assert_eq!(s.scene().background.as_deref(), Some("scenes/desert.png"), "held for the question");
+        s.confirm_scene_pending();
+        assert_eq!(s.scene().background, None, "discarded: the saved scene is back");
+        assert!(!s.scene_dirty(), "a scene just loaded has nothing unsaved");
+    }
+
+    #[test]
+    fn a_close_waits_on_unsaved_scene_edits() {
+        use crate::quit::QuitGuard;
+        let mut s = stage();
+        assert!(s.approve_quit(), "nothing unsaved: agreed at once");
+
+        let mut s = stage();
+        s.add_light(gs_field::lighting::LampKind::Torch);
+        assert!(!s.approve_quit());
+        assert!(s.quit_asking() && !s.quit_approved());
+        s.cancel_quit();
+        assert!(!s.quit_asking() && !s.quit_approved());
+        assert_eq!(s.scene().lights.len(), 1, "a cancelled close keeps the edits");
+        assert!(!s.approve_quit());
+        s.confirm_scene_pending();
+        assert!(s.quit_approved() && !s.quit_asking());
     }
 
     #[test]

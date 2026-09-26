@@ -165,6 +165,21 @@ fn pos(p: [f32; 2]) -> Pos2 {
     Pos2::new(p[0], p[1])
 }
 
+impl crate::quit::QuitGuard for RigTool {
+    fn approve_quit(&mut self) -> bool {
+        RigTool::approve_quit(self)
+    }
+    fn quit_asking(&self) -> bool {
+        RigTool::quit_asking(self)
+    }
+    fn quit_approved(&self) -> bool {
+        RigTool::quit_approved(self)
+    }
+    fn cancel_quit(&mut self) {
+        RigTool::cancel_quit(self)
+    }
+}
+
 impl RigTool {
     pub fn open(data_root: &Path, publish_dir: PathBuf, pool: Option<PathBuf>) -> Result<RigTool, String> {
         Ok(RigTool {
@@ -269,6 +284,20 @@ impl RigTool {
 
     pub fn quit_approved(&self) -> bool {
         self.session.quit_approved && (!self.poses_dirty() || self.pose_quit == PoseQuit::Approved)
+    }
+
+    /// A quit question (the poses', or the rig's) is up.
+    fn quit_asking(&self) -> bool {
+        self.pose_quit == PoseQuit::Asking || self.session.pending == Some(DocAction::Quit)
+    }
+
+    /// The close is off: drop any agreement, so the next one asks again.
+    fn cancel_quit(&mut self) {
+        self.session.quit_approved = false;
+        if self.session.pending == Some(DocAction::Quit) {
+            self.session.cancel_pending();
+        }
+        self.pose_quit = PoseQuit::No;
     }
 
     pub fn status(&self, ui: &mut egui::Ui) {

@@ -13,6 +13,7 @@ use crate::calib::{CalibKind, HostEffects};
 use crate::data_home::{self, ImportPlan, ImportReport};
 use crate::data_root::{self, DataRoot};
 use crate::pool_dir::{self, PoolDir};
+use crate::quit::{CloseSequence, CloseStep, QuitGuard};
 use crate::settings;
 use crate::stage::StudioRoomContext;
 use crate::tools::calibrators::CalibratorsTool;
@@ -127,6 +128,8 @@ pub struct StudioApp {
     /// "Import from VellumFE...": the open confirmation, and the last
     /// report. See [`Import`].
     import: Import,
+    /// A window close waiting on the unsaved-work questions.
+    closing: CloseSequence,
 }
 
 /// A dev screenshot (`GS_STUDIO_SHOT`): frames drawn, and asked for yet.
@@ -174,6 +177,7 @@ impl StudioApp {
             exit_after_secs,
             shot: std::env::var_os("GS_STUDIO_SHOT").map(|p| Shot { path: PathBuf::from(p), frames: 0, requested: false }),
             import: Import::default(),
+            closing: CloseSequence::default(),
         }
     }
 
@@ -510,16 +514,6 @@ impl eframe::App for StudioApp {
 impl StudioApp {
     /// One frame of the app (timed by [`eframe::App::ui`]).
     fn frame(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        // Closing the window with unsaved work goes through the same
-        // discard prompt as everything else.
-        if ui.ctx().input(|i| i.viewport().close_requested()) {
-            if let Ok(tool) = &mut self.rigs {
-                if !tool.approve_quit() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                }
-            }
-        }
-
         if let Some(shot) = &mut self.shot {
             shot.frames += 1;
             // GS_STUDIO_SHOT_FRAMES waits longer, for work done off the UI
@@ -621,13 +615,34 @@ impl StudioApp {
             }
         }
 
-        // Whatever tab is showing: the rig tool's unsaved-work questions,
-        // and the close they approve.
+        self.close_with_unsaved_work(ui.ctx());
+    }
+
+    /// Closing the window with unsaved work (the rig, its poses, the stage
+    /// scene): each tool asks its own question in turn, drawn over whichever
+    /// tab is showing, and the window closes once every one agrees.
+    fn close_with_unsaved_work(&mut self, ctx: &egui::Context) {
         if let Ok(tool) = &mut self.rigs {
-            tool.modal_prompts(ui.ctx());
-            if tool.quit_approved() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
+            tool.modal_prompts(ctx);
+        }
+        if let Some(stage) = &mut self.stage {
+            stage.modal_prompts(ctx);
+        }
+        let mut guards: Vec<&mut dyn QuitGuard> = Vec::new();
+        if let Ok(tool) = &mut self.rigs {
+            guards.push(tool);
+        }
+        if let Some(stage) = &mut self.stage {
+            guards.push(stage);
+        }
+        if ctx.input(|i| i.viewport().close_requested()) && !self.closing.close_requested(&mut guards) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        match self.closing.step(&mut guards) {
+            CloseStep::Close => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            // An answer given this frame is acted on next frame.
+            CloseStep::Waiting => ctx.request_repaint(),
+            CloseStep::Idle | CloseStep::Cancelled => {}
         }
     }
 }

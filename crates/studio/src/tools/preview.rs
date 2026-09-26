@@ -22,7 +22,7 @@ use gs_field_egui::{
 
 use crate::stage::color::{hex_rgb, parse_hex_rgb, NEUTRAL_SLATE};
 use crate::stage::eval::eval_condition;
-use crate::stage::{cast, ClassFlag, StageState, StudioRoomContext};
+use crate::stage::{cast, ClassFlag, SceneAction, StageState, StudioRoomContext};
 
 /// Which side panel the shared stage shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +186,44 @@ impl StageTool {
         ui.weak(format!("{} on stage", self.stage.creatures().len()));
     }
 
+    /// The unsaved-scene question, drawn by the app over whichever tab is
+    /// showing (a window close asks it from anywhere).
+    pub fn modal_prompts(&mut self, ctx: &egui::Context) {
+        let stage = &mut self.stage;
+        let Some(action) = stage.scene_pending.clone() else {
+            return;
+        };
+        let name = stage.scene_name.trim().to_owned();
+        let modal = egui::Modal::new(egui::Id::new("scene_discard")).show(ctx, |ui| {
+            ui.set_width(340.0);
+            ui.heading("Unsaved scene");
+            let what = if name.is_empty() {
+                "The stage scene (not named yet)".to_owned()
+            } else {
+                format!("The scene '{}'", scenes::display_name(&name))
+            };
+            ui.label(format!("{what} has unsaved changes. Discard them and {}?", action.describe()));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let save = ui
+                    .add_enabled(!name.is_empty(), egui::Button::new("Save first"))
+                    .on_disabled_hover_text("Name it under New scene (Scenes tab) to save it");
+                if save.clicked() {
+                    stage.save_scene_then_confirm();
+                }
+                if ui.button("Discard").clicked() {
+                    stage.confirm_scene_pending();
+                }
+                if ui.button("Cancel").clicked() {
+                    stage.cancel_scene_pending();
+                }
+            });
+        });
+        if modal.should_close() {
+            stage.cancel_scene_pending();
+        }
+    }
+
     /// Returns true when the Scenes panel asked for the scenery calibrator
     /// (the app switches to the Scenery tab).
     pub fn ui(&mut self, ui: &mut egui::Ui, panel: StagePanel) -> bool {
@@ -270,6 +308,21 @@ impl StageTool {
             self.art.set_global_lighting(self.lighting.clone());
         }
         calibrate_scenery
+    }
+}
+
+impl crate::quit::QuitGuard for StageTool {
+    fn approve_quit(&mut self) -> bool {
+        self.stage.approve_quit()
+    }
+    fn quit_asking(&self) -> bool {
+        self.stage.quit_asking()
+    }
+    fn quit_approved(&self) -> bool {
+        self.stage.quit_approved()
+    }
+    fn cancel_quit(&mut self) {
+        self.stage.cancel_quit()
     }
 }
 
@@ -589,17 +642,22 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
     // The scene FILENAME is the binding: leading room uid binds that room,
     // otherwise the stem matches room title -> location -> "default".
     // There is no separate bindings store to manage.
-    ui.label(if stage.scene_name.trim().is_empty() {
-        "Editing: (unsaved scene)".to_string()
-    } else {
-        format!("Editing: {}", scenes::display_name(stage.scene_name.trim()))
+    ui.horizontal(|ui| {
+        ui.label(if stage.scene_name.trim().is_empty() {
+            "Editing: (unsaved scene)".to_string()
+        } else {
+            format!("Editing: {}", scenes::display_name(stage.scene_name.trim()))
+        });
+        if stage.scene_dirty() {
+            ui.colored_label(ui.visuals().warn_fg_color, "* unsaved");
+        }
     });
     ui.horizontal_wrapped(|ui| {
         if !stage.scene_name.trim().is_empty() && ui.button("Save").clicked() {
             stage.save_current_scene();
         }
         if ui.button("Clear stage scene").clicked() {
-            stage.clear_scene();
+            stage.request_scene(SceneAction::Clear);
         }
     });
     new_scene_ui(stage, ui);
@@ -630,7 +688,7 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
             }
         });
         if let Some(name) = load_request {
-            stage.load_scene_by_name(&name);
+            stage.request_scene(SceneAction::Load(name));
         }
     }
 
@@ -917,7 +975,7 @@ fn new_scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
                 if adopt {
                     stage.adopt_scene_name(stem);
                 } else if load_existing {
-                    stage.load_scene_by_name(&stem);
+                    stage.request_scene(SceneAction::Load(stem));
                 }
             }
             Err(err) => {
