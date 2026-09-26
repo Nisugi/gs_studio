@@ -1,11 +1,11 @@
-version = 2
+version = 3
 family = "arachnid"
 body_type = "multileg"
 view = "front"
 ref_ft = 2.0
 axis = "carapace"
 from_above = true
-joint_order = ["head_top", "mouth", "thorax_top", "thorax_bottom", "abdomen_tip", "eye_r", "leg1_base_r", "leg1_knee_r", "leg1_tip_r", "leg2_base_r", "leg2_knee_r", "leg2_tip_r", "leg3_base_r", "leg3_knee_r", "leg3_tip_r", "leg4_base_r", "leg4_knee_r", "leg4_tip_r", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "eye_l", "leg1_base_l", "leg1_knee_l", "leg1_tip_l", "leg2_base_l", "leg2_knee_l", "leg2_tip_l", "leg3_base_l", "leg3_knee_l", "leg3_tip_l", "leg4_base_l", "leg4_knee_l", "leg4_tip_l", "leg5_base_l", "leg5_knee_l", "leg5_tip_l", "leg2_knee3_r", "leg2_knee3_l", "leg2_knee2_r", "leg2_knee2_l", "leg3_knee2_r", "leg3_knee2_l", "leg3_knee3_r", "leg3_knee3_l", "leg4_knee2_r", "leg4_knee2_l", "leg4_knee3_r", "leg4_knee3_l", "leg5_knee2_r", "leg5_knee2_l", "leg5_knee3_r", "leg5_knee3_l"]
+joint_order = ["head_top", "mouth", "thorax_top", "thorax_bottom", "abdomen_tip", "eye_r", "antenna_base_r", "antenna_mid_r", "antenna_tip_r", "leg2_base_r", "leg2_knee_r", "leg2_tip_r", "leg3_base_r", "leg3_knee_r", "leg3_tip_r", "leg4_base_r", "leg4_knee_r", "leg4_tip_r", "leg5_base_r", "leg5_knee_r", "leg5_tip_r", "eye_l", "antenna_base_l", "antenna_mid_l", "antenna_tip_l", "leg2_base_l", "leg2_knee_l", "leg2_tip_l", "leg3_base_l", "leg3_knee_l", "leg3_tip_l", "leg4_base_l", "leg4_knee_l", "leg4_tip_l", "leg5_base_l", "leg5_knee_l", "leg5_tip_l", "leg2_knee3_r", "leg2_knee3_l", "leg2_knee2_r", "leg2_knee2_l", "leg3_knee2_r", "leg3_knee2_l", "leg3_knee3_r", "leg3_knee3_l", "leg4_knee2_r", "leg4_knee2_l", "leg4_knee3_r", "leg4_knee3_l", "leg5_knee2_r", "leg5_knee2_l", "leg5_knee3_r", "leg5_knee3_l"]
 
 [anchors]
 head = "head_top"
@@ -13,59 +13,59 @@ mouth = "mouth"
 saddle = "thorax_top"
 
 [joints]
-abdomen_tip = [0.0, 0.1973]
-eye_l = [0.0731, 1.7791]
-eye_r = [-0.0783, 1.7821]
-head_top = [-0.0, 1.9907]
-leg1_base_l = [0.1797, 1.5575]
-leg1_base_r = [-0.1744, 1.5513]
-leg1_knee_l = [0.2221, 1.6516]
-leg1_knee_r = [-0.2265, 1.635]
-leg1_tip_l = [0.1651, 1.7506]
-leg1_tip_r = [-0.1762, 1.7414]
-leg2_base_l = [0.2678, 1.5038]
-leg2_base_r = [-0.2577, 1.4944]
-leg2_knee2_l = [0.739, 2.1652]
-leg2_knee2_r = [-0.7338, 2.1627]
-leg2_knee3_l = [0.8414, 2.4861]
-leg2_knee3_r = [-0.8414, 2.4861]
-leg2_knee_l = [0.5235, 1.7517]
-leg2_knee_r = [-0.5214, 1.7186]
-leg2_tip_l = [0.8759, 2.6254]
-leg2_tip_r = [-0.8806, 2.6242]
-leg3_base_l = [0.3123, 1.3835]
-leg3_base_r = [-0.2991, 1.3835]
-leg3_knee2_l = [1.0431, 1.7948]
-leg3_knee2_r = [-1.0455, 1.7948]
-leg3_knee3_l = [1.3009, 2.0426]
-leg3_knee3_r = [-1.3009, 2.0426]
-leg3_knee_l = [0.7106, 1.5613]
-leg3_knee_r = [-0.671, 1.5376]
-leg3_tip_l = [1.4077, 2.1596]
-leg3_tip_r = [-1.4099, 2.1618]
-leg4_base_l = [0.3249, 1.248]
-leg4_base_r = [-0.3328, 1.2401]
-leg4_knee2_l = [1.3836, 0.7442]
-leg4_knee2_r = [-1.389, 0.758]
-leg4_knee3_l = [1.4192, 0.2201]
-leg4_knee3_r = [-1.422, 0.2201]
-leg4_knee_l = [0.8962, 1.221]
-leg4_knee_r = [-0.896, 1.2233]
-leg4_tip_l = [1.516, 0.0173]
-leg4_tip_r = [-1.5158, 0.0093]
-leg5_base_l = [0.2781, 1.1238]
-leg5_base_r = [-0.27, 1.1291]
-leg5_knee2_l = [0.9911, 0.5713]
-leg5_knee2_r = [-0.9801, 0.5823]
-leg5_knee3_l = [1.0789, 0.1762]
-leg5_knee3_r = [-1.0762, 0.2173]
-leg5_knee_l = [0.6541, 0.979]
-leg5_knee_r = [-0.6435, 0.9922]
-leg5_tip_l = [1.1671, 0.0147]
-leg5_tip_r = [-1.1647, 0.0137]
-mouth = [0.0, 1.6]
-thorax_bottom = [0.0, 1.1072]
-thorax_top = [0.0, 1.62]
+abdomen_tip = [0.0, 1.045]
+antenna_base_l = [0.3948, 3.5533]
+antenna_base_r = [-0.3966, 3.5532]
+antenna_mid_l = [0.4887, 3.8216]
+antenna_mid_r = [-0.4793, 3.8104]
+antenna_tip_l = [0.3278, 4.1112]
+antenna_tip_r = [-0.3464, 4.1144]
+eye_l = [0.1412, 4.1007]
+eye_r = [-0.1513, 4.1065]
+head_top = [0.0, 4.5095]
+leg2_base_l = [0.5129, 3.3918]
+leg2_base_r = [-0.514, 3.3723]
+leg2_knee2_l = [1.5248, 5.0383]
+leg2_knee2_r = [-1.4905, 4.9066]
+leg2_knee3_l = [1.6956, 5.4854]
+leg2_knee3_r = [-1.6497, 5.3854]
+leg2_knee_l = [1.1176, 4.1327]
+leg2_knee_r = [-1.0559, 4.0162]
+leg2_tip_l = [1.8298, 5.8112]
+leg2_tip_r = [-1.8065, 5.7575]
+leg3_base_l = [0.5298, 3.0897]
+leg3_base_r = [-0.5454, 3.1013]
+leg3_knee2_l = [2.1098, 3.9111]
+leg3_knee2_r = [-2.0684, 3.8796]
+leg3_knee3_l = [2.3629, 4.2828]
+leg3_knee3_r = [-2.3266, 4.2205]
+leg3_knee_l = [1.4065, 3.3477]
+leg3_knee_r = [-1.3449, 3.3179]
+leg3_tip_l = [2.6212, 4.546]
+leg3_tip_r = [-2.602, 4.5156]
+leg4_base_l = [0.5384, 2.7909]
+leg4_base_r = [-0.5132, 2.7838]
+leg4_knee2_l = [2.0159, 2.0772]
+leg4_knee2_r = [-1.9859, 2.12]
+leg4_knee3_l = [2.2794, 1.6729]
+leg4_knee3_r = [-2.2604, 1.681]
+leg4_knee_l = [1.5042, 2.5117]
+leg4_knee_r = [-1.3741, 2.5891]
+leg4_tip_l = [2.5718, 1.419]
+leg4_tip_r = [-2.5471, 1.4197]
+leg5_base_l = [0.5291, 2.4942]
+leg5_base_r = [-0.4648, 2.545]
+leg5_knee2_l = [1.4848, 1.0701]
+leg5_knee2_r = [-1.4716, 1.1237]
+leg5_knee3_l = [1.5084, 0.4203]
+leg5_knee3_r = [-1.5195, 0.443]
+leg5_knee_l = [1.1176, 2.0118]
+leg5_knee_r = [-1.1215, 1.9967]
+leg5_tip_l = [1.6221, 0.0678]
+leg5_tip_r = [-1.6256, 0.0497]
+mouth = [0.0, 3.7547]
+thorax_bottom = [0.0, 2.8027]
+thorax_top = [0.0, 3.7933]
 
 [[bones]]
 name = "skull"
@@ -89,25 +89,25 @@ joints = ["thorax_bottom", "abdomen_tip"]
 name = "leg1_r"
 part = "rightArm"
 parent = "thorax"
-joints = ["leg1_base_r", "leg1_knee_r"]
+joints = ["antenna_base_r", "antenna_mid_r"]
 
 [[bones]]
 name = "leg1_tip_r"
 part = "rightHand"
 parent = "leg1_r"
-joints = ["leg1_knee_r", "leg1_tip_r"]
+joints = ["antenna_mid_r", "antenna_tip_r"]
 
 [[bones]]
 name = "leg1_l"
 part = "leftArm"
 parent = "thorax"
-joints = ["leg1_base_l", "leg1_knee_l"]
+joints = ["antenna_base_l", "antenna_mid_l"]
 
 [[bones]]
 name = "leg1_tip_l"
 part = "leftHand"
 parent = "leg1_l"
-joints = ["leg1_knee_l", "leg1_tip_l"]
+joints = ["antenna_mid_l", "antenna_tip_l"]
 
 [[bones]]
 name = "leg2_r"
