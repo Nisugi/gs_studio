@@ -15,7 +15,9 @@
 //! `SPLAT_SPACING=<ft>` sets the sample spacing (default 0.03),
 //! `SPLAT_OVERLAP=<x>` the splat reach past its step (default 0.6) and
 //! `SPLAT_ALPHA=<a>` the peak opacity (default 0.9);
-//! `SPLAT_TILE=<px>` the tile size (default 320); `SPLAT_DATA=<dir>`
+//! `SPLAT_TILE=<px>` the tile size (default 320); `SPLAT_ZOOM=<x>`
+//! magnifies and `SPLAT_LOOK_Y=<ft>` aims at that height, for a close
+//! look at a joint; `SPLAT_SHEET=none` leaves the sheet off; `SPLAT_DATA=<dir>`
 //! another data root.
 
 use std::path::Path;
@@ -68,7 +70,7 @@ fn main() {
     // The painted sheet, when it fits this puppet's pattern.
     let sheet_path = std::env::var_os("SPLAT_SHEET").map(std::path::PathBuf::from).unwrap_or_else(|| data.join("textures").join(family).join("sheet.png"));
     let layout = UvLayout::fit(&puppet, SHEET_SIDE);
-    let texture = read_png(&sheet_path).and_then(|(w, h, rgba)| {
+    let texture = (sheet_path.as_os_str() != "none").then(|| read_png(&sheet_path)).flatten().and_then(|(w, h, rgba)| {
         if (w, h) == (layout.w, layout.h) {
             Some(Texture { layout: layout.clone(), rgba, normal: None })
         } else {
@@ -91,6 +93,14 @@ fn main() {
     for k in 0..yaws.len() * 2 {
         let mut cam = Camera::framing(size, [tile as f32, tile as f32]);
         cam.target = [0.0, (hi[1] + lo[1]) * 0.5, 0.0];
+        // A close look: SPLAT_ZOOM=<x> magnifies, SPLAT_LOOK_Y=<ft> aims
+        // the camera at that height (a crotch, a shoulder).
+        if let Some(z) = std::env::var("SPLAT_ZOOM").ok().and_then(|v| v.parse::<f32>().ok()) {
+            cam.focal *= z.max(0.1);
+        }
+        if let Some(y) = std::env::var("SPLAT_LOOK_Y").ok().and_then(|v| v.parse::<f32>().ok()) {
+            cam.target[1] = y;
+        }
         cam.center = [tile as f32 * (k as f32 + 0.5), tile as f32 * 0.5];
         canvas.draw(&ground_grid(&|p| cam.project(p), 5, GRID, 1.0));
         cams.push(cam);

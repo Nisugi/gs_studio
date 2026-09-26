@@ -699,7 +699,7 @@ impl RigTool {
                 ui.add(egui::Slider::new(&mut p.overlap, 0.3..=1.5).text("overlap")).on_hover_text("How far each splat reaches past its step: 0.5 = neighbours just touch");
                 ui.add(egui::Slider::new(&mut p.alpha, 0.1..=1.0).text("opacity")).on_hover_text("Each splat's peak opacity");
                 if ui.small_button("Defaults").clicked() {
-                    *p = gs_puppet::splat::SplatParams::default();
+                    *p = crate::editor::puppet_view::PuppetView::default().splat;
                 }
             });
         }

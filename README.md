@@ -236,7 +236,8 @@ death*, *Reload poses*), **View** (*Smooth skin*, *Texture*, *Splats*, *Creature
 *Reset view*; *Splats* draws the puppet as a Gaussian splat cloud instead
 of the skin, `gs_puppet::splat`, with a row of sliders for the sample
 spacing, each splat's overlap and its opacity -- the place to spin and
-zoom the splat look) and **Hold** (a weapon or shield for each hand, from the props file -- see
+zoom the splat look; the spacing is the cloud's resolution, so it starts
+finer here, 0.015 ft, than on the stage) and **Hold** (a weapon or shield for each hand, from the props file -- see
 *Held props* below), then a collapsed **Texture painting** section.
 Drag turns it, the wheel zooms; the pose list comes from
 `<data>/poses/<body_type>.toml` (else the built-in copy) with the family's

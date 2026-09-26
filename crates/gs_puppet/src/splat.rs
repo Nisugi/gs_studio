@@ -9,8 +9,8 @@
 //! colour. [`render`] projects the cloud, sorts it back to front and
 //! alpha-blends the 2D Gaussians into a [`Skin`]-shaped image, so a host
 //! can show the splat look in place of the smooth skin with nothing else
-//! changed. Buried rings (a thigh in the pelvis, a socket stub) are left
-//! out: a surface hides them, a cloud would show them. Garments and props
+//! changed. Every ring is sampled, buried ones too: inside a hull they
+//! hide behind its front face, and what pokes out closes the joint. Garments and props
 //! are sampled like the body (a prop in its own colour). Wounds, status
 //! effects and the contour are not drawn -- this is the look test, not the
 //! stage's renderer.
@@ -23,8 +23,11 @@ use crate::uv::Texture;
 /// Default sample spacing along a ring and between rings, feet.
 pub const SPACING_FT: f32 = 0.03;
 
+
 /// What shapes the cloud. `spacing` is the sample step along a ring, feet
-/// (finer = more, smaller splats); `overlap` how far each splat's
+/// (finer = more, smaller splats -- and it IS the cloud's resolution: each
+/// splat carries one colour, so detail finer than the step is lost, and
+/// past the default a figure filling the view wants 0.015); `overlap` how far each splat's
 /// half-extent reaches past its step (0.5 = neighbours just touch, more =
 /// softer and denser); `alpha` each splat's peak opacity.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -60,43 +63,6 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
     let alpha = params.alpha.clamp(0.05, 1.0);
     let body = body.map(|c| c as f32);
     let puppet = posed.puppet;
-    // Every body ring in posed space, for the inside test below: a sample
-    // that lands inside another segment's tube (a neck ring the side view
-    // read as wide as the hunch, a thigh's top in the pelvis) is interior
-    // geometry a surface hides and a cloud would show.
-    struct Tube {
-        c: V3,
-        axis: V3,
-        w: V3,
-        d: V3,
-        hw: f32,
-        hd: f32,
-        seg: usize,
-    }
-    let mut tubes: Vec<Tube> = Vec::new();
-    for (i, s) in puppet.segments.iter().enumerate() {
-        if s.hidden || !s.kind.is_body() {
-            continue;
-        }
-        let xf = &posed.xf[i];
-        let axis = norm_or(xf.dir(sub(s.tail, s.head)), [0.0, 1.0, 0.0]);
-        for st in &s.stations {
-            tubes.push(Tube { c: xf.point(st.c), axis, w: xf.dir(s.axis_w), d: xf.dir(s.axis_d), hw: st.w, hd: st.d, seg: i });
-        }
-    }
-    let inside_other = |p: V3, seg: usize| {
-        tubes.iter().any(|t| {
-            if t.seg == seg {
-                return false;
-            }
-            let e = sub(p, t.c);
-            if dot(e, t.axis).abs() > crate::puppet::STATION_STEP_FT {
-                return false;
-            }
-            let (u, v) = (dot(e, t.w) / t.hw.max(1e-3), dot(e, t.d) / t.hd.max(1e-3));
-            u * u + v * v < 0.45
-        })
-    };
     let mut out = Vec::new();
     for (i, s) in puppet.segments.iter().enumerate() {
         // Garments and props are drawn too: a robe hides the legs under
@@ -116,7 +82,13 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
         // Rings sit STATION_STEP_FT apart, coarser than the samples round
         // them; sub-rings are interpolated between neighbours so the cloud
         // is as even along the bone as round it (no streaks, no bands).
-        for k in s.bare.max(0)..n {
+        // Every ring, buried ones too: a thigh's top in the pelvis, a
+        // socket stub. Inside a closed hull they are hidden by its own
+        // front face once the splats are near opaque, and the part that
+        // pokes out is what closes a crotch or an armpit. Culling them by
+        // geometry (tried, per ring and per sample) left notches or spikes
+        // at every joint.
+        for k in 0..n {
             let st = &s.stations[k];
             let next = s.stations.get(k + 1);
             let c0 = xf.point(st.c);
@@ -140,13 +112,6 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                     let (sin, cos) = theta.sin_cos();
                     let radial = add(scale(a, cos), scale(b, sin));
                     let p = add(c, radial);
-                    // Deep inside another segment only, and never at a
-                    // segment's ends: the junction rings are what closes
-                    // a shoulder or a crotch, and culling them left holes.
-                    let junction = k < s.bare + 2 || k + 3 >= n;
-                    if s.kind.is_body() && !junction && inside_other(p, i) {
-                        continue;
-                    }
                     let tangent = sub(scale(b, cos), scale(a, sin));
                     let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
                     let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
