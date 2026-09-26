@@ -219,20 +219,21 @@ fn an_empty_override_is_identity() {
     assert!(PoseOverride::default().is_empty());
 }
 
-/// The shipped quadruped file: the elephant, the monitor lizard and the bear
-/// carry corrections; every other family must see the shared poses untouched.
+/// The shipped quadruped file: the wolf (its own lie), the elephant, the
+/// monitor lizard and the bear carry corrections; every other family must
+/// see the shared poses untouched.
 #[test]
 fn the_shipped_quadruped_overrides_only_the_families_that_need_it() {
     let set = PoseSet::shipped("quadruped").expect("shipped quadruped");
-    assert_eq!(set.families.keys().collect::<Vec<_>>(), vec!["elephantid", "reptilian", "ursine"]);
-    for family in ["canine", "suine", "caprine", "equine", "feline"] {
+    assert_eq!(set.families.keys().collect::<Vec<_>>(), vec!["canine", "elephantid", "reptilian", "ursine"]);
+    for family in ["suine", "caprine", "equine", "feline"] {
         assert!(matches!(set.for_family(family), std::borrow::Cow::Borrowed(_)), "{family} must be untouched");
     }
     let template = [
         "spine", "neck", "skull", "tail", "brisket", "underline", "foreleg_l", "foreleg_r", "forepaw_l", "forepaw_r",
         "hindleg_l", "hindleg_r",
     ];
-    for family in ["reptilian", "ursine"] {
+    for family in ["canine", "reptilian", "ursine"] {
         let bad = set.check_family_bones(family, &template);
         assert!(bad.is_empty(), "{family}: {bad:?}");
     }
