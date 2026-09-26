@@ -12,72 +12,72 @@ mouth = "chin"
 saddle = "neck_base"
 
 [joints]
-ankle_l = [0.8485, 0.2560]
-ankle_r = [-0.8485, 0.2560]
+ankle_l = [0.6939, 0.2657]
+ankle_r = [-0.7422, 0.3527]
 chin = [-0.0063, 5.7361]
-crown = [-0.0048, 6.4657]
-elbow_l = [2.3873, 3.6124]
-elbow_r = [-2.3869, 3.6124]
+crown = [0.0242, 6.9393]
+elbow_l = [2.194, 3.7091]
+elbow_r = [-2.2516, 3.6607]
 eye_l = [0.1311, 6.0836]
 eye_r = [-0.1313, 6.0836]
-fingertip_l = [2.7894, 0.1015]
-fingertip_r = [-2.7894, 0.1015]
-hip_l = [0.6530, 3.1000]
-hip_r = [-0.6530, 3.1000]
-knee_l = [0.8970, 1.8030]
-knee_r = [-0.8970, 1.8030]
-neck_base = [0.012, 6.1414]
+fingertip_l = [2.3931, 0.1112]
+fingertip_r = [-2.3835, 0.1015]
+hip_l = [0.3437, 2.9744]
+hip_r = [-0.4984, 2.9647]
+knee_l = [1.1, 1.542]
+knee_r = [-1.1193, 1.4261]
+neck_base = [0.012, 5.9384]
 pelvis = [-0.0067, 3.2612]
-shoulder_l = [1.2397, 5.8237]
-shoulder_r = [-1.2692, 5.8237]
+shoulder_l = [1.0947, 5.5337]
+shoulder_r = [-1.4142, 5.4661]
 sternum = [0.0156, 4.7329]
-toe_l = [0.9925, 0.1655]
-toe_r = [-0.9925, 0.1655]
-wrist_l = [2.9230, 1.4308]
-wrist_r = [-2.9322, 1.4308]
+toe_l = [1.5628, 0.1462]
+toe_r = [-1.6304, 0.1075]
+wrist_l = [2.6137, 1.5854]
+wrist_r = [-2.6712, 1.4501]
 
 [depth]
-ankle_l = 0.8002
-ankle_r = -1.5789
+ankle_l = -1.46
+ankle_r = -1.4506
 chin = 1.45
-crown = 1.4
-elbow_l = 0.1421
-elbow_r = -0.0519
-fingertip_l = 1.0271
-fingertip_r = 0.9593
-hip_l = -0.6546
-hip_r = -1.6502
-knee_l = 0.6078
-knee_r = -1.4155
-neck_base = 0.9
-toe_l = 1.2668
-toe_r = -0.0694
-wrist_l = 0.9349
-wrist_r = 0.9091
+crown = 1.4592
+elbow_l = 0.1322
+elbow_r = 0.1258
+fingertip_l = 1.1061
+fingertip_r = 1.1172
+hip_l = -1.5528
+hip_r = -1.5614
+knee_l = -1.0405
+knee_r = -1.0503
+neck_base = 0.8408
+pelvis = -1.0889
+shoulder_l = -0.0091
+shoulder_r = -0.0627
+sternum = -0.0444
+toe_l = -0.0558
+toe_r = -0.1385
+wrist_l = 0.9744
+wrist_r = 1.0275
 
-pelvis = -1.6021
-shoulder_l = 1.0569
-shoulder_r = 1.2994
-sternum = -0.0938
 [radius_depth_ft]
 neck = 0.35
 skull = 0.6
 
 [[bones]]
 name = "skull"
-radius_ft = 0.5
 part = "head"
 parent = "neck"
 joints = ["crown", "chin"]
 pivot = "chin"
+radius_ft = 0.5
 
 [[bones]]
 name = "neck"
-radius_ft = 0.35
 part = "neck"
 parent = "torso_upper"
 joints = ["chin", "neck_base"]
 pivot = "neck_base"
+radius_ft = 0.35
 
 [[bones]]
 name = "clavicle"
