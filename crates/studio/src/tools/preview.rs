@@ -94,12 +94,22 @@ impl StageTool {
             );
         }
         // Puppets with no one at the Spawn buttons: GS_STUDIO_PUPPETS=
-        // <form>[,<form>...] puts each form's puppet on the stage (forced,
-        // as the Puppets list's Spawn does), since a pool with default art
-        // otherwise draws every creature as a sprite.
+        // <form>[/<creature name>][,...] puts each form's puppet on the
+        // stage (forced, as the Puppets list's Spawn does; with a creature
+        // name, that creature in its own skin, as the tree's texture rows
+        // do), since a pool with default art otherwise draws every
+        // creature as a sprite.
         if let Ok(forms) = std::env::var("GS_STUDIO_PUPPETS") {
             for form in forms.split(',').map(str::trim).filter(|f| !f.is_empty()) {
-                stage.spawn_puppet(form);
+                match form.split_once('/') {
+                    Some((form, name)) => {
+                        let noun = name.rsplit(' ').next().unwrap_or(name);
+                        stage.spawn_puppet_wearing(form, Some((name, noun)));
+                    }
+                    None => {
+                        stage.spawn_puppet(form);
+                    }
+                }
             }
         }
         // A splat check with no one at the checkbox: GS_STUDIO_SPLATS=1

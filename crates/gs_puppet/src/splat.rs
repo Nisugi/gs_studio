@@ -10,7 +10,8 @@
 //! alpha-blends the 2D Gaussians into a [`Skin`]-shaped image, so a host
 //! can show the splat look in place of the smooth skin with nothing else
 //! changed. Buried rings (a thigh in the pelvis, a socket stub) are left
-//! out: a surface hides them, a cloud would show them. Wounds, status
+//! out: a surface hides them, a cloud would show them. Garments and props
+//! are sampled like the body (a prop in its own colour). Wounds, status
 //! effects and the contour are not drawn -- this is the look test, not the
 //! stage's renderer.
 
@@ -98,9 +99,15 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
     };
     let mut out = Vec::new();
     for (i, s) in puppet.segments.iter().enumerate() {
-        if s.hidden || !s.kind.is_body() {
+        // Garments and props are drawn too: a robe hides the legs under
+        // it, so a cloud without it has holes where the skin has cloth.
+        if s.hidden {
             continue;
         }
+        let own = match s.kind {
+            crate::Kind::Prop { color } => Some(color.map(|c| c as f32)),
+            _ => None,
+        };
         let xf = &posed.xf[i];
         let n = s.stations.len();
         let aw = xf.dir(s.axis_w);
@@ -137,13 +144,15 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                     // segment's ends: the junction rings are what closes
                     // a shoulder or a crotch, and culling them left holes.
                     let junction = k < s.bare + 2 || k + 3 >= n;
-                    if !junction && inside_other(p, i) {
+                    if s.kind.is_body() && !junction && inside_other(p, i) {
                         continue;
                     }
                     let tangent = sub(scale(b, cos), scale(a, sin));
                     let nrm = norm_or(cross(tangent, along), norm_or(radial, [0.0, 0.0, 1.0]));
                     let nrm = if dot(nrm, radial) < 0.0 { scale(nrm, -1.0) } else { nrm };
-                    let rgb = texture.and_then(|tx| tx.layout.locate(i, k as f32 + t, theta).and_then(|at| tx.sample(at))).unwrap_or(body);
+                    let rgb = own
+                        .or_else(|| texture.and_then(|tx| tx.layout.locate(i, k as f32 + t, theta).and_then(|at| tx.sample(at))))
+                        .unwrap_or(body);
                     let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * overlap);
                     out.push(Gaussian { c: p, axes: [half_ring, scale(along, 2.0 * overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha });
                 }
@@ -174,7 +183,14 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         shade: f32,
         i: usize,
     }
-    let light = norm_or([0.3, 0.8, 0.6], [0.0, 1.0, 0.0]);
+    // The skin's own light and cel bands (`skin.rs`), so the cloud reads
+    // as bright as the skin beside it instead of a muted copy.
+    let centre = {
+        let n = cloud.len() as f32;
+        cloud.iter().fold([0.0f32; 3], |a, g| add(a, scale(g.c, 1.0 / n)))
+    };
+    let view = crate::draw::view_basis(&proj, centre);
+    let light = view.light;
     let mut flats: Vec<Flat> = Vec::with_capacity(cloud.len());
     let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
     for (i, g) in cloud.iter().enumerate() {
@@ -203,11 +219,19 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         let r = [3.0 * cov[0][0].sqrt(), 3.0 * cov[1][1].sqrt()];
         lo = [lo[0].min(centre[0] - r[0]), lo[1].min(centre[1] - r[1])];
         hi = [hi[0].max(centre[0] + r[0]), hi[1].max(centre[1] + r[1])];
-        let shade = 0.55 + 0.45 * dot(turned(g.n), light).max(0.0);
+        let gb = dot(g.n, light);
+        let lit = crate::skin::smoothstep(crate::draw::LIGHT_ABOVE - 0.09, crate::draw::LIGHT_ABOVE + 0.09, gb);
+        let dark = 1.0 - crate::skin::smoothstep(crate::draw::DARK_BELOW - 0.09, crate::draw::DARK_BELOW + 0.09, gb);
+        let shade = (1.0 + 0.13 * lit - 0.2 * dark) * (1.0 + 0.08 * gb);
         flats.push(Flat { c: centre, inv, r, z, shade, i });
     }
     if flats.is_empty() || !(lo[0].is_finite() && hi[0].is_finite()) {
         return Skin { origin: [0.0, 0.0], w: 0, h: 0, rgba: Vec::new() };
+    }
+    let (near, far) = flats.iter().fold((f32::MAX, f32::MIN), |(n, f), x| (n.min(x.z), f.max(x.z)));
+    let range = (far - near).max(2.0);
+    for f in &mut flats {
+        f.shade *= 1.0 - crate::draw::DEPTH_SHADE * ((f.z - near) / range).clamp(0.0, 1.0);
     }
     let origin = [lo[0].floor(), lo[1].floor()];
     let w = ((hi[0] - origin[0]).ceil() as usize + 1).min(4096);
