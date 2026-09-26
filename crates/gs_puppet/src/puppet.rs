@@ -1339,6 +1339,43 @@ fn biped_crotch(segments: &mut [Segment]) {
             st.d = q(st.d.min(most));
         }
     }
+    // And below the hips the pelvis does not round off: it splits into the
+    // thighs. Its cap rings there rounded off in depth while the thighs
+    // stayed full, so the thigh fronts stood proud of the belly and the
+    // buttock cap left a notch behind. Each such ring reaches at least as
+    // far front and back as the thighs do at its height.
+    let front_back = |s: &Segment, st: &Station| {
+        let reach = st.d * s.axis_d[2].abs() + st.w * s.axis_w[2].abs();
+        (st.c[2] + reach, st.c[2] - reach)
+    };
+    let thigh_rings: Vec<(f32, f32, f32)> = segments
+        .iter()
+        .filter(|s| s.kind == Kind::Limb && s.chain_index == 0 && s.part.as_deref().is_some_and(|p| p.ends_with("Leg")))
+        .flat_map(|s| s.stations.iter().skip(CAP_RINGS).map(move |st| (st.c[1], front_back(s, st).0, front_back(s, st).1)))
+        .collect();
+    if thigh_rings.is_empty() {
+        return;
+    }
+    for s in segments.iter_mut().filter(|s| s.kind == Kind::Trunk && !matches!(s.part.as_deref(), Some("head" | "neck"))) {
+        let ad = s.axis_d[2].abs();
+        if ad < 0.7 {
+            continue;
+        }
+        for st in &mut s.stations {
+            if st.c[1] > hip {
+                continue;
+            }
+            let near: Vec<&(f32, f32, f32)> = thigh_rings.iter().filter(|t| (t.0 - st.c[1]).abs() < STATION_STEP_FT).collect();
+            if near.is_empty() {
+                continue;
+            }
+            let (tf, tb) = near.iter().fold((f32::MIN, f32::MAX), |(f, b), t| (f.max(t.1), b.min(t.2)));
+            let (f, b) = (st.c[2] + st.d * ad, st.c[2] - st.d * ad);
+            let (f, b) = (f.max(tf), b.min(tb));
+            st.c[2] = q((f + b) * 0.5);
+            st.d = q(((f - b) * 0.5 / ad).max(MIN_HALF_FT * 0.5));
+        }
+    }
 }
 
 /// Above its chin a biped's neck is inside its head. Its top reads the
