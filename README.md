@@ -404,10 +404,15 @@ toggle switches the canvas to a DEPTH pass where those guesses are corrected.
   is the creature's front and what it cannot show is HEIGHT. The DEPTH
   canvas then shows the side silhouette turned a quarter turn, head up, so
   its heights run left-right (higher = further left, a depth of `-height`),
-  and joints sit at (height, their position along the body). The 3D puppet
-  is built as if the plan were a front view, laid flat and grounded
-  (`gs_puppet::turned_head_up`, `Puppet::from_above`); the bake is 2D and
-  unchanged.
+  and joints sit at (height, their position along the body). The side view
+  must face right (its front at +x), and it is slid along the plan so the
+  two are centre on centre: the chart stands the plan on y = 0 but centres
+  the side view on x = 0 (`gs_puppet::side_for_plan`; the puppet keeps the
+  slide as `side_shift`, which its side-view fit and overlays use). The 3D
+  puppet is built as if the plan were a front view, laid flat and grounded
+  (`Puppet::from_above`); the bake is 2D and unchanged. The plan is traced
+  at the side view's scale by BODY length (image-gen's `trace.json`
+  `front_view: "top"`), not at its height.
 - **Guessed** joints are hollow and dim; **overridden** ones are filled and
   bright, with a faint tick and leader back to where the guess was, so the
   correction can be judged against it. The right panel says "*n* of *m*

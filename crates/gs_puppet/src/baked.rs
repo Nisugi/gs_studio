@@ -56,6 +56,10 @@ pub struct BakedEye {
     pub radius: f64,
 }
 
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BakedPuppet {
     pub version: u32,
@@ -65,6 +69,10 @@ pub struct BakedPuppet {
     /// Built from a silhouette drawn from above (`Puppet::from_above`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub from_above: bool,
+    /// Drawn from above: its plan's frame ahead of its side silhouette's
+    /// (`Puppet::side_shift`). Absent (0) for every other puppet.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub side_shift: f64,
     pub height: f64,
     pub groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -100,6 +108,7 @@ impl Puppet {
             body_type: self.body_type.clone(),
             view: self.view,
             from_above: self.from_above,
+            side_shift: wide(self.side_shift),
             height: wide(self.height),
             groups: self.groups[..groups.min(self.groups.len())].to_vec(),
             eyes: self
@@ -217,6 +226,7 @@ impl Puppet {
             body_type: baked.body_type.clone(),
             view: baked.view,
             from_above: baked.from_above,
+            side_shift: baked.side_shift as f32,
             height: baked.height as f32,
             segments,
             groups: baked.groups.clone(),

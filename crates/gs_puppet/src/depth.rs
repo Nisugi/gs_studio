@@ -100,8 +100,15 @@ pub fn guess_depths(rig: &Rig, outlines: &Outlines) -> BTreeMap<String, DepthGue
         View::Front => View::Side,
         View::Side => View::Front,
     };
-    let mask = outlines.get(&rig.family, other).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
-    let mask = mask.map(|m| if rig.from_above { crate::puppet::turned_head_up(&m) } else { m });
+    let raster = |v: View| outlines.get(&rig.family, v).map(|e| rig_bake::rasterize(&e.outline(), MASK_PX));
+    let mask = raster(other);
+    let mask = match (rig.from_above, &mask) {
+        (true, Some(side)) => Some(match raster(rig.view) {
+            Some(plan) => crate::puppet::side_for_plan(side, &plan),
+            None => crate::puppet::turned_head_up(side),
+        }),
+        _ => mask,
+    };
     guess_depths_mask(rig, mask.as_ref())
 }
 

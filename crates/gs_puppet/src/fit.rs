@@ -25,10 +25,14 @@ pub fn ortho(view: View, min_x: f32, max_y: f32, px_per_ft: f32) -> impl Fn(V3) 
 }
 
 /// [`ortho`] for a puppet: a figure drawn from above has its own view seen
-/// from above (screen up = +z, nearer = higher), its side view as ever.
+/// from above (screen up = +z, nearer = higher), and its side view slid back
+/// into the side silhouette's frame (`Puppet::side_shift`).
 pub fn ortho_of(puppet: &Puppet, view: View, min_x: f32, max_y: f32, px_per_ft: f32) -> Box<dyn Fn(V3) -> ([f32; 2], f32)> {
     if puppet.from_above && view == View::Front {
         Box::new(move |p: V3| ([(p[0] - min_x) * px_per_ft, (max_y - p[2]) * px_per_ft], 100.0 - p[1]))
+    } else if puppet.from_above {
+        let side = ortho(view, min_x + puppet.side_shift, max_y, px_per_ft);
+        Box::new(side)
     } else {
         Box::new(ortho(view, min_x, max_y, px_per_ft))
     }

@@ -1102,3 +1102,36 @@ fn a_side_drawn_trunk_is_not_ribbed_by_the_gap_between_its_legs() {
         assert!(hi <= lo * 1.25, "spine.0 depth steps {lo:.2} -> {hi:.2} between neighbours");
     }
 }
+
+/// A plan drawn from above stands on y = 0 and runs forward to its length;
+/// its side view is centred on x = 0. Registered centre on centre, the side
+/// view turned head up spans exactly the plan's rows -- unregistered, the
+/// plan's front half read its heights from past the side view's nose (the
+/// spider's and crab's side fits of 0.45 and 0.18).
+#[test]
+fn a_side_view_is_read_row_for_row_against_a_plan() {
+    let outline = |x0: f32, x1: f32, y0: f32, y1: f32| rig_bake::Outline { subpaths: vec![vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]] };
+    let plan = rig_bake::rasterize(&outline(-1.0, 1.0, 0.0, 4.0), 256);
+    let side = rig_bake::rasterize(&outline(-2.0, 2.0, 0.0, 1.0), 256);
+    assert!((crate::plan_shift(&plan, &side) - 2.0).abs() < 0.02, "{}", crate::plan_shift(&plan, &side));
+    let turned = crate::side_for_plan(&side, &plan);
+    let rows = |m: &rig_bake::Mask| (m.grid.max_y - m.grid.h as f32 / m.grid.px_per_ft, m.grid.max_y);
+    let ((a0, a1), (b0, b1)) = (rows(&turned), rows(&plan));
+    assert!((a0 - b0).abs() < 0.03 && (a1 - b1).abs() < 0.03, "turned side {a0:.2}..{a1:.2} vs plan {b0:.2}..{b1:.2}");
+    // heights run left: the turned side spans x = -height..0
+    assert!((turned.grid.min_x + 1.0).abs() < 0.02, "{}", turned.grid.min_x);
+}
+
+/// The shipped forms drawn from above keep the registration they were
+/// built with, and their side view is measured in it.
+#[test]
+fn shipped_plans_carry_their_side_registration() {
+    for family in ["arachnid", "crustacean"] {
+        let p = shipped(family);
+        assert!(p.from_above);
+        assert!(p.side_shift > 0.1, "{family}: side_shift {}", p.side_shift);
+        let back = Puppet::from_baked_toml(&p.to_baked_toml().unwrap()).unwrap();
+        assert_eq!(back.side_shift, p.side_shift, "{family}: baked and read back");
+    }
+    assert_eq!(shipped("canine").side_shift, 0.0);
+}

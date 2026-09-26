@@ -107,11 +107,18 @@ pub struct DepthModel {
 
 impl DepthModel {
     /// Guess every placed joint's depth from an already rasterized OTHER view.
-    /// `other` = None is a family with only one silhouette.
-    pub fn new(rig: &Rig, other: Option<Mask>) -> DepthModel {
+    /// `other` = None is a family with only one silhouette. `plan` is the
+    /// rig's own silhouette, which a rig drawn from above registers its side
+    /// view against.
+    pub fn new(rig: &Rig, other: Option<Mask>, plan: Option<&Mask>) -> DepthModel {
         // Drawn from above, the other (side) silhouette is worked on turned
-        // head up, as the builder reads it: heights run left-right.
-        let other = other.map(|m| if rig.from_above { gs_puppet::turned_head_up(&m) } else { m });
+        // head up and slid along the plan, as the builder reads it: heights
+        // run left-right, row for row with the plan.
+        let other = other.map(|m| match (rig.from_above, plan) {
+            (true, Some(plan)) => gs_puppet::side_for_plan(&m, plan),
+            (true, None) => gs_puppet::turned_head_up(&m),
+            _ => m,
+        });
         DepthModel { guesses: guess_depths_mask(rig, other.as_ref()), other_mask: other }
     }
 
@@ -364,7 +371,7 @@ mod tests {
     }
 
     fn model(e: &Editor) -> DepthModel {
-        DepthModel::new(e.rig(), Some(block(0.5)))
+        DepthModel::new(e.rig(), Some(block(0.5)), None)
     }
 
     /// How many undo steps deep the history is, on a throwaway copy (placing
@@ -398,7 +405,7 @@ mod tests {
     #[test]
     fn a_family_with_one_silhouette_disables_depth_mode() {
         let (e, _) = biped();
-        let m = DepthModel::new(e.rig(), None);
+        let m = DepthModel::new(e.rig(), None, None);
         assert!(!m.available());
         assert!(m.unavailable_reason(e.rig()).contains("side"));
         assert!(m.joints_off_other(e.rig()).is_empty(), "no mask, no off-silhouette warning");
@@ -577,7 +584,7 @@ mod tests {
             e.set_current(j);
             e.place_current(p);
         }
-        let m = DepthModel::new(e.rig(), Some(block(1.0)));
+        let m = DepthModel::new(e.rig(), Some(block(1.0)), None);
         assert_eq!(axis_label(View::Side), "x (left-right, + = the creature's left)");
         assert_eq!(other_view(View::Side), View::Front);
         // The two limbs share one clicked point and are separated by depth.
@@ -605,7 +612,8 @@ mod tests {
             let r = rig::Rig::load(&path).unwrap();
             let mask =
                 outlines.get(&r.family, other_view(r.view)).map(|o| rig_bake::rasterize(&o.outline(), 512));
-            let m = DepthModel::new(&r, mask);
+            let plan = outlines.get(&r.family, r.view).map(|o| rig_bake::rasterize(&o.outline(), 512));
+            let m = DepthModel::new(&r, mask, plan.as_ref());
             let (over, placed) = m.override_counts(&r);
             let off = m.joints_off_other(&r);
             println!(

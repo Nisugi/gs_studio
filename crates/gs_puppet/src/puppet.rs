@@ -234,6 +234,11 @@ pub struct Puppet {
     /// figure lies flat, its front toward +z, as any other puppet does,
     /// but its own silhouette is its plan, not its elevation.
     pub from_above: bool,
+    /// Drawn from above: how far its plan's frame (the puppet's z) runs
+    /// ahead of its side silhouette's (side x = z - side_shift), as the two
+    /// were registered for the build ([`plan_shift`]). 0 for every other
+    /// puppet.
+    pub side_shift: f32,
     /// Top of the rest figure, feet.
     pub height: f32,
     pub segments: Vec<Segment>,
@@ -524,7 +529,14 @@ impl Puppet {
         // view -- up = forward -- against the side silhouette turned head
         // up, so every row read off it is a row of heights; the finished
         // figure is then laid down (below).
-        let side_turned = side_kept.as_deref().filter(|_| rig.from_above).map(turned_head_up);
+        let side_shift = match (rig.from_above, front_kept.as_deref(), side_kept.as_deref()) {
+            (true, Some(plan), Some(side)) => plan_shift(plan, side),
+            _ => 0.0,
+        };
+        let side_turned = side_kept.as_deref().filter(|_| rig.from_above).map(|side| match front_kept.as_deref() {
+            Some(plan) => side_for_plan(side, plan),
+            None => turned_head_up(side),
+        });
         let (front, side) = (front_kept.as_deref(), side_turned.as_ref().or(side_kept.as_deref()));
         let mask_of = |v: View| match v {
             View::Front => front,
@@ -1342,6 +1354,7 @@ impl Puppet {
             body_type: rig.body_type.clone(),
             view: rig.view,
             from_above: rig.from_above,
+            side_shift: q(side_shift),
             height: q(height),
             segments,
             groups,
@@ -1602,6 +1615,26 @@ pub fn turned_head_up(mask: &Mask) -> Mask {
         }
     }
     Mask { grid, inside }
+}
+
+/// How far a plan drawn from above runs ahead of its side silhouette, in
+/// feet: plan y = side x + this. The chart stands every drawing on y = 0
+/// and centres it in x, so a plan runs 0..L forward while its side view
+/// runs -L/2..L/2. Read unregistered, the plan's front rows took their
+/// heights from past the side view's nose; the two are read centre on
+/// centre (the middles of their boxes) instead.
+pub fn plan_shift(plan: &Mask, side: &Mask) -> f32 {
+    let (p, s) = (plan.grid, side.grid);
+    (p.max_y - p.h as f32 / p.px_per_ft / 2.0) - (s.min_x + s.w as f32 / s.px_per_ft / 2.0)
+}
+
+/// [`turned_head_up`] slid along the plan by [`plan_shift`]: the side
+/// silhouette in the plan's own frame, which is how the builder reads a
+/// height for every row of the plan.
+pub fn side_for_plan(side: &Mask, plan: &Mask) -> Mask {
+    let mut turned = turned_head_up(side);
+    turned.grid.max_y += plan_shift(plan, side);
+    turned
 }
 
 fn ignoring<'m>(rig: &Rig, view: View, mask: &'m Mask) -> std::borrow::Cow<'m, Mask> {

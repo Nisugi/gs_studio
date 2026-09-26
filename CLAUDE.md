@@ -13,6 +13,7 @@ projection-first export, texture generator plan).
     cargo test --workspace                     # everything
     cargo test -p studio                       # one crate
     cargo test -p studio editor_is_egui_free   # one test (name filter)
+    python -m unittest tools/test_refit_joints.py tools/test_snap_joints.py   # the rig tools
     cargo run -p studio                        # the app, binary gs-studio
     cargo run -p studio -- --pool <dir> --tab preview
     cargo build --release -p studio --features bundled-art   # packs art into the exe (needs GS_STUDIO_EMBED_POOL)
@@ -158,8 +159,10 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
 - A rig drawn from above (`from_above = true`; the multileg template sets
   it, arachnid and crustacean) keeps `view = "front"` for its outline and
   bake, but the 3D builder reads drawing-up as the creature's front and its
-  depth as HEIGHT off the side silhouette turned head up (`gs_puppet::turned_head_up`);
-  the figure is laid flat and grounded. Depth values are `-height`.
+  depth as HEIGHT off the side silhouette turned head up and slid along the
+  plan centre on centre (`gs_puppet::side_for_plan`; `Puppet::side_shift`
+  keeps the slide for side-view fits); the figure is laid flat and grounded.
+  Depth values are `-height`. Its side view faces right, like every side view.
 - Front views face the viewer: the creature's right (`_r`) is screen-left,
   negative x. In side views `_r` is the near limb.
 - Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.

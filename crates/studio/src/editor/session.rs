@@ -341,16 +341,25 @@ impl Session {
     }
 
     /// [`Session::other_outline`] as DEPTH mode draws it: for a rig drawn
-    /// from above, turned head up (world (z, y) -> (-y, z)), the frame its
-    /// depths are read and edited in.
+    /// from above, turned head up (world (z, y) -> (-y, z)) and slid along
+    /// the plan so the two are centre on centre (`gs_puppet::plan_shift`,
+    /// here from the outlines' boxes), the frame its depths are read and
+    /// edited in.
     pub fn other_outline_shown(&self) -> Option<OutlineEntry> {
         let entry = self.other_outline()?.clone();
-        if !self.editor.rig().from_above {
+        let rig = self.editor.rig();
+        if !rig.from_above {
             return Some(entry);
         }
+        let mid = |e: &OutlineEntry, axis: usize| {
+            let v = e.subpaths.iter().flatten().map(|p| p[axis]);
+            let (lo, hi) = v.fold((f32::MAX, f32::MIN), |(lo, hi), x| (lo.min(x), hi.max(x)));
+            (lo + hi) / 2.0
+        };
+        let shift = self.outlines.get(&rig.family, rig.view).map_or(0.0, |plan| mid(plan, 1) - mid(&entry, 0));
         Some(OutlineEntry {
             ref_ft: entry.ref_ft,
-            subpaths: entry.subpaths.iter().map(|sub| sub.iter().map(|p| [-p[1], p[0]]).collect()).collect(),
+            subpaths: entry.subpaths.iter().map(|sub| sub.iter().map(|p| [-p[1], p[0] + shift]).collect()).collect(),
         })
     }
 
@@ -364,8 +373,11 @@ impl Session {
             return;
         }
         self.ensure_other_mask();
+        if let Some(outline) = self.outline().map(|o| o.outline()) {
+            self.masks.entry(FULL_PX).or_insert_with(|| rasterize(&outline, FULL_PX));
+        }
         let mask = self.other_mask.as_ref().and_then(Clone::clone);
-        self.depth = Some((revision, DepthModel::new(self.editor.rig(), mask)));
+        self.depth = Some((revision, DepthModel::new(self.editor.rig(), mask, self.masks.get(&FULL_PX))));
     }
 
     fn ensure_other_mask(&mut self) {
