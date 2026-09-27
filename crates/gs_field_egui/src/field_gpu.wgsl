@@ -326,7 +326,12 @@ fn torch_prop(col0: vec3<f32>, px: vec2<f32>, Lt: Light, nearest_z: f32) -> vec3
     col = mix(col, stick_col, stick);
     let r = length(px - proj(T - up * 0.05));
     let halo = (0.45 * exp(-pow(r / (0.22 * ppm), 2.0)) + 0.05 / (1.0 + pow(r / (0.6 * ppm), 2.0))) * flick;
-    col = col + tcol * halo * (1.0 - 0.75 * hidden);
+    // The halo is in the air round the flame: anything well in front of it
+    // hides it (the prototype kept a quarter of it, which laid a glow over
+    // whatever stood before the torch); only an occluder at the flame
+    // itself -- a hand round the torch -- lets the glare spill over.
+    let glare_hidden = smoothstep(0.08, 0.6, T.z - nearest_z);
+    col = col + tcol * halo * (1.0 - glare_hidden);
     col = col + sparks(px, t, T, flick) * (1.0 - hidden);
     let fl = flame(px, t, T, T0, flick) * (1.0 - hidden);
     return col * (1.0 - 0.5 * fl.a) + fl.rgb;
@@ -345,7 +350,9 @@ fn mote_prop(px: vec2<f32>, Lt: Light, nearest_z: f32) -> vec3<f32> {
     let r = length(px - c);
     let core = exp(-pow(r / (0.05 * ppm), 2.0));
     let halo = 0.6 * exp(-pow(r / (0.16 * ppm), 2.0)) + 0.22 * exp(-pow(r / (0.9 * ppm), 2.0)) + 0.03 / (1.0 + pow(r / (0.5 * ppm), 2.0));
-    var acc = mcore * core * 3.0 * pulse * (1.0 - hidden) + mcol * halo * pulse * (1.0 - 0.7 * hidden);
+    // the halo hidden by anything well in front of it, as the torch's
+    let glare_hidden = smoothstep(0.05, 0.6, M.z - nearest_z);
+    var acc = mcore * core * 3.0 * pulse * (1.0 - hidden) + mcol * halo * pulse * (1.0 - glare_hidden);
     for (var i = 0; i < 10; i = i + 1) {
         let fi = f32(i);
         let ang = t * (0.5 + 0.9 * hash11(fi)) * select(-1.0, 1.0, hash11(fi + 9.0) > 0.5) + fi * 2.39996;

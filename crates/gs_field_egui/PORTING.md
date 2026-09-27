@@ -738,6 +738,12 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   drawings, and the puppet's own lamp light and lamp shadows are skipped.
 - `creature_art::prepare_scene_art` tells the light state to keep pixels
   while the pass is enabled.
+- One deliberate difference from the prototype: a torch's or a mote's
+  halo is hidden by anything well in front of it (fading out from 8 cm to
+  60 cm in front, so a hand at the flame still lets the glare spill). The
+  prototype kept a quarter of it, which laid the glow over whatever stood
+  before the light (Niffy's report). Against the prototype's scene: mean
+  OKLab dE 0.0017, from 0.0014.
 - `creature_puppet`: a skin that ships no normal sheet gets one made from
   its own paint when its texture loads (`gs_puppet::bump_sheet`, about
   0.1 s a skin, once), so every painted puppet has relief -- under its own
