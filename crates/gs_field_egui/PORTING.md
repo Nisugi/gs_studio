@@ -752,7 +752,8 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   `LightState::moons_now()`: every moon lighting the scene, Liabo then
   Lornon (`Sky.lornon`: its own hours, `lornon_strength` of Liabo's light,
   grey turning crimson by Lornon's Eve), each a `LightKind::Moon` light;
-  `moon_now()` is Liabo's alone.
+  `moon_now()` is Liabo's alone. `WeatherKind: From<gs_field::sky::Precip>`
+  (**a new impl**): the game sky's weather as the stage draws it.
   `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
   brings, which the host adds to the sky's.
 - Skins lit by the scene (Niffy's flat hull). `LightClock.sun_lit` (**a

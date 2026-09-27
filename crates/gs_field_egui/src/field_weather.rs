@@ -54,6 +54,23 @@ impl WeatherKind {
     }
 }
 
+/// What falls, as the game's sky has it ([`gs_field::sky::GameSky::weather`],
+/// or a host that tracks it itself), as the stage draws it.
+impl From<gs_field::sky::Precip> for WeatherKind {
+    fn from(p: gs_field::sky::Precip) -> Self {
+        use gs_field::sky::Precip;
+        match p {
+            Precip::Rain => WeatherKind::Rain,
+            Precip::Storm => WeatherKind::Storm,
+            Precip::Snow => WeatherKind::Snow,
+            Precip::Sleet => WeatherKind::Sleet,
+            Precip::BloodRain => WeatherKind::BloodRain,
+            Precip::Fog => WeatherKind::Fog,
+            Precip::Sand => WeatherKind::Sand,
+        }
+    }
+}
+
 impl WeatherKind {
     /// How much of the sky its clouds cover at full intensity (fog is low
     /// cloud: it greys the moon rather than hiding it).
@@ -276,5 +293,14 @@ mod tests {
         // Depths split the particles between the two layers, evenly enough.
         let front = (0..1000).filter(|i| depth(*i, 11) >= 0.5).count();
         assert!((400..600).contains(&front), "{front}");
+    }
+
+    /// Every kind the game's sky can report is one the stage draws.
+    #[test]
+    fn the_games_weather_is_drawn() {
+        use gs_field::sky::Precip;
+        let all = [Precip::Rain, Precip::Storm, Precip::Snow, Precip::Sleet, Precip::BloodRain, Precip::Fog, Precip::Sand];
+        let kinds: Vec<WeatherKind> = all.into_iter().map(WeatherKind::from).collect();
+        assert_eq!(kinds, WeatherKind::ALL.to_vec());
     }
 }

@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 rig / baked-map / baked-toml file formats, templates). Read the relevant
 section before changing behaviour it describes, and keep it in sync.
 `docs/` holds the design specs behind larger features (clothing kit,
-projection-first export, texture generator plan).
+projection-first export, texture generator plan, what Hydra tracks of the
+game's sky).
 
 ## Commands
 

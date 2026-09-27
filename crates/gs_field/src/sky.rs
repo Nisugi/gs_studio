@@ -122,6 +122,23 @@ pub fn lornon_blood(month: u32, day: u32, hour: f32) -> f32 {
     ((day as f32 - 20.0 + hour / 24.0) / 11.0).clamp(0.0, 1.0)
 }
 
+/// The [`Sky`] Liabo and Lornon make at these ages, on the Elanthian date
+/// `month`/`day` at `game_hour`, cloud left at none: what a host that
+/// tracks the moons itself (Hydra, `docs/game-sky-spec.md`) hands the
+/// renderer.
+pub fn moons_sky(liabo: MoonAge, lornon: MoonAge, month: u32, day: u32, game_hour: f32) -> Sky {
+    // On Lornon's Eve it "glows brightly".
+    let eve = if month == 12 && day == 31 { 1.0 } else { 0.0 };
+    Sky {
+        moon: liabo.lit(),
+        moon_high: liabo.highest(),
+        lornon: lornon.lit().max(eve),
+        lornon_high: lornon.highest(),
+        lornon_blood: lornon_blood(month, day, game_hour),
+        ..Sky::default()
+    }
+}
+
 /// A `look <moon>` reply, read.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MoonLook {
@@ -405,19 +422,7 @@ impl GameSky {
     /// `month`/`day` at `game_hour`. Cloud is left to the host (its weather
     /// brings its own).
     pub fn sky(&self, unix: f64, month: u32, day: u32, game_hour: f32) -> Sky {
-        let liabo = self.moon_age(Moon::Liabo, unix);
-        let lornon = self.moon_age(Moon::Lornon, unix);
-        let blood = lornon_blood(month, day, game_hour);
-        // On Lornon's Eve it "glows brightly".
-        let eve = if month == 12 && day == 31 { 1.0 } else { 0.0 };
-        Sky {
-            moon: liabo.lit(),
-            moon_high: liabo.highest(),
-            lornon: lornon.lit().max(eve),
-            lornon_high: lornon.highest(),
-            lornon_blood: blood,
-            ..Sky::default()
-        }
+        moons_sky(self.moon_age(Moon::Liabo, unix), self.moon_age(Moon::Lornon, unix), month, day, game_hour)
     }
 
     /// What falls now and how hard, 0..1: None indoors or in the clear.
@@ -587,6 +592,9 @@ mod tests {
         let sky = GameSky::default();
         let eve = sky.sky(1_798_700_000.0, 12, 31, 22.0);
         assert!(eve.lornon_blood == 1.0 && eve.lornon == 1.0, "{eve:?}");
+        // a host tracking the moons itself gets the same sky from their ages
+        let (liabo, lornon) = (sky.moon_age(Moon::Liabo, 1_798_700_000.0), sky.moon_age(Moon::Lornon, 1_798_700_000.0));
+        assert_eq!(moons_sky(liabo, lornon, 12, 31, 22.0), eve);
     }
 
     #[test]

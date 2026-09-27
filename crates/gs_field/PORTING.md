@@ -452,6 +452,9 @@ host keeps one per session.
   room's weather is when no line has.
 * The words -- look phrases and weather lines -- are data:
   `data/sky.toml`, compiled in (`SHIPPED_SKY_TOML`).
+* `moons_sky(liabo, lornon, month, day, hour)`: the `Sky` two moon ages
+  make, for a host that tracks the moons itself (Hydra:
+  `docs/game-sky-spec.md` at the gs-studio root says what to track).
 
 Tests: +7 in `sky::tests`, built on the looks and lines as the game sent
 them.
