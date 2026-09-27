@@ -641,6 +641,7 @@ impl StageGpu {
             shadows: true,
             view: FieldView::Lit,
             weather,
+            detail: field_gpu::DETAIL,
         };
         Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, used: std::cell::Cell::new(0.0), ppp: ctx.pixels_per_point() })
     }

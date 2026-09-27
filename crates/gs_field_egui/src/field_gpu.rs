@@ -550,7 +550,19 @@ pub struct FieldFrame {
     pub shadows: bool,
     pub view: FieldView,
     pub weather: FieldWeather,
+    /// How finely a piece is shaded: at most this many shaded pixels per
+    /// pixel of its own art (the backdrop's, a layer's image). A piece shown
+    /// bigger is shaded at that and stretched to its place -- the art has
+    /// no more detail to show, and the cost stops growing with the window.
+    /// 0 = every screen pixel ([`DETAIL`] is the stage's).
+    pub detail: f32,
 }
+
+/// The stage's [`FieldFrame::detail`]: shaded no finer than the art.
+pub const DETAIL: f32 = 1.0;
+/// A piece shaded at this share of its screen pixels or more is shaded
+/// whole instead: stretching would save little and soften it.
+const SHADE_WHOLE: f32 = 0.9;
 
 /// A frame being filled while the UI is laid out: egui prepares every
 /// paint callback only after the whole UI pass, so a backdrop piece added
@@ -785,6 +797,90 @@ const DRAW_STRIDE: u32 = 256;
 /// Floats in a piece's uniforms (field_gpu.wgsl `Draw`).
 const DRAW_FLOATS: usize = 12;
 
+/// Floats in a stretch's uniforms (`BLIT_WGSL` `Blit`).
+const BLIT_FLOATS: usize = 12;
+
+/// Stretching a piece shaded small into its place: a quad (`ndc`), the
+/// window of the scratch texture it shows (`uv`), kept half a texel inside
+/// that window (`inner`) so nothing beyond it bleeds in.
+const BLIT_WGSL: &str = r#"
+struct Blit { ndc: vec4<f32>, uv: vec4<f32>, inner: vec4<f32> };
+@group(0) @binding(0) var<uniform> B: Blit;
+@group(0) @binding(1) var tex: texture_2d<f32>;
+@group(0) @binding(2) var smp: sampler;
+struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+@vertex fn vs_blit(@builtin(vertex_index) i: u32) -> VsOut {
+    let corner = array<vec2<f32>, 6>(vec2<f32>(0.0, 0.0), vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0),
+                                     vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), vec2<f32>(1.0, 1.0));
+    let c = corner[i];
+    var o: VsOut;
+    o.pos = vec4<f32>(mix(B.ndc.x, B.ndc.z, c.x), mix(B.ndc.y, B.ndc.w, c.y), 0.0, 1.0);
+    o.uv = vec2<f32>(mix(B.uv.x, B.uv.z, c.x), mix(B.uv.y, B.uv.w, c.y));
+    return o;
+}
+@fragment fn fs_blit(in: VsOut) -> @location(0) vec4<f32> {
+    return textureSampleLevel(tex, smp, clamp(in.uv, B.inner.xy, B.inner.zw), 0.0);
+}
+"#;
+
+/// A draw slot's scratch texture: its piece shaded small, cleared around it.
+struct Scratch {
+    view: wgpu::TextureView,
+    size: [u32; 2],
+    /// The stretch's bindings: its uniforms, this texture, the sampler.
+    bind: wgpu::BindGroup,
+}
+
+/// What `prepare` settled for one piece: its draw slot, and whether it was
+/// shaded small into that slot's scratch texture (`paint` then stretches it).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Prepared {
+    slot: u32,
+    small: bool,
+}
+
+impl Prepared {
+    fn pack(self) -> u32 {
+        self.slot | (self.small as u32) << 31
+    }
+
+    fn unpack(v: u32) -> Option<Prepared> {
+        (v != u32::MAX).then_some(Prepared { slot: v & 0x7fff_ffff, small: v >> 31 != 0 })
+    }
+}
+
+/// Where a piece lands on the framebuffer (whole pixels, clipped to it:
+/// x0, y0, x1, y1) and the size to shade it at, when its art would show
+/// bigger than the frame's [`FieldFrame::detail`] allows; None: shade every
+/// screen pixel.
+fn shading_size(frame: &FieldFrame, piece: Piece, place: Placement, rect: egui::Rect, screen_px: [u32; 2], ppp: f32) -> Option<([u32; 4], [u32; 2])> {
+    if frame.detail <= 0.0 {
+        return None;
+    }
+    // art pixels per scene pixel
+    let art = match piece {
+        Piece::Everything | Piece::Backdrop => frame.backdrop.w as f32 / frame.backdrop_rect[2].max(1e-3),
+        Piece::Layer(i) => {
+            let l = drawn_layers(frame).get(i)?;
+            l.image.w as f32 / l.rect[2].max(1e-3)
+        }
+    };
+    // shaded pixels per framebuffer pixel
+    let r = frame.detail * art / (ppp * place.scale).max(1e-6);
+    if r >= SHADE_WHOLE {
+        return None;
+    }
+    let x0 = (rect.min.x * ppp).floor().max(0.0);
+    let y0 = (rect.min.y * ppp).floor().max(0.0);
+    let x1 = (rect.max.x * ppp).ceil().min(screen_px[0] as f32);
+    let y1 = (rect.max.y * ppp).ceil().min(screen_px[1] as f32);
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let size = [((x1 - x0) * r).ceil().max(1.0) as u32, ((y1 - y0) * r).ceil().max(1.0) as u32];
+    Some(([x0 as u32, y0 as u32, x1 as u32, y1 as u32], size))
+}
+
 struct Gpu {
     /// Backdrop and "everything" pieces: they replace what is under them.
     opaque: wgpu::RenderPipeline,
@@ -797,6 +893,17 @@ struct Gpu {
     s_lin: wgpu::Sampler,
     s_near: wgpu::Sampler,
     srgb_target: bool,
+    /// The target's format (a scratch texture takes it).
+    format: wgpu::TextureFormat,
+    /// Stretching a piece shaded small into place ([`FieldFrame::detail`]):
+    /// replacing what is under it (a backdrop) or over it (a layer).
+    blit_opaque: wgpu::RenderPipeline,
+    blit_blended: wgpu::RenderPipeline,
+    blit_layout: wgpu::BindGroupLayout,
+    /// Per draw slot: the stretch's quad and texture window ([`BLIT_FLOATS`]).
+    blits: wgpu::Buffer,
+    /// Per draw slot: the texture its piece is shaded small into.
+    scratch: Vec<Option<Scratch>>,
     /// (key, size, textures)
     backdrop: Option<(u64, [u32; 2], Textures)>,
     atlas: Textures,
@@ -942,9 +1049,70 @@ impl Gpu {
                 ..Default::default()
             })
         };
+        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("field_gpu blit"),
+            source: wgpu::ShaderSource::Wgsl(BLIT_WGSL.into()),
+        });
+        let blit_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("field_gpu blit"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new((BLIT_FLOATS * 4) as u64),
+                    },
+                    count: None,
+                },
+                texture(1),
+                sampler(2),
+            ],
+        });
+        let blit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("field_gpu blit"),
+            bind_group_layouts: &[Some(&blit_layout)],
+            immediate_size: 0,
+        });
+        let blit = |blend: Option<wgpu::BlendState>, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&blit_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &blit_shader,
+                    entry_point: Some("vs_blit"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &blit_shader,
+                    entry_point: Some("fs_blit"),
+                    targets: &[Some(wgpu::ColorTargetState { format: target_format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let blits = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("field_gpu blits"),
+            size: (DRAW_SLOTS * DRAW_STRIDE) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Gpu {
             opaque: pipeline(None, "field_gpu opaque"),
             blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
+            format: target_format,
+            blit_opaque: blit(None, "field_gpu blit opaque"),
+            blit_blended: blit(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blit blended"),
+            blit_layout,
+            blits,
+            scratch: Vec::new(),
             layout,
             uniform,
             draws,
@@ -1029,59 +1197,109 @@ pub fn layer_index(frame: &FieldFrame, key: u64) -> Option<usize> {
     drawn_layers(frame).iter().position(|l| l.image.key == key)
 }
 
-/// Time the pass without a window: draw `frame` whole ([`Piece::Everything`])
-/// into an offscreen target `size` pixels big, `repeats` times, a submission
-/// each, and wait for the GPU. The mean wall time per draw; the first draw
-/// (shader compile, uploads) is not counted. For `examples/torchlight`'s
-/// bench (`TORCHLIGHT_BENCH`); the caller owns the device.
-pub fn time_offscreen(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2], repeats: u32) -> std::time::Duration {
-    let format = wgpu::TextureFormat::Rgba8Unorm;
-    let mut gpu = Gpu::new(device, format);
-    gpu.upload_frame(device, queue, frame);
-    let target = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("field_gpu offscreen"),
-        size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    let place = Placement { origin: egui::Pos2::ZERO, scale: size[0] as f32 / frame.camera.size[0] };
-    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
-    let u = draw_uniforms(rect, place, Piece::Everything, size, 1.0);
-    queue.write_buffer(&gpu.draws, 0, bytemuck::cast_slice(&u));
-    let Some(bind) = gpu.bind.as_ref() else { return std::time::Duration::ZERO };
-    let draw = || {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("field_gpu offscreen") });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("field_gpu offscreen"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&gpu.opaque);
-            pass.set_bind_group(0, bind, &[]);
-            pass.set_bind_group(1, &gpu.draw_bind, &[0]);
-            pass.draw(0..6, 0..1);
+/// The pass drawn without a window: a whole frame ([`Piece::Everything`])
+/// into an offscreen target, prepared and painted the pieces' way (shaded
+/// small first when the frame's `detail` says so).
+struct Offscreen {
+    gpu: Gpu,
+    target: wgpu::Texture,
+    view: wgpu::TextureView,
+    size: [u32; 2],
+}
+
+impl Offscreen {
+    const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2]) -> Offscreen {
+        let mut gpu = Gpu::new(device, Self::FORMAT);
+        gpu.upload_frame(device, queue, frame);
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("field_gpu offscreen"),
+            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        Offscreen { gpu, target, view, size }
+    }
+
+    /// Record one draw of `frame` on `encoder`.
+    fn draw(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &FieldFrame) {
+        let place = Placement { origin: egui::Pos2::ZERO, scale: self.size[0] as f32 / frame.camera.size[0] };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.size[0] as f32, self.size[1] as f32));
+        self.gpu.next_slot = 0;
+        let prepared = self.gpu.prepare_piece(device, queue, encoder, frame, Piece::Everything, place, rect, self.size, 1.0);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("field_gpu offscreen"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+            })],
+            ..Default::default()
+        });
+        if let Some(p) = prepared {
+            self.gpu.paint_piece(&mut pass, p, Piece::Everything);
         }
+    }
+}
+
+/// Time the pass without a window: draw `frame` whole into an offscreen
+/// target `size` pixels big, `repeats` times, a submission each, and wait
+/// for the GPU. The mean wall time per draw; the first draw (shader
+/// compile, uploads) is not counted. For `examples/torchlight`'s bench
+/// (`TORCHLIGHT_BENCH`); the caller owns the device.
+pub fn time_offscreen(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2], repeats: u32) -> std::time::Duration {
+    let mut off = Offscreen::new(device, queue, frame, size);
+    let draw = |off: &mut Offscreen| {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("field_gpu offscreen") });
+        off.draw(device, queue, &mut encoder, frame);
         queue.submit([encoder.finish()]);
     };
-    draw();
+    draw(&mut off);
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     let started = std::time::Instant::now();
     for _ in 0..repeats {
-        draw();
+        draw(&mut off);
     }
     let _ = device.poll(wgpu::PollType::wait_indefinitely());
     started.elapsed() / repeats.max(1)
+}
+
+/// Draw `frame` whole into an offscreen target `size` pixels big and read it
+/// back: RGBA8, rows top down, as the pass writes a non-sRGB target. For
+/// comparing looks without a window (`TORCHLIGHT_BENCH_PNG`).
+pub fn render_offscreen(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2]) -> Vec<u8> {
+    let mut off = Offscreen::new(device, queue, frame, size);
+    let row = (size[0] * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("field_gpu readback"),
+        size: (row * size[1]) as u64,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("field_gpu readback") });
+    off.draw(device, queue, &mut encoder, frame);
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: &off.target, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo { buffer: &buffer, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: Some(size[1]) } },
+        wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+    );
+    queue.submit([encoder.finish()]);
+    buffer.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let data = buffer.slice(..).get_mapped_range();
+    let mut out = Vec::with_capacity((size[0] * size[1] * 4) as usize);
+    for y in 0..size[1] as usize {
+        let start = y * row as usize;
+        out.extend_from_slice(&data[start..start + size[0] as usize * 4]);
+    }
+    out
 }
 
 struct FieldCallback {
@@ -1196,13 +1414,163 @@ fn draw_uniforms(rect: egui::Rect, place: Placement, piece: Piece, screen_px: [u
     [a[0], a[1], b[0], b[1], k, k, -place.origin.x / place.scale, -place.origin.y / place.scale, mode, layer, 0.0, 0.0]
 }
 
+impl Gpu {
+    /// One piece of `frame` (its textures and uniforms uploaded): a draw
+    /// slot, its uniforms, and -- when its art would show bigger than the
+    /// frame's `detail` -- its shading at that size, into the slot's scratch
+    /// texture, recorded on `encoder`. None when the slots are used up.
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_piece(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &FieldFrame,
+        piece: Piece,
+        place: Placement,
+        rect: egui::Rect,
+        screen_px: [u32; 2],
+        ppp: f32,
+    ) -> Option<Prepared> {
+        if self.next_slot >= DRAW_SLOTS {
+            return None;
+        }
+        let slot = self.next_slot;
+        self.next_slot += 1;
+        let at = (slot * DRAW_STRIDE) as u64;
+        let small = self.bind.is_some().then(|| shading_size(frame, piece, place, rect, screen_px, ppp)).flatten();
+        let Some(([x0, y0, x1, y1], [sw, sh])) = small else {
+            let u = draw_uniforms(rect, place, piece, screen_px, ppp);
+            queue.write_buffer(&self.draws, at, bytemuck::cast_slice(&u));
+            return Some(Prepared { slot, small: false });
+        };
+        let [tw, th] = self.scratch_for(device, slot, [sw, sh]).size;
+        let (tw, th, swf, shf) = (tw as f32, th as f32, sw as f32, sh as f32);
+        // scratch pixel s shows framebuffer pixel x0 + s * (x1 - x0) / sw;
+        // framebuffer to scene as `draw_uniforms` maps it
+        let k = 1.0 / (ppp * place.scale);
+        let (fx, fy) = ((x1 - x0) as f32 / swf, (y1 - y0) as f32 / shf);
+        let (mode, layer) = match piece {
+            Piece::Everything => (0.0, 0.0),
+            Piece::Backdrop => (1.0, 0.0),
+            Piece::Layer(i) => (2.0, i as f32),
+        };
+        let shade: [f32; DRAW_FLOATS] = [
+            -1.0,
+            1.0,
+            swf / tw * 2.0 - 1.0,
+            1.0 - shf / th * 2.0,
+            k * fx,
+            k * fy,
+            x0 as f32 * k - place.origin.x / place.scale,
+            y0 as f32 * k - place.origin.y / place.scale,
+            mode,
+            layer,
+            0.0,
+            0.0,
+        ];
+        queue.write_buffer(&self.draws, at, bytemuck::cast_slice(&shade));
+        let (px, py) = (screen_px[0].max(1) as f32, screen_px[1].max(1) as f32);
+        let stretch: [f32; BLIT_FLOATS] = [
+            x0 as f32 / px * 2.0 - 1.0,
+            1.0 - y0 as f32 / py * 2.0,
+            x1 as f32 / px * 2.0 - 1.0,
+            1.0 - y1 as f32 / py * 2.0,
+            0.0,
+            0.0,
+            swf / tw,
+            shf / th,
+            0.5 / tw,
+            0.5 / th,
+            (swf - 0.5) / tw,
+            (shf - 0.5) / th,
+        ];
+        queue.write_buffer(&self.blits, at, bytemuck::cast_slice(&stretch));
+        let (Some(bind), Some(Some(scratch))) = (&self.bind, self.scratch.get(slot as usize)) else { return None };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("field_gpu piece, shaded small"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &scratch.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+            })],
+            ..Default::default()
+        });
+        // straight in: a layer's premultiplied colour over clear, its
+        // transparent pixels left clear
+        pass.set_pipeline(&self.opaque);
+        pass.set_bind_group(0, bind, &[]);
+        pass.set_bind_group(1, &self.draw_bind, &[slot * DRAW_STRIDE]);
+        pass.draw(0..6, 0..1);
+        Some(Prepared { slot, small: true })
+    }
+
+    /// Slot `slot`'s scratch texture, at least `size` (grown, never shrunk).
+    fn scratch_for(&mut self, device: &wgpu::Device, slot: u32, size: [u32; 2]) -> &Scratch {
+        let i = slot as usize;
+        if self.scratch.len() <= i {
+            self.scratch.resize_with(i + 1, || None);
+        }
+        let old = self.scratch[i].as_ref().map_or([0, 0], |s| s.size);
+        if old[0] < size[0] || old[1] < size[1] {
+            let want = [size[0].max(old[0]).next_multiple_of(64), size[1].max(old[1]).next_multiple_of(64)];
+            let tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("field_gpu scratch"),
+                size: wgpu::Extent3d { width: want[0], height: want[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("field_gpu scratch"),
+                layout: &self.blit_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &self.blits,
+                            offset: (slot * DRAW_STRIDE) as u64,
+                            size: std::num::NonZeroU64::new((BLIT_FLOATS * 4) as u64),
+                        }),
+                    },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.s_lin) },
+                ],
+            });
+            self.scratch[i] = Some(Scratch { view, size: want, bind });
+        }
+        self.scratch[i].as_ref().expect("made above")
+    }
+
+    /// Draw a prepared piece: its quad, or its small shading stretched.
+    fn paint_piece(&self, pass: &mut wgpu::RenderPass<'_>, p: Prepared, piece: Piece) {
+        let layer = matches!(piece, Piece::Layer(_));
+        if p.small {
+            let Some(Some(s)) = self.scratch.get(p.slot as usize) else { return };
+            pass.set_pipeline(if layer { &self.blit_blended } else { &self.blit_opaque });
+            pass.set_bind_group(0, &s.bind, &[]);
+        } else {
+            let Some(bind) = &self.bind else { return };
+            pass.set_pipeline(if layer { &self.blended } else { &self.opaque });
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_bind_group(1, &self.draw_bind, &[p.slot * DRAW_STRIDE]);
+        }
+        pass.draw(0..6, 0..1);
+    }
+}
+
 impl egui_wgpu::CallbackTrait for FieldCallback {
     fn prepare(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen: &egui_wgpu::ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(gpu) = resources.get_mut::<Gpu>() else { return Vec::new() };
@@ -1212,31 +1580,18 @@ impl egui_wgpu::CallbackTrait for FieldCallback {
             gpu.next_slot = 0;
             gpu.upload_frame(device, queue, &frame);
         }
-        if gpu.next_slot >= DRAW_SLOTS {
-            return Vec::new();
-        }
-        let slot = gpu.next_slot;
-        gpu.next_slot += 1;
-        let u = draw_uniforms(self.rect, self.place, self.piece, screen.size_in_pixels, screen.pixels_per_point);
-        queue.write_buffer(&gpu.draws, (slot * DRAW_STRIDE) as u64, bytemuck::cast_slice(&u));
-        self.slot.store(slot, std::sync::atomic::Ordering::Relaxed);
+        let prepared = gpu.prepare_piece(device, queue, encoder, &frame, self.piece, self.place, self.rect, screen.size_in_pixels, screen.pixels_per_point);
+        self.slot.store(prepared.map_or(u32::MAX, Prepared::pack), std::sync::atomic::Ordering::Relaxed);
         Vec::new()
     }
 
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let Some(gpu) = resources.get::<Gpu>() else { return };
-        let Some(bind) = &gpu.bind else { return };
-        let slot = self.slot.load(std::sync::atomic::Ordering::Relaxed);
-        if slot >= DRAW_SLOTS {
-            return;
-        }
+        let Some(prepared) = Prepared::unpack(self.slot.load(std::sync::atomic::Ordering::Relaxed)) else { return };
         // The quad carries its own place on the screen: undo egui's viewport
         // (the callback rect, clamped to the screen) so it maps 1:1.
         pass.set_viewport(0.0, 0.0, info.screen_size_px[0] as f32, info.screen_size_px[1] as f32, 0.0, 1.0);
-        pass.set_pipeline(if matches!(self.piece, Piece::Layer(_)) { &gpu.blended } else { &gpu.opaque });
-        pass.set_bind_group(0, bind, &[]);
-        pass.set_bind_group(1, &gpu.draw_bind, &[slot * DRAW_STRIDE]);
-        pass.draw(0..6, 0..1);
+        gpu.paint_piece(pass, prepared, self.piece);
     }
 }
 
@@ -1373,6 +1728,7 @@ mod tests {
             shadows: true,
             view: FieldView::Lit,
             weather: FieldWeather::default(),
+            detail: DETAIL,
         };
         let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], &vec![[-0.5, 2.0]; MAX_LAYERS], false);
         assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16, "the WGSL struct's size");

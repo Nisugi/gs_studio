@@ -760,7 +760,16 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   ray's depth is inside the figure's own depth slab (each layer's nearest
   and farthest solid depth, worked out once per image upload); the samples
   keep their places, so the picture is unchanged -- a crowd with lamps and
-  both moons, 2.88 -> 1.60 ms a frame at 1264x848 on an RX 7900 GRE. `WeatherKind: From<gs_field::sky::Precip>`
+  both moons, 2.88 -> 1.60 ms a frame at 1264x848 on an RX 7900 GRE.
+- `FieldFrame.detail` (**a new field**: a host building a `FieldFrame`
+  adds it; `field_gpu::DETAIL`, 1, is the stage's, 0 turns it off): a
+  piece shown bigger than its own art (the backdrop's image, a layer's) is
+  shaded at the art's size into a per-slot scratch texture while egui
+  prepares it, then stretched into place when painted -- over what is
+  there for a layer, premultiplied, as before. The cost stops growing with
+  the window: a crowd with lamps and both moons at twice the art's size,
+  5.29 -> 1.80 ms. `field_gpu::render_offscreen` (**a new function**)
+  reads a frame back without a window. `WeatherKind: From<gs_field::sky::Precip>`
   (**a new impl**): the game sky's weather as the stage draws it.
   `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
   brings, which the host adds to the sky's.

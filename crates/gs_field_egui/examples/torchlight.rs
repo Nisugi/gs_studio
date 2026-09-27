@@ -21,7 +21,13 @@
 //! time, weather off);
 //! `TORCHLIGHT_BENCH=1` opens no window: it times the pass on every GPU the
 //! machine has (`=all`: on every backend of each), feature by feature, at
-//! 1x, 1.5x and 2x the prototype's size, and prints milliseconds a frame.
+//! 1x, 1.5x and 2x the prototype's size, shading every screen pixel and
+//! shaded no finer than the art (`FieldFrame::detail`), and prints
+//! milliseconds a frame; `TORCHLIGHT_BENCH_PNG=<prefix>` also saves a
+//! crowd at 2x both ways (`<prefix>_every.png`, `<prefix>_art.png`);
+//! `TORCHLIGHT_DETAIL=<d>` sets the window's detail (0 = every pixel);
+//! `TORCHLIGHT_SCALE=<k>` makes the window (and a shot) k times the
+//! prototype's size, to see the scene shown bigger than its art.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -254,6 +260,7 @@ impl Scene {
             shadows,
             view,
             weather: self.weather(t),
+            detail: std::env::var("TORCHLIGHT_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(field_gpu::DETAIL),
         }
     }
 }
@@ -330,7 +337,8 @@ impl eframe::App for App {
                 let (w, h) = ((r.width() * ppp).round() as u32, (r.height() * ppp).round() as u32);
                 let full = image::RgbaImage::from_raw(image.size[0] as u32, image.size[1] as u32, image.as_raw().to_vec()).expect("screenshot");
                 let crop = image::imageops::crop_imm(&full, x0, y0, w.min(full.width() - x0), h.min(full.height() - y0)).to_image();
-                let out = image::imageops::resize(&crop, SIZE[0] as u32, SIZE[1] as u32, image::imageops::FilterType::Triangle);
+                let k = scale();
+                let out = image::imageops::resize(&crop, (SIZE[0] * k) as u32, (SIZE[1] * k) as u32, image::imageops::FilterType::Triangle);
                 out.save(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
                 println!("wrote {}", path.display());
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -433,6 +441,8 @@ fn bench(scene: &Scene, every_backend: bool) {
         println!("adapter: {} ({:?}, {:?})", i.name, i.device_type, i.backend);
     }
     let sizes = [1.0f32, 1.5, 2.0].map(|k| [(SIZE[0] * k) as u32, (SIZE[1] * k) as u32]);
+    // pictures of the crowd both ways, from the first GPU
+    let mut pictures = std::env::var("TORCHLIGHT_BENCH_PNG").ok();
     for adapter in adapters {
         let info = adapter.get_info();
         // software rasterisers take seconds a frame: not a GPU to plan for
@@ -440,21 +450,39 @@ fn bench(scene: &Scene, every_backend: bool) {
             continue;
         }
         let Ok((device, queue)) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("torchlight bench"), ..Default::default() })) else {
-            println!("
-{}: no device", info.name);
+            println!("\n{}: no device", info.name);
             continue;
         };
-        println!("
-== {} ({:?}, {:?}) -- ms a frame", info.name, info.device_type, info.backend);
-        println!("{:<34}{}", "case", sizes.map(|s| format!("{:>12}", format!("{}x{}", s[0], s[1]))).join(""));
-        for (label, frame) in &cases {
-            let ms = sizes.map(|s| {
-                let repeats = (40.0 * (SIZE[0] * SIZE[1]) / (s[0] * s[1]) as f32).max(10.0) as u32;
-                field_gpu::time_offscreen(&device, &queue, frame, s, repeats).as_secs_f64() * 1000.0
-            });
-            println!("{:<34}{}", label, ms.map(|m| format!("{m:>12.2}")).join(""));
+        println!("\n== {} ({:?}, {:?}) -- ms a frame", info.name, info.device_type, info.backend);
+        for (detail, how) in [(0.0, "every screen pixel shaded"), (field_gpu::DETAIL, "shaded no finer than the art")] {
+            println!("\n-- {how}");
+            println!("{:<38}{}", "case", sizes.map(|s| format!("{:>12}", format!("{}x{}", s[0], s[1]))).join(""));
+            for (label, frame) in &cases {
+                let frame = FieldFrame { detail, ..frame.clone() };
+                let ms = sizes.map(|s| {
+                    let repeats = (40.0 * (SIZE[0] * SIZE[1]) / (s[0] * s[1]) as f32).max(10.0) as u32;
+                    field_gpu::time_offscreen(&device, &queue, &frame, s, repeats).as_secs_f64() * 1000.0
+                });
+                println!("{:<38}{}", label, ms.map(|m| format!("{m:>12.2}")).join(""));
+            }
+        }
+        if let Some(prefix) = pictures.take() {
+            let (_, crowd) = cases.iter().find(|(l, _)| l.starts_with("8 creatures, lamps + 2 moons")).expect("the crowd");
+            let s = sizes[2];
+            for (detail, name) in [(0.0, "every"), (field_gpu::DETAIL, "art")] {
+                let frame = FieldFrame { detail, ..crowd.clone() };
+                let px = field_gpu::render_offscreen(&device, &queue, &frame, s);
+                let path = format!("{prefix}_{name}.png");
+                image::RgbaImage::from_raw(s[0], s[1], px).expect("pixels").save(&path).expect("save");
+                println!("wrote {path}");
+            }
         }
     }
+}
+
+/// `TORCHLIGHT_SCALE`: how many times the prototype's size the window is.
+fn scale() -> f32 {
+    std::env::var("TORCHLIGHT_SCALE").ok().and_then(|v| v.parse::<f32>().ok()).filter(|k| *k > 0.0).unwrap_or(1.0)
 }
 
 fn main() -> eframe::Result {
@@ -477,7 +505,8 @@ fn main() -> eframe::Result {
         bench(&scene, v.trim() == "all");
         return Ok(());
     }
-    let size = if shot.is_some() { [SIZE[0], SIZE[1]] } else { [SIZE[0] + 200.0, SIZE[1]] };
+    let k = scale();
+    let size = if shot.is_some() { [SIZE[0] * k, SIZE[1] * k] } else { [SIZE[0] * k + 200.0, SIZE[1] * k] };
     let options = eframe::NativeOptions { viewport: egui::ViewportBuilder::default().with_title("torchlight").with_inner_size(size), ..Default::default() };
     eframe::run_native(
         "torchlight",

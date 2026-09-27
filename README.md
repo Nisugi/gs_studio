@@ -617,7 +617,12 @@ across -- and differ only in the right-hand panel:
   R and G over -0.5..2 m from its feet, a glow mask in B; a camera-space
   normal map, z < 0 toward the viewer) is lit by them, one without is rounded from its outline; a
   puppet brings its own surface (`gs_field_egui::field_gpu`,
-  `field_gpu_stage`).
+  `field_gpu_stage`). The pass shades no finer than the art: a stage shown
+  bigger than its backdrop (a detached field, half a wide screen) is
+  shaded at the painting's own size and stretched to fit, so its cost
+  stops growing with the window (`FieldFrame::detail`; a crowd with lamps
+  and both moons at twice the art's size, 5.3 -> 1.8 ms a frame on an
+  RX 7900 GRE, looking the same to a mean OKLab dE of 0.003-0.005).
 - **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
   holds in front of creatures. Paint white over a rock, cactus or tree trunk
   in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create
