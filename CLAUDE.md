@@ -74,7 +74,9 @@ Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
 `puppet_tune` / `torchlight` (the v2 lighting pass on Niffy's "Swamp
 Torchlight" prototype scene, unzipped to `target/torchlight`, to compare
 with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame,
-`TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` turns on its weather),
+`TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` turns on its weather,
+`TORCHLIGHT_BENCH=1` times the pass offscreen on every GPU, case by case --
+run it after a shader change),
 `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
 Lighting: `cargo run -p vellum_light --bin vlight -- golden <dir>` checks the
 relight port against relight.py's golden cases (OKLab dE <= 0.01); `bench`

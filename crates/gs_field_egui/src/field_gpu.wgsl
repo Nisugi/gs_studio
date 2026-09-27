@@ -21,7 +21,7 @@
 struct Layer {
     rect: vec4<f32>,   // scene px: x, y, w, h
     uv: vec4<f32>,     // its slot in the atlas: x, y, w, h (0..1)
-    z: vec4<f32>,      // x = the depth of its feet, metres; y = colour multiplier, linear
+    z: vec4<f32>,      // x = the depth of its feet, metres; y = colour multiplier, linear; zw = its figure's nearest and farthest depth from the feet
 };
 
 struct Light {
@@ -208,9 +208,34 @@ fn layer_shadow(i: u32, P: vec3<f32>, LP: vec3<f32>, start_dist: f32, light_r: f
     let t_min = clamp(start_dist / max(dist, 1e-3), 0.0, 1.0);
     s_in = max(s_in, t_min * z1 / (z0 + t_min * (z1 - z0)));
     if (s_out <= s_in) { return 1.0; }
+    // The ray can be blocked only where its depth is just behind the
+    // figure's surface (the band tested below) -- inside the figure's slab,
+    // Ly.z.zw. The march keeps its N places along the whole crossing (moving
+    // them into the slab would alias thin parts into stripes) and visits
+    // only those in the slab: the same shadow, most samples skipped.
+    if (Ly.z.w < Ly.z.z) { return 1.0; }
+    let zlo = Ly.z.x + Ly.z.z + 0.05;
+    let zhi = Ly.z.x + Ly.z.w + 0.7;
+    var c_in = s_in;
+    var c_out = s_out;
+    if (abs(z1 - z0) < 1e-4) {
+        if (z0 <= zlo || z0 >= zhi) { return 1.0; }
+    } else {
+        // depth runs linearly in tt, the screen in sp (projective)
+        let ta = clamp((zlo - z0) / (z1 - z0), 0.0, 1.0);
+        let tb = clamp((zhi - z0) / (z1 - z0), 0.0, 1.0);
+        let sa = ta * z1 / (z0 + ta * (z1 - z0));
+        let sb = tb * z1 / (z0 + tb * (z1 - z0));
+        c_in = max(c_in, min(sa, sb));
+        c_out = min(c_out, max(sa, sb));
+    }
+    if (c_out <= c_in) { return 1.0; }
     var occ = 0.0;
     let N = 32;
-    for (var k = 0; k < N; k = k + 1) {
+    let span = s_out - s_in;
+    let k_lo = max(i32(floor((c_in - s_in) / span * f32(N) - 0.5)), 0);
+    let k_hi = min(i32(ceil((c_out - s_in) / span * f32(N) - 0.5)), N - 1);
+    for (var k = k_lo; k <= k_hi; k = k + 1) {
         let sp = mix(s_in, s_out, (f32(k) + 0.5) / f32(N));
         let t = (p0 + sp * d - Ly.rect.xy) / Ly.rect.zw;
         let auv = Ly.uv.xy + t * Ly.uv.zw;
@@ -252,16 +277,22 @@ fn beam_gain(P: vec3<f32>, Lt: Light) -> f32 {
     return t * t * (3.0 - 2.0 * t);
 }
 
+// The shadow (`shadow_all` from `start` metres out, light radius `light_r`)
+// is marched only where it can matter: within the light's range, on a
+// surface facing it -- most of a frame's pixels, for a lamp, are neither.
 fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: vec3<f32>, pw: f32, r0: f32,
-              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, sh: f32) -> vec3<f32> {
+              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, start: f32, light_r: f32) -> vec3<f32> {
     let Lv = LP - P;
     let d2 = dot(Lv, Lv);
     let dd = sqrt(d2);
     let l = Lv / dd;
     let win = pow(clamp(1.0 - pow(dd / range, 4.0), 0.0, 1.0), 2.0);
+    if (win <= 0.0) { return vec3<f32>(0.0); }
     let fall = pw / (d2 + r0 * r0) * win;
     let ndl = dot(n, l);
     let shade = max((ndl + wrap) / (1.0 + wrap), 0.0);
+    var sh = 0.0;
+    if (shade > 0.0) { sh = shadow_all(P, LP, start, light_r); }
     var o = alb * col * fall * (shade * sh + bounce);
     if (sheen > 0.0) {
         let v = normalize(-P);
@@ -310,7 +341,8 @@ fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, s
     var lit = 0.0;
     if (shade > 0.0) {
         let t = moon_reach(P, l);
-        lit = cloud_mask(P, Lt) * shadow_all(P, P + l * t, start, Lt.fall.z * t);
+        lit = cloud_mask(P, Lt);
+        if (lit > 0.0) { lit = lit * shadow_all(P, P + l * t, start, Lt.fall.z * t); }
     }
     var o = alb * Lt.col.rgb * Lt.col.w * (shade * lit + Lt.fall.w);
     if (sheen > 0.0 && lit > 0.0) {
@@ -745,8 +777,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             let gain = beam_gain(bg_p, Lt);
             if (gain <= 0.0) { continue; }
             col = col + light_term(bg_p, bg_n, alb_bg, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y,
-                                   shadow_all(bg_p, Lt.pos.xyz, 0.08, Lt.fall.z));
+                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z);
         }
     } else {
         // Sky and far scenery: the moon lights them as open ground facing
@@ -834,8 +865,7 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
         let gain = beam_gain(P, Lt);
         if (gain <= 0.0) { continue; }
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x,
-                           shadow_all(P, Lt.pos.xyz, 0.15, Lt.fall.z));
+                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z);
     }
     if (W.a.x > 0.0 && !light_only) {
         // lightning comes from above and behind: it catches their tops and backs

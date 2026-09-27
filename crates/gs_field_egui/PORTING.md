@@ -752,7 +752,15 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   `LightState::moons_now()`: every moon lighting the scene, Liabo then
   Lornon (`Sky.lornon`: its own hours, `lornon_strength` of Liabo's light,
   grey turning crimson by Lornon's Eve), each a `LightKind::Moon` light;
-  `moon_now()` is Liabo's alone. `WeatherKind: From<gs_field::sky::Precip>`
+  `moon_now()` is Liabo's alone.
+- `field_gpu::time_offscreen` (**a new function**): the pass drawn into an
+  offscreen target and timed, no window (`examples/torchlight` with
+  `TORCHLIGHT_BENCH`). The shader marches a light's shadow only within the
+  light's reach on a surface facing it, and through a figure only where the
+  ray's depth is inside the figure's own depth slab (each layer's nearest
+  and farthest solid depth, worked out once per image upload); the samples
+  keep their places, so the picture is unchanged -- a crowd with lamps and
+  both moons, 2.88 -> 1.60 ms a frame at 1264x848 on an RX 7900 GRE. `WeatherKind: From<gs_field::sky::Precip>`
   (**a new impl**): the game sky's weather as the stage draws it.
   `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
   brings, which the host adds to the sky's.

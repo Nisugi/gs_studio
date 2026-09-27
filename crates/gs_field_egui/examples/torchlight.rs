@@ -18,7 +18,10 @@
 //! callbacks, the stage's way, instead of in one;
 //! `TORCHLIGHT_SHOT=<png>` saves the scene at the prototype's 1264x848 and
 //! quits (with `TORCHLIGHT_T`, comparable with the prototype frozen at that
-//! time, weather off).
+//! time, weather off);
+//! `TORCHLIGHT_BENCH=1` opens no window: it times the pass on every GPU the
+//! machine has (`=all`: on every backend of each), feature by feature, at
+//! 1x, 1.5x and 2x the prototype's size, and prints milliseconds a frame.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -169,7 +172,11 @@ impl Scene {
     /// `TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` (any of them): the
     /// prototype's weather at its default settings; none by default.
     fn weather(&self, t: f32) -> field_gpu::FieldWeather {
-        let want = std::env::var("TORCHLIGHT_WEATHER").unwrap_or_default();
+        self.weather_of(t, &std::env::var("TORCHLIGHT_WEATHER").unwrap_or_default())
+    }
+
+    /// The prototype's weather: `want` lists the kinds, as the env var does.
+    fn weather_of(&self, t: f32, want: &str) -> field_gpu::FieldWeather {
         let on = |w: &str| want.split(',').any(|x| x.trim() == w);
         let s2l = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
         let mut w = field_gpu::FieldWeather { dust: self.bd.dust.map(s2l), ..Default::default() };
@@ -335,6 +342,121 @@ impl eframe::App for App {
     }
 }
 
+/// A moon for the bench: at `azimuth` / `elevation` degrees, as the stage
+/// places one (`field_gpu_stage::moon_light`), with some cloud.
+fn bench_moon(cam: &FieldCamera, azimuth: f32, elevation: f32, colour: [f32; 3], power: f32) -> FieldLight {
+    let up = cam.up();
+    let deeper = [0.0, up[2], -up[1]];
+    let (sa, ca) = azimuth.to_radians().sin_cos();
+    let (se, ce) = elevation.to_radians().sin_cos();
+    let toward = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
+    FieldLight::moon(toward, colour, power, 0.3, [3.0, 0.6])
+}
+
+/// Run a future to the end on this thread (wgpu's native ones are ready at
+/// once or nearly).
+fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let mut f = std::pin::pin!(f);
+    loop {
+        if let std::task::Poll::Ready(v) = f.as_mut().poll(&mut cx) {
+            return v;
+        }
+        std::thread::yield_now();
+    }
+}
+
+/// `TORCHLIGHT_BENCH`: the pass timed offscreen, case by case.
+fn bench(scene: &Scene, every_backend: bool) {
+    use egui_wgpu::wgpu;
+    const T: f32 = 5.0;
+    let cam = scene.camera;
+    // lamps + both moons, the stage's night at its fullest
+    let moons = || [bench_moon(&cam, -30.0, 40.0, [0.456, 0.552, 0.834], 0.32), bench_moon(&cam, 50.0, 25.0, [0.42, 0.43, 0.47], 0.1)];
+    let base = |torch: bool, mote: bool| scene.frame(T, FieldView::Lit, true, torch, mote);
+    let with = |mut f: FieldFrame, moons_n: usize, weather: &str| {
+        f.lights.extend(moons().into_iter().take(moons_n));
+        f.weather = scene.weather_of(T, weather);
+        f
+    };
+    let mut cases: Vec<(String, FieldFrame)> = vec![
+        ("bare (no lights)".into(), with(base(false, false), 0, "")),
+        ("torch".into(), with(base(true, false), 0, "")),
+        ("torch + mote".into(), with(base(true, true), 0, "")),
+        ("+ moon".into(), with(base(true, true), 1, "")),
+        ("+ 2 moons".into(), with(base(true, true), 2, "")),
+    ];
+    let mut no_shadows = with(base(true, true), 2, "");
+    no_shadows.shadows = false;
+    cases.push(("lamps + 2 moons, shadows off".into(), no_shadows));
+    for w in ["rain", "snow", "storm", "sand", "mist"] {
+        cases.push((format!("lamps + 2 moons + {w}"), with(base(true, true), 2, w)));
+    }
+    cases.push(("lamps + 2 moons + all weather".into(), with(base(true, true), 2, "storm,mist,rain,sand,snow")));
+    // eight torches across the ground: the cost of each more lamp
+    let mut many = with(base(false, false), 2, "");
+    for i in 0..8 {
+        let u = 120.0 + i as f32 * 140.0;
+        let b = cam.point_at_height(u, 640.0 + 20.0 * (i % 3) as f32, 0.8);
+        let (f, sway) = field_gpu::torch_flicker(T + i as f32, 1.0);
+        many.lights.push(FieldLight::torch([b[0] + sway[0], b[1] + sway[1], b[2] + sway[2]], b, 0.8, f, 1.0));
+    }
+    cases.push(("8 torches + 2 moons".into(), many));
+    // a crowd: the two creatures again at six more spots, as a busy stage
+    let crowd = |mut f: FieldFrame| {
+        for (i, feet) in [[230.0, 650.0], [360.0, 790.0], [560.0, 640.0], [850.0, 690.0], [1000.0, 610.0], [1120.0, 780.0]].into_iter().enumerate() {
+            let c = &CREATURES[i % 2];
+            let zf = cam.ground_depth(feet[1]);
+            let k = c.height_m * cam.f / zf / (c.content[3] - c.content[1]);
+            let cx = (c.content[0] + c.content[2]) / 2.0;
+            f.layers.push(LayerDraw {
+                image: scene.creatures[i % 2].clone(),
+                rect: [feet[0] - k * cx, feet[1] - k * c.content[3], c.tex[0] as f32 * k, c.tex[1] as f32 * k],
+                feet_z: zf,
+                tint: 1.0,
+            });
+        }
+        f.layers.sort_by(|a, b| b.feet_z.total_cmp(&a.feet_z));
+        f
+    };
+    cases.push(("8 creatures, lamps + 2 moons".into(), crowd(with(base(true, true), 2, ""))));
+    cases.push(("8 creatures, lamps + 2 moons + snow".into(), crowd(with(base(true, true), 2, "snow"))));
+    let mut crowd_off = crowd(with(base(true, true), 2, ""));
+    crowd_off.shadows = false;
+    cases.push(("8 creatures, shadows off".into(), crowd_off));
+
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let adapters = block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+    let mut seen = std::collections::HashSet::new();
+    for a in &adapters {
+        let i = a.get_info();
+        println!("adapter: {} ({:?}, {:?})", i.name, i.device_type, i.backend);
+    }
+    let sizes = [1.0f32, 1.5, 2.0].map(|k| [(SIZE[0] * k) as u32, (SIZE[1] * k) as u32]);
+    for adapter in adapters {
+        let info = adapter.get_info();
+        // software rasterisers take seconds a frame: not a GPU to plan for
+        if info.device_type == wgpu::DeviceType::Cpu || (!every_backend && !seen.insert(info.name.clone())) {
+            continue;
+        }
+        let Ok((device, queue)) = block_on(adapter.request_device(&wgpu::DeviceDescriptor { label: Some("torchlight bench"), ..Default::default() })) else {
+            println!("
+{}: no device", info.name);
+            continue;
+        };
+        println!("
+== {} ({:?}, {:?}) -- ms a frame", info.name, info.device_type, info.backend);
+        println!("{:<34}{}", "case", sizes.map(|s| format!("{:>12}", format!("{}x{}", s[0], s[1]))).join(""));
+        for (label, frame) in &cases {
+            let ms = sizes.map(|s| {
+                let repeats = (40.0 * (SIZE[0] * SIZE[1]) / (s[0] * s[1]) as f32).max(10.0) as u32;
+                field_gpu::time_offscreen(&device, &queue, frame, s, repeats).as_secs_f64() * 1000.0
+            });
+            println!("{:<34}{}", label, ms.map(|m| format!("{m:>12.2}")).join(""));
+        }
+    }
+}
+
 fn main() -> eframe::Result {
     let dir = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/torchlight"));
     let bd = match std::env::var("TORCHLIGHT_BG").as_deref() {
@@ -351,6 +473,10 @@ fn main() -> eframe::Result {
     };
     let shot = std::env::var_os("TORCHLIGHT_SHOT").map(PathBuf::from);
     let scene = load(&dir, bd);
+    if let Ok(v) = std::env::var("TORCHLIGHT_BENCH") {
+        bench(&scene, v.trim() == "all");
+        return Ok(());
+    }
     let size = if shot.is_some() { [SIZE[0], SIZE[1]] } else { [SIZE[0] + 200.0, SIZE[1]] };
     let options = eframe::NativeOptions { viewport: egui::ViewportBuilder::default().with_title("torchlight").with_inner_size(size), ..Default::default() };
     eframe::run_native(

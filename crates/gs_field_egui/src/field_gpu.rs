@@ -581,7 +581,7 @@ const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_F
 /// Floats in the shader's `Weather`.
 const WEATHER_FLOATS: usize = 28;
 
-fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f32> {
+fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_target: bool) -> Vec<f32> {
     let mut u = Vec::with_capacity(UNIFORM_FLOATS);
     let c = &frame.camera;
     let view = match frame.view {
@@ -604,7 +604,8 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f3
             (Some(l), Some(uv)) => {
                 u.extend(l.rect);
                 u.extend(*uv);
-                u.extend([l.feet_z, l.tint, 0.0, 0.0]);
+                let span = spans.get(i).copied().unwrap_or(NO_SPAN);
+                u.extend([l.feet_z, l.tint, span[0], span[1]]);
             }
             _ => u.extend([0.0; 12]),
         }
@@ -639,6 +640,22 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f3
     debug_assert_eq!(u.len(), UNIFORM_FLOATS);
     u
 }
+
+/// A figure's depth span, metres from its feet: its nearest and farthest
+/// solid pixels (alpha at least half, what a shadow march tests). The
+/// shader marches a layer's shadow only where a ray's depth is within it.
+fn depth_span(img: &LitImage) -> [f32; 2] {
+    let mut span = NO_SPAN;
+    for (px, g) in img.albedo.chunks_exact(4).zip(img.geo.iter()) {
+        if px[3] >= 128 {
+            span = [span[0].min(g[3]), span[1].max(g[3])];
+        }
+    }
+    span
+}
+
+/// No solid pixel: an empty span (nearest past farthest) casts nothing.
+const NO_SPAN: [f32; 2] = [f32::MAX, f32::MIN];
 
 fn drawn_layers(frame: &FieldFrame) -> &[LayerDraw] {
     &frame.layers[..frame.layers.len().min(MAX_LAYERS)]
@@ -786,6 +803,8 @@ struct Gpu {
     shelves: Shelves,
     /// Image key -> its slot (x, y, w, h), atlas pixels.
     slots: HashMap<u64, [u32; 4]>,
+    /// Image key -> its figure's depth span ([`depth_span`]).
+    spans: HashMap<u64, [f32; 2]>,
     bind: Option<wgpu::BindGroup>,
     /// The frame whose textures and uniforms are uploaded, and how many of
     /// its pieces have taken a draw slot.
@@ -797,145 +816,152 @@ struct Gpu {
 /// `CreationContext::wgpu_render_state`). Afterwards [`available`] is true
 /// for `ctx`.
 pub fn init(ctx: &egui::Context, render_state: &egui_wgpu::RenderState) {
-    let device = &render_state.device;
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("field_gpu"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("field_gpu.wgsl").into()),
-    });
-    let texture = |binding: u32| wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
-        ty: wgpu::BindingType::Texture {
-            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            view_dimension: wgpu::TextureViewDimension::D2,
-            multisampled: false,
-        },
-        count: None,
-    };
-    let sampler = |binding: u32| wgpu::BindGroupLayoutEntry {
-        binding,
-        visibility: wgpu::ShaderStages::FRAGMENT,
-        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        count: None,
-    };
-    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("field_gpu frame"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: std::num::NonZeroU64::new((UNIFORM_FLOATS * 4) as u64),
-                },
-                count: None,
-            },
-            sampler(1),
-            sampler(2),
-            texture(3),
-            texture(4),
-            texture(5),
-            texture(6),
-            texture(7),
-            texture(8),
-        ],
-    });
-    let draw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("field_gpu piece"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: true,
-                min_binding_size: std::num::NonZeroU64::new((DRAW_FLOATS * 4) as u64),
-            },
-            count: None,
-        }],
-    });
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("field_gpu"),
-        bind_group_layouts: &[Some(&layout), Some(&draw_layout)],
-        immediate_size: 0,
-    });
-    let pipeline = |blend: Option<wgpu::BlendState>, label: &str| {
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(label),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState { format: render_state.target_format, blend, write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        })
-    };
-    let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("field_gpu frame"),
-        size: (UNIFORM_FLOATS * 4) as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let draws = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("field_gpu pieces"),
-        size: (DRAW_SLOTS * DRAW_STRIDE) as u64,
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let draw_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("field_gpu pieces"),
-        layout: &draw_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: &draws,
-                offset: 0,
-                size: std::num::NonZeroU64::new((DRAW_FLOATS * 4) as u64),
-            }),
-        }],
-    });
-    let make_sampler = |filter: wgpu::FilterMode| {
-        device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("field_gpu"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: filter,
-            min_filter: filter,
-            ..Default::default()
-        })
-    };
-    let gpu = Gpu {
-        opaque: pipeline(None, "field_gpu opaque"),
-        blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
-        layout,
-        uniform,
-        draws,
-        draw_bind,
-        s_lin: make_sampler(wgpu::FilterMode::Linear),
-        s_near: make_sampler(wgpu::FilterMode::Nearest),
-        srgb_target: render_state.target_format.is_srgb(),
-        backdrop: None,
-        atlas: Textures::new(device, ATLAS_SIDE, ATLAS_SIDE, "atlas"),
-        shelves: Shelves::default(),
-        slots: HashMap::new(),
-        bind: None,
-        frame_id: 0,
-        next_slot: 0,
-    };
+    let gpu = Gpu::new(&render_state.device, render_state.target_format);
     render_state.renderer.write().callback_resources.insert(gpu);
     ctx.data_mut(|d| d.insert_temp(available_id(), true));
+}
+
+impl Gpu {
+    /// The pipelines, buffers and samplers, drawing into `target_format`.
+    fn new(device: &wgpu::Device, target_format: wgpu::TextureFormat) -> Gpu {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("field_gpu"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("field_gpu.wgsl").into()),
+        });
+        let texture = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let sampler = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("field_gpu frame"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new((UNIFORM_FLOATS * 4) as u64),
+                    },
+                    count: None,
+                },
+                sampler(1),
+                sampler(2),
+                texture(3),
+                texture(4),
+                texture(5),
+                texture(6),
+                texture(7),
+                texture(8),
+            ],
+        });
+        let draw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("field_gpu piece"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: std::num::NonZeroU64::new((DRAW_FLOATS * 4) as u64),
+                },
+                count: None,
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("field_gpu"),
+            bind_group_layouts: &[Some(&layout), Some(&draw_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |blend: Option<wgpu::BlendState>, label: &str| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState { format: target_format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("field_gpu frame"),
+            size: (UNIFORM_FLOATS * 4) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let draws = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("field_gpu pieces"),
+            size: (DRAW_SLOTS * DRAW_STRIDE) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let draw_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("field_gpu pieces"),
+            layout: &draw_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &draws,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new((DRAW_FLOATS * 4) as u64),
+                }),
+            }],
+        });
+        let make_sampler = |filter: wgpu::FilterMode| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("field_gpu"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                mag_filter: filter,
+                min_filter: filter,
+                ..Default::default()
+            })
+        };
+        Gpu {
+            opaque: pipeline(None, "field_gpu opaque"),
+            blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
+            layout,
+            uniform,
+            draws,
+            draw_bind,
+            s_lin: make_sampler(wgpu::FilterMode::Linear),
+            s_near: make_sampler(wgpu::FilterMode::Nearest),
+            srgb_target: target_format.is_srgb(),
+            backdrop: None,
+            atlas: Textures::new(device, ATLAS_SIDE, ATLAS_SIDE, "atlas"),
+            shelves: Shelves::default(),
+            slots: HashMap::new(),
+            spans: HashMap::new(),
+            bind: None,
+            frame_id: 0,
+            next_slot: 0,
+        }
+    }
 }
 
 fn available_id() -> egui::Id {
@@ -1003,6 +1029,61 @@ pub fn layer_index(frame: &FieldFrame, key: u64) -> Option<usize> {
     drawn_layers(frame).iter().position(|l| l.image.key == key)
 }
 
+/// Time the pass without a window: draw `frame` whole ([`Piece::Everything`])
+/// into an offscreen target `size` pixels big, `repeats` times, a submission
+/// each, and wait for the GPU. The mean wall time per draw; the first draw
+/// (shader compile, uploads) is not counted. For `examples/torchlight`'s
+/// bench (`TORCHLIGHT_BENCH`); the caller owns the device.
+pub fn time_offscreen(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2], repeats: u32) -> std::time::Duration {
+    let format = wgpu::TextureFormat::Rgba8Unorm;
+    let mut gpu = Gpu::new(device, format);
+    gpu.upload_frame(device, queue, frame);
+    let target = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("field_gpu offscreen"),
+        size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let place = Placement { origin: egui::Pos2::ZERO, scale: size[0] as f32 / frame.camera.size[0] };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
+    let u = draw_uniforms(rect, place, Piece::Everything, size, 1.0);
+    queue.write_buffer(&gpu.draws, 0, bytemuck::cast_slice(&u));
+    let Some(bind) = gpu.bind.as_ref() else { return std::time::Duration::ZERO };
+    let draw = || {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("field_gpu offscreen") });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("field_gpu offscreen"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&gpu.opaque);
+            pass.set_bind_group(0, bind, &[]);
+            pass.set_bind_group(1, &gpu.draw_bind, &[0]);
+            pass.draw(0..6, 0..1);
+        }
+        queue.submit([encoder.finish()]);
+    };
+    draw();
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    let started = std::time::Instant::now();
+    for _ in 0..repeats {
+        draw();
+    }
+    let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    started.elapsed() / repeats.max(1)
+}
+
 struct FieldCallback {
     frame: SharedFrame,
     place: Placement,
@@ -1042,6 +1123,7 @@ impl Gpu {
                         // full: start over with only this frame's layers
                         self.shelves = Shelves::default();
                         self.slots.clear();
+                        self.spans.clear();
                         fresh = true;
                         match self.shelves.place(img.w, img.h) {
                             Some(at) => at,
@@ -1052,6 +1134,7 @@ impl Gpu {
                 };
                 self.atlas.upload(queue, at, img);
                 self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
+                self.spans.insert(img.key, depth_span(img));
             }
             if fresh {
                 // the layers placed before the reset lost their slots
@@ -1063,6 +1146,7 @@ impl Gpu {
                     if let Some(at) = self.shelves.place(img.w, img.h) {
                         self.atlas.upload(queue, at, img);
                         self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
+                        self.spans.insert(img.key, depth_span(img));
                     }
                 }
             }
@@ -1090,7 +1174,8 @@ impl Gpu {
             }
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("field_gpu frame"), layout: &self.layout, entries: &entries }));
         }
-        let u = uniforms(frame, &uv, self.srgb_target);
+        let spans: Vec<[f32; 2]> = layers.iter().map(|l| self.spans.get(&l.image.key).copied().unwrap_or(NO_SPAN)).collect();
+        let u = uniforms(frame, &uv, &spans, self.srgb_target);
         queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&u));
     }
 }
@@ -1289,7 +1374,7 @@ mod tests {
             view: FieldView::Lit,
             weather: FieldWeather::default(),
         };
-        let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], false);
+        let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], &vec![[-0.5, 2.0]; MAX_LAYERS], false);
         assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16, "the WGSL struct's size");
         assert_eq!((u[14], u[15]), (MAX_LAYERS as f32, MAX_LIGHTS as f32));
         assert_eq!(&u[16..20], &[0.0, 0.0, 1264.0, 848.0], "the backdrop's place");
