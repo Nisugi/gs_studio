@@ -275,7 +275,12 @@ paint's relief -- ribs, folds, cracks -- as how far each surface point's
 normal leans from the body's own, in rest space. The skin adds that lean
 to its geometry's normal after smoothing, so the relief shades under the
 skin's own light and under every lamp on the stage, and the paintings'
-big forms, already in the puppet, are not counted twice. *Reload*
+big forms, already in the puppet, are not counted twice. A skin shipped
+without a normal sheet gets one from its own paint where it is worn
+(`gs_puppet::bump_sheet`: the paint's fine detail -- its brightness less a
+blur of it, patch by patch -- as height, its slope along the body as the
+lean), so every painted form has relief with no extra file to ship; a
+normal sheet that is there wins. *Reload*
 re-reads them. A sheet laid out for an older rig (another size) is
 refused with a note. Save installs it beside the puppet as
 `<pool>/global/puppets/<family>.texture.png` (and `normal.png` as

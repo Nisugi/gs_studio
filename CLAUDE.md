@@ -96,7 +96,8 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   from the clothing kit `data/outfits/kit.toml` (`TURNAROUND_WEAR`); `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
   that sheet (`uv_sheet --demo` shows it) and their normal maps onto a
-  normal sheet (`prefill_normals`; `examples/normal_strip` shows a family
+  normal sheet (`prefill_normals`; a skin without one gets its relief from
+  its own paint, `bump_sheet`; `examples/normal_strip` shows a family
   with and without it), and renders each template's
   depth guide for an image generator (`depth_guide`). `fall.rs` is the procedural
   death fall (`examples/fall_strip` films it); `Pose::breathe` is the idle

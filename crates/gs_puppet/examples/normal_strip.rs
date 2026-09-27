@@ -9,12 +9,13 @@
 //! skin from four sides twice: the top row with the geometry's normals
 //! alone, the bottom row with the normal sheet's relief leaning them. A
 //! third row shows the lit surface alone (a flat grey albedo) so the relief
-//! can be read without the paint. With paintings but no normal maps, only
-//! the first row is drawn.
+//! can be read without the paint. With paintings but no normal maps, the
+//! normal sheet is the one a skin without one gets (`bump_sheet`: the
+//! paint's own detail as relief).
 
 use std::path::{Path, PathBuf};
 
-use gs_puppet::{prefill, prefill_normals, Camera, Look, Painting, Paintings, PoseSet, Puppet, Texture, UvLayout, MASK_PX, SHEET_SIDE};
+use gs_puppet::{bump_sheet, prefill, prefill_normals, Camera, Look, Painting, Paintings, PoseSet, Puppet, Texture, UvLayout, MASK_PX, SHEET_SIDE};
 
 /// Tile size, pixels (`NORMAL_STRIP_TILE` overrides, for a close look).
 const TILE_DEFAULT: usize = 300;
@@ -77,7 +78,7 @@ fn main() {
 
     let layout = UvLayout::fit(&puppet, SHEET_SIDE);
     let rgba = if painted > 0 { prefill(&puppet, &layout, &paintings) } else { vec![0; layout.w * layout.h * 4] };
-    let normals = prefill_normals(&puppet, &layout, &maps);
+    let normals = if mapped > 0 { prefill_normals(&puppet, &layout, &maps) } else { bump_sheet(&puppet, &layout, &rgba) };
     let flat = Texture { layout: layout.clone(), rgba: rgba.clone(), normal: None };
     let relief = Texture { layout: layout.clone(), rgba, normal: Some(normals.clone()) };
     // A flat grey albedo: the relief alone.
@@ -87,12 +88,7 @@ fn main() {
     }
     let lit = Texture { layout, rgba: grey, normal: Some(normals) };
 
-    // Without normal maps only the paint row means anything.
-    let rows: &[(&str, &Texture)] = if mapped > 0 {
-        &[("paint, geometry normals", &flat), ("paint + normal sheet", &relief), ("relief alone", &lit)]
-    } else {
-        &[("paint, geometry normals", &flat)]
-    };
+    let rows: &[(&str, &Texture)] = &[("paint, geometry normals", &flat), ("paint + normal sheet", &relief), ("relief alone", &lit)];
     let w = TILE * YAWS.len();
     let h = TILE * rows.len();
     let mut sheet: Vec<u8> = BACKGROUND.iter().copied().cycle().take(w * h * 4).collect();

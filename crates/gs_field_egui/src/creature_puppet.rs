@@ -1327,7 +1327,11 @@ impl PuppetCache {
                                 None
                             }
                         });
-                        Some(Arc::new(gs_puppet::Texture { layout, rgba: img.into_raw(), normal }))
+                        let rgba = img.into_raw();
+                        // No normal sheet shipped: the paint's own detail
+                        // as relief (gs_puppet::bump_sheet), made once here.
+                        let normal = normal.or_else(|| Some(gs_puppet::bump_sheet(&puppet, &layout, &rgba)));
+                        Some(Arc::new(gs_puppet::Texture { layout, rgba, normal }))
                     } else {
                         tracing::warn!(
                             "puppet '{family}': texture is {}x{}, this puppet's sheet is {}x{} (painted for an older rig?)",

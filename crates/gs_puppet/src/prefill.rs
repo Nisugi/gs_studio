@@ -384,6 +384,116 @@ pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u
     rgba
 }
 
+/// How wide the blur is that a bump's detail is measured against (texels,
+/// box radius, run twice), how steep a unit of brightness change per texel
+/// makes the relief, and the most it may lean the surface.
+const BUMP_BLUR_TEXELS: usize = 3;
+const BUMP_SLOPE: f32 = 4.0;
+const BUMP_MAX: f32 = 0.6;
+
+/// A NORMAL sheet made from the colour sheet itself, for a skin that has
+/// none: the paint's fine detail (its brightness less a blur of it, within
+/// each patch) taken as height, and that height's slope along the body as
+/// the deviation [`prefill_normals`] stores -- so the ribs, folds, scales
+/// and cracks the paint shows catch the light. Fine relief only: the big
+/// forms are the body's own (a map from a depth estimate counts them
+/// twice). Transparent where the sheet is.
+pub fn bump_sheet(p: &Puppet, layout: &UvLayout, sheet: &[u8]) -> Vec<u8> {
+    let (w, h) = (layout.w, layout.h);
+    let n = w * h;
+    let mut out = vec![0u8; n * 4];
+    if sheet.len() < n * 4 {
+        return out;
+    }
+    // each texel's segment, rest point and normal
+    let mut owner = vec![usize::MAX; n];
+    let mut at: Vec<Option<(V3, V3)>> = vec![None; n];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if sheet[i * 4 + 3] < 128 {
+                continue;
+            }
+            let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+            if let Some(pn) = rest_point(p, seg, station, theta) {
+                owner[i] = seg;
+                at[i] = Some(pn);
+            }
+        }
+    }
+    let lum: Vec<f32> =
+        sheet.chunks_exact(4).map(|c| (0.2126 * c[0] as f32 + 0.7152 * c[1] as f32 + 0.0722 * c[2] as f32) / 255.0).collect();
+    let base = blur_within(&lum, &owner, w, h, BUMP_BLUR_TEXELS);
+    let height: Vec<f32> = (0..n).map(|i| if owner[i] == usize::MAX { 0.0 } else { lum[i] - base[i] }).collect();
+    // The height's change per texel across `i` from `a` to `b` (both on its
+    // patch), and the way that step runs on the body.
+    let slope = |i: usize, a: Option<usize>, b: Option<usize>| -> Option<(f32, V3)> {
+        let same = |j: usize| owner[j] == owner[i];
+        let (a, b) = (a.filter(|&j| same(j))?, b.filter(|&j| same(j))?);
+        let (pa, pb) = (at[a]?.0, at[b]?.0);
+        Some(((height[b] - height[a]) * 0.5, norm_or(crate::math::sub(pb, pa), [0.0; 3])))
+    };
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let Some((_, normal)) = at[i] else { continue };
+            let (left, right) = ((x > 0).then(|| i - 1), (x + 1 < w).then(|| i + 1));
+            let (up, down) = ((y > 0).then(|| i - w), (y + 1 < h).then(|| i + w));
+            let mut g = [0.0f32; 3];
+            for (dh, dir) in [slope(i, left, right), slope(i, up, down)].into_iter().flatten() {
+                g = add(g, scale(dir, dh * BUMP_SLOPE));
+            }
+            // along the surface only, and never past BUMP_MAX
+            g = crate::math::sub(g, scale(normal, dot(g, normal)));
+            let len = dot(g, g).sqrt();
+            if len > BUMP_MAX {
+                g = scale(g, BUMP_MAX / len);
+            }
+            // uphill is where the surface leans away from
+            for k in 0..3 {
+                out[i * 4 + k] = crate::uv::encode_normal(-g[k]);
+            }
+            out[i * 4 + 3] = 255;
+        }
+    }
+    out
+}
+
+/// A box blur of radius `r`, run twice each way, that only averages texels
+/// of the same `owner` (a patch's own; `usize::MAX` = none, left as is).
+fn blur_within(v: &[f32], owner: &[usize], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let pass = |src: &[f32], horizontal: bool| -> Vec<f32> {
+        let mut out = src.to_vec();
+        for i in 0..w * h {
+            let o = owner[i];
+            if o == usize::MAX {
+                continue;
+            }
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let (mut sum, mut count) = (0.0f32, 0.0f32);
+            for d in -(r as isize)..=(r as isize) {
+                let (xx, yy) = if horizontal { (x + d, y) } else { (x, y + d) };
+                if xx < 0 || yy < 0 || xx >= w as isize || yy >= h as isize {
+                    continue;
+                }
+                let j = yy as usize * w + xx as usize;
+                if owner[j] == o {
+                    sum += src[j];
+                    count += 1.0;
+                }
+            }
+            out[i] = sum / count.max(1.0);
+        }
+        out
+    };
+    let mut cur = v.to_vec();
+    for _ in 0..2 {
+        cur = pass(&cur, true);
+        cur = pass(&cur, false);
+    }
+    cur
+}
+
 /// A surface address on the rest body: the point and its outward normal.
 fn rest_point(p: &Puppet, seg: usize, station: f32, theta: f32) -> Option<(V3, V3)> {
     let s = p.segments.get(seg)?;
@@ -1050,6 +1160,45 @@ mod tests {
         // So compare the head's middle (nearest, the cheek) with its rim.
         let mid = at(cols[cols.len() / 2]);
         assert!(mid > back && mid > face, "the cheek ({mid}) is nearer than the head's rim ({back}, {face})");
+    }
+
+    /// A sheet of one flat colour has no relief; stripes across it lean the
+    /// surface along the body, never off it; off the patches stays empty.
+    #[test]
+    fn a_bump_comes_from_the_paints_detail() {
+        let (p, _, _) = humanoid();
+        let layout = UvLayout::fit(&p, crate::SHEET_SIDE);
+        let (w, h) = (layout.w, layout.h);
+        let on = |x: usize, y: usize| layout.address([x as f32 + 0.5, y as f32 + 0.5]).is_some();
+        let sheet = |stripes: bool| -> Vec<u8> {
+            (0..w * h)
+                .flat_map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    let v = if stripes && (x / 4) % 2 == 0 { 200 } else { 120 };
+                    if on(x, y) { [v, v, v, 255] } else { [0; 4] }
+                })
+                .collect()
+        };
+        let lean = |s: &[u8], i: usize| [0, 1, 2].map(|k| crate::uv::decode_normal(s[i * 4 + k]));
+        let flat = bump_sheet(&p, &layout, &sheet(false));
+        let painted: Vec<usize> = (0..w * h).filter(|&i| flat[i * 4 + 3] == 255).collect();
+        assert!(painted.len() > w * h / 10, "the patches are covered: {}", painted.len());
+        assert!(painted.iter().all(|&i| lean(&flat, i).iter().all(|v| v.abs() < 0.01)), "flat paint, no relief");
+        assert!((0..w * h).filter(|&i| !on(i % w, i / w)).all(|i| flat[i * 4 + 3] == 0), "off the patches: empty");
+        let striped = bump_sheet(&p, &layout, &sheet(true));
+        let (mut leaning, mut off_surface) = (0, 0.0f32);
+        for &i in &painted {
+            let d = lean(&striped, i);
+            if d.iter().map(|v| v * v).sum::<f32>().sqrt() > 0.05 {
+                leaning += 1;
+                let (x, y) = (i % w, i / w);
+                let (seg, station, theta) = layout.address([x as f32 + 0.5, y as f32 + 0.5]).unwrap();
+                let (_, normal) = rest_point(&p, seg, station, theta).unwrap();
+                off_surface = off_surface.max(dot(d, normal).abs());
+            }
+        }
+        assert!(leaning > painted.len() / 4, "stripes lean the surface: {leaning} of {}", painted.len());
+        assert!(off_surface < 0.03, "along the surface only: {off_surface}");
     }
 
     /// Projection-first: a front painted solid red shows red on whatever of

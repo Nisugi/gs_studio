@@ -18,7 +18,7 @@
 //! | `front_normal.png`, `side_normal.png`, `back_normal.png` | the generator | tangent-space normal maps of the paintings (any subset), the same framing |
 //! | `projected/<view>_render.png`, `<view>_unpainted.png` | Project | projection-first: what the paintings so far show from the next view in the family's order ([`projection_order`]), and what is left to paint |
 //! | `sheet.png` | Build sheet, then the artist | the texture itself: the paintings projected onto the pattern, touched up by hand |
-//! | `normal.png` | Build sheet | the normal sheet: the normal maps projected onto the pattern (`gs_puppet::prefill_normals`); only with a map to project |
+//! | `normal.png` | Build sheet | the normal sheet: the normal maps projected onto the pattern (`gs_puppet::prefill_normals`); only with a map to project (without one, the renderer makes the relief from the sheet's own paint, `gs_puppet::bump_sheet`) |
 //!
 //! Save installs the family's `sheet.png` as
 //! `<pool>/global/puppets/<family>.texture.png` (and `normal.png` as

@@ -738,6 +738,10 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   drawings, and the puppet's own lamp light and lamp shadows are skipped.
 - `creature_art::prepare_scene_art` tells the light state to keep pixels
   while the pass is enabled.
+- `creature_puppet`: a skin that ships no normal sheet gets one made from
+  its own paint when its texture loads (`gs_puppet::bump_sheet`, about
+  0.1 s a skin, once), so every painted puppet has relief -- under its own
+  light and the pass's lamps and moon.
 
 VellumFE: call `field_gpu::init` in its eframe creation closure and
 `field_gpu_stage::set_enabled` from a setting to use it; without either,
