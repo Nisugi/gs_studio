@@ -47,7 +47,7 @@ wrist_r = [-1.7107, 3.7181]
 [depth]
 ankle_l = 1.5598
 chin = 2.4781
-crown = 2.01
+crown = 1.8276
 elbow_l = 0.9732
 elbow_r = 0.9523
 eye_l = 2.4062
@@ -57,7 +57,7 @@ hip_l = 2.0688
 neck_base = 1.6865
 pelvis = 2.1092
 shoulder_l = 1.9
-shoulder_r = 1.9019
+shoulder_r = 1.8522
 sternum = 2.126
 toe_l = 2.1938
 toe_r = 2.2182

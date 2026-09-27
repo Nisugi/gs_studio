@@ -1,11 +1,10 @@
-version = 2
+version = 3
 family = "worm"
 body_type = "serpentine"
 view = "side"
 ref_ft = 2.0
 axis = "diameter"
 joint_order = ["snout", "skull_base", "neck_end", "chest_end", "belly_mid", "belly_end", "back_1", "back_2", "tail_mid", "tail_tip", "eye_r"]
-# The worm art has no eye.
 unused = ["eye_r"]
 
 [anchors]
@@ -14,28 +13,17 @@ mouth = "snout"
 saddle = "chest_end"
 
 [joints]
+back_1 = [0.5346, 0.6399]
+back_2 = [-0.5877, 0.8915]
+belly_end = [3.0042, 1.2324]
+belly_mid = [3.7355, 1.9299]
+chest_end = [3.5517, 2.931]
+neck_end = [2.7757, 5.361]
+skull_base = [3.7059, 6.9226]
 snout = [4.8653, 6.9422]
-skull_base = [3.78, 6.8423]
-neck_end = [3.0472, 5.3007]
-chest_end = [3.3496, 2.9472]
-belly_mid = [3.0994, 1.2494]
-belly_end = [1.8404, 0.9498]
-back_1 = [0.0126, 1.3928]
-back_2 = [-1.3059, 1.0839]
-tail_mid = [-3.5136, 1.4247]
-tail_tip = [-5.2825, 0.0000]
+tail_mid = [-2.8142, 0.6679]
+tail_tip = [-5.0761, 0.2064]
 
-[depth]
-back_1 = -2.1129
-back_2 = -0.7523
-tail_mid = 2.3602
-tail_tip = 2.1344
-
-belly_end = 0.7046
-belly_mid = 0.8608
-chest_end = 0.4165
-neck_end = -0.1007
-snout = -0.0278
 [[bones]]
 name = "skull"
 part = "head"
