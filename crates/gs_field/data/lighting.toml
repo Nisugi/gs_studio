@@ -48,3 +48,10 @@ strength = 0.9
 exposure = 0.3
 night = 0.85
 intensity = 0.7
+
+# How black the dark is beyond the lamps, 0..1, in a lit scene that does not
+# set its own ([light] darkness): outdoors at the darkest of night (half of it
+# at dusk and dawn), indoors at every hour -- a room needs a lamp.
+[darkness]
+outdoor = 0.7
+indoor = 0.88

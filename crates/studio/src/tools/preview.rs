@@ -452,14 +452,22 @@ fn light_ui(
     if ui.checkbox(&mut outdoor, "Outdoor").on_hover_text("Dawn, dusk and night apply").changed() {
         edited.outdoor = Some(outdoor);
     }
-    let mut dark = edited.darkness.unwrap_or(0.0);
-    if ui
-        .add(egui::Slider::new(&mut dark, 0.0..=1.0).text("Darkness"))
-        .on_hover_text("How black the dark is beyond the lamps: outdoors at night (half at dusk and dawn), indoors always. 1 = pitch black but for the lamps")
-        .changed()
-    {
-        edited.darkness = (dark > 0.0).then_some(dark);
-    }
+    // the global default (lighting.toml [darkness]) unless the scene sets its own
+    ui.horizontal(|ui| {
+        let mut dark = edited.darkness.unwrap_or(global.darkness.at(outdoor));
+        if ui
+            .add(egui::Slider::new(&mut dark, 0.0..=1.0).text("Darkness"))
+            .on_hover_text("How black the dark is beyond the lamps: outdoors at the darkest of night (half at dusk and dawn), indoors at every hour. 1 = pitch black but for the lamps")
+            .changed()
+        {
+            edited.darkness = Some(dark);
+        }
+        if edited.darkness.is_none() {
+            ui.weak("default");
+        } else if ui.small_button("x").on_hover_text("Back to the default").clicked() {
+            edited.darkness = None;
+        }
+    });
     egui::CollapsingHeader::new("More").id_salt("light_more").show(ui, |ui| {
         light_opt_slider(ui, "Strength", &mut edited.strength, SCENE_STRENGTH, 0.0..=1.0);
         light_opt_slider(ui, "Ground bounce", &mut edited.bounce_strength, SCENE_BOUNCE_STRENGTH, 0.0..=1.0);
@@ -581,6 +589,13 @@ fn global_light_ui(ui: &mut egui::Ui, global: &mut gs_field::lighting::GlobalLig
     let mut changed = false;
     egui::CollapsingHeader::new("Global time-of-day defaults").id_salt("light_global").show(ui, |ui| {
         ui.weak("Every scene's dawn, dusk and night, unless the scene overrides a field.");
+        ui.strong("Darkness");
+        let d = &mut global.darkness;
+        changed |= ui
+            .add(egui::Slider::new(&mut d.outdoor, 0.0..=1.0).text("Outdoors"))
+            .on_hover_text("At the darkest of night; half of it at dusk and dawn")
+            .changed();
+        changed |= ui.add(egui::Slider::new(&mut d.indoor, 0.0..=1.0).text("Indoors")).on_hover_text("At every hour: a room needs a lamp").changed();
         let phases = [("Dawn", &mut global.phase.dawn), ("Dusk", &mut global.phase.dusk), ("Night", &mut global.phase.night)];
         for (label, slot) in phases {
             let Some(f) = slot.as_mut() else { continue };

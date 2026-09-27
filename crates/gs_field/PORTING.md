@@ -321,8 +321,16 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
 * `SceneLight::resolve(auto)` = relight.py `resolve_scene_light`;
   `GlobalLighting::phase_light` = `phase_light`; `SceneLighting::resolve`
   gathers the scene light and the time-of-day keyframes at a game hour.
+* `SceneLight.darkness` -- how black the dark is beyond the lamps, 0..1:
+  outdoors at the darkest of night (half at dusk and dawn), indoors at every
+  hour. A scene that leaves it out takes `GlobalLighting.darkness`
+  (`Darkness`, `[darkness]` in `global/lighting.toml`): 0.7 outdoors, 0.88
+  indoors, so **every lit scene is dark at night, and a lit indoor scene is
+  dark at every hour unless it has lamps or sets `darkness = 0`**. Scenes
+  without `[light]` are unaffected.
 
-Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`.
+Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`;
++1 for the default darkness.
 
 ### 6.11 Puppet textures
 

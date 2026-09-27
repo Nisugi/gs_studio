@@ -542,8 +542,10 @@ across -- and differ only in the right-hand panel:
   Saturation show the values read from the backdrop ("auto") and can each be
   overridden or reset; Intensity; Outdoor (time of day applies); Darkness
   (`darkness`, 0..1: how black the dark is beyond the lamps -- outdoors at
-  night, half of it at dusk and dawn, indoors always, so a torch-lit cave is
-  dark at noon; 1 = pitch black but for the lamps); *More*
+  the darkest of night, half of it at dusk and dawn, indoors always, so a
+  torch-lit cave is dark at noon; 1 = pitch black but for the lamps; unset =
+  the global default, 0.7 outdoors and 0.88 indoors, `[darkness]` in
+  `global/lighting.toml`, under *Global time-of-day defaults*); *More*
   (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
   / Night rows over `global/lighting.toml`, "Use default" per row); *Global
   time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;

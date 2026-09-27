@@ -388,7 +388,8 @@ pub struct SceneLight {
     pub outdoor: Option<bool>,
     /// How black the dark is, 0 = as the time of day has it .. 1 = pitch
     /// black but for the lamps (`[[lights]]`): outdoors at night (half of
-    /// it at dusk and dawn), indoors always -- a torch-lit cave.
+    /// it at dusk and dawn), indoors always -- a torch-lit cave. None = the
+    /// global default ([`Darkness`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub darkness: Option<f32>,
     /// Per-scene time-of-day overrides, laid over `lighting.toml`.
@@ -488,6 +489,40 @@ impl SceneLight {
 pub struct GlobalLighting {
     #[serde(default)]
     pub phase: PhaseTable,
+    #[serde(default)]
+    pub darkness: Darkness,
+}
+
+/// How black the dark is beyond the lamps in a lit scene that does not set
+/// its own (`[light] darkness`), 0..1: outdoors at the darkest of night
+/// (half of it at dusk and dawn, easing in and out with the clock; the
+/// moon's light will lift it), indoors at every hour -- a room needs a lamp.
+/// `[darkness]` in `global/lighting.toml`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Darkness {
+    pub outdoor: f32,
+    pub indoor: f32,
+}
+
+pub const OUTDOOR_DARKNESS: f32 = 0.7;
+pub const INDOOR_DARKNESS: f32 = 0.88;
+
+impl Default for Darkness {
+    fn default() -> Self {
+        Darkness { outdoor: OUTDOOR_DARKNESS, indoor: INDOOR_DARKNESS }
+    }
+}
+
+impl Darkness {
+    /// The default for a scene outdoors or in.
+    pub fn at(&self, outdoor: bool) -> f32 {
+        if outdoor {
+            self.outdoor
+        } else {
+            self.indoor
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -521,7 +556,10 @@ impl Default for GlobalLighting {
     /// The shipped defaults (`vellum_light::default_phase_light`).
     fn default() -> Self {
         let f = |p| vellum_light::default_phase_light(p).map(|e| LightFields::from_env(&e));
-        GlobalLighting { phase: PhaseTable { dawn: f(Phase::Dawn), day: None, dusk: f(Phase::Dusk), night: f(Phase::Night) } }
+        GlobalLighting {
+            phase: PhaseTable { dawn: f(Phase::Dawn), day: None, dusk: f(Phase::Dusk), night: f(Phase::Night) },
+            darkness: Darkness::default(),
+        }
     }
 }
 
@@ -554,6 +592,7 @@ impl GlobalLighting {
                 dusk: keep(file.phase.dusk, shipped.phase.dusk),
                 night: keep(file.phase.night, shipped.phase.night),
             },
+            darkness: file.darkness,
         })
     }
 
@@ -608,7 +647,7 @@ impl SceneLighting {
     ) -> Option<SceneLighting> {
         let light = scene.light.as_ref()?;
         let outdoor = light.is_outdoor(outdoor_guess);
-        let dark = light.darkness.unwrap_or(0.0).clamp(0.0, 1.0);
+        let dark = light.darkness.unwrap_or(global.darkness.at(outdoor)).clamp(0.0, 1.0);
         let mut keyframes: Vec<(Phase, Option<LightEnv>, f32)> = match game_hour.filter(|_| outdoor) {
             None => Vec::new(),
             Some(h) => vellum_light::phase_keyframes(h, vellum_light::PhaseBoundaries::default())
@@ -668,7 +707,7 @@ mod tests {
         let exposure = |l: &SceneLighting, p: Phase| {
             l.keyframes.iter().find(|k| k.0 == p).and_then(|k| k.1.as_ref()).map(|e| vellum_light::with_intensity(Some(e), 1.0).1.exposure)
         };
-        let plain = SceneLight::default();
+        let plain = SceneLight { darkness: Some(0.0), ..SceneLight::default() };
         let night = |l: &SceneLight| SceneLighting::resolve(&scene(l), &desert(), &global, Some(23.0), None).unwrap();
         let (dark, lit) = (exposure(&night(&light), Phase::Night).unwrap(), exposure(&night(&plain), Phase::Night).unwrap());
         assert!((dark / lit - DARKNESS_FLOOR).abs() < 1e-3, "night {lit} -> {dark}");
@@ -681,6 +720,33 @@ mod tests {
         let inside = SceneLighting::resolve(&scene(&light), &desert(), &global, Some(12.0), None).unwrap();
         assert_eq!(inside.keyframes.len(), 1, "indoors, the dark itself");
         assert!((exposure(&inside, Phase::Night).unwrap() - DARKNESS_FLOOR).abs() < 1e-4);
+    }
+
+    /// A scene that says nothing takes the global darkness: 0.7 at the
+    /// darkest of night outdoors, 0.88 indoors at any hour; one that sets 0
+    /// has none.
+    #[test]
+    fn a_scene_without_its_own_darkness_takes_the_default() {
+        let global = GlobalLighting::default();
+        let scene = |light: SceneLight| crate::scenes::StageScene { light: Some(light), ..Default::default() };
+        let exposure = |l: &SceneLighting| {
+            l.keyframes.iter().find(|k| k.0 == Phase::Night).and_then(|k| k.1.as_ref()).map(|e| vellum_light::with_intensity(Some(e), 1.0).1.exposure).unwrap()
+        };
+        let at = |light: SceneLight, hour: f32| SceneLighting::resolve(&scene(light), &desert(), &global, Some(hour), None).unwrap();
+        let (dflt, none) = (exposure(&at(SceneLight::default(), 23.0)), exposure(&at(SceneLight { darkness: Some(0.0), ..SceneLight::default() }, 23.0)));
+        assert!((dflt / none - DARKNESS_FLOOR.powf(OUTDOOR_DARKNESS)).abs() < 1e-3, "{dflt} / {none}");
+        let inside = at(SceneLight { outdoor: Some(false), ..SceneLight::default() }, 12.0);
+        assert_eq!(inside.keyframes.len(), 1, "indoors: the dark itself, at noon too");
+        assert!((exposure(&inside) - DARKNESS_FLOOR.powf(INDOOR_DARKNESS)).abs() < 1e-4);
+        let open = at(SceneLight { outdoor: Some(false), darkness: Some(0.0), ..SceneLight::default() }, 12.0);
+        assert!(open.keyframes.is_empty(), "a room that sets no dark has none");
+        // the file keeps it, and a file without it takes the default
+        let mut g = GlobalLighting::default();
+        g.darkness.indoor = 0.5;
+        assert_eq!(GlobalLighting::from_toml(&toml::to_string_pretty(&g).unwrap()).unwrap().darkness.indoor, 0.5);
+        assert_eq!(GlobalLighting::from_toml("[phase.night]
+key = \"#112233\"
+").unwrap().darkness, Darkness::default());
     }
 
     /// A lamp shines all round unless its spread is under 360; then only
@@ -826,9 +892,11 @@ exposure = 0.35
         let lit = SceneLighting::resolve(&scene, &desert(), &global, Some(19.5), None).unwrap();
         let phases: Vec<_> = lit.keyframes.iter().map(|(p, _, w)| (*p, *w)).collect();
         assert_eq!(phases, vec![(Phase::Dusk, 0.5), (Phase::Night, 0.5)]);
+        // indoors no time of day: only the dark, whole
         let mut indoor = scene.clone();
         indoor.light.as_mut().unwrap().outdoor = Some(false);
-        assert!(SceneLighting::resolve(&indoor, &desert(), &global, Some(19.5), None).unwrap().keyframes.is_empty());
+        let inside = SceneLighting::resolve(&indoor, &desert(), &global, Some(19.5), None).unwrap();
+        assert_eq!(inside.keyframes.iter().map(|(p, _, w)| (*p, *w)).collect::<Vec<_>>(), vec![(Phase::Night, 1.0)]);
     }
 
     #[test]
