@@ -135,19 +135,19 @@ impl Default for LightClock {
     }
 }
 
-/// Where a sun-lit skin's sun is, relative to the screen: x right, y up,
-/// z toward the viewer -- high and to the front left, the way paintings are
-/// lit. Its light and the sky's are the prototype's day (a warm white sun,
-/// a cool fill), tinted toward the hues of the scene's key and ambient
-/// colours by the scene light's strength.
-pub const SUN_TOWARD: [f32; 3] = [-0.55, 0.75, 0.55];
+// A sun-lit skin's sun is where the scene says (`[light] sun`,
+// `gs_field::lighting::SunDir`: high and to the front left unless the
+// painting is lit from elsewhere). Its light and the sky's are the
+// prototype's day (a warm white sun, a cool fill), tinted toward the hues of
+// the scene's key and ambient colours by the scene light's strength.
 const SUN_RGB: [u8; 3] = [255, 244, 226];
 const SUN_FILL_RGB: [u8; 3] = [150, 170, 200];
 const SUN_STRENGTH: f32 = 1.0;
 const SUN_FILL: f32 = 0.45;
 
-/// The sun and sky a sun-lit skin is shaded by under the scene light `env`.
-fn scene_sun(env: &LightEnv) -> gs_puppet::SceneLight {
+/// The sun and sky a sun-lit skin is shaded by under the scene light `env`,
+/// the sun `toward` (screen-relative, [`gs_field::lighting::SunDir::toward`]).
+fn scene_sun(env: &LightEnv, toward: [f32; 3]) -> gs_puppet::SceneLight {
     let t = (env.strength * env.intensity).clamp(0.0, 1.0);
     // A backdrop's key and ambient are the average colours of its lit and
     // shaded parts, mid-tones: their hue tints the light, not their
@@ -164,7 +164,7 @@ fn scene_sun(env: &LightEnv) -> gs_puppet::SceneLight {
         None => a,
     };
     gs_puppet::SceneLight {
-        toward: SUN_TOWARD,
+        toward,
         rgb: mix(SUN_RGB, hex(&env.key)),
         strength: SUN_STRENGTH,
         fill_rgb: mix(SUN_FILL_RGB, env.ambient.as_deref().and_then(hex)),
@@ -633,14 +633,16 @@ impl LightState {
             self.worn.clear();
             self.worn_for = Some(plan.key);
         }
-        // Puppets key on the plan and on how their skins are shaded.
+        // Puppets key on the plan and on how their skins are shaded: by the
+        // scene's sun, from where the scene says it is.
+        let sun_dir = self.scene.as_ref().and_then(|(l, _)| l.sun).unwrap_or_default();
         let puppet_key = {
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            (plan.key, self.clock.sun_lit).hash(&mut h);
+            (plan.key, self.clock.sun_lit, sun_dir.azimuth.to_bits(), sun_dir.elevation.to_bits()).hash(&mut h);
             h.finish()
         };
         if self.current.as_ref().is_none_or(|c| c.key != puppet_key) {
-            let sun = self.clock.sun_lit.then(|| scene_sun(&plan.scene.0));
+            let sun = self.clock.sun_lit.then(|| scene_sun(&plan.scene.0, sun_dir.toward()));
             self.current = Some(Arc::new(ResolvedLight { key: puppet_key, scene: plan.scene.clone(), keyframes: plan.keyframes.clone(), sun }));
             self.generation += 1;
         }
@@ -953,8 +955,17 @@ mod tests {
         let lit = state.current().unwrap();
         let sun = lit.sun.expect("a sun");
         assert_ne!(lit.key, plain.key, "the skins re-key");
-        assert_eq!(sun.toward, SUN_TOWARD);
+        assert_eq!(sun.toward, gs_field::lighting::SunDir::default().toward());
         assert!(sun.rgb.iter().copied().max() >= Some(200), "a bright sun, only tinted: {:?}", sun.rgb);
+        // a scene lit from the right: its skins' sun is on the right, re-keyed
+        let from_right = gs_field::lighting::SunDir { azimuth: 80.0, elevation: 20.0 };
+        state.set_scene(Some(SceneLight { sun: Some(from_right), ..SceneLight::default() }), Some("scenes/test.png".into()));
+        state.update(&ctx);
+        let right = state.current().unwrap();
+        assert_ne!(right.key, lit.key, "the skins re-key");
+        assert_eq!(right.sun.expect("a sun").toward, from_right.toward());
+        state.set_scene(Some(SceneLight::default()), Some("scenes/test.png".into()));
+        state.update(&ctx);
         let moon = state.moon_now().expect("the moon at 23:00");
         assert!(moon.elevation > 30.0 && moon.brightness > 0.9);
         assert_eq!(state.moons_now(), vec![moon.clone()], "no Lornon unless the sky has one");

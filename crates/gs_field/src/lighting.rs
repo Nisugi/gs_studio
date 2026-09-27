@@ -392,6 +392,10 @@ pub struct SceneLight {
     /// global default ([`Darkness`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub darkness: Option<f32>,
+    /// Where the sun is: the side the painting is lit from. None = from the
+    /// front left ([`SunDir::default`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sun: Option<SunDir>,
     /// Per-scene time-of-day overrides, laid over `lighting.toml`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dawn: Option<LightFields>,
@@ -422,11 +426,42 @@ impl Default for SceneLight {
             haze: None,
             outdoor: None,
             darkness: None,
+            sun: None,
             dawn: None,
             day: None,
             dusk: None,
             night: None,
         }
+    }
+}
+
+/// Where the sun is over a scene -- the side its painting is lit from,
+/// which the creatures should be lit from too -- degrees: `azimuth` 0 is
+/// behind the viewer (the scene lit from the front), -90 screen-left, +90
+/// screen-right, 180 behind the scene (backlit), as the moon's is;
+/// `elevation` above the horizon. `[light] sun = { azimuth = -45.0,
+/// elevation = 44.0 }`. It does not move with the clock: the painting's
+/// light does not.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SunDir {
+    pub azimuth: f32,
+    pub elevation: f32,
+}
+
+impl Default for SunDir {
+    /// High and to the front left, the way paintings are most often lit.
+    fn default() -> Self {
+        SunDir { azimuth: -45.0, elevation: 44.0 }
+    }
+}
+
+impl SunDir {
+    /// Toward the sun, relative to the screen (unit): x right, y up, z
+    /// toward the viewer.
+    pub fn toward(self) -> [f32; 3] {
+        let (sa, ca) = self.azimuth.to_radians().sin_cos();
+        let (se, ce) = self.elevation.clamp(-90.0, 90.0).to_radians().sin_cos();
+        [ce * sa, se, ce * ca]
     }
 }
 
@@ -1027,6 +1062,24 @@ key = \"#112233\"
 
     fn desert() -> SceneColours {
         SceneColours { key: "#c69c67".into(), ambient: "#81abc6".into(), bounce: "#b68855".into(), chroma: 0.98 }
+    }
+
+    /// A scene says where its sun is: to the right, low, it is to the right
+    /// and low; one that says nothing keeps the front-left sun; the file
+    /// form round-trips.
+    #[test]
+    fn a_scene_says_where_its_sun_is() {
+        let t = SunDir::default().toward();
+        assert!(t[0] < -0.4 && t[1] > 0.6 && t[2] > 0.4, "front left and high: {t:?}");
+        assert!((t.iter().map(|v| v * v).sum::<f32>() - 1.0).abs() < 1e-5);
+        let right = SunDir { azimuth: 90.0, elevation: 10.0 }.toward();
+        assert!(right[0] > 0.95 && right[1] < 0.2 && right[2].abs() < 1e-5, "{right:?}");
+        let back = SunDir { azimuth: 180.0, elevation: 20.0 }.toward();
+        assert!(back[2] < -0.9, "backlit: {back:?}");
+        let light: SceneLight = toml::from_str("sun = { azimuth = 90.0, elevation = 10.0 }").unwrap();
+        assert_eq!(light.sun, Some(SunDir { azimuth: 90.0, elevation: 10.0 }));
+        assert_eq!(toml::from_str::<SceneLight>(&toml::to_string(&light).unwrap()).unwrap(), light);
+        assert_eq!(SceneLight::default().sun, None);
     }
 
     #[test]

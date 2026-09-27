@@ -554,7 +554,11 @@ across -- and differ only in the right-hand panel:
   the darkest of night, half of it at dusk and dawn, indoors always, so a
   torch-lit cave is dark at noon; 1 = pitch black but for the lamps; unset =
   the global default, 0.7 outdoors and 0.88 indoors, `[darkness]` in
-  `global/lighting.toml`, under *Global time-of-day defaults*); *More*
+  `global/lighting.toml`, under *Global time-of-day defaults*); *Sun from*
+  and *Sun height* (`sun = { azimuth, elevation }`, degrees: the side the
+  painting is lit from, which puppets lit by the scene take -- 0 = from
+  behind you, -90 the left, 90 the right, 180 backlit; unset = high to the
+  front left, -45 and 44); *More*
   (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
   / Night rows over `global/lighting.toml`, "Use default" per row); *Global
   time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;
@@ -678,7 +682,8 @@ in the pool.
 The **Puppets** list at the top of the Preview panel (with the *Held
 weapons*, *Breathing*, *Lit by the scene* and *Splats* checkboxes; *Lit by
 the scene* shades every skin by the scene's sun and sky instead of its own
-fixed cel light -- the paint flat, a warm sun high to the front left
+fixed cel light -- the paint flat, a warm sun where the scene's *Sun from*
+puts it (high to the front left unless the painting is lit from elsewhere)
 tinted by the hue of the scene's key light, a cool fill by its ambient, a
 rim along the edges facing the sun, the time of day on top
 (`creature_light::LightClock::sun_lit`, Niffy's flat hull; off by

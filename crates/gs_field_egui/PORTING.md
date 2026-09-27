@@ -797,8 +797,10 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   brings, which the host adds to the sky's.
 - Skins lit by the scene (Niffy's flat hull). `LightClock.sun_lit` (**a
   new field**) puts a sun in `ResolvedLight.sun` (`gs_puppet::SceneLight`,
-  its direction relative to the screen, `SUN_TOWARD`; also **a new
-  field**) and re-keys the puppets; `pose_puppet_with` then shades the skin
+  its direction relative to the screen from the scene's `[light] sun`,
+  `gs_field::lighting::SunDir`, high to the front left unless the scene
+  says; also **a new field**) and re-keys the puppets (on the direction
+  too); `pose_puppet_with` then shades the skin
   with `SkinSurface::scene_lit` (the sun turned into the skin's frame) and
   lays only the time of day over it (`ResolvedLight::light_image_timed`),
   the scene pass's tint being in the sun and sky already.

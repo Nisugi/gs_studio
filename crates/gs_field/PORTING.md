@@ -329,6 +329,10 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   dark at every hour unless it has lamps or sets `darkness = 0`**. Scenes
   without `[light]` are unaffected.
 
+* The sun: `SceneLight.sun` (**a new field**, `sun = { azimuth,
+  elevation }`: where the painting is lit from; None = high to the front
+  left) and `SunDir` (`toward()`: the direction, screen-relative). A
+  struct literal of `SceneLight` adds it or `..SceneLight::default()`.
 * The moon: `GlobalLighting.moon` (`MoonLight`, `[moon]` in
   `global/lighting.toml`: colour, strength, lift); `Sky` (the host's moon
   fullness and cloud cover); `moon_position(hour)` (its arc: up 18:00 to

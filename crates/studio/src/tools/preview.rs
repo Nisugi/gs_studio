@@ -94,7 +94,12 @@ impl StageTool {
             // an Arcane one.
             if let Some(which) = std::env::var_os("GS_STUDIO_SMOKE_LIGHTS") {
                 use gs_field::lighting::{LampKind, SceneLight};
-                stage.scene_mut().light = Some(SceneLight::default());
+                // GS_STUDIO_SUN=<azimuth>,<elevation>: where its sun is
+                let sun = std::env::var("GS_STUDIO_SUN").ok().and_then(|v| {
+                    let (a, e) = v.split_once(',')?;
+                    Some(gs_field::lighting::SunDir { azimuth: a.trim().parse().ok()?, elevation: e.trim().parse().ok()? })
+                });
+                stage.scene_mut().light = Some(SceneLight { sun, ..SceneLight::default() });
                 let mut lamps = vec![(LampKind::Torch, 170.0, 430.0), (LampKind::Wisp, 640.0, 330.0)];
                 let all = which == "all";
                 if all {
@@ -505,6 +510,27 @@ fn light_ui(
             edited.darkness = None;
         }
     });
+    // the side the painting is lit from: puppets lit by the scene take it
+    let mut sun = edited.sun.unwrap_or_default();
+    let mut moved = false;
+    ui.horizontal(|ui| {
+        moved |= ui
+            .add(egui::Slider::new(&mut sun.azimuth, -180.0..=180.0).step_by(1.0).suffix(" deg").text("Sun from"))
+            .on_hover_text("Where the painting's light comes from, round the scene: 0 = from behind you (lit from the front), -90 = the left, 90 = the right, 180 = from behind the scene (backlit). Puppets lit by the scene (Preview) take it")
+            .changed();
+        if edited.sun.is_none() {
+            ui.weak("default");
+        } else if ui.small_button("x").on_hover_text("Back to the default: from the front left, 44 deg up").clicked() {
+            edited.sun = None;
+        }
+    });
+    moved |= ui
+        .add(egui::Slider::new(&mut sun.elevation, 0.0..=90.0).step_by(1.0).suffix(" deg").text("Sun height"))
+        .on_hover_text("How high the sun is: 0 = at the horizon, 90 = overhead")
+        .changed();
+    if moved {
+        edited.sun = Some(sun);
+    }
     egui::CollapsingHeader::new("More").id_salt("light_more").show(ui, |ui| {
         light_opt_slider(ui, "Strength", &mut edited.strength, SCENE_STRENGTH, 0.0..=1.0);
         light_opt_slider(ui, "Ground bounce", &mut edited.bounce_strength, SCENE_BOUNCE_STRENGTH, 0.0..=1.0);
