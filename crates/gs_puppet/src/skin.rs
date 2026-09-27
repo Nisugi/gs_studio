@@ -943,6 +943,34 @@ impl Beam {
     }
 }
 
+/// The scene's own light on a figure: a directed light (the sun, the moon)
+/// and the soft fill light from everywhere else (the sky, the room), for
+/// [`SkinSurface::scene_lit`]. PROTOTYPE: the shading comes from the scene
+/// instead of the skin's fixed cel light.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneLight {
+    /// Toward the directed light, world (need not be unit length).
+    pub toward: V3,
+    /// Its colour, sRGB, and how strong it is (1 = full sun).
+    pub rgb: [u8; 3],
+    pub strength: f32,
+    /// The fill light's colour, sRGB, and strength.
+    pub fill_rgb: [u8; 3],
+    pub fill: f32,
+}
+
+/// How far round a surface the directed light wraps past edge-on, as for
+/// a lamp: the terminator is soft, as on skin and fur.
+const SCENE_WRAP: f32 = 0.25;
+/// The fill light is brighter on surfaces facing up (the sky) than down
+/// (the ground): this much of it is lost facing straight down.
+const FILL_GROUND: f32 = 0.45;
+/// The rim a directed light draws along the edges that face it, seen
+/// edge-on: what keeps a figure against a low sun readable. Its strength,
+/// and how tightly it hugs the edge.
+const SCENE_RIM: f32 = 0.9;
+const SCENE_RIM_POWER: i32 = 3;
+
 /// How far round a surface a lamp's light wraps past the line where it
 /// meets the surface edge-on (0 = a hard terminator).
 const LAMP_WRAP: f32 = 0.3;
@@ -982,11 +1010,60 @@ impl SkinSurface {
         (self.cov.get(i).copied().unwrap_or(0) > 0).then(|| self.normal[i].map(|v| v as f32 / 127.0))
     }
 
+    /// Toward the viewer, in the skin's frame.
+    pub fn to_cam(&self) -> V3 {
+        self.to_cam
+    }
+
+    /// Everything pixel `i` (row-major) shows, for a host that lights the
+    /// skin itself (the v2 field pass): its surface point (world feet, the
+    /// skin's frame), unit normal, colour before shading, and how much of
+    /// the pixel the body covers (0..255). None where it covers nothing.
+    pub fn texel(&self, i: usize) -> Option<(V3, V3, [u8; 3], u8)> {
+        let cov = self.cov.get(i).copied().unwrap_or(0);
+        (cov > 0).then(|| (self.pos[i], self.normal[i].map(|v| v as f32 / 127.0), self.albedo[i], cov))
+    }
+
     fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32) {
         self.pos[i] = pos;
         self.normal[i] = n.map(|v| (v.clamp(-1.0, 1.0) * 127.0).round() as i8);
         self.albedo[i] = albedo.map(|v| v.round().clamp(0.0, 255.0) as u8);
         self.cov[i] = (cov * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+
+    /// The figure lit by the scene alone (PROTOTYPE): each pixel's own
+    /// colour -- the paint, flat, with no cel bands, roundness term or
+    /// depth darkening -- under `light`'s fill and directed light, from
+    /// the way that pixel faces (the normal sheet's relief included).
+    /// Straight RGBA8 the size of `skin`, which supplies everything the
+    /// surface does not cover (the outline round the figure).
+    pub fn scene_lit(&self, light: &SceneLight, skin: &Skin) -> Vec<u8> {
+        let mut out = skin.rgba.clone();
+        if skin.w != self.w || skin.h != self.h {
+            return out;
+        }
+        let decode = srgb_lut();
+        let sun = light.rgb.map(|c| decode[c as usize] * light.strength);
+        let fill = light.fill_rgb.map(|c| decode[c as usize] * light.fill);
+        let toward = norm_or(light.toward, [0.0, 1.0, 0.0]);
+        for i in 0..self.w * self.h {
+            if self.cov[i] == 0 {
+                continue;
+            }
+            let n = norm_or(self.normal[i].map(|v| v as f32 / 127.0), self.to_cam);
+            let albedo = self.albedo[i].map(|c| decode[c as usize]);
+            let facing_light = dot(n, toward);
+            let edge = (1.0 - dot(n, self.to_cam).max(0.0)).powi(SCENE_RIM_POWER);
+            let diffuse = ((facing_light + SCENE_WRAP) / (1.0 + SCENE_WRAP)).max(0.0) + SCENE_RIM * edge * facing_light.max(0.0);
+            let sky = 1.0 - FILL_GROUND * (1.0 - n[1]) * 0.5;
+            let o = i * 4;
+            let cov = self.cov[i] as f32 / 255.0;
+            for k in 0..3 {
+                let lit = linear_to_srgb8(albedo[k] * (fill[k] * sky + sun[k] * diffuse)) as f32;
+                out[o + k] = (lit * cov + out[o + k] as f32 * (1.0 - cov)).round() as u8;
+            }
+        }
+        out
     }
 
     /// The light `lamps` add to `skin` (the skin this surface came with, as

@@ -9,7 +9,8 @@
 //! skin from four sides twice: the top row with the geometry's normals
 //! alone, the bottom row with the normal sheet's relief leaning them. A
 //! third row shows the lit surface alone (a flat grey albedo) so the relief
-//! can be read without the paint.
+//! can be read without the paint. With paintings but no normal maps, only
+//! the first row is drawn.
 
 use std::path::{Path, PathBuf};
 
@@ -72,7 +73,7 @@ fn main() {
     let maps = Paintings { front_grid, side_grid, front: as_painting(&normal_px[0]), side: as_painting(&normal_px[1]), back: as_painting(&normal_px[2]) };
     let painted = paint_px.iter().filter(|p| p.is_some()).count();
     let mapped = normal_px.iter().filter(|p| p.is_some()).count();
-    assert!(mapped > 0, "no *_normal.png in {}", folder.display());
+    assert!(painted + mapped > 0, "no paintings or *_normal.png in {}", folder.display());
 
     let layout = UvLayout::fit(&puppet, SHEET_SIDE);
     let rgba = if painted > 0 { prefill(&puppet, &layout, &paintings) } else { vec![0; layout.w * layout.h * 4] };
@@ -86,7 +87,12 @@ fn main() {
     }
     let lit = Texture { layout, rgba: grey, normal: Some(normals) };
 
-    let rows: [(&str, &Texture); 3] = [("paint, geometry normals", &flat), ("paint + normal sheet", &relief), ("relief alone", &lit)];
+    // Without normal maps only the paint row means anything.
+    let rows: &[(&str, &Texture)] = if mapped > 0 {
+        &[("paint, geometry normals", &flat), ("paint + normal sheet", &relief), ("relief alone", &lit)]
+    } else {
+        &[("paint, geometry normals", &flat)]
+    };
     let w = TILE * YAWS.len();
     let h = TILE * rows.len();
     let mut sheet: Vec<u8> = BACKGROUND.iter().copied().cycle().take(w * h * 4).collect();
