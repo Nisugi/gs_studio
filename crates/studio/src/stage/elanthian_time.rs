@@ -107,6 +107,14 @@ pub fn elanthian_hour(unix_seconds: i64) -> u32 {
     ((unix_seconds - offset * 3600).rem_euclid(DAY_SECS) / 3600) as u32
 }
 
+/// The Elanthian (US Eastern) date for a UTC timestamp: (year, month, day)
+/// -- the calendar's months are ours, Lormesta = January .. Eorgaen =
+/// December. A gs-studio addition, for the moons' own dates.
+pub fn eastern_date(unix_seconds: i64) -> (i64, u32, u32) {
+    let offset = if eastern_is_dst(unix_seconds) { 4 } else { 5 };
+    civil_from_days((unix_seconds - offset * 3600).div_euclid(DAY_SECS))
+}
+
 /// The in-game hour as a fraction (0.0 up to 24.0), for lighting's gradual
 /// dawn and dusk. Same clock as [`elanthian_hour`].
 pub fn elanthian_hour_f(unix_seconds: f64) -> f32 {
@@ -203,6 +211,15 @@ mod tests {
     }
 
     /// US Eastern DST: second Sunday of March through first Sunday of
+    /// The date is Eastern: 01:32 EDT on the 27th is 05:32 UTC; 23:00 EST
+    /// on December 31 is already January 1 in UTC.
+    #[test]
+    fn the_date_is_eastern() {
+        assert_eq!(eastern_date(1_790_487_120), (2026, 9, 27));
+        assert_eq!(eastern_date(1_790_487_120 - 4 * 3600), (2026, 9, 26));
+        assert_eq!(eastern_date(utc(12, 31, 23) + 5 * 3600), (2026, 12, 31));
+    }
+
     /// November. 2026: March 8, November 1.
     #[test]
     fn eastern_dst_window_is_correct_for_2026() {

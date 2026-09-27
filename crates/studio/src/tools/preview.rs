@@ -171,6 +171,15 @@ impl StageTool {
         if let Some(v) = sky("GS_STUDIO_LIGHT_MOON") {
             stage.light_moon = v;
         }
+        // GS_STUDIO_GAME_SKY=1 takes the moons from the game's calendar,
+        // =<unix seconds> at that instant; GS_STUDIO_LORNONS_EVE=1 on Eorgaen 31.
+        if let Ok(v) = std::env::var("GS_STUDIO_GAME_SKY") {
+            stage.game_sky = true;
+            stage.sky_at = v.trim().parse::<f64>().ok().filter(|t| *t > 1.0);
+        }
+        if std::env::var_os("GS_STUDIO_LORNONS_EVE").is_some() {
+            stage.lornons_eve = true;
+        }
         let lighting = gs_field::lighting::GlobalLighting::load();
         art.set_global_lighting(lighting.clone());
         StageTool { stage, art, lighting }
@@ -311,7 +320,7 @@ impl StageTool {
             game_hour: Some(game_hour),
             strength: stage.light_strength,
             outdoor_guess: None,
-            sky: gs_field::lighting::Sky { moon: stage.light_moon, clouds },
+            sky: stage.sky(now, game_hour, clouds),
             sun_lit: stage.sun_lit_skins,
         });
         self.art.prepare_scene_art(&ctx, stage.scene());
@@ -562,9 +571,18 @@ fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
     }
     ui.add(egui::Slider::new(&mut stage.light_strength, 0.0..=1.0).text("Lighting strength"))
         .on_hover_text("The player's setting: scales every light, scene and time of day alike");
-    ui.add(egui::Slider::new(&mut stage.light_moon, 0.0..=1.0).text("Moon")).on_hover_text(
-        "How full the moon is: 0 = new, 1 = full. It rises at 18:00 on the left, is highest at midnight and sets at 06:00 on the right; outdoors only",
+    ui.checkbox(&mut stage.game_sky, "The game's moons").on_hover_text(
+        "Liabo and Lornon as the game has them at the hour shown, today: Liabo circles in 7.449 days (the astrolabe script), Lornon in about a month, from the last look at it. Each is highest at midnight when full and runs later as it wanes; outdoors only",
     );
+    if stage.game_sky {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
+        ui.weak(stage.moons_line(now, game_hour));
+        ui.checkbox(&mut stage.lornons_eve, "Lornon's Eve").on_hover_text("Show them on Eorgaen 31: Lornon crimson and glowing");
+    } else {
+        ui.add(egui::Slider::new(&mut stage.light_moon, 0.0..=1.0).text("Moon")).on_hover_text(
+            "How full the moon is: 0 = new, 1 = full. It rises at 18:00 on the left, is highest at midnight and sets at 06:00 on the right; outdoors only",
+        );
+    }
     ui.add(egui::Slider::new(&mut stage.light_clouds, 0.0..=1.0).text("Clouds")).on_hover_text(
         "How much cloud covers the sky: on the GPU its shadows drift over the moonlit ground; rain, snow and fog bring their own",
     );

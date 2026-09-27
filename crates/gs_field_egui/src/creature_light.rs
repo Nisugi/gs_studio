@@ -39,7 +39,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use gs_field::lighting::{moon_light, moon_position, GlobalLighting, SceneLight, SceneLighting, Sky};
+use gs_field::lighting::{lornon_light, moon_arc, moon_light, GlobalLighting, SceneLight, SceneLighting, Sky};
 use vellum_light::{
     apply, apply_backdrop, auto_scene_light, with_intensity, LightEnv, LightFrame, SceneColours, Srgb8Lut, YMap,
 };
@@ -120,7 +120,8 @@ pub struct LightClock {
     pub strength: f32,
     /// The room's indoor/outdoor guess when the scene does not say.
     pub outdoor_guess: Option<bool>,
-    /// The moon's fullness and the cloud over it (outdoors, at night).
+    /// The moons' fullness and hours and the cloud over them (outdoors, at
+    /// night): the game's own from [`gs_field::sky::GameSky::sky`].
     pub sky: Sky,
     /// Shade puppet skins by the scene's sun and sky -- the paint flat,
     /// the light from the scene -- instead of by their own fixed cel light
@@ -174,7 +175,7 @@ fn scene_sun(env: &LightEnv) -> gs_puppet::SceneLight {
 /// The moon as the v2 pass lights it now ([`LightState::moon_now`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoonNow {
-    /// Degrees ([`gs_field::lighting::moon_position`]): azimuth 0 = behind
+    /// Degrees ([`gs_field::lighting::moon_arc`]): azimuth 0 = behind
     /// the viewer, -90 screen-left; elevation above the horizon.
     pub azimuth: f32,
     pub elevation: f32,
@@ -402,25 +403,36 @@ impl LightState {
         self.clock = clock;
     }
 
-    /// The moon over the scene now, for the v2 pass: None indoors, while it
-    /// is down, in an unlit scene or with lighting off.
+    /// The moon (Liabo) over the scene now, for the v2 pass: None indoors,
+    /// while it is down or it is day, in an unlit scene or with lighting off.
     pub fn moon_now(&self) -> Option<MoonNow> {
+        self.moon_of(false)
+    }
+
+    /// Every moon lighting the scene now: Liabo, then Lornon (dimmer, grey,
+    /// crimson by Lornon's Eve), each where its own hours put it.
+    pub fn moons_now(&self) -> Vec<MoonNow> {
+        [false, true].into_iter().filter_map(|lornon| self.moon_of(lornon)).collect()
+    }
+
+    fn moon_of(&self, lornon: bool) -> Option<MoonNow> {
         let (light, _) = self.scene.as_ref()?;
         let hour = self.clock.game_hour?;
         let global = self.global.as_ref()?;
         if self.clock.strength <= 0.0 || !light.is_outdoor(self.clock.outdoor_guess) {
             return None;
         }
-        let (azimuth, elevation) = moon_position(hour)?;
-        let clear = Sky { clouds: 0.0, ..self.clock.sky };
-        let brightness = moon_light(hour, &clear) * global.moon.strength.max(0.0) * self.clock.strength.clamp(0.0, 1.0);
-        (brightness > 0.0).then(|| MoonNow {
-            azimuth,
-            elevation,
-            colour: global.moon.color.clone(),
-            brightness,
-            clouds: self.clock.sky.clouds.clamp(0.0, 1.0),
-        })
+        let sky = &self.clock.sky;
+        let clear = Sky { clouds: 0.0, ..*sky };
+        let (high, lit, colour) = if lornon {
+            let lit = lornon_light(hour, &clear) * global.moon.lornon_strength.max(0.0);
+            (sky.lornon_high, lit, global.moon.lornon_colour(sky.lornon_blood))
+        } else {
+            (sky.moon_high, moon_light(hour, &clear), global.moon.color.clone())
+        };
+        let (azimuth, elevation) = moon_arc(hour, high)?;
+        let brightness = lit * global.moon.strength.max(0.0) * self.clock.strength.clamp(0.0, 1.0);
+        (brightness > 0.0).then(|| MoonNow { azimuth, elevation, colour, brightness, clouds: sky.clouds.clamp(0.0, 1.0) })
     }
 
     pub fn set_global(&mut self, global: GlobalLighting) {
@@ -509,7 +521,15 @@ impl LightState {
         // The v2 pass lights the moon itself (a light with shadows); without
         // it the moon lifts the dark evenly. Quantized like the hour.
         let q = |v: f32| (v * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM;
-        let sky = Sky { moon: q(self.clock.sky.moon), clouds: q(self.clock.sky.clouds) };
+        let s = &self.clock.sky;
+        let sky = Sky {
+            moon: q(s.moon),
+            clouds: q(s.clouds),
+            moon_high: q(s.moon_high),
+            lornon: q(s.lornon),
+            lornon_high: q(s.lornon_high),
+            lornon_blood: q(s.lornon_blood),
+        };
         let sky = (!self.keep_pixels).then_some(&sky);
         let lit = SceneLighting::resolve_under(&scene, &auto, &global, hour, self.clock.outdoor_guess, sky)?;
         let strength = self.clock.strength.clamp(0.0, 1.0);
@@ -937,6 +957,15 @@ mod tests {
         assert!(sun.rgb.iter().copied().max() >= Some(200), "a bright sun, only tinted: {:?}", sun.rgb);
         let moon = state.moon_now().expect("the moon at 23:00");
         assert!(moon.elevation > 30.0 && moon.brightness > 0.9);
+        assert_eq!(state.moons_now(), vec![moon.clone()], "no Lornon unless the sky has one");
+        // Lornon: its own hours, dimmer, grey -- crimson by Lornon's Eve
+        let lornon = Sky { lornon: 1.0, lornon_high: 21.0, lornon_blood: 1.0, ..Sky::default() };
+        state.set_clock(LightClock { sky: lornon, ..clock(23.0, true) });
+        let both = state.moons_now();
+        assert_eq!(both.len(), 2);
+        assert!(both[1].azimuth > both[0].azimuth, "past its height, further west");
+        assert!((both[1].brightness - gs_field::lighting::LORNON_STRENGTH * both[0].brightness).abs() < 0.05);
+        assert_eq!(both[1].colour, gs_field::lighting::LORNON_BLOOD_COLOUR);
         state.set_clock(clock(12.0, true));
         assert!(state.moon_now().is_none(), "down by day");
         state.set_clock(clock(23.0, true));

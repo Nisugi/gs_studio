@@ -150,6 +150,12 @@ pub struct StageState {
     /// much cloud covers the sky (0..1; weather adds its own).
     pub light_moon: f32,
     pub light_clouds: f32,
+    /// The moons from the game's own calendar (`gs_field::sky`) in place of
+    /// the Moon slider: taken at `sky_at` (unix seconds) when pinned, else
+    /// today at the hour shown; `lornons_eve` shows them on Eorgaen 31.
+    pub game_sky: bool,
+    pub sky_at: Option<f64>,
+    pub lornons_eve: bool,
     /// Weather preview: 0 = clear, else 1 + the index into the renderer's
     /// weather kinds; how much falls (0..1); wind (-1..1).
     pub weather_kind: usize,
@@ -226,6 +232,9 @@ impl StageState {
             light_strength: 1.0,
             light_moon: 1.0,
             light_clouds: 0.0,
+            game_sky: false,
+            sky_at: None,
+            lornons_eve: false,
             weather_kind: 0,
             weather_intensity: 0.6,
             weather_wind: 0.15,

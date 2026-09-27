@@ -1,0 +1,68 @@
+# How the game's own text reads to `gs_field::sky`. Compiled in.
+#
+# Seen in play (Lich logs, Sept 2026); add what is new as it turns up. A
+# weather line matches whole (runs of spaces count as one); a `look <moon>`
+# phrase matches inside the reply's first clause.
+
+# look <moon>: "<Moon> <where> [as] <phase>[.,] ..." -- the phase words: how
+# much of the moon they mean is lit (0..1), and whether it is growing where
+# the words say so. "almost complete" came three days after "half full" on
+# a Lornon still setting in the evening (growing); "less than full" on a
+# Liabo a day past full.
+[phases]
+"less than full" = { lit = 0.9, waxing = false }
+"almost complete" = { lit = 0.9, waxing = true }
+"half full" = { lit = 0.5 }
+
+# ... and the where words: hours since the moon was highest (negative =
+# still rising toward it).
+[places]
+"almost arrives at her azimuth" = -0.5
+"falls farther toward the western horizon" = 4.0
+
+# Weather lines, as the game sends them while something falls outdoors
+# (about one every 80 s in the Hinterwilds). Each is drawn at random from
+# its kind's pool -- "an occasional snowflake" and "blinded in white snow"
+# a minute apart -- so a line says what falls, not how hard.
+[[weather]]
+kind = "snow"
+lines = [
+    "An occasional snowflake drifts to the ground.",
+    "Snowflakes drift silently to the ground.",
+    "Snowflakes drift to the ground.",
+    "Snowflakes flutter to the ground.",
+    "A light snow drifts silently to the ground.",
+    "A light flurry of snowflakes drifts down from the grey skies.",
+    "A soft flurry of snowflakes drifts down from the grey skies.",
+    "Snowflakes cling to your eyelashes and coat you with a dusting of snow.",
+    "A thick flurry of snowflakes drifts down from the grey skies.",
+    "The sky is full of billowing snowflakes.",
+    "The sky all around is white with falling snow.",
+    "Falling snow obscures the sky.",
+    "A heavy snow falls, sculpting everything into round white curves.",
+    "A blinding flurry of snowflakes drifts down from the grey skies.",
+    "Billowing gusts of heavy snow buffet your face.",
+    "The surroundings are engulfed in gusts of white snow.",
+    "Heavy gusts of wind cause the area to be blinded in white snow.",
+    "A sudden gust makes the snow dance and swirl around you.",
+]
+
+# The Hinterwilds' storms: ice and hail on the wind.
+[[weather]]
+kind = "sleet"
+lines = [
+    "With a screech, a gust of wind wheels through the area, laden with stinging sleet!",
+    "Gusting winds fling shards of cutting ice and pounding hail at you as they sweep through the area with brutal force!",
+    "The fury of the storm assails you, its icy talons searching cruelly for exposed flesh!",
+]
+
+# Lines that are a gust of wind through whatever falls.
+[gusts]
+lines = [
+    "A sudden gust makes the snow dance and swirl around you.",
+    "Billowing gusts of heavy snow buffet your face.",
+    "The surroundings are engulfed in gusts of white snow.",
+    "Heavy gusts of wind cause the area to be blinded in white snow.",
+    "With a screech, a gust of wind wheels through the area, laden with stinging sleet!",
+    "Gusting winds fling shards of cutting ice and pounding hail at you as they sweep through the area with brutal force!",
+]

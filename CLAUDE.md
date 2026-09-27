@@ -28,7 +28,9 @@ it at a game hour, for lighting checks, `GS_STUDIO_LIGHT_MOON` / `GS_STUDIO_LIGH
 forms' puppets, forced, since default art draws everything as a sprite
 (`humanoid/rotting citadel arbalester` spawns that creature in its own skin);
 `GS_STUDIO_SUN_LIT=1` shades their skins by the scene's sun, the Preview tab's
-*Lit by the scene*; `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
+*Lit by the scene*; `GS_STUDIO_GAME_SKY=1` takes the moons from the game's
+calendar (*The game's moons*), `=<unix seconds>` at that instant, and
+`GS_STUDIO_LORNONS_EVE=1` shows them on Lornon's Eve; `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU

@@ -558,13 +558,23 @@ across -- and differ only in the right-hand panel:
   picks the hour: the live Elanthian clock, the Dawn / Day / Dusk / Night
   buttons or the slider, plus the player's Lighting strength, and the sky:
   *Moon* (how full, 0 = new .. 1 = full) and *Clouds* (how much of the sky
-  is covered; rain, snow and fog bring their own). Outdoors the moon rises
-  at 18:00 low on the left, is highest at midnight and sets at 06:00 low on
-  the right, always on the viewer's side; on the GPU (v2) it is a light
+  is covered; rain, snow and fog bring their own). Outdoors a full moon
+  rises at 18:00 low on the left, is highest at midnight and sets at 06:00
+  low on the right, always on the viewer's side, and lights nothing by day
+  (half its light at dusk and dawn); on the GPU (v2) it is a light
   from the sky with soft shadows, a fill from the whole sky and cloud
   shadows drifting with the wind, and elsewhere it lifts the darkness
   evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
-  lift, under *Global time-of-day defaults*). Creatures,
+  lift, under *Global time-of-day defaults*). *The game's moons* replaces
+  the Moon slider with Elanthia's own at the hour shown, today
+  (`gs_field::sky`, and a line of how lit each is and when it is highest):
+  Liabo, the great moon, circles in 7.449 days, full for a twelfth of it
+  (the Lich script `astrolabe`); Lornon, the dark moon, in about a month,
+  from the last `look lornon`; each is highest at midnight when full and
+  runs later as it wanes. Lornon is a second, dimmer light, a cloudy grey
+  (`lornon_color`, `lornon_strength` in `[moon]`), turning crimson from
+  Eorgaen 20 to Lornon's Eve on the 31st (*Lornon's Eve* shows it).
+  Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
 - **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*,

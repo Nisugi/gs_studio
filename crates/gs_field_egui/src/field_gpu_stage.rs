@@ -622,7 +622,7 @@ impl StageGpu {
         })?;
         let t = ctx.input(|i| i.time) as f32;
         let wind = crate::field_weather::weather(ctx).map_or(0.0, |w| w.wind);
-        let mut lights: Vec<FieldLight> = cache.light.moon_now().map(|m| moon_light(&camera, &m, wind)).into_iter().collect();
+        let mut lights: Vec<FieldLight> = cache.light.moons_now().iter().map(|m| moon_light(&camera, m, wind)).collect();
         let room = field_gpu::MAX_LIGHTS - lights.len();
         if let Some(s) = scene {
             lights.extend(s.lights.iter().enumerate().filter_map(|(i, l)| scene_light(field, &camera, k, l, i, t)).take(room));

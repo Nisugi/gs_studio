@@ -749,6 +749,10 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   sky and far scenery past the flat ground take it facing up, unshadowed.
   Without the pass the bake takes the moon as an even lift of the darkness
   (`SceneLighting::resolve_under`); with it, it does not.
+  `LightState::moons_now()`: every moon lighting the scene, Liabo then
+  Lornon (`Sky.lornon`: its own hours, `lornon_strength` of Liabo's light,
+  grey turning crimson by Lornon's Eve), each a `LightKind::Moon` light;
+  `moon_now()` is Liabo's alone.
   `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
   brings, which the host adds to the sky's.
 - Skins lit by the scene (Niffy's flat hull). `LightClock.sun_lit` (**a

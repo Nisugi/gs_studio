@@ -56,11 +56,17 @@ intensity = 0.7
 outdoor = 0.7
 indoor = 0.88
 
-# The moon over outdoor scenes: it rises at 18:00, is highest at midnight and
-# sets at 06:00. Where the GPU pass draws it is a light from the sky with
-# shadows; elsewhere it lifts the darkness evenly, by `lift` at a full moon in
-# a clear sky. strength: 0 = no moonlight .. 1 = as shipped.
+# The moons over outdoor scenes. Liabo, the great moon: a full one rises at
+# 18:00, is highest at midnight and sets at 06:00, and each moon runs later as
+# it wanes (gs_field::sky). Where the GPU pass draws each is a light from the
+# sky with shadows; elsewhere they lift the darkness evenly, by `lift` at a
+# full Liabo in a clear sky. strength: 0 = no moonlight .. 1 = as shipped.
+# Lornon, the dark moon, is a cloudy grey, crimson by Lornon's Eve;
+# lornon_strength is a full Lornon's light as a share of a full Liabo's.
 [moon]
 color = "#b4c4ec"
 strength = 1.0
 lift = 0.4
+lornon_color = "#aeb0b8"
+lornon_blood_color = "#c8322c"
+lornon_strength = 0.3

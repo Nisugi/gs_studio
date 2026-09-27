@@ -509,44 +509,88 @@ pub struct MoonLight {
     /// Share of the darkness a full, clear, high moon takes away where the
     /// GPU pass does not draw, 0..1.
     pub lift: f32,
+    /// Lornon, the dark moon (`#rrggbb`): a cloudy grey, and the crimson it
+    /// turns by Lornon's Eve.
+    pub lornon_color: String,
+    pub lornon_blood_color: String,
+    /// A full Lornon's light as a share of a full Liabo's.
+    pub lornon_strength: f32,
 }
 
 pub const MOON_COLOUR: &str = "#b4c4ec";
 pub const MOON_LIFT: f32 = 0.4;
+pub const LORNON_COLOUR: &str = "#aeb0b8";
+pub const LORNON_BLOOD_COLOUR: &str = "#c8322c";
+pub const LORNON_STRENGTH: f32 = 0.3;
 
 impl Default for MoonLight {
     fn default() -> Self {
-        MoonLight { color: MOON_COLOUR.into(), strength: 1.0, lift: MOON_LIFT }
+        MoonLight {
+            color: MOON_COLOUR.into(),
+            strength: 1.0,
+            lift: MOON_LIFT,
+            lornon_color: LORNON_COLOUR.into(),
+            lornon_blood_color: LORNON_BLOOD_COLOUR.into(),
+            lornon_strength: LORNON_STRENGTH,
+        }
     }
 }
 
-/// The sky over the field right now, from the host (the game's own moon
-/// and weather when it has them): how full the moon is, 0 = new .. 1 =
-/// full, and how much cloud covers the sky, 0 = clear .. 1 = overcast.
+impl MoonLight {
+    /// Lornon's colour at `blood` (0..1, [`Sky::lornon_blood`]).
+    pub fn lornon_colour(&self, blood: f32) -> String {
+        let rgb = |h: &str| {
+            let h = h.trim().trim_start_matches('#');
+            let p = |i: usize| h.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok()).unwrap_or(0) as f32;
+            [p(0), p(2), p(4)]
+        };
+        let (a, b, t) = (rgb(&self.lornon_color), rgb(&self.lornon_blood_color), blood.clamp(0.0, 1.0));
+        let c = [0, 1, 2].map(|k| (a[k] + (b[k] - a[k]) * t).round() as u8);
+        format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
+    }
+}
+
+/// The sky over the field right now, from the host (the game's own moons
+/// and weather when it has them, [`crate::sky::GameSky`]): how full the
+/// moon (Liabo) is, 0 = new .. 1 = full, and the game hour it is highest;
+/// Lornon's the same (0 = not lit), and how crimson it has turned, 0..1;
+/// how much cloud covers the sky, 0 = clear .. 1 = overcast.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sky {
     pub moon: f32,
     pub clouds: f32,
+    pub moon_high: f32,
+    pub lornon: f32,
+    pub lornon_high: f32,
+    pub lornon_blood: f32,
 }
 
 impl Default for Sky {
+    /// A full moon highest at midnight, no Lornon, no cloud.
     fn default() -> Self {
-        Sky { moon: 1.0, clouds: 0.0 }
+        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0 }
     }
 }
 
-/// Where the moon is at `game_hour`, degrees: (azimuth, elevation), or
-/// None while it is down. It rises at 18:00 low on the left, is highest
-/// ([`MOON_PEAK_DEG`]) at midnight and sets at 06:00 low on the right,
-/// always on the viewer's side of the scene: azimuth 0 is straight behind
-/// the viewer, -90 screen-left, +90 screen-right.
-pub fn moon_position(game_hour: f32) -> Option<(f32, f32)> {
-    let s = (game_hour - MOON_RISE_HOUR).rem_euclid(24.0) / MOON_UP_HOURS;
+/// Where a moon highest at `high` (a game hour) is at `game_hour`, degrees:
+/// (azimuth, elevation), or None while it is down. It rises six hours
+/// before low on the left, is highest ([`MOON_PEAK_DEG`]) at `high` and
+/// sets six hours after low on the right, always on the viewer's side of
+/// the scene: azimuth 0 is straight behind the viewer, -90 screen-left,
+/// +90 screen-right.
+pub fn moon_arc(game_hour: f32, high: f32) -> Option<(f32, f32)> {
+    let s = (game_hour - (high - MOON_UP_HOURS / 2.0)).rem_euclid(24.0) / MOON_UP_HOURS;
     if !(0.0..=1.0).contains(&s) {
         return None;
     }
     let elevation = MOON_PEAK_DEG * (std::f32::consts::PI * s).sin();
     (elevation > 0.0).then_some((MOON_SWING_DEG * (2.0 * s - 1.0), elevation))
+}
+
+/// A full moon's arc ([`moon_arc`] highest at midnight): up at 18:00, down
+/// at 06:00.
+pub fn moon_position(game_hour: f32) -> Option<(f32, f32)> {
+    moon_arc(game_hour, 0.0)
 }
 
 pub const MOON_RISE_HOUR: f32 = 18.0;
@@ -556,12 +600,39 @@ pub const MOON_PEAK_DEG: f32 = 55.0;
 pub const MOON_SWING_DEG: f32 = 70.0;
 
 /// How much of a full moon's light reaches the field at `game_hour`, 0..1:
-/// its fullness, fading in over its first 12 degrees above the horizon,
-/// less what the clouds hold back (on average: they drift).
+/// its fullness, fading in over its first 12 degrees above the horizon and
+/// with the night (none by day, half at dusk and dawn -- a moon up by day
+/// lights nothing the sun does not), less what the clouds hold back (on
+/// average: they drift).
 pub fn moon_light(game_hour: f32, sky: &Sky) -> f32 {
-    let Some((_, elevation)) = moon_position(game_hour) else { return 0.0 };
+    moon_light_of(game_hour, sky.moon, sky.moon_high, sky.clouds)
+}
+
+/// [`moon_light`] for Lornon, as a share of a full Lornon's light.
+pub fn lornon_light(game_hour: f32, sky: &Sky) -> f32 {
+    moon_light_of(game_hour, sky.lornon, sky.lornon_high, sky.clouds)
+}
+
+fn moon_light_of(game_hour: f32, full: f32, high: f32, clouds: f32) -> f32 {
+    let Some((_, elevation)) = moon_arc(game_hour, high) else { return 0.0 };
     let t = (elevation / 12.0).clamp(0.0, 1.0);
-    sky.moon.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * (1.0 - 0.9 * sky.clouds.clamp(0.0, 1.0))
+    full.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * night_share(game_hour) * (1.0 - 0.9 * clouds.clamp(0.0, 1.0))
+}
+
+/// How much of the night it is at `game_hour`, 0..1: the time-of-day
+/// weights with night whole, dusk and dawn half, day none -- the share of
+/// the darkness a lit scene takes then.
+pub fn night_share(game_hour: f32) -> f32 {
+    vellum_light::phase_keyframes(game_hour, vellum_light::PhaseBoundaries::default())
+        .into_iter()
+        .map(|(p, w)| {
+            w * match p {
+                Phase::Night => 1.0,
+                Phase::Dawn | Phase::Dusk => 0.5,
+                Phase::Day => 0.0,
+            }
+        })
+        .sum()
 }
 
 /// How black the dark is beyond the lamps in a lit scene that does not set
@@ -737,7 +808,9 @@ impl SceneLighting {
         let outdoor = light.is_outdoor(outdoor_guess);
         let moon = match (sky, game_hour) {
             (Some(sky), Some(h)) if outdoor => {
-                moon_light(h, sky) * global.moon.lift.clamp(0.0, 1.0) * global.moon.strength.clamp(0.0, 1.0)
+                let m = &global.moon;
+                ((moon_light(h, sky) + lornon_light(h, sky) * m.lornon_strength.max(0.0)) * m.lift.clamp(0.0, 1.0) * m.strength.clamp(0.0, 1.0))
+                    .min(1.0)
             }
             _ => 0.0,
         };
@@ -907,8 +980,26 @@ key = \"#112233\"
         assert!(rise_az < -60.0 && set_az > 60.0 && rise_el < 10.0 && set_el < 10.0);
         let sky = Sky::default();
         assert!(moon_light(0.0, &sky) > 0.99 && moon_light(18.1, &sky) < 0.1 && moon_light(12.0, &sky) == 0.0);
-        assert!(moon_light(0.0, &Sky { moon: 0.5, clouds: 0.0 }) < 0.51);
-        assert!(moon_light(0.0, &Sky { moon: 1.0, clouds: 1.0 }) < 0.11, "overcast");
+        assert!(moon_light(0.0, &Sky { moon: 0.5, ..Sky::default() }) < 0.51);
+        assert!(moon_light(0.0, &Sky { clouds: 1.0, ..Sky::default() }) < 0.11, "overcast");
+    }
+
+    /// A waning moon runs later: highest at 06:00 when half full, up from
+    /// midnight to noon -- and by day it lights nothing. Lornon lights by
+    /// its own fullness and hour, and turns crimson.
+    #[test]
+    fn each_moon_keeps_its_own_hours() {
+        let waning = Sky { moon: 0.5, moon_high: 6.0, ..Sky::default() };
+        assert_eq!(moon_arc(23.0, 6.0), None);
+        let (az, el) = moon_arc(6.0, 6.0).unwrap();
+        assert!(az.abs() < 1e-3 && (el - MOON_PEAK_DEG).abs() < 1e-3);
+        assert!(moon_light(3.0, &waning) > 0.45, "up and dark at 03:00");
+        assert_eq!(moon_light(11.0, &waning), 0.0, "up by day, lighting nothing");
+        assert!((night_share(0.0) - 1.0).abs() < 1e-6 && night_share(12.0) == 0.0 && (night_share(19.0) - 0.5).abs() < 1e-6);
+        let lornon = Sky { moon: 0.0, lornon: 1.0, lornon_high: 22.0, ..Sky::default() };
+        assert!(lornon_light(22.0, &lornon) > 0.99 && moon_light(22.0, &lornon) == 0.0);
+        let m = MoonLight::default();
+        assert_eq!((m.lornon_colour(0.0), m.lornon_colour(1.0)), (LORNON_COLOUR.to_string(), LORNON_BLOOD_COLOUR.to_string()));
     }
 
     /// Where nothing lights the moon itself, it lifts the darkness evenly;
@@ -925,9 +1016,9 @@ key = \"#112233\"
         let (dark, moonlit) = (night_exposure(None), night_exposure(Some(&Sky::default())));
         let want = DARKNESS_FLOOR.powf(OUTDOOR_DARKNESS * (1.0 - MOON_LIFT)) / DARKNESS_FLOOR.powf(OUTDOOR_DARKNESS);
         assert!((moonlit / dark - want).abs() < 1e-3, "{moonlit} / {dark} vs {want}");
-        let clouded = night_exposure(Some(&Sky { moon: 1.0, clouds: 1.0 }));
+        let clouded = night_exposure(Some(&Sky { clouds: 1.0, ..Sky::default() }));
         assert!(clouded < moonlit && clouded > dark);
-        assert_eq!(night_exposure(Some(&Sky { moon: 0.0, clouds: 0.0 })), dark, "a new moon");
+        assert_eq!(night_exposure(Some(&Sky { moon: 0.0, ..Sky::default() })), dark, "a new moon");
         let mut inside = scene.clone();
         inside.light.as_mut().unwrap().outdoor = Some(false);
         let lit = |sky| SceneLighting::resolve_under(&inside, &desert(), &global, Some(0.0), None, sky).unwrap().keyframes[0].1.as_ref().map(|e| e.exposure);

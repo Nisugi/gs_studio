@@ -336,9 +336,16 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   (how much of it reaches the field). `SceneLighting::resolve_under(..,
   sky)` is `resolve` with the moon lifting the darkness evenly, for a
   frontend that does not light the moon itself; `resolve` is unchanged.
+  `Sky` also carries when the moon is highest (`moon_high`) and Lornon
+  (`lornon`, `lornon_high`, `lornon_blood`), a struct literal adds them or
+  `..Sky::default()` (the default is the old one moon, full, highest at
+  midnight, no Lornon); `moon_arc(hour, high)` is the arc for any moon
+  (`moon_position` is it at midnight), `lornon_light` Lornon's share, and
+  both moons light nothing by day, half at dusk and dawn (`night_share`).
+  `MoonLight` gains `lornon_color`, `lornon_blood_color`, `lornon_strength`.
 
 Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`;
-+1 for the default darkness; +2 for the moon.
++1 for the default darkness; +3 for the moons.
 
 ### 6.11 Puppet textures
 
@@ -422,3 +429,29 @@ A normal sheet is the texture's relief for the frontend's lighting
 `with_outfits` / `with_skin` build a set by hand. Embedded skins grow the
 binary by one sheet per creature (a few hundred KB each), so a full set of
 627 belongs in the pool rather than compiled in.
+
+### 6.18 `src/sky.rs` -- the game's own sky
+
+`GameSky` takes in the game's text as it comes -- `read_line` (a `look
+<moon>` reply, `read_moon_look`, or a weather line, `read_weather_line`)
+and `set_room` (`RoomMeta::parse` of `<roommeta>`) -- and answers
+`sky(unix, month, day, hour)` (a `lighting::Sky`: the moons), `weather(unix)`
+(what falls and how hard, `Precip`), `gust(unix)` and `outdoor()`. The
+host keeps one per session.
+
+* Liabo: `liabo_age` from the Lich script `astrolabe` (a 7.449-day orbit,
+  full for a twelfth of it from 2021-05-08 22:32 UTC); Tilaok and Makiri
+  follow it. Lornon: a 30-day cycle ("around a full month", The Elanthian
+  Moons) anchored by the last `look lornon`, `LORNON_SEEN` until one;
+  `lornon_blood` from Eorgaen (December) 20 to the 31st.
+* A moon is highest at midnight when full and runs later as it wanes, like
+  ours (`MoonAge::highest`): fitted to three looks, not documented.
+* `RoomMeta`: `CLIMATES` / `TERRAINS` name the codes (the Lich logs' rooms
+  paired with the map's names); `weather` 0 = clear, 2 = snowing (the only
+  non-zero value seen, the Hinterwilds). `Precip::of_climate` says what a
+  room's weather is when no line has.
+* The words -- look phrases and weather lines -- are data:
+  `data/sky.toml`, compiled in (`SHIPPED_SKY_TOML`).
+
+Tests: +7 in `sky::tests`, built on the looks and lines as the game sent
+them.
