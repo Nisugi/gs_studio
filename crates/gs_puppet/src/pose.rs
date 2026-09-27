@@ -891,7 +891,12 @@ impl Puppet {
                     None => r,
                 }
             } else {
-                axis_angle(s.hinge, bp.bend.get(s.chain_index - 1).copied().unwrap_or(0.0))
+                let r = axis_angle(s.hinge, bp.bend.get(s.chain_index - 1).copied().unwrap_or(0.0));
+                // a forearm drawn flared out is straightened at the elbow ([`Puppet::arm_hang`])
+                match self.arm_hang.iter().find(|(k, _)| *k == i).filter(|_| hang) {
+                    Some((_, h)) => mul_mm(h, &r),
+                    None => r,
+                }
             };
             let local = Xf::about(s.head, r);
             let parent = s.parent.map(|p| xf[p]).unwrap_or(root);

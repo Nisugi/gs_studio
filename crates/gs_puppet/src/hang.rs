@@ -33,7 +33,7 @@ pub const TRUNK_CLIP_HANG_DEG: f32 = 12.0;
 pub const CLAVICLE_LIFT_DEG: f32 = 35.0;
 /// How far an arm is raised before the collarbone starts to lift, degrees
 /// from hanging straight down.
-const CLAVICLE_FROM_DEG: f32 = 30.0;
+const CLAVICLE_FROM_DEG: f32 = 60.0;
 
 /// A drawn arm this much further out than it can hang is turned down.
 pub const HANG_MIN_DEG: f32 = 6.0;
@@ -106,24 +106,27 @@ impl Puppet {
         let in_arms: HashSet<usize> = arms.iter().flat_map(|&a| self.subtree(a)).collect();
         // what an arm must clear: body that is not an arm or what hangs from one
         let body: Vec<usize> = (0..segs.len()).filter(|&i| segs[i].kind.is_body() && !in_arms.contains(&i)).collect();
-        let mut out = Vec::new();
+        // how far out a direction is across the body: 0 = straight down
+        let out_deg = |v: V3| v[0].abs().atan2(-v[1]).to_degrees();
+        let mut found: Vec<(usize, f32, f32, Option<(usize, M3)>)> = Vec::new();
         for &a in &arms {
             let chain = self.subtree(a);
             let pivot = segs[a].head;
-            let end = chain
-                .iter()
-                .flat_map(|&k| segs[k].stations.iter().map(|st| st.c))
-                .max_by(|p, q| len(sub(*p, pivot)).total_cmp(&len(sub(*q, pivot))));
-            let Some(end) = end else { continue };
-            let v = sub(end, pivot);
+            let v = sub(segs[a].tail, pivot);
             if v[1] >= 0.0 {
                 continue;
             }
             let side = if v[0] < 0.0 { -1.0 } else { 1.0 };
-            // how far out the drawn arm is: 0 = straight down, across the body
-            let drawn = v[0].abs().atan2(-v[1]).to_degrees();
+            let drawn = out_deg(v);
+            // The forearm is drawn flared out at the elbow (an A-pose's
+            // carrying angle): hanging, it comes into line with the upper
+            // arm, as the pose files' arms hang, hands by the thighs.
+            let forearm = chain.iter().copied().find(|&k| segs[k].bone == segs[a].bone && segs[k].chain_index == 1).and_then(|f| {
+                let flare = out_deg(sub(segs[f].tail, segs[f].head)) - drawn;
+                (flare.abs() > 1.0).then(|| (f, axis_angle([0.0, 0.0, 1.0], -side * flare)))
+            });
             let turned = |deg: f32| axis_angle([0.0, 0.0, 1.0], side * (deg - drawn));
-            let clear = |r: &M3| self.arm_clear(&chain, a, pivot, r, side, &body);
+            let clear = |r: &M3| self.arm_clear(&chain, a, pivot, r, side, &body, forearm.as_ref());
             if !clear(&turned(drawn)) {
                 continue;
             }
@@ -131,8 +134,22 @@ impl Puppet {
             while hang - STEP_DEG > 0.0 && clear(&turned(hang - STEP_DEG)) {
                 hang -= STEP_DEG;
             }
+            found.push((a, side, hang, forearm));
+        }
+        // A pair hangs alike, at the angle both clear: one arm's depth is
+        // often guessed, the other's placed, and they found different angles.
+        let stem = |b: &str| b.strip_suffix("_r").or_else(|| b.strip_suffix("_l")).map(str::to_owned);
+        let mut out = Vec::new();
+        for &(a, side, hang, forearm) in &found {
+            let hang = found
+                .iter()
+                .filter(|(b, ..)| stem(&segs[*b].bone).is_some() && stem(&segs[*b].bone) == stem(&segs[a].bone))
+                .map(|(_, _, h, _)| *h)
+                .fold(hang, f32::max);
+            let drawn = out_deg(sub(segs[a].tail, segs[a].head));
             if drawn - hang >= HANG_MIN_DEG {
-                out.push((a, turned(hang)));
+                out.push((a, axis_angle([0.0, 0.0, 1.0], side * (hang - drawn))));
+                out.extend(forearm);
             }
         }
         out
@@ -140,8 +157,11 @@ impl Puppet {
 
     /// Does the arm `chain` (first segment `root`), turned by `r` about
     /// `pivot`, keep [`CLEAR_FT`] from every `body` station beside it?
-    fn arm_clear(&self, chain: &[usize], root: usize, pivot: V3, r: &M3, side: f32, body: &[usize]) -> bool {
+    #[allow(clippy::too_many_arguments)]
+    fn arm_clear(&self, chain: &[usize], root: usize, pivot: V3, r: &M3, side: f32, body: &[usize], forearm: Option<&(usize, M3)>) -> bool {
         let segs = &self.segments;
+        // the forearm and what hangs from it, straightened at the elbow first
+        let straight: Vec<usize> = forearm.map(|(f, _)| self.subtree(*f)).unwrap_or_default();
         let along = |k: usize, c: V3| {
             let (h, t) = (segs[k].head, segs[k].tail);
             let d = sub(t, h);
@@ -152,12 +172,15 @@ impl Puppet {
         let reach = |w: f32, d: f32, aw: V3, ad: V3, k: usize| ((w * aw[k]).powi(2) + (d * ad[k]).powi(2)).sqrt();
         for &k in chain {
             let s = &segs[k];
-            let (aw, ad) = (mul_mv(r, s.axis_w), mul_mv(r, s.axis_d));
+            let pre = forearm.filter(|_| straight.contains(&k));
+            let first = |v: V3| pre.map_or(v, |(_, m)| mul_mv(m, v));
+            let at = |c: V3| pre.map_or(c, |(f, m)| add(segs[*f].head, mul_mv(m, sub(c, segs[*f].head))));
+            let (aw, ad) = (mul_mv(r, first(s.axis_w)), mul_mv(r, first(s.axis_d)));
             for (j, st) in s.stations.iter().enumerate() {
                 if k == root && (j < s.bare || along(k, st.c) < SHOULDER_SHARE) {
                     continue;
                 }
-                let c = add(pivot, mul_mv(r, sub(st.c, pivot)));
+                let c = add(pivot, mul_mv(r, sub(at(st.c), pivot)));
                 let inner = side * c[0] - reach(st.w, st.d, aw, ad, 0);
                 let (z, zr) = (c[2], reach(st.w, st.d, aw, ad, 2));
                 for &b in body {
@@ -208,7 +231,7 @@ mod tests {
     #[test]
     fn raised_arms_hang_for_posing() {
         let p = humanoid(true);
-        assert_eq!(p.arm_hang.len(), 2, "both arms");
+        assert_eq!(p.arm_hang.iter().filter(|(k, _)| p.segments[*k].chain_index == 0).count(), 2, "both arms");
         let drawn = p.pose_as_drawn(&Pose::default());
         let posed = p.pose(&Pose::default());
         for bone in ["arm_r", "arm_l"] {
@@ -228,9 +251,10 @@ mod tests {
         // a hanging arm keeps clear of the body
         let hung: Vec<(usize, M3)> = p.arm_hang.clone();
         let body: Vec<usize> = (0..p.segments.len()).filter(|&i| p.segments[i].kind.is_body() && !hung.iter().any(|(a, _)| p.subtree(*a).contains(&i))).collect();
-        for (a, r) in &hung {
+        for (a, r) in hung.iter().filter(|(k, _)| p.segments[*k].chain_index == 0) {
             let side = if p.segments[*a].tail[0] < 0.0 { -1.0 } else { 1.0 };
-            assert!(p.arm_clear(&p.subtree(*a), *a, p.segments[*a].head, r, side, &body));
+            let forearm = hung.iter().find(|(f, _)| p.segments[*f].parent == Some(*a) && p.segments[*f].chain_index == 1).copied();
+            assert!(p.arm_clear(&p.subtree(*a), *a, p.segments[*a].head, r, side, &body, forearm.as_ref()));
         }
         // arms up: the collarbone lifts the shoulder, the arm points where
         // the pose says all the same
@@ -248,6 +272,6 @@ mod tests {
         assert!(d1.iter().zip(d2).all(|(x, y)| (x - y).abs() < 1e-3), "{d1:?} vs {d2:?}");
         // the baked puppet keeps the flag, and its arms hang the same
         let back = Puppet::from_baked(&p.to_baked()).unwrap();
-        assert!(back.arms_raised && back.arm_hang.len() == 2);
+        assert!(back.arms_raised && back.arm_hang == p.arm_hang);
     }
 }

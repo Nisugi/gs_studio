@@ -227,7 +227,7 @@ fn check(family: &str, outlines: &Outlines, data: &Path, out: &Path) {
     };
     println!("  puppet: {} segments, {:.2} ft tall", puppet.segments.len(), puppet.height);
     // arms drawn raised, and where they hang for posing (gs_puppet::hang)
-    for (i, r) in &puppet.arm_hang {
+    for (i, r) in puppet.arm_hang.iter().filter(|(i, _)| puppet.segments[*i].chain_index == 0) {
         let s = &puppet.segments[*i];
         let out = |v: [f32; 3]| v[0].abs().atan2(-v[1]).to_degrees();
         let v = [s.tail[0] - s.head[0], s.tail[1] - s.head[1], s.tail[2] - s.head[2]];

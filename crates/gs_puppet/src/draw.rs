@@ -293,12 +293,13 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
     let turn = rot_y(look.yaw);
     let (hidden, stump) = severed(posed, look);
     let body = if look.dead { BODY_DEAD } else { look.body };
+    // rings near a joint share its bend (`joints.rs`)
+    let shares = crate::joints::shares(puppet);
     let mut out = Vec::new();
-    for (i, (s, x)) in puppet.segments.iter().zip(&posed.xf).enumerate() {
+    for (i, s) in puppet.segments.iter().enumerate() {
         if hidden[i] {
             continue;
         }
-        let (aw, ad) = (mul_mv(&turn, x.dir(s.axis_w)), mul_mv(&turn, x.dir(s.axis_d)));
         let rank = look.rank(s.part.as_deref());
         // Tint falls off toward an end that borders ANOTHER part, so a
         // wounded chest is a patch, not a bib with a hard edge.
@@ -335,6 +336,9 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
             .map(|(k, (st, red))| {
                 let t = k as f32 / (n.max(2) - 1) as f32;
                 let ease = |e: f32, u: f32| e + (1.0 - e) * (u * 2.0).clamp(0.0, 1.0);
+                // a stump's added rings go with the last ring measured
+                let x = posed.ring_xf(i, shares[i].get(k.min(s.stations.len().saturating_sub(1))).copied().flatten());
+                let (aw, ad) = (mul_mv(&turn, x.dir(s.axis_w)), mul_mv(&turn, x.dir(s.axis_d)));
                 SurfRing {
                     c: mul_mv(&turn, x.point(st.c)),
                     a: scale(aw, st.w),
