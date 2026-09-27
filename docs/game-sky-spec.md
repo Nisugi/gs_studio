@@ -13,7 +13,7 @@ three things from its host:
 
 | Input | Type | What it holds |
 | --- | --- | --- |
-| `LightClock.sky` | `gs_field::lighting::Sky` | Liabo's fullness and the hour it is highest; Lornon's the same, plus how crimson; cloud cover |
+| `LightClock.sky` | `gs_field::lighting::Sky` | Liabo's fullness and the hour it is highest; Lornon's the same, plus how crimson; cloud cover; the way the view faces; how far through the year it is (which constellations are up) |
 | `set_weather(ctx, ..)` | `gs_field_egui::field_weather::Weather` | what falls, how hard (0..1), the wind (-1..1) |
 | `LightClock.outdoor_guess` | `Option<bool>` | outdoors or in (indoors is dark without a lamp: darkness 0.88) |
 

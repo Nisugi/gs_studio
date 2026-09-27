@@ -605,12 +605,17 @@ pub struct Sky {
     /// the west, and stand where that puts them round the viewer. None =
     /// the viewer-side arc ([`moon_arc`]).
     pub facing: Option<f32>,
+    /// How far through the year the night is, 0..1 from Lormesta 1
+    /// ([`crate::stars::year_turn`]): which constellations are up, and
+    /// where. None = no stars drawn.
+    pub year: Option<f32>,
 }
 
 impl Default for Sky {
-    /// A full moon highest at midnight, no Lornon, no cloud, no facing.
+    /// A full moon highest at midnight, no Lornon, no cloud, no facing, no
+    /// stars.
     fn default() -> Self {
-        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0, facing: None }
+        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0, facing: None, year: None }
     }
 }
 

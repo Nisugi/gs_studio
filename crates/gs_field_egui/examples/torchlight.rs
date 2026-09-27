@@ -263,6 +263,7 @@ impl Scene {
             detail: std::env::var("TORCHLIGHT_DETAIL").ok().and_then(|v| v.parse().ok()).unwrap_or(field_gpu::DETAIL),
             // the prototype has none: TORCHLIGHT_BOUNCE=0 to compare with it
             bounce: std::env::var("TORCHLIGHT_BOUNCE").ok().and_then(|v| v.parse().ok()).unwrap_or(field_gpu::BOUNCE),
+            stars: Default::default(),
         }
     }
 }

@@ -593,7 +593,19 @@ across -- and differ only in the right-hand panel:
   drifting cloud, only where the backdrop is sky (its depth map says
   where) and behind whatever stands in front. The camera looks level, so a
   disc's height is squeezed into the sky the frame shows; where it is
-  round you, and the light it throws, are true.
+  round you, and the light it throws, are true. With the game's moons on,
+  the stars come out too (the GPU pass): the 25 constellations of the
+  official *Constellations of the Northern Sky*, their stars traced from
+  its drawings (`gs_field::stars`, `data/constellations.toml`) -- Krrska's
+  eight points, Arachne's red hourglass, the Dragonfly's twin nebulae.
+  Each is highest at midnight in the middle of its own two weeks of the
+  year and two hours earlier a month on, and keeps the moons' arc: up in
+  the east, highest in the south, down in the west, leaning as the sky
+  turns it (upright at its highest); faint stars between them turn with
+  the sky. Only by night (a little at dusk and dawn), paled by a bright
+  Liabo, hidden by the drifting cloud and by the painting's own clouds,
+  only on the backdrop's sky. Like the discs, a figure's height is
+  squeezed into the frame's sky; its shape is its own.
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).

@@ -138,6 +138,7 @@ pub fn moons_sky(liabo: MoonAge, lornon: MoonAge, month: u32, day: u32, game_hou
         lornon: lornon.lit().max(eve),
         lornon_high: lornon.highest(),
         lornon_blood: lornon_blood(month, day, game_hour),
+        year: Some(crate::stars::year_turn(month, day, game_hour)),
         ..Sky::default()
     }
 }

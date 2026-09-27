@@ -44,6 +44,7 @@ pub mod lighting;
 pub mod scenes;
 pub mod skins;
 pub mod sky;
+pub mod stars;
 pub mod solver;
 
 pub use condition::Condition;

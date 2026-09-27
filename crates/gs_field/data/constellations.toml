@@ -1,0 +1,400 @@
+# The constellations of Elanthia's northern sky, from "Constellations of
+# the Northern Sky", an official GemStone IV document on the GemStone IV
+# wiki, which lists them by season. Each is the constellation of its two
+# weeks of the year (`first` .. `last`, [month, day], Lormesta = 1 ..
+# Eorgaen = 12, the months ours).
+#
+# The stars were traced from the document's drawings: x, y from the
+# drawing's centre, -1..1, y up; `size` how big the drawing makes one
+# (1 = an ordinary star); `color` its colour there. `nebulae`: the glows
+# the drawings paint, an ellipse each (`long`, `wide`: half its axes;
+# `angle` of the long one, degrees, counter-clockwise from x).
+
+[[constellation]]
+name = "The Handmaidens"
+first = [3, 21]
+last = [4, 3]
+look = "Zelia's ladies-in-waiting, clustered tightly"
+stars = [
+  { x = -0.157, y = -0.158, size = 1.05, color = "#fff6d1" },
+  { x = -0.345, y = 0.400, size = 1.04, color = "#f1fff2" },
+  { x = 0.172, y = 0.149, size = 1.04, color = "#fbff82" },
+  { x = 0.421, y = -0.004, size = 0.65, color = "#fdffd1" },
+  { x = 0.650, y = 0.472, size = 0.57, color = "#fffdf0" },
+  { x = -0.698, y = 0.302, size = 0.57, color = "#fffbf3" },
+]
+
+[[constellation]]
+name = "The Hammer"
+first = [4, 4]
+last = [4, 18]
+look = "Eonak's, five stars in the shape of a T"
+stars = [
+  { x = -0.700, y = -0.743, size = 1.00, color = "#fcffc2" },
+  { x = -0.108, y = 0.036, size = 0.96, color = "#ff181b" },
+  { x = -0.446, y = 0.687, size = 0.68, color = "#fdffe0" },
+  { x = 0.468, y = -0.316, size = 0.68, color = "#ffffdb" },
+  { x = 0.254, y = 0.458, size = 0.60, color = "#fdf8ff" },
+]
+
+[[constellation]]
+name = "The Cat's Paw"
+first = [4, 19]
+last = [5, 2]
+look = "Andelas's: the paw and claws of a giant feline"
+stars = [
+  { x = -0.579, y = 0.430, size = 1.12, color = "#fffee7" },
+  { x = -0.023, y = 0.291, size = 1.10, color = "#fffde7" },
+  { x = 0.440, y = -0.273, size = 1.09, color = "#fffee6" },
+  { x = 0.239, y = 0.808, size = 1.05, color = "#fffee4" },
+  { x = 0.508, y = 0.418, size = 1.05, color = "#fffee9" },
+  { x = -0.377, y = 0.117, size = 0.78, color = "#fffcd0" },
+  { x = -0.554, y = -0.205, size = 0.76, color = "#feffcd" },
+  { x = 0.274, y = -0.145, size = 0.73, color = "#feffd3" },
+  { x = -0.484, y = -0.708, size = 0.68, color = "#fdffc3" },
+  { x = -0.255, y = 0.785, size = 0.65, color = "#fffeca" },
+  { x = 0.549, y = -0.548, size = 0.65, color = "#fdffd2" },
+]
+
+[[constellation]]
+name = "The Mistress of Adoration"
+first = [5, 3]
+last = [5, 17]
+look = "the leaf, stalk and petals of Oleani's flower"
+stars = [
+  { x = 0.272, y = -0.710, size = 1.12, color = "#feff9b" },
+  { x = -0.088, y = -0.187, size = 1.10, color = "#ffad38" },
+  { x = 0.676, y = -0.125, size = 1.07, color = "#ffafae" },
+  { x = -0.237, y = -0.623, size = 0.98, color = "#fffee7" },
+  { x = -0.506, y = 0.747, size = 0.65, color = "#fffdde" },
+  { x = -0.731, y = -0.165, size = 0.63, color = "#fffcd0" },
+  { x = -0.602, y = -0.603, size = 0.63, color = "#fcffe9" },
+  { x = 0.550, y = 0.690, size = 0.60, color = "#fcffe6" },
+  { x = -0.141, y = -0.819, size = 0.57, color = "#feffe3" },
+]
+
+[[constellation]]
+name = "The Rat"
+first = [5, 18]
+last = [6, 1]
+look = "three stars form the tail"
+stars = [
+  { x = 0.734, y = -0.012, size = 1.20, color = "#fffdee" },
+  { x = 0.575, y = -0.371, size = 1.09, color = "#ffa62d" },
+  { x = -0.029, y = -0.313, size = 1.02, color = "#ddfff2" },
+  { x = 0.220, y = 0.458, size = 1.00, color = "#ffffd2" },
+  { x = -0.403, y = 0.383, size = 0.57, color = "#fdffda" },
+  { x = -0.712, y = -0.187, size = 0.53, color = "#feffd9" },
+  { x = 0.040, y = -0.440, size = 0.50, color = "#fffdd0" },
+]
+
+[[constellation]]
+name = "The Dragonfly"
+first = [6, 2]
+last = [6, 15]
+look = "twin nebulae ripple through its wings"
+stars = [
+  { x = -0.309, y = 0.575, size = 0.50, color = "#faffd1" },
+  { x = 0.280, y = 0.305, size = 0.98, color = "#faffec" },
+  { x = 0.010, y = -0.094, size = 0.50, color = "#fff9c0" },
+  { x = 0.287, y = -0.069, size = 0.50, color = "#ffdac7" },
+  { x = 0.686, y = 0.165, size = 0.50, color = "#ffecd2" },
+  { x = -0.569, y = -0.302, size = 0.50, color = "#ffdecd" },
+  { x = -0.466, y = -0.463, size = 0.50, color = "#ffbec0" },
+]
+nebulae = [
+  { x = 0.430, y = 0.195, long = 0.450, wide = 0.168, angle = 33, color = "#ff89f5" },
+  { x = -0.309, y = -0.262, long = 0.416, wide = 0.168, angle = 30, color = "#f989ff" },
+]
+
+[[constellation]]
+name = "The First"
+first = [6, 16]
+last = [6, 30]
+look = "the First Drake, Ka'lethas; a faint purple nebula in its head"
+stars = [
+  { x = -0.371, y = 0.297, size = 1.09, color = "#fffc70" },
+  { x = 0.166, y = 0.363, size = 1.07, color = "#fcffee" },
+  { x = 0.018, y = -0.441, size = 1.07, color = "#ff251c" },
+  { x = 0.543, y = -0.024, size = 1.04, color = "#feffae" },
+  { x = -0.553, y = -0.253, size = 1.04, color = "#dffff9" },
+  { x = -0.364, y = 0.043, size = 1.02, color = "#feff70" },
+  { x = -0.430, y = 0.549, size = 1.00, color = "#ff211c" },
+  { x = 0.346, y = 0.136, size = 1.00, color = "#ebfff3" },
+  { x = 0.004, y = -0.038, size = 0.98, color = "#ffa52e" },
+  { x = -0.291, y = -0.475, size = 0.98, color = "#fffdf5" },
+  { x = -0.336, y = -0.339, size = 0.94, color = "#ffb733" },
+  { x = -0.660, y = 0.131, size = 0.71, color = "#ffe9de" },
+  { x = -0.590, y = 0.092, size = 0.71, color = "#ffefe5" },
+  { x = 0.404, y = 0.610, size = 0.65, color = "#fffedd" },
+  { x = -0.852, y = 0.030, size = 0.65, color = "#fff5de" },
+  { x = -0.715, y = 0.270, size = 0.60, color = "#ffe3d0" },
+  { x = -0.183, y = -0.138, size = 0.60, color = "#ffffd8" },
+  { x = 0.568, y = -0.258, size = 0.60, color = "#fffcf1" },
+  { x = -0.230, y = -0.668, size = 0.60, color = "#fffee7" },
+  { x = -0.702, y = -0.415, size = 0.57, color = "#ffffd3" },
+  { x = 0.772, y = 0.599, size = 0.53, color = "#ffffd6" },
+]
+nebulae = [
+  { x = -0.705, y = 0.208, long = 0.268, wide = 0.148, angle = 35, color = "#9c73ff" },
+]
+
+[[constellation]]
+name = "Jastev's Crystal"
+first = [7, 1]
+last = [7, 14]
+look = "four stars in the ball, four in the base"
+stars = [
+  { x = -0.330, y = -0.540, size = 1.15, color = "#ff271f" },
+  { x = 0.279, y = 0.801, size = 1.07, color = "#fffdfb" },
+  { x = 0.682, y = -0.138, size = 1.04, color = "#fffdf0" },
+  { x = -0.150, y = -0.869, size = 1.04, color = "#efffdf" },
+  { x = 0.301, y = -0.829, size = 0.68, color = "#ffffd4" },
+  { x = 0.353, y = -0.547, size = 0.63, color = "#fffecc" },
+  { x = -0.417, y = -0.743, size = 0.63, color = "#fffecb" },
+  { x = -0.550, y = 0.545, size = 0.60, color = "#fefffb" },
+]
+
+[[constellation]]
+name = "The Huntress"
+first = [7, 15]
+last = [7, 29]
+look = "the single star Krrska, brighter than any other, with exactly eight points"
+points = 8
+stars = [
+  { x = -0.119, y = 0.364, size = 2.20, color = "#fffeea", name = "Krrska" },
+]
+
+[[constellation]]
+name = "The Guardian"
+first = [7, 30]
+last = [8, 13]
+look = "always just behind the Huntress; its head star is Apparea"
+stars = [
+  { x = 0.185, y = -0.447, size = 1.07, color = "#f8ff9e" },
+  { x = 0.248, y = 0.466, size = 1.00, color = "#ff9573" },
+  { x = -0.170, y = 0.463, size = 0.96, color = "#ffe1a6" },
+  { x = -0.629, y = 0.861, size = 0.85, color = "#a2c2ff" },
+  { x = -0.002, y = 0.651, size = 0.78, color = "#ff341e", name = "Apparea" },
+  { x = 0.107, y = 0.662, size = 0.57, color = "#f7ff8f" },
+  { x = 0.072, y = 0.174, size = 0.50, color = "#fdffcd" },
+  { x = -0.226, y = -0.007, size = 0.50, color = "#fcffc1" },
+  { x = 0.208, y = -0.854, size = 0.50, color = "#f9ffd8" },
+  { x = -0.179, y = -0.374, size = 0.50, color = "#ffffd9" },
+]
+
+[[constellation]]
+name = "The Sun God"
+first = [8, 14]
+last = [8, 27]
+look = "Phoen's, a wide sunburst"
+stars = [
+  { x = 0.005, y = 0.022, size = 1.09, color = "#fcffb0" },
+  { x = 0.810, y = 0.458, size = 0.65, color = "#fffee3" },
+  { x = -0.848, y = 0.154, size = 0.63, color = "#ffffce" },
+  { x = -0.395, y = -0.704, size = 0.50, color = "#ff3c2f" },
+]
+
+[[constellation]]
+name = "The Wagon"
+first = [8, 28]
+last = [9, 11]
+look = "four stars the body, one the yoke"
+stars = [
+  { x = -0.325, y = 0.023, size = 1.05, color = "#fffdef" },
+  { x = 0.468, y = 0.692, size = 1.00, color = "#fffdf1" },
+  { x = 0.756, y = 0.587, size = 0.63, color = "#f6ffdd" },
+  { x = -0.905, y = -0.347, size = 0.63, color = "#f2ff6b" },
+  { x = -0.591, y = 0.154, size = 0.57, color = "#feffdf" },
+]
+
+[[constellation]]
+name = "The Queen of Enlightenment"
+first = [9, 12]
+last = [9, 25]
+look = "five stars patterned like a W"
+stars = [
+  { x = 0.422, y = 0.451, size = 0.91, color = "#ffbb4d" },
+  { x = -0.350, y = -0.261, size = 0.89, color = "#fffffb" },
+  { x = 0.049, y = 0.422, size = 0.57, color = "#ffffff" },
+  { x = 0.328, y = -0.415, size = 0.53, color = "#ffffff" },
+  { x = -0.649, y = 0.260, size = 0.50, color = "#f2ff6d" },
+]
+
+[[constellation]]
+name = "The Trident"
+first = [9, 26]
+last = [10, 10]
+look = "Charl's: a star per tine, one the base, two the handle"
+stars = [
+  { x = 0.461, y = -0.413, size = 1.04, color = "#fdffea" },
+  { x = 0.166, y = -0.715, size = 1.04, color = "#fffff1" },
+  { x = -0.552, y = 0.801, size = 1.02, color = "#fffef7" },
+  { x = -0.110, y = 0.211, size = 0.98, color = "#ff5653" },
+  { x = 0.514, y = -0.752, size = 0.94, color = "#ff6a30" },
+  { x = 0.201, y = -0.348, size = 0.60, color = "#fffec2" },
+]
+
+[[constellation]]
+name = "The Jackal"
+first = [10, 11]
+last = [10, 25]
+look = "the Bringer of Terror's jackal head"
+stars = [
+  { x = -0.580, y = 0.363, size = 1.07, color = "#ff4a33" },
+  { x = -0.412, y = 0.734, size = 1.00, color = "#fffef3" },
+  { x = -0.124, y = 0.183, size = 0.65, color = "#fffeda" },
+  { x = 0.293, y = -0.098, size = 0.63, color = "#fffed2" },
+  { x = 0.536, y = -0.531, size = 0.60, color = "#2403ff" },
+  { x = 0.582, y = 0.813, size = 0.57, color = "#fffec9" },
+  { x = -0.349, y = -0.589, size = 0.50, color = "#feffd7" },
+]
+
+[[constellation]]
+name = "The Gryphon"
+first = [10, 26]
+last = [11, 8]
+look = "a rampant gryphon: each leg, the tail, the beak and one eye"
+stars = [
+  { x = -0.495, y = 0.612, size = 0.85, color = "#ebff5a" },
+  { x = -0.047, y = -0.630, size = 0.85, color = "#f6efff" },
+  { x = 0.184, y = -0.737, size = 0.82, color = "#ff4636" },
+  { x = -0.008, y = 0.819, size = 0.60, color = "#fffee7" },
+  { x = 0.557, y = -0.074, size = 0.57, color = "#fffddf" },
+  { x = -0.485, y = -0.677, size = 0.57, color = "#fffdeb" },
+  { x = -0.638, y = 0.402, size = 0.53, color = "#fbffda" },
+]
+
+[[constellation]]
+name = "The Lady of the Green"
+first = [11, 9]
+last = [11, 23]
+look = "Imaera's stalk of wheat, six stars of a curiously golden colour"
+stars = [
+  { x = -0.270, y = 0.418, size = 1.36, color = "#fdff22" },
+  { x = 0.177, y = -0.240, size = 1.35, color = "#f4ff46" },
+  { x = -0.108, y = 0.129, size = 1.12, color = "#ffb328" },
+  { x = -0.085, y = -0.373, size = 0.73, color = "#ffda5c" },
+  { x = 0.240, y = -0.809, size = 0.65, color = "#f0ff89" },
+  { x = -0.055, y = 0.424, size = 0.53, color = "#fbffc1" },
+]
+
+[[constellation]]
+name = "The Bat"
+first = [11, 24]
+last = [12, 7]
+look = "four stars per scalloped wing"
+stars = [
+  { x = 0.070, y = -0.206, size = 1.00, color = "#fffee8" },
+  { x = 0.074, y = 0.272, size = 0.93, color = "#fffdec" },
+  { x = -0.503, y = 0.044, size = 0.93, color = "#fffef2" },
+  { x = 0.821, y = 0.786, size = 0.89, color = "#feffec" },
+  { x = 0.516, y = -0.350, size = 0.89, color = "#fffef1" },
+  { x = -0.145, y = -0.187, size = 0.57, color = "#fffeeb" },
+  { x = -0.235, y = 0.091, size = 0.50, color = "#ffffe6" },
+  { x = -0.885, y = 0.333, size = 0.50, color = "#ffffe8" },
+]
+
+[[constellation]]
+name = "The Paladin"
+first = [12, 8]
+last = [12, 22]
+look = "Voln's four-star shield"
+stars = [
+  { x = 0.005, y = -0.753, size = 1.07, color = "#f9ff61" },
+  { x = 0.366, y = -0.454, size = 1.05, color = "#fffcfb" },
+  { x = -0.499, y = 0.352, size = 0.71, color = "#fffede" },
+  { x = 0.455, y = 0.766, size = 0.63, color = "#fbffd7" },
+]
+
+[[constellation]]
+name = "The Gates"
+first = [12, 23]
+last = [1, 6]
+look = "the outline of Lorminstra's gates"
+stars = [
+  { x = -0.300, y = 0.104, size = 1.10, color = "#ffefa2" },
+  { x = -0.291, y = 0.580, size = 1.04, color = "#a0ff82" },
+  { x = 0.420, y = 0.144, size = 0.98, color = "#ff9584" },
+  { x = -0.284, y = -0.810, size = 0.98, color = "#fffb9d" },
+  { x = 0.186, y = 0.377, size = 0.96, color = "#b0feff" },
+  { x = 0.211, y = 0.111, size = 0.63, color = "#fdffca" },
+  { x = -0.479, y = -0.782, size = 0.63, color = "#ffffcb" },
+  { x = 0.425, y = -0.775, size = 0.60, color = "#ffffd7" },
+  { x = -0.020, y = 0.832, size = 0.57, color = "#feffd0" },
+  { x = 0.221, y = -0.830, size = 0.57, color = "#fbffe4" },
+  { x = -0.471, y = 0.300, size = 0.53, color = "#fcffcd" },
+]
+
+[[constellation]]
+name = "Grandfather's Eye"
+first = [1, 7]
+last = [1, 20]
+look = "Fash'lo'nae's slit-pupilled eye"
+stars = [
+  { x = 0.474, y = -0.661, size = 1.05, color = "#feffcd" },
+  { x = -0.136, y = 0.364, size = 0.96, color = "#fff0e6" },
+  { x = -0.712, y = 0.699, size = 0.93, color = "#feffdb" },
+  { x = -0.370, y = -0.790, size = 0.91, color = "#f0ffe2" },
+  { x = 0.168, y = 0.134, size = 0.57, color = "#feffce" },
+  { x = -0.140, y = -0.244, size = 0.57, color = "#feffd2" },
+  { x = 0.771, y = -0.187, size = 0.53, color = "#feffe7" },
+]
+
+[[constellation]]
+name = "The Ur-Daemon"
+first = [1, 21]
+last = [2, 4]
+look = "a six-fingered talon"
+stars = [
+  { x = -0.245, y = 0.675, size = 1.10, color = "#ffff9f" },
+  { x = -0.056, y = -0.138, size = 1.10, color = "#fdff9c" },
+  { x = 0.206, y = 0.652, size = 1.07, color = "#ff5227" },
+  { x = -0.203, y = 0.384, size = 1.05, color = "#ffffeb" },
+  { x = -0.525, y = -0.507, size = 1.05, color = "#ffffee" },
+  { x = 0.382, y = 0.426, size = 0.91, color = "#dfffd6" },
+  { x = -0.528, y = 0.867, size = 0.63, color = "#ffffca" },
+  { x = 0.140, y = 0.225, size = 0.60, color = "#ffffbd" },
+  { x = 0.717, y = 0.390, size = 0.53, color = "#fffecc" },
+  { x = -0.625, y = -0.053, size = 0.53, color = "#ffffb7" },
+  { x = 0.682, y = -0.234, size = 0.50, color = "#feffcd" },
+  { x = -0.357, y = -0.878, size = 0.50, color = "#f8ffb3" },
+]
+
+[[constellation]]
+name = "Arachne"
+first = [2, 5]
+last = [2, 18]
+look = "five oddly red stars in an hourglass"
+stars = [
+  { x = -0.795, y = -0.153, size = 1.55, color = "#ffc6d2" },
+  { x = -0.044, y = 0.033, size = 1.02, color = "#ff6449" },
+  { x = 0.065, y = 0.830, size = 0.96, color = "#ff5856" },
+  { x = 0.733, y = 0.199, size = 0.96, color = "#ff2a4e" },
+  { x = -0.093, y = -0.765, size = 0.50, color = "#f9ffdd" },
+]
+
+[[constellation]]
+name = "The Unicorn"
+first = [2, 19]
+last = [3, 5]
+look = "Ronan's steed; one of the brightest stars tips its horn"
+stars = [
+  { x = -0.511, y = 0.690, size = 1.63, color = "#fefff9" },
+  { x = -0.365, y = -0.064, size = 1.05, color = "#fdff93" },
+  { x = 0.168, y = 0.650, size = 0.60, color = "#fffdf5" },
+  { x = 0.357, y = -0.069, size = 0.50, color = "#ff4452" },
+]
+
+[[constellation]]
+name = "The Spire"
+first = [3, 6]
+last = [3, 20]
+look = "rising through the night sky"
+stars = [
+  { x = 0.277, y = -0.704, size = 1.02, color = "#ff4425" },
+  { x = -0.023, y = 0.893, size = 0.76, color = "#fffdfc" },
+  { x = -0.245, y = -0.056, size = 0.76, color = "#ffc359" },
+  { x = -0.323, y = -0.747, size = 0.76, color = "#fffdc5" },
+  { x = 0.172, y = 0.175, size = 0.73, color = "#fffddd" },
+]

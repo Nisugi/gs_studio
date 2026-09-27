@@ -29,6 +29,9 @@ use egui_wgpu::wgpu;
 pub const MAX_LAYERS: usize = 32;
 /// Local lights one pass adds.
 pub const MAX_LIGHTS: usize = 8;
+/// Stars and nebulae the pass draws on the sky ([`FieldStars`]).
+pub const MAX_STARS: usize = 64;
+pub const MAX_NEBULAE: usize = 4;
 /// Side of the creature atlas, pixels.
 pub const ATLAS_SIDE: u32 = 2048;
 /// Empty pixels round every atlas slot, so linear filtering never reads a
@@ -574,6 +577,53 @@ pub struct FieldFrame {
     /// what stands by it. One bounce, in screen space: the frame's direct
     /// light at a quarter of its size, gathered round each pixel.
     pub bounce: f32,
+    /// The stars on the sky (the backdrop's sky pixels, behind everything):
+    /// none by default.
+    pub stars: FieldStars,
+}
+
+/// The night sky's stars, placed on the stage (scene pixels): the
+/// constellations up now (`gs_field::stars`), their nebulae, and the faint
+/// stars between them, all under the drifting cloud.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FieldStars {
+    /// Only the first [`MAX_STARS`] are drawn.
+    pub stars: Vec<FieldStar>,
+    /// Only the first [`MAX_NEBULAE`] are drawn.
+    pub nebulae: Vec<FieldNebula>,
+    /// How much of them shows, 0 (none: nothing is drawn) .. 1.
+    pub light: f32,
+    /// How much of the sky the clouds cover, 0..1, and their drift (m/s
+    /// across, deeper): the moons' cloud.
+    pub clouds: f32,
+    pub drift: [f32; 2],
+    /// How far the faint stars have turned with the sky, scene pixels.
+    pub turn_px: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldStar {
+    /// Scene pixels.
+    pub at: [f32; 2],
+    pub radius: f32,
+    /// Points drawn on it (Krrska's eight), 0 = none.
+    pub points: f32,
+    /// Linear.
+    pub colour: [f32; 3],
+    pub brightness: f32,
+}
+
+/// A glow on the sky, an ellipse: scene pixels, half its axes, the long
+/// one's angle (radians, counter-clockwise on the screen).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldNebula {
+    pub at: [f32; 2],
+    pub long: f32,
+    pub wide: f32,
+    pub angle: f32,
+    /// Linear.
+    pub colour: [f32; 3],
+    pub brightness: f32,
 }
 
 /// The stage's [`FieldFrame::bounce`].
@@ -616,7 +666,7 @@ impl FieldFrame {
 }
 
 /// Floats in the uniform block (field_gpu.wgsl `Field`).
-const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS + 4;
+const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS + 4 + 8 + MAX_STARS * 8 + MAX_NEBULAE * 12;
 /// Floats in the shader's `Weather`.
 const WEATHER_FLOATS: usize = 28;
 
@@ -677,6 +727,29 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
         u.extend([rgb[0], rgb[1], rgb[2], 0.0]);
     }
     u.extend([frame.bounce.max(0.0), BOUNCE_RADIUS_M, BOUNCE_DOWN, 0.0]);
+    let s = &frame.stars;
+    let (stars, nebulae) = (&s.stars[..s.stars.len().min(MAX_STARS)], &s.nebulae[..s.nebulae.len().min(MAX_NEBULAE)]);
+    u.extend([s.light.clamp(0.0, 1.0), s.clouds.clamp(0.0, 1.0), s.drift[0], s.drift[1]]);
+    u.extend([stars.len() as f32, nebulae.len() as f32, s.turn_px, 0.0]);
+    for i in 0..MAX_STARS {
+        match stars.get(i) {
+            Some(st) => {
+                u.extend([st.at[0], st.at[1], st.radius.max(0.1), st.points]);
+                u.extend([st.colour[0], st.colour[1], st.colour[2], st.brightness]);
+            }
+            None => u.extend([0.0; 8]),
+        }
+    }
+    for i in 0..MAX_NEBULAE {
+        match nebulae.get(i) {
+            Some(n) => {
+                u.extend([n.at[0], n.at[1], n.long.max(0.1), n.wide.max(0.1)]);
+                u.extend([n.angle.cos(), n.angle.sin(), 0.0, 0.0]);
+                u.extend([n.colour[0], n.colour[1], n.colour[2], n.brightness]);
+            }
+            None => u.extend([0.0; 12]),
+        }
+    }
     debug_assert_eq!(u.len(), UNIFORM_FLOATS);
     u
 }
@@ -2006,9 +2079,10 @@ mod tests {
             weather: FieldWeather::default(),
             detail: DETAIL,
             bounce: BOUNCE,
+            stars: FieldStars::default(),
         };
         let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], &vec![[-0.5, 2.0]; MAX_LAYERS], false);
-        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16 + 16, "the WGSL struct's size");
+        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16 + 16 + 32 + MAX_STARS * 32 + MAX_NEBULAE * 48, "the WGSL struct's size");
         assert_eq!((u[14], u[15]), (MAX_LAYERS as f32, MAX_LIGHTS as f32));
         assert_eq!(&u[16..20], &[0.0, 0.0, 1264.0, 848.0], "the backdrop's place");
         // the first MAX_LAYERS are written, the rest fall off

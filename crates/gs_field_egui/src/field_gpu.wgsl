@@ -45,6 +45,17 @@ struct Weather {
     rain_tint: vec4<f32>,  // the rain's colour, rgb linear (white; blood)
 };
 
+// The night sky's stars (FieldStars), placed on the stage: scene px.
+struct Star {
+    at: vec4<f32>,     // x, y, radius, points drawn on it (0 = none)
+    col: vec4<f32>,    // rgb linear, brightness
+};
+struct Nebula {
+    at: vec4<f32>,     // x, y, half its long axis, half its wide one
+    axis: vec4<f32>,   // the long axis (cos, sin)
+    col: vec4<f32>,    // rgb linear, brightness
+};
+
 struct Field {
     size: vec4<f32>,   // scene w, h, target is sRGB (1 = write linear), view
     cam: vec4<f32>,    // f, cx, cy, camera height (m)
@@ -55,6 +66,10 @@ struct Field {
     lights: array<Light, 8>,
     weather: Weather,
     bounce: vec4<f32>, // strength (0 = none), gather radius (m), scene px per bounce texel
+    sky: vec4<f32>,    // how much of the stars shows (0 = none), cloud cover, cloud drift across, deeper (m/s)
+    sky_n: vec4<f32>,  // stars, nebulae, how far the faint stars have turned (scene px)
+    stars: array<Star, 64>,
+    nebulae: array<Nebula, 4>,
 };
 
 // One piece of the frame.
@@ -796,6 +811,78 @@ fn disc_at(uv: vec2<f32>, aa: f32, age: f32) -> vec2<f32> {
     let s = select(-xt - uv.x, uv.x - xt, fract(age) < 0.5);
     return vec2<f32>(inside, smoothstep(-0.06, 0.06, s));
 }
+// ---- the stars (U.sky): the constellations up now, their nebulae and the
+// faint stars between them, on sky pixels only, under the drifting cloud
+// (the moons' own) and not on the painting's clouds.
+// How clear the sky is along `dir`, 0..1: where the ray meets the moons'
+// cloud deck; low near the horizon, the cloud's average.
+fn sky_cloud(dir: vec3<f32>) -> f32 {
+    let c = U.sky.y;
+    if (c <= 0.001) { return 1.0; }
+    if (c >= 0.999) { return 0.0; }
+    let up = U.up.xyz;
+    let rise = dot(dir, up);
+    let Q = dir * ((CLOUD_H - U.cam.w) / max(rise, 0.02));
+    let deeper = vec3<f32>(0.0, up.z, -up.y);
+    let uv = (vec2<f32>(Q.x, dot(Q, deeper)) - U.sky.zw * U.up.w) / CLOUD_SCALE;
+    let thr = 0.47 + 0.56 * (c - 0.5);
+    return mix(1.0 - 0.9 * c, smoothstep(thr - 0.05, thr + 0.05, fbm(uv)), smoothstep(0.02, 0.06, rise));
+}
+fn star_sky(px: vec2<f32>, alb: vec3<f32>) -> vec3<f32> {
+    let shown = U.sky.x;
+    if (shown <= 0.0) { return vec3<f32>(0.0); }
+    // a painted cloud (pale, grey, bright) hides them; open sky does not
+    let hi = max(max(alb.r, alb.g), alb.b);
+    let grey = min(min(alb.r, alb.g), alb.b) / max(hi, 1e-4);
+    let painted = smoothstep(0.6, 0.9, grey) * smoothstep(0.12, 0.4, dot(alb, LUM));
+    let k = shown * sky_cloud(normalize(ray(px))) * (1.0 - painted);
+    if (k <= 0.002) { return vec3<f32>(0.0); }
+    let t = U.up.w;
+    var o = vec3<f32>(0.0);
+    let nn = u32(U.sky_n.y);
+    for (var i = 0u; i < nn; i = i + 1u) {
+        let N = U.nebulae[i];
+        let d = px - N.at.xy;
+        let u = dot(d, N.axis.xy) / N.at.z;
+        let v = dot(d, vec2<f32>(-N.axis.y, N.axis.x)) / N.at.w;
+        let r2 = u * u + v * v;
+        if (r2 > 4.0) { continue; }
+        // a wash, not a disc: its brightness wanders across it
+        let wisp = 0.4 + 1.1 * fbm(px * 0.06 + N.at.xy);
+        o = o + N.col.rgb * N.col.w * exp(-1.8 * r2) * wisp;
+    }
+    let ns = u32(U.sky_n.x);
+    for (var i = 0u; i < ns; i = i + 1u) {
+        let S = U.stars[i];
+        let d = px - S.at.xy;
+        let q = dot(d, d);
+        let r = S.at.z;
+        if (q > 64.0 * r * r) { continue; }
+        let twinkle = 0.85 + 0.15 * sin(t * 2.3 + f32(i) * 1.7);
+        let core = exp(-q / (r * r));
+        let glow = 0.18 * exp(-sqrt(q) / (1.8 * r));
+        var spikes = 0.0;
+        if (S.at.w >= 1.0) {
+            // Krrska: "always exactly eight points"
+            spikes = 0.9 * pow(abs(cos(0.5 * S.at.w * atan2(d.y, d.x))), 60.0) * exp(-sqrt(q) / (5.0 * r));
+        }
+        // a white-hot core in its own colour's glow
+        o = o + (mix(S.col.rgb, vec3<f32>(1.0), 0.55) * core * 1.4 + S.col.rgb * (glow + spikes)) * S.col.w * twinkle;
+    }
+    // the faint stars between, a few to a cell of a grid that turns with
+    // the sky
+    let g = (px + vec2<f32>(U.sky_n.z, 0.0)) / 4.0;
+    let cell = floor(g);
+    let h = hash12(cell);
+    if (h < 0.035) {
+        let at = cell + vec2<f32>(0.25 + 0.5 * hash12(cell + 17.3), 0.25 + 0.5 * hash12(cell + 41.9));
+        let d = (g - at) * 4.0;
+        let b = pow(hash12(cell + 7.7), 3.0);
+        let twinkle = 0.7 + 0.3 * sin(t * (1.0 + 60.0 * h) + 90.0 * h);
+        o = o + vec3<f32>(0.85, 0.9, 1.0) * (0.06 + 0.35 * b) * exp(-dot(d, d) / 0.35) * twinkle;
+    }
+    return o * k;
+}
 fn moon_discs(px: vec2<f32>) -> vec3<f32> {
     var o = vec3<f32>(0.0);
     let n_lights = u32(U.misc.w);
@@ -886,7 +973,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             col = col + alb_bg * Lt.col.rgb * Lt.col.w * (open + Lt.fall.w);
         }
         if (!light_only) {
-            col = col + moon_discs(px);
+            col = col + star_sky(px, alb_bg) + moon_discs(px);
         }
     }
     col = mix(col, s2l(bg_a.rgb) * 2.2, bg_l.a);

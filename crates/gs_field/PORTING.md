@@ -350,10 +350,23 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   bearing) and `moon_sky_arc(hour, high, facing)`: the moons rise due
   east, are highest due south and set due west, round the viewer; None
   keeps `moon_arc`'s viewer-side arc.
+  `Sky.year` (**a new field**: how far through the year the night is,
+  0..1 from Lormesta 1, `stars::year_turn`; None = no stars), set by
+  `sky::moons_sky` from its date.
   `MoonLight` gains `lornon_color`, `lornon_blood_color`, `lornon_strength`.
 
 Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`;
 +1 for the default darkness; +3 for the moons.
+
+`stars` (**a new module**, not in VellumFE): the 25 constellations of
+"Constellations of the Northern Sky", their stars traced from the
+document's drawings (`data/constellations.toml`, `constellations()`).
+Each is highest at midnight in the middle of its two weeks
+(`Constellation::highest(year)`), on the moons' arc
+(`constellations_up(hour, year, facing)` -> `Placed`: where its centre
+is, and how far the sky leans it, `tilt`); `star_light(hour, sky)` is how
+much of them shows (night, paled by a bright Liabo). Tests: +4 in
+`stars::tests`.
 
 ### 6.11 Puppet textures
 

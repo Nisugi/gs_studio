@@ -194,6 +194,21 @@ pub struct MoonNow {
     pub companion: bool,
 }
 
+/// The stars as the v2 pass draws them now ([`LightState::stars_now`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StarsNow {
+    /// How much of them shows, 0..1: the night, paled by a bright Liabo,
+    /// times the player's Lighting strength; the clouds are not in it.
+    pub light: f32,
+    /// How much of the sky the clouds cover, 0..1.
+    pub clouds: f32,
+    /// The constellations up now (`gs_field::stars`).
+    pub up: Vec<gs_field::stars::Placed>,
+    /// How far the sky has turned round the viewer, degrees: the faint
+    /// stars between the constellations drift with it.
+    pub turn: f32,
+}
+
 /// The moons' discs in the sky, angular radius, degrees: Liabo "very close"
 /// and the largest; Lornon large but far. Drawn bigger than a real moon
 /// looks: the stage is small.
@@ -427,6 +442,23 @@ impl LightState {
         [false, true].into_iter().filter_map(|lornon| self.moon_of(lornon)).collect()
     }
 
+    /// The stars over the scene now, for the v2 pass: None indoors, by
+    /// day, in an unlit scene, with lighting off, or when the sky has no
+    /// date to set them by ([`Sky::year`]).
+    pub fn stars_now(&self) -> Option<StarsNow> {
+        let (light, _) = self.scene.as_ref()?;
+        let hour = self.clock.game_hour?;
+        if self.clock.strength <= 0.0 || !light.is_outdoor(self.clock.outdoor_guess) {
+            return None;
+        }
+        let sky = &self.clock.sky;
+        let year = sky.year?;
+        let shown = gs_field::stars::star_light(hour, sky)? * self.clock.strength.clamp(0.0, 1.0);
+        // the sky turns a full circle a day, and a day further in a year
+        let turn = ((hour / 24.0 + year) * 360.0 - sky.facing.unwrap_or(180.0)).rem_euclid(360.0);
+        (shown > 0.0).then(|| StarsNow { light: shown, clouds: sky.clouds.clamp(0.0, 1.0), up: gs_field::stars::constellations_up(hour, year, sky.facing), turn })
+    }
+
     fn moon_of(&self, lornon: bool) -> Option<MoonNow> {
         let (light, _) = self.scene.as_ref()?;
         let hour = self.clock.game_hour?;
@@ -548,6 +580,7 @@ impl LightState {
             lornon_high: q(s.lornon_high),
             lornon_blood: q(s.lornon_blood),
             facing: s.facing,
+            year: s.year,
         };
         let sky = (!self.keep_pixels).then_some(&sky);
         let lit = SceneLighting::resolve_under(&scene, &auto, &global, hour, self.clock.outdoor_guess, sky)?;
@@ -1004,6 +1037,18 @@ mod tests {
         assert_eq!(both[1].colour, gs_field::lighting::LORNON_BLOOD_COLOUR);
         state.set_clock(clock(12.0, true));
         assert!(state.moon_now().is_none(), "down by day");
+        // the stars: only with a date; by night, half the band up
+        state.set_clock(clock(23.0, true));
+        assert!(state.stars_now().is_none(), "no date, no stars");
+        let dated = Sky { moon: 0.0, year: Some(gs_field::stars::year_turn(9, 27, 23.0)), facing: Some(180.0), ..Sky::default() };
+        state.set_clock(LightClock { sky: dated, ..clock(23.0, true) });
+        let stars = state.stars_now().expect("stars at 23:00");
+        assert!(stars.light > 0.9 && (11..=14).contains(&stars.up.len()), "{} up, light {}", stars.up.len(), stars.light);
+        let queen = gs_field::stars::constellations().iter().position(|c| c.name == "The Queen of Enlightenment").unwrap();
+        let q = stars.up.iter().find(|p| p.index == queen).expect("the Queen is up");
+        assert!((q.azimuth.abs() - 180.0).abs() < 15.0 && q.elevation > 50.0, "near her highest, ahead: {q:?}");
+        state.set_clock(LightClock { sky: dated, ..clock(12.0, true) });
+        assert!(state.stars_now().is_none(), "none by day");
         state.set_clock(clock(23.0, true));
         state.set_scene(Some(SceneLight { outdoor: Some(false), ..SceneLight::default() }), Some("scenes/test.png".into()));
         assert!(state.moon_now().is_none(), "none indoors");

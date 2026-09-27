@@ -818,6 +818,17 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     centre falls (a true circle of sky off to one side of the wide camera
     would project as an oval), lit to its phase, under the drifting cloud,
     with a glow.
+  - The stars. `FieldFrame.stars` (**a new field**, `FieldStars` with its
+    `FieldStar`s and `FieldNebula`s, placed on the stage in scene pixels;
+    `MAX_STARS`, `MAX_NEBULAE`; default: none) and the uniform block's
+    star section after `bounce`; `LightState::stars_now` / `StarsNow`
+    (**new**): the constellations up now when the sky has a date
+    (`Sky.year`), outdoors by night. The stage places each one's stars at
+    its own shape round its centre, the centre's height squeezed into the
+    frame's sky as a moon's disc is, leaning as the sky turns it; the
+    shader draws them, the nebulae and faint stars between on the sky
+    pixels, under the moons' drifting cloud and not on the painting's
+    clouds.
   - `creature_puppet`'s texture loader refuses a sheet or normal sheet
     stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
     puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`

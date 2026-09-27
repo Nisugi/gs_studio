@@ -749,6 +749,77 @@ fn moon_light(cam: &FieldCamera, moon: &crate::creature_light::MoonNow, wind: f3
 /// its highest.
 const DISC_SKY_SHARE: f32 = 0.8;
 
+/// How wide a constellation's drawing is on the sky, degrees (less in a
+/// frame with less sky: [`CONSTELLATION_SKY_SHARE`] of it at most).
+const CONSTELLATION_DEG: f32 = 16.0;
+const CONSTELLATION_SKY_SHARE: f32 = 0.9;
+/// An ordinary star's radius, scene pixels, and how bright it is (linear).
+const STAR_PX: f32 = 1.25;
+const STAR_POWER: f32 = 1.0;
+const NEBULA_POWER: f32 = 0.16;
+
+/// The stars as the pass draws them: each constellation up now where it is
+/// round the viewer, its height squeezed into the frame's sky as a moon's
+/// disc is ([`moon_light`]) -- at its highest, its top just under the
+/// frame's -- its figure at its own shape, leaning as the sky turns it;
+/// only what lands on the stage.
+fn star_field(cam: &FieldCamera, now: &crate::creature_light::StarsNow, wind: f32) -> field_gpu::FieldStars {
+    let up = cam.up();
+    let deeper = [0.0, up[2], -up[1]];
+    let top_deg = (cam.cy / cam.f.max(1e-3)).atan().to_degrees();
+    // scene pixels per unit of a drawing (-1..1 across)
+    let span = (CONSTELLATION_DEG).min(top_deg * CONSTELLATION_SKY_SHARE);
+    let unit = cam.f * (span / 2.0).to_radians().tan();
+    let all = gs_field::stars::constellations();
+    let (mut stars, mut nebulae) = (Vec::new(), Vec::new());
+    let on_stage = |p: [f32; 2], m: f32| p[0] > -m && p[0] < cam.size[0] + m && p[1] > -m && p[1] < cam.size[1] + m;
+    for placed in &now.up {
+        let Some(c) = all.get(placed.index) else { continue };
+        let (sa, ca) = placed.azimuth.to_radians().sin_cos();
+        let el = (placed.elevation / gs_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * (top_deg - span / 2.0).max(0.0);
+        let (se, ce) = el.to_radians().sin_cos();
+        let dir = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
+        if dir[2] < 0.2 {
+            continue;
+        }
+        let centre = [cam.cx + cam.f * dir[0] / dir[2], cam.cy + cam.f * dir[1] / dir[2]];
+        if !on_stage(centre, 1.5 * unit) {
+            continue;
+        }
+        // drawing (y up) to the screen (y down), turned by its lean
+        let (st, ct) = placed.tilt.to_radians().sin_cos();
+        let place = |x: f32, y: f32| [centre[0] + unit * (x * ct - y * st), centre[1] - unit * (x * st + y * ct)];
+        for s in &c.stars {
+            let at = place(s.x, s.y);
+            if on_stage(at, 8.0) {
+                let points = if s.name.is_some() && c.points > 0 { c.points as f32 } else { 0.0 };
+                stars.push(field_gpu::FieldStar { at, radius: STAR_PX * s.size.sqrt(), points, colour: hex_lin(&s.color), brightness: STAR_POWER * s.size * now.light });
+            }
+        }
+        for n in &c.nebulae {
+            nebulae.push(field_gpu::FieldNebula {
+                at: place(n.x, n.y),
+                long: unit * n.long,
+                wide: unit * n.wide,
+                angle: -(n.angle + placed.tilt).to_radians(),
+                colour: hex_lin(&n.color),
+                brightness: NEBULA_POWER * now.light,
+            });
+        }
+    }
+    // brightest first, so a full frame drops the faintest
+    stars.sort_by(|a, b| b.brightness.total_cmp(&a.brightness));
+    let drift = (CLOUD_DRIFT + CLOUD_WIND * wind.abs()) * if wind < 0.0 { -1.0 } else { 1.0 };
+    field_gpu::FieldStars {
+        stars,
+        nebulae,
+        light: now.light,
+        clouds: now.clouds,
+        drift: [drift, 0.2 * drift.abs()],
+        turn_px: now.turn.to_radians() * cam.f,
+    }
+}
+
 // ------------------------------------------------------------------ the stage
 
 thread_local! {
@@ -878,6 +949,7 @@ impl StageGpu {
             weather,
             detail: field_gpu::DETAIL,
             bounce: field_gpu::BOUNCE,
+            stars: cache.light.stars_now().map(|s| star_field(&camera, &s, wind)).unwrap_or_default(),
         };
         Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass, f })
     }
@@ -1284,6 +1356,44 @@ mod tests {
         let y = cam.cy + cam.f * d[1] / d[2];
         assert!(y > 0.0 && y < cam.cy, "in the sky, in the frame: row {y}");
         assert!((d[3] - 2.0f32.to_radians()).abs() < 1e-6 && (ahead.prop[3] - 1.3).abs() < 1e-6, "radius, phase + companion");
+    }
+
+    /// A constellation ahead and highest stands in the frame's sky at its
+    /// own shape, upright; rising on the left it leans left; one behind the
+    /// viewer is not drawn. Krrska keeps its eight points.
+    #[test]
+    fn the_stars_stand_in_the_frames_sky() {
+        let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
+        let all = gs_field::stars::constellations();
+        let huntress = all.iter().position(|c| c.name == "The Huntress").unwrap();
+        let hammer = all.iter().position(|c| c.name == "The Hammer").unwrap();
+        let now = |index: usize, azimuth: f32, elevation: f32, tilt: f32| crate::creature_light::StarsNow {
+            light: 1.0,
+            clouds: 0.2,
+            up: vec![gs_field::stars::Placed { index, azimuth, elevation, tilt }],
+            turn: 0.0,
+        };
+        let f = star_field(&cam, &now(huntress, 180.0, 55.0, 0.0), 0.0);
+        assert_eq!(f.stars.len(), 1);
+        let k = f.stars[0];
+        assert_eq!(k.points, 8.0, "Krrska");
+        assert!(k.at[1] > 0.0 && k.at[1] < cam.cy, "in the sky: {:?}", k.at);
+        // the Hammer upright: its drawing's shape, scaled, y flipped
+        let h = &all[hammer].stars;
+        let f = star_field(&cam, &now(hammer, 180.0, 40.0, 0.0), 0.0);
+        assert_eq!(f.stars.len(), h.len(), "all on the stage");
+        let unit = cam.f * (16.0f32.min((cam.cy / cam.f).atan().to_degrees() * 0.9) / 2.0).to_radians().tan();
+        let find = |x: f32, y: f32, stars: &[field_gpu::FieldStar]| stars.iter().any(|s| (s.at[0] - x).abs() < 1e-3 && (s.at[1] - y).abs() < 1e-3);
+        let c = [cam.cx, f.stars.iter().map(|s| s.at[1]).sum::<f32>() / f.stars.len() as f32 + unit * h.iter().map(|s| s.y).sum::<f32>() / h.len() as f32];
+        assert!(h.iter().all(|s| find(c[0] + unit * s.x, c[1] - unit * s.y, &f.stars)), "upright");
+        // leaning 30 degrees left: its top star's x moves left of where it was
+        let top = h.iter().max_by(|a, b| a.y.total_cmp(&b.y)).unwrap();
+        let leaned = star_field(&cam, &now(hammer, 180.0, 40.0, 30.0), 0.0);
+        let upright_top = c[0] + unit * top.x;
+        let (st, ct) = 30f32.to_radians().sin_cos();
+        let x = c[0] + unit * (top.x * ct - top.y * st);
+        assert!(x < upright_top && leaned.stars.iter().any(|s| (s.at[0] - x).abs() < 1e-3), "leans left");
+        assert!(star_field(&cam, &now(hammer, 0.0, 40.0, 0.0), 0.0).stars.is_empty(), "behind the viewer");
     }
 
     /// Each weather kind turns on its own parts; none is none.
