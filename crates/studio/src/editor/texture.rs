@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 use gs_puppet::{
     depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
-    Paintings, Puppet, Texture, UvLayout, MASK_PX, SHEET_SIDE,
+    Paintings, Puppet, Texture, UvLayout, LAYOUT_KEYWORD, MASK_PX, SHEET_SIDE,
 };
 use rig::{Outlines, View};
 use rig_bake::Mask;
@@ -185,6 +185,41 @@ pub fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<(), Str
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Stamp the PNG at `path` with the layout it was built for
+/// ([`UvLayout::signature`], a `tEXt` chunk under [`LAYOUT_KEYWORD`]): a
+/// sheet the same size but laid out for another rig is then told apart.
+fn stamp_layout(path: &Path, layout: &UvLayout) -> Result<(), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let stamped = gs_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &layout.signature()).ok_or_else(|| format!("{}: not a PNG", path.display()))?;
+    std::fs::write(path, stamped).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// The layout a sheet at `path` was stamped with, if any.
+pub fn layout_stamp(path: &Path) -> Option<String> {
+    gs_field::png_meta::read_text_bytes(&std::fs::read(path).ok()?, LAYOUT_KEYWORD)
+}
+
+/// Why the sheet (or normal sheet, or skin) at `path` cannot be worn by a
+/// figure laid out as `layout`: another size, or stamped for another
+/// layout. None: it fits -- or carries no stamp (built before sheets were
+/// stamped: its size is all there is to go by).
+pub fn stale_sheet(path: &Path, layout: &UvLayout) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    // IHDR, first after the signature: width and height, big-endian
+    if bytes.len() >= 24 {
+        let be = |i: usize| u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+        let (w, h) = (be(16), be(20));
+        if (w, h) != (layout.w, layout.h) {
+            return Some(format!("{name} is {w}x{h}, the pattern {}x{}", layout.w, layout.h));
+        }
+    }
+    match gs_field::png_meta::read_text_bytes(&bytes, LAYOUT_KEYWORD) {
+        Some(sig) if !layout.matches(&sig) => Some(format!("{name} was built for another layout of this rig")),
+        _ => None,
+    }
+}
+
 /// An 8-bit RGB or RGBA PNG as straight RGBA.
 pub fn read_png(path: &Path) -> Result<(usize, usize, Vec<u8>), String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -304,12 +339,14 @@ pub fn build_sheet_in(folder: &Path, d: &Dressed) -> Result<(PathBuf, usize), St
     let rgba = prefill(&d.puppet, &layout, &paintings);
     let path = folder.join(SHEET);
     write_png(&path, layout.w, layout.h, &rgba)?;
+    stamp_layout(&path, &layout)?;
     let [front_n, side_n, back_n] = read_paintings(folder, "_normal")?;
     let normal_path = folder.join(NORMAL_SHEET);
     if [&front_n, &side_n, &back_n].iter().any(|p| p.is_some()) {
         let maps = d.paintings(as_painting(&front_n), as_painting(&side_n), as_painting(&back_n));
         let normals = prefill_normals(&d.puppet, &layout, &maps);
         write_png(&normal_path, layout.w, layout.h, &normals)?;
+        stamp_layout(&normal_path, &layout)?;
     } else if normal_path.is_file() {
         std::fs::remove_file(&normal_path).map_err(|e| format!("{}: {e}", normal_path.display()))?;
     }
@@ -391,8 +428,11 @@ pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)>
 /// `skins/<family>/<creature>.png` (`gs_field::puppets::skin_file_name`),
 /// each with its normal sheet as `<creature>.normal.png` when it has one,
 /// and drop any there whose creature has no sheet (or normal sheet) any
-/// more. Returns how many skins were copied.
-pub fn ship_skins(data_root: &Path, family: &str, puppets: &Path) -> Result<usize, String> {
+/// more. With the family's saved `puppet`, a skin (or normal sheet) built
+/// for another layout of its creature's figure is not shipped -- and a copy
+/// already there is taken away -- and said in the second list. Returns how
+/// many skins were copied, and those refused.
+pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outlines: &Outlines, puppets: &Path) -> Result<(usize, Vec<String>), String> {
     let sheets = creature_sheets(data_root, family);
     let has_normal = |c: &str| sheets.iter().any(|(s, sheet)| s == c && sheet.with_file_name(NORMAL_SHEET).is_file());
     let into = puppets.join(gs_field::puppets::SKINS_DIR).join(family);
@@ -409,19 +449,37 @@ pub fn ship_skins(data_root: &Path, family: &str, puppets: &Path) -> Result<usiz
     }
     if sheets.is_empty() {
         let _ = std::fs::remove_dir(&into);
-        return Ok(0);
+        return Ok((0, Vec::new()));
     }
     std::fs::create_dir_all(&into).map_err(|e| format!("{}: {e}", into.display()))?;
+    let (mut shipped, mut refused) = (0, Vec::new());
     for (creature, sheet) in &sheets {
         let to = puppets.join(gs_field::puppets::skin_file_name(family, creature));
-        std::fs::copy(sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
         let normal = sheet.with_file_name(NORMAL_SHEET);
+        let normal_to = puppets.join(gs_field::puppets::skin_normal_file_name(family, creature));
+        // laid out for the creature's own figure: the family's, in its outfit
+        let layout = match puppet {
+            Some(p) => Some(UvLayout::fit(&Dressed::creature(data_root, p, outlines, family, creature)?.puppet, SHEET_SIDE)),
+            None => None,
+        };
+        if let Some(why) = layout.as_ref().and_then(|l| stale_sheet(sheet, l)) {
+            let _ = std::fs::remove_file(&to);
+            let _ = std::fs::remove_file(&normal_to);
+            refused.push(format!("{creature}: {why}"));
+            continue;
+        }
+        std::fs::copy(sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
+        shipped += 1;
         if normal.is_file() {
-            let to = puppets.join(gs_field::puppets::skin_normal_file_name(family, creature));
-            std::fs::copy(&normal, &to).map_err(|e| format!("{} -> {}: {e}", normal.display(), to.display()))?;
+            if let Some(why) = layout.as_ref().and_then(|l| stale_sheet(&normal, l)) {
+                let _ = std::fs::remove_file(&normal_to);
+                refused.push(format!("{creature}: {why}"));
+            } else {
+                std::fs::copy(&normal, &normal_to).map_err(|e| format!("{} -> {}: {e}", normal.display(), normal_to.display()))?;
+            }
         }
     }
-    Ok(sheets.len())
+    Ok((shipped, refused))
 }
 
 /// Put `<data>/outfits/kit.toml` and `outfits.toml` into `into` (the pool's
@@ -740,27 +798,30 @@ pub fn load_sheet(data_root: &Path, family: &str, puppet: &Puppet) -> Result<Opt
         return Ok(None);
     }
     let (w, h, rgba) = read_png(&path)?;
-    let mut texture = sheet_texture(puppet, w, h, rgba)?;
+    let mut texture = sheet_texture(puppet, w, h, rgba, layout_stamp(&path).as_deref())?;
     let normal = normal_sheet_path(data_root, family);
     if normal.is_file() {
-        let (nw, nh, normals) = read_png(&normal)?;
-        if (nw, nh) == (texture.layout.w, texture.layout.h) {
-            texture.normal = Some(normals);
-        } else {
-            return Err(format!("normal.png is {nw}x{nh} but this rig's pattern is {}x{}: build the sheet again", texture.layout.w, texture.layout.h));
+        if let Some(why) = stale_sheet(&normal, &texture.layout) {
+            return Err(format!("{why}: build the sheet again"));
         }
+        texture.normal = Some(read_png(&normal)?.2);
     }
     Ok(Some(texture))
 }
 
-/// Decoded sheet pixels as a texture for `puppet`, if the sizes agree.
-pub fn sheet_texture(puppet: &Puppet, w: usize, h: usize, rgba: Vec<u8>) -> Result<Texture, String> {
+/// Decoded sheet pixels as a texture for `puppet`, if the sizes agree and
+/// the layout it was stamped with (`stamp`, [`layout_stamp`]; None for a
+/// sheet built before stamps) is this puppet's.
+pub fn sheet_texture(puppet: &Puppet, w: usize, h: usize, rgba: Vec<u8>, stamp: Option<&str>) -> Result<Texture, String> {
     let layout = UvLayout::fit(puppet, SHEET_SIDE);
     if (w, h) != (layout.w, layout.h) {
         return Err(format!(
             "sheet.png is {w}x{h} but this rig's pattern is {}x{}: the rig changed since it was painted -- export and build again",
             layout.w, layout.h
         ));
+    }
+    if stamp.is_some_and(|s| !layout.matches(s)) {
+        return Err("sheet.png was built for another layout of this rig (it changed since, at the same size): build the sheet again".into());
     }
     Ok(Texture { layout, rgba, normal: None })
 }
@@ -820,6 +881,26 @@ mod tests {
         assert_eq!(count, 1);
         let tex = load_sheet(&data, "humanoid", &puppet).unwrap().expect("a sheet");
         assert!(tex.rgba.chunks_exact(4).any(|p| p[3] > 0 && p[0] > 150 && p[1] < 80), "the paint is on the sheet");
+        // stamped with its layout, which is this puppet's
+        let sheet = sheet_path(&data, "humanoid");
+        assert!(layout_stamp(&sheet).is_some_and(|s| tex.layout.matches(&s)));
+        assert_eq!(stale_sheet(&sheet, &tex.layout), None);
+        // the same size, stamped for a rig that has changed since: refused
+        let mut changed = puppet.clone();
+        for st in changed.segments.iter_mut().flat_map(|s| s.stations.iter_mut()) {
+            st.w *= 1.03;
+        }
+        let other = UvLayout::fit(&changed, SHEET_SIDE);
+        let (w, h, px) = read_png(&sheet).unwrap();
+        let bytes = std::fs::read(&sheet).unwrap();
+        std::fs::write(&sheet, gs_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &other.signature()).unwrap()).unwrap();
+        if (other.w, other.h) == (w, h) {
+            assert!(load_sheet(&data, "humanoid", &puppet).unwrap_err().contains("another layout"));
+        }
+        assert!(stale_sheet(&sheet, &tex.layout).is_some(), "stale however its size compares");
+        // a sheet from before stamps goes by its size
+        write_png(&sheet, w, h, &px).unwrap();
+        assert!(layout_stamp(&sheet).is_none() && load_sheet(&data, "humanoid", &puppet).is_ok());
 
         write_png(&sheet_path(&data, "humanoid"), 10, 10, &[0; 400]).unwrap();
         assert!(load_sheet(&data, "humanoid", &puppet).unwrap_err().contains("rig changed"));

@@ -281,8 +281,12 @@ without a normal sheet gets one from its own paint where it is worn
 blur of it, patch by patch -- as height, its slope along the body as the
 lean), so every painted form has relief with no extra file to ship; a
 normal sheet that is there wins. *Reload*
-re-reads them. A sheet laid out for an older rig (another size) is
-refused with a note. Save installs it beside the puppet as
+re-reads them. A sheet (and a normal sheet) carries the layout it was
+built for (`gs_puppet::UvLayout::signature`, in a `gs-uv-layout` PNG text
+chunk): one laid out for an older rig -- another size, or the same size
+with its paint in other places -- is refused with a note, and Save and
+Publish leave it out, naming it ("build again"); the game ignores it too.
+A sheet built before the stamp goes by its size. Save installs it beside the puppet as
 `<pool>/global/puppets/<family>.texture.png` (and `normal.png` as
 `<family>.normal.png`) and Publish ships them to `puppets/`; the stage's
 puppets wear them. Export also writes `marks.json`,

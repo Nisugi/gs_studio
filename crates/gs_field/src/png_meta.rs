@@ -30,13 +30,20 @@ pub fn read_embedded(path: &Path) -> Option<String> {
 /// In-memory form of [`read_embedded`], for callers holding zip entries
 /// rather than files (skin-pack validation).
 pub fn read_embedded_bytes(bytes: &[u8]) -> Option<String> {
+    read_text_bytes(bytes, KEYWORD)
+}
+
+/// The `tEXt` chunk under `keyword` in a PNG, if there is one (ADDITION,
+/// not in VellumFE: gs-studio's texture sheets carry their UV layout
+/// under `gs_puppet::LAYOUT_KEYWORD` this way).
+pub fn read_text_bytes(bytes: &[u8], keyword: &str) -> Option<String> {
     for (kind, data) in chunks(bytes)? {
         if kind != *b"tEXt" {
             continue;
         }
-        // tEXt: keyword, NUL, text (both Latin-1; ours is ASCII TOML).
+        // tEXt: keyword, NUL, text (both Latin-1; ours is ASCII).
         let nul = data.iter().position(|&b| b == 0)?;
-        if &data[..nul] == KEYWORD.as_bytes() {
+        if &data[..nul] == keyword.as_bytes() {
             return String::from_utf8(data[nul + 1..].to_vec()).ok();
         }
     }
@@ -61,26 +68,34 @@ pub fn write_embedded(path: &Path, meta: &str) -> anyhow::Result<()> {
 /// (skin-pack export bakes each PNG's sidecar in before zipping). None
 /// when the bytes are not a valid PNG.
 pub fn write_embedded_bytes(bytes: &[u8], meta: &str) -> Option<Vec<u8>> {
+    write_text_bytes(bytes, KEYWORD, meta)
+}
+
+/// Write (or replace) the `tEXt` chunk under `keyword` in PNG bytes, after
+/// IHDR; every other chunk, other text chunks included, passes through
+/// untouched. None when the bytes are not a valid PNG (ADDITION, see
+/// [`read_text_bytes`]).
+pub fn write_text_bytes(bytes: &[u8], keyword: &str, text: &str) -> Option<Vec<u8>> {
     let parsed = chunks(bytes)?;
-    let mut out = Vec::with_capacity(bytes.len() + meta.len() + 64);
+    let mut out = Vec::with_capacity(bytes.len() + text.len() + 64);
     out.extend_from_slice(&PNG_SIGNATURE);
     let mut inserted = false;
     for (kind, data) in parsed {
-        // Drop any existing vellum-meta chunk (replaced, never duplicated).
+        // Drop any existing chunk under this keyword (replaced, never duplicated).
         if kind == *b"tEXt" {
             if let Some(nul) = data.iter().position(|&b| b == 0) {
-                if &data[..nul] == KEYWORD.as_bytes() {
+                if &data[..nul] == keyword.as_bytes() {
                     continue;
                 }
             }
         }
         push_chunk(&mut out, &kind, data);
         if !inserted && kind == *b"IHDR" {
-            let mut text = Vec::with_capacity(KEYWORD.len() + 1 + meta.len());
-            text.extend_from_slice(KEYWORD.as_bytes());
-            text.push(0);
-            text.extend_from_slice(meta.as_bytes());
-            push_chunk(&mut out, b"tEXt", &text);
+            let mut chunk = Vec::with_capacity(keyword.len() + 1 + text.len());
+            chunk.extend_from_slice(keyword.as_bytes());
+            chunk.push(0);
+            chunk.extend_from_slice(text.as_bytes());
+            push_chunk(&mut out, b"tEXt", &chunk);
             inserted = true;
         }
     }

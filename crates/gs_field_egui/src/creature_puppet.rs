@@ -1332,14 +1332,18 @@ impl PuppetCache {
                 Ok(img) => {
                     let img = img.to_rgba8();
                     let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
-                    if (img.width() as usize, img.height() as usize) == (layout.w, layout.h) {
+                    // A sheet stamped with the layout it was built for must be
+                    // this one's (the same size can be laid out differently);
+                    // one from before stamps goes by its size.
+                    let built_for_this = |b: &[u8]| gs_field::png_meta::read_text_bytes(b, gs_puppet::LAYOUT_KEYWORD).is_none_or(|sig| layout.matches(&sig));
+                    if (img.width() as usize, img.height() as usize) == (layout.w, layout.h) && built_for_this(&bytes[..]) {
                         let normal = normal_bytes.and_then(|bytes| match image::load_from_memory(&bytes) {
                             Ok(n) => {
                                 let n = n.to_rgba8();
-                                if (n.width() as usize, n.height() as usize) == (layout.w, layout.h) {
+                                if (n.width() as usize, n.height() as usize) == (layout.w, layout.h) && built_for_this(&bytes[..]) {
                                     Some(n.into_raw())
                                 } else {
-                                    tracing::warn!("puppet '{family}': normal sheet is {}x{}, the texture {}x{}: ignored", n.width(), n.height(), layout.w, layout.h);
+                                    tracing::warn!("puppet '{family}': normal sheet ({}x{}) is not laid out for this puppet ({}x{}): ignored", n.width(), n.height(), layout.w, layout.h);
                                     None
                                 }
                             }
@@ -1355,7 +1359,7 @@ impl PuppetCache {
                         Some(Arc::new(gs_puppet::Texture { layout, rgba, normal }))
                     } else {
                         tracing::warn!(
-                            "puppet '{family}': texture is {}x{}, this puppet's sheet is {}x{} (painted for an older rig?)",
+                            "puppet '{family}': texture ({}x{}) is not laid out for this puppet ({}x{}; painted for an older rig?)",
                             img.width(),
                             img.height(),
                             layout.w,

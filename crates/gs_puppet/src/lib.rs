@@ -74,7 +74,7 @@ pub use prefill::{depth_guide, dressed_silhouette, prefill, project_view, puppet
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinSurface};
-pub use uv::{silhouette_template, Texture, UvLayout, SHEET_SIDE};
+pub use uv::{silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, SHEET_SIDE};
 pub use puppet::{plan_shift, side_for_plan, turned_head_up, Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]

@@ -458,3 +458,11 @@ host keeps one per session.
 
 Tests: +7 in `sky::tests`, built on the looks and lines as the game sent
 them.
+
+### 6.19 `png_meta`: text chunks by keyword
+
+`read_text_bytes(bytes, keyword)` / `write_text_bytes(bytes, keyword,
+text)` (**new functions**): any `tEXt` chunk, not only `vellum-meta`;
+`read_embedded_bytes` / `write_embedded_bytes` are them under `KEYWORD`,
+unchanged. gs-studio's texture sheets carry their UV layout under
+`gs_puppet::LAYOUT_KEYWORD` this way.

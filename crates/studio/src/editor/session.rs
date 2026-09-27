@@ -498,12 +498,18 @@ impl Session {
             copy_into(&self.rigs_dir().join(&name), &dir.join(sub))?;
             shipped.push(format!("{sub}/{name}"));
         }
+        // A sheet built for another layout of the rig (it changed since, at
+        // the same size) is not shipped: the game would smear its paint.
+        let saved = self.saved_puppet(&family);
+        let layout = saved.as_ref().map(|p| gs_puppet::UvLayout::fit(p, gs_puppet::SHEET_SIDE));
+        let mut refused = Vec::new();
         let sheets = [
             (super::texture::sheet_path(&self.data_root, &family), gs_field::puppets::texture_file_name(&family)),
             (super::texture::normal_sheet_path(&self.data_root, &family), gs_field::puppets::normal_file_name(&family)),
         ];
         for (sheet, published) in sheets {
-            if sheet.is_file() {
+            let stale = layout.as_ref().filter(|_| sheet.is_file()).and_then(|l| super::texture::stale_sheet(&sheet, l));
+            if sheet.is_file() && stale.is_none() {
                 let to = dir.join("puppets").join(&published);
                 std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
                 std::fs::copy(&sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
@@ -511,8 +517,10 @@ impl Session {
             } else {
                 take_away(dir.join("puppets").join(&published), format!("puppets/{published}"))?;
             }
+            refused.extend(stale);
         }
-        let skins = super::texture::ship_skins(&self.data_root, &family, &dir.join("puppets"))?;
+        let (skins, stale_skins) = super::texture::ship_skins(&self.data_root, &family, saved.as_ref(), &self.outlines, &dir.join("puppets"))?;
+        refused.extend(stale_skins);
         if skins > 0 {
             shipped.push(format!("{skins} creature skin(s)"));
         }
@@ -539,7 +547,18 @@ impl Session {
         if !removed.is_empty() {
             self.status += &format!("; removed {}", removed.join(", "));
         }
+        if !refused.is_empty() {
+            self.status += &format!("; NOT SHIPPED, build again: {}", refused.join("; "));
+        }
         Ok(dir)
+    }
+
+    /// The family's puppet as saved (`<data>/rigs/<family>.puppet.toml`):
+    /// what is installed and published, and what the game lays a sheet out
+    /// for.
+    fn saved_puppet(&self, family: &str) -> Option<Puppet> {
+        let text = std::fs::read_to_string(self.rigs_dir().join(Puppet::baked_file_name(family))).ok()?;
+        Puppet::from_baked_toml(&text).ok()
     }
 
     /// Write `<family>.rig.toml`, `<family>.png`, `<family>.toml` and (when
@@ -580,7 +599,12 @@ impl Session {
 
         if let Some(pool) = self.pool.clone() {
             match self.install_in_pool(&family, &pool) {
-                Ok(()) => notes.push("installed in the pool".into()),
+                Ok(refused) => {
+                    notes.push("installed in the pool".into());
+                    if !refused.is_empty() {
+                        notes.push(format!("NOT INSTALLED, build again: {}", refused.join("; ")));
+                    }
+                }
                 Err(e) => notes.push(format!("NOT INSTALLED IN THE POOL: {e}")),
             }
             if let Err(e) = self.install_poses() {
@@ -687,7 +711,9 @@ impl Session {
     /// its painted texture and its creatures' skins into
     /// `<pool>/global/puppets/` (removing what this family no longer has),
     /// then drop gs_field's caches so they are read again.
-    fn install_in_pool(&self, family: &str, pool: &Path) -> Result<(), String> {
+    /// Sheets built for another layout of the rig are not installed (and an
+    /// installed copy is taken away): the list says which.
+    fn install_in_pool(&self, family: &str, pool: &Path) -> Result<Vec<String>, String> {
         let global = pool.join("global");
         let files = self.shipped_files(family);
         if !files.iter().any(|(_, sub)| *sub == "puppets") {
@@ -698,22 +724,28 @@ impl Session {
         }
         // The painted texture rides beside the puppet (or goes with it), and
         // so do its creatures' skins.
+        let saved = self.saved_puppet(family);
+        let layout = saved.as_ref().map(|p| gs_puppet::UvLayout::fit(p, gs_puppet::SHEET_SIDE));
+        let mut refused = Vec::new();
         let sheets = [
             (super::texture::sheet_path(&self.data_root, family), gs_field::puppets::texture_file_name(family)),
             (super::texture::normal_sheet_path(&self.data_root, family), gs_field::puppets::normal_file_name(family)),
         ];
         for (sheet, name) in sheets {
             let installed = global.join("puppets").join(name);
-            if sheet.is_file() {
+            let stale = layout.as_ref().filter(|_| sheet.is_file()).and_then(|l| super::texture::stale_sheet(&sheet, l));
+            if sheet.is_file() && stale.is_none() {
                 std::fs::create_dir_all(global.join("puppets")).map_err(|e| e.to_string())?;
                 std::fs::copy(&sheet, &installed).map_err(|e| format!("{} -> {}: {e}", sheet.display(), installed.display()))?;
             } else {
                 let _ = std::fs::remove_file(&installed);
             }
+            refused.extend(stale);
         }
-        super::texture::ship_skins(&self.data_root, family, &global.join("puppets"))?;
+        let (_, stale_skins) = super::texture::ship_skins(&self.data_root, family, saved.as_ref(), &self.outlines, &global.join("puppets"))?;
+        refused.extend(stale_skins);
         crate::pool_dir::invalidate_caches();
-        Ok(())
+        Ok(refused)
     }
 }
 

@@ -26,6 +26,14 @@ use crate::puppet::Puppet;
 
 /// Blank sheet pixels between patches.
 const GAP_PX: f32 = 6.0;
+/// The PNG text chunk (`tEXt` keyword) a sheet, normal sheet or skin
+/// carries its layout's [`UvLayout::signature`] under.
+pub const LAYOUT_KEYWORD: &str = "gs-uv-layout";
+/// How far (sheet pixels) a layout may lie from a sheet's signature and
+/// still be the one the sheet was built for: a baked puppet file's rounding
+/// or another platform's arithmetic moves nothing this far; a rig edit that
+/// moves the paint does.
+pub const LAYOUT_SLACK_PX: f32 = 0.5;
 /// Samples round a ring when measuring arc length.
 const ARC_SAMPLES: usize = 48;
 
@@ -188,6 +196,52 @@ impl UvLayout {
     }
 
     /// The density at which the sheet's long side is about `side` pixels.
+    /// Where this layout puts paint, as text to carry in a sheet: its size,
+    /// and per patch its segment, box and seam, and per station its row, its
+    /// ring unrolled (its width on the sheet) and where a quarter, a half and
+    /// three quarters of the way round that ring fall across it -- all in
+    /// sheet pixels. Two layouts with the
+    /// same size can put paint in different places; [`UvLayout::matches`]
+    /// tells.
+    pub fn signature(&self) -> String {
+        let mut s = format!("uv1 {} {}", self.w, self.h);
+        for p in &self.patches {
+            let seam_px = p.seam.rem_euclid(TAU) / TAU * p.size[0];
+            s += &format!("|{} {:.2} {:.2} {:.2} {:.2} {:.2}", p.segment, p.origin[0], p.origin[1], p.size[0], p.size[1], seam_px);
+            for (k, (y, circumference)) in p.rows.iter().enumerate() {
+                let wide = circumference * self.px_per_ft;
+                let across = |f: f32| p.across(k, f * TAU) * wide;
+                s += &format!(";{:.2} {:.2} {:.2} {:.2} {:.2}", y, wide, across(0.25), across(0.5), across(0.75));
+            }
+        }
+        s
+    }
+
+    /// Whether this is the layout `signature` was taken from: the same
+    /// size, patches and stations, and every place within
+    /// [`LAYOUT_SLACK_PX`] of it.
+    pub fn matches(&self, signature: &str) -> bool {
+        let mine = self.signature();
+        let (a, b): (Vec<&str>, Vec<&str>) = (mine.split('|').collect(), signature.trim().split('|').collect());
+        if a.len() != b.len() || a[0] != b[0] {
+            return false;
+        }
+        let close = |x: &str, y: &str| {
+            let (xs, ys): (Vec<&str>, Vec<&str>) = (x.split_whitespace().collect(), y.split_whitespace().collect());
+            xs.len() == ys.len()
+                && xs.iter().zip(&ys).all(|(p, q)| match (p.parse::<f32>(), q.parse::<f32>()) {
+                    (Ok(p), Ok(q)) => (p - q).abs() <= LAYOUT_SLACK_PX,
+                    _ => false,
+                })
+        };
+        a[1..].iter().zip(&b[1..]).all(|(pa, pb)| {
+            let (ra, rb): (Vec<&str>, Vec<&str>) = (pa.split(';').collect(), pb.split(';').collect());
+            // the segment index must agree exactly; the rest within the slack
+            let seg = |r: &str| r.split_whitespace().next().map(str::to_owned);
+            ra.len() == rb.len() && seg(ra[0]) == seg(rb[0]) && ra.iter().zip(&rb).all(|(x, y)| close(x, y))
+        })
+    }
+
     pub fn fit(p: &Puppet, side: usize) -> UvLayout {
         let probe = UvLayout::new(p, 64.0);
         let long = probe.w.max(probe.h).max(1) as f32;
@@ -415,4 +469,37 @@ pub fn silhouette_template(mask: &rig_bake::Mask, mirror: bool, rgb: [u8; 3]) ->
         }
     }
     rgba
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn humanoid() -> Puppet {
+        Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+    }
+
+    /// A sheet's signature is its layout's: the puppet read back from its
+    /// own baked file lays out the same; a station made 5% wider moves the
+    /// paint and does not match -- at the same sheet size; nothing matches
+    /// a signature of another shape, or none.
+    #[test]
+    fn a_signature_tells_one_layout_from_another() {
+        let p = humanoid();
+        let layout = UvLayout::fit(&p, crate::SHEET_SIDE);
+        let sig = layout.signature();
+        assert!(sig.starts_with(&format!("uv1 {} {}", layout.w, layout.h)) && layout.matches(&sig));
+        let again = Puppet::from_baked_toml(&p.to_baked_toml().unwrap()).unwrap();
+        assert!(UvLayout::fit(&again, crate::SHEET_SIDE).matches(&sig), "a baked round trip lays out the same");
+        let mut wider = p.clone();
+        // the thickest station on the body
+        let (seg, st) = (0..wider.segments.len())
+            .flat_map(|i| (0..wider.segments[i].stations.len()).map(move |j| (i, j)))
+            .max_by(|a, b| p.segments[a.0].stations[a.1].w.total_cmp(&p.segments[b.0].stations[b.1].w))
+            .unwrap();
+        wider.segments[seg].stations[st].w *= 1.05;
+        let moved = UvLayout::fit(&wider, crate::SHEET_SIDE);
+        assert!(!moved.matches(&sig), "a wider station moves the paint");
+        assert!(!layout.matches("uv1 1 1") && !layout.matches(""));
+    }
 }

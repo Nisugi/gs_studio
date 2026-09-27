@@ -769,7 +769,29 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   there for a layer, premultiplied, as before. The cost stops growing with
   the window: a crowd with lamps and both moons at twice the art's size,
   5.29 -> 1.80 ms. `field_gpu::render_offscreen` (**a new function**)
-  reads a frame back without a window. `WeatherKind: From<gs_field::sky::Precip>`
+  reads a frame back without a window.
+- Fixes from the 2026-09-27 review (`docs/review-2026-09-27.md`):
+  - `field_gpu::AtlasPlan` (**a new type**): the atlas's shelf packing of
+    one frame's images, in push order, one slot per image. The stage admits
+    a layer only when the frame has one to spare and the plan has room --
+    before anything is committed, so a refused layer is drawn the old way.
+    A full atlas repacks exactly the frame's images in that order, so every
+    admitted one gets its slot (area-based admission let three 1024-square
+    images in where one fits, and the rest vanished). A refused placement
+    no longer moves the packing on. Each slot uploads with its gutter
+    cleared, so a repack cannot leave a neighbour's edge in it.
+  - A puppet's skin keeps its drawn contour and a boss's gold outline in
+    the pass (they had no surface, so no coverage): every pixel the skin
+    shows is in the layer, the outline unlit, at the body's depth.
+    `StageGpu::paint_skin` drops its `dead` argument: a dead skin is a
+    corpse's colour already (`gs_puppet`), so it takes no second tint.
+  - `field_lights::set_gpu` takes `Option<Vec<bool>>` (**changed
+    signature**): which scene lamps the pass lights
+    (`StageGpu::lamps_in_pass`). A lamp past `MAX_LIGHTS` keeps its old
+    flame and ground pool instead of vanishing.
+  - `creature_puppet`'s texture loader refuses a sheet or normal sheet
+    stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
+    puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`
   (**a new impl**): the game sky's weather as the stage draws it.
   `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
   brings, which the host adds to the sky's.

@@ -146,7 +146,9 @@ struct SheetFile {
     /// `<family>` or `<family>/<creature>`: whose sheet it is.
     who: String,
     serial: u64,
-    pixels: Result<Option<(usize, usize, std::sync::Arc<Vec<u8>>)>, String>,
+    /// Its pixels, and the layout it was stamped with when built (None for
+    /// a sheet from before stamps).
+    pixels: Result<Option<(usize, usize, std::sync::Arc<Vec<u8>>, Option<String>)>, String>,
 }
 
 /// What the document controls need to know about files on disk.
@@ -1058,7 +1060,7 @@ impl RigTool {
                 crate::editor::texture::creature_dir(&data_root, &family, &creature).join(crate::editor::texture::SHEET)
             };
             let pixels = if path.is_file() {
-                crate::editor::texture::read_png(&path).map(|(w, h, px)| Some((w, h, std::sync::Arc::new(px))))
+                crate::editor::texture::read_png(&path).map(|(w, h, px)| Some((w, h, std::sync::Arc::new(px), crate::editor::texture::layout_stamp(&path))))
             } else {
                 Ok(None)
             };
@@ -1077,9 +1079,8 @@ impl RigTool {
         };
         if want_texture && self.sheet_texture.as_ref().is_none_or(|(r, s, _)| *r != revision || *s != self.sheet_serial) {
             let made = match (self.sheet.as_ref().map(|s| &s.pixels), &figure) {
-                (Some(Ok(Some((w, h, px)))), Ok(puppet)) => {
-                    crate::editor::texture::sheet_texture(puppet, *w, *h, px.as_ref().clone()).map(|t| Some(std::sync::Arc::new(t)))
-                }
+                (Some(Ok(Some((w, h, px, stamp)))), Ok(puppet)) => crate::editor::texture::sheet_texture(puppet, *w, *h, px.as_ref().clone(), stamp.as_deref())
+                    .map(|t| Some(std::sync::Arc::new(t))),
                 _ => Ok(None),
             };
             self.sheet_texture = Some((revision, self.sheet_serial, made));
