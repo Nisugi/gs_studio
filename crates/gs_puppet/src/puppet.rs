@@ -140,6 +140,61 @@ const MEMBRANE_HALF_FT: f32 = 0.04;
 /// from that view: it stays a flat plate in the view's own plane.
 const MEMBRANE_EDGE_ON: f32 = 0.2;
 
+/// Inside the solid both silhouettes allow (the visual hull): the front
+/// silhouette at (x, y) and the side silhouette at (z, y).
+fn in_hull(front: &Mask, side: &Mask, p: V3) -> bool {
+    let at = |m: &Mask, x: f32, y: f32| {
+        let g = m.grid;
+        let (c, r) = (((x - g.min_x) * g.px_per_ft).floor(), ((g.max_y - y) * g.px_per_ft).floor());
+        c >= 0.0 && r >= 0.0 && (c as usize) < g.w && (r as usize) < g.h && m.inside[r as usize * g.w + c as usize]
+    };
+    at(front, p[0], p[1]) && at(side, p[2], p[1])
+}
+
+/// A ring fitted inside the visual hull: along each of its axes it is slid
+/// and shrunk to the span the hull leaves it round its centre (never grown).
+/// A ring whose centre is already outside is left alone -- there is nothing
+/// to fit it to.
+fn fit_to_hull(st: Station, axis_w: V3, axis_d: V3, front: &Mask, side: &Mask) -> Station {
+    if !in_hull(front, side, st.c) {
+        return st;
+    }
+    // How far out from `c` along `dir` (a full half-axis) stays inside, 0..1,
+    // across gaps the measuring bridges (MERGE_GAP_FT: a seam drawn inside
+    // the body, a hairline between toes) -- stopped at the first empty pixel,
+    // a bird's trunk was cut back to the seam round its folded wing.
+    let reach = |c: V3, dir: V3| -> f32 {
+        let l = len(dir);
+        if l < 1e-6 {
+            return 1.0;
+        }
+        let steps = ((l / 0.01).ceil() as usize).clamp(8, 400);
+        let mut last_in = 0.0f32;
+        for k in 1..=steps {
+            let t = k as f32 / steps as f32;
+            if in_hull(front, side, add(c, scale(dir, t))) {
+                last_in = t;
+            } else if (t - last_in) * l > MERGE_GAP_FT {
+                break;
+            }
+        }
+        if (1.0 - last_in) * l <= MERGE_GAP_FT { 1.0 } else { last_in }
+    };
+    let mut c = st.c;
+    let (mut w, mut d) = (st.w, st.d);
+    for (axis, half) in [(axis_w, &mut w), (axis_d, &mut d)] {
+        let (plus, minus) = (reach(c, scale(axis, *half)), reach(c, scale(axis, -*half)));
+        if plus < 1.0 || minus < 1.0 {
+            c = add(c, scale(axis, (plus - minus) * 0.5 * *half));
+            *half *= (plus + minus) * 0.5;
+        }
+    }
+    // (No diagonal pass: a ring's diagonal poking out shrank both axes, and
+    // cut the width the drawing measured to settle a depth the other view
+    // disputed.)
+    Station { c, w: w.max(MIN_HALF_FT), d: d.max(MIN_HALF_FT) }
+}
+
 /// The plane of a membrane's joints: its unit normal, least squares (the
 /// smallest-spread direction of the points about their centroid). None when
 /// they span no plane (fewer than three, or all on one line).
@@ -1168,6 +1223,15 @@ impl Puppet {
             if let Some((end, reach, kj)) = joint {
                 for (k, st) in body.iter_mut().enumerate().take(kj) {
                     st.c = lerp(end.c, st.c, k as f32 * ds / reach);
+                }
+            }
+            // Nothing bulges past the solid both silhouettes allow: a ring
+            // measured on rows a neighbour shares (a neck between the head
+            // and a hunch), filled in, eased or pinned can reach out of it.
+            // (Not a girdle: it keeps to its own line, capped by its own rule.)
+            if let (false, false, Some(front), Some(side)) = (rig.from_above, m.girdle, mask_of(View::Front), mask_of(View::Side)) {
+                for st in body.iter_mut() {
+                    *st = fit_to_hull(*st, axis_w, axis_d, front, side);
                 }
             }
 
