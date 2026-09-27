@@ -423,6 +423,18 @@ toggle switches the canvas to a DEPTH pass where those guesses are corrected.
   (`Puppet::from_above`); the bake is 2D and unchanged. The plan is traced
   at the side view's scale by BODY length (image-gen's `trace.json`
   `front_view: "top"`), not at its height.
+- **Arms raised** (the *arms raised* checkbox beside it): the sheet holds
+  the arms out from the body -- an A-pose, some 30-45 degrees out -- so
+  the front view shows the armpit and the inner arm, which a hanging arm
+  hides against the body and the builder would otherwise guess. The side
+  view is the same pose: the arms hang beside the body, foreshortened,
+  elbows and wrists at the front view's heights. The silhouettes, the
+  bake, the fit and the paintings stay as drawn; the 3D puppet's arms
+  hang before any pose applies (`gs_puppet::hang`: each turns down across
+  the body about its shoulder until its forearm and hand would come within
+  0.02 ft of the body beside them), since the pose files are written for a
+  hanging arm. `rig_check` prints each arm's drawn and hanging angle. The
+  humanoid's sheet is drawn so.
 - **Guessed** joints are hollow and dim; **overridden** ones are filled and
   bright, with a faint tick and leader back to where the guess was, so the
   correction can be judged against it. The right panel says "*n* of *m*
@@ -899,6 +911,7 @@ limits, kept in step by hand.
     ref_ft = 6.0
     axis = "crown"               # what ref_ft measures: crown | withers | diameter | carapace
     from_above = true            # the silhouette is a plan (multileg); omitted = false
+    arms_raised = true           # the sheet holds the arms out (an A-pose): they hang for posing; omitted = false
     eye_radius_ft = 0.05         # omit for Auto
     joint_order = ["crown", "chin", "neck_base"]   # EVERY joint, placed or not, in click order
 

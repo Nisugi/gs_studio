@@ -12,7 +12,7 @@ use rig::{Outlines, Rig, View};
 use rig_bake::Mask;
 
 use crate::depth::{guess_depths_mask, joints3};
-use crate::math::{add, cross, dot, len, lerp, norm_or, scale, sub, V3};
+use crate::math::{add, cross, dot, len, lerp, norm_or, scale, sub, M3, V3};
 use crate::measure::{edge_distance, median, run_along, MERGE_GAP_FT};
 
 /// Long side of the masks the measurements are read from.
@@ -357,11 +357,19 @@ pub struct Puppet {
     /// were registered for the build ([`plan_shift`]). 0 for every other
     /// puppet.
     pub side_shift: f32,
+    /// Drawn with the arms raised (`Rig::arms_raised`): they hang for
+    /// posing ([`Puppet::arm_hang`]).
+    pub arms_raised: bool,
     /// Top of the rest figure, feet.
     pub height: f32,
     pub segments: Vec<Segment>,
     pub groups: Vec<String>,
     pub eyes: Vec<Eye>,
+    /// Arms drawn raised (an A-pose sheet), turned down to hang before a
+    /// pose applies: (the arm's first segment, the turn about its head).
+    /// Worked out from the segments ([`Puppet::arm_hangs`], `hang.rs`);
+    /// empty when every arm is drawn hanging.
+    pub arm_hang: Vec<(usize, M3)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1533,17 +1541,21 @@ impl Puppet {
             .iter()
             .flat_map(|s| s.stations.iter().map(|st| st.c[1] + st.w * s.axis_w[1].abs() + st.d * s.axis_d[1].abs()))
             .fold(0.0, f32::max);
-        Ok(Puppet {
+        let mut puppet = Puppet {
             family: rig.family.clone(),
             body_type: rig.body_type.clone(),
             view: rig.view,
             from_above: rig.from_above,
             side_shift: q(side_shift),
+            arms_raised: rig.arms_raised,
             height: q(height),
             segments,
             groups,
             eyes,
-        })
+            arm_hang: Vec::new(),
+        };
+        puppet.arm_hang = puppet.arm_hangs();
+        Ok(puppet)
     }
 
     pub fn segment(&self, name: &str) -> Option<usize> {
@@ -1917,6 +1929,18 @@ fn measure_segment<'m>(
                 return None;
             }
             let trunk_stops_at_limb = kind == Kind::Trunk && kinds[o] != Kind::Trunk;
+            // An arm drawn raised (`Rig::arms_raised`): the torso stops at
+            // its upper arm as if it hung, where a sheet with the arms down
+            // puts it. At the raised line the chest kept the flesh between
+            // the armpit and the shoulder, the arm's, and stood it out beside
+            // the chest when the arm went up.
+            let (b, e) = if rig.arms_raised && view == View::Front && trunk_stops_at_limb && biped_arm(other.bone) && other.k == 0 {
+                let (s, c) = crate::hang::TRUNK_CLIP_HANG_DEG.to_radians().sin_cos();
+                let e = [el * s * e[0].signum(), -el * c];
+                ([a[0] + e[0], a[1] + e[1]], e)
+            } else {
+                (b, e)
+            };
             let beside_trunk = kind != Kind::Trunk && kinds[o] == Kind::Trunk && biped_arm(r.bone);
             // An arm's root sits inside the ball of the shoulder: the torso
             // stops there too, so the shoulder is the arm's and goes up with

@@ -102,6 +102,7 @@ fn buried_rig(view: View) -> Rig {
         ref_ft: 4.0,
         axis: "crown".to_owned(),
         from_above: false,
+        arms_raised: false,
         eye_radius_ft: None,
         joint_order: vec!["top".into(), "hip".into(), "knee".into(), "foot".into()],
         unused: Default::default(),

@@ -46,6 +46,7 @@ pub mod depth;
 pub mod draw;
 pub mod fall;
 pub mod fit;
+pub mod hang;
 pub mod math;
 pub mod measure;
 pub mod outfit;

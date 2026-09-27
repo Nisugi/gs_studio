@@ -42,7 +42,7 @@ pub fn ortho_of(puppet: &Puppet, view: View, min_x: f32, max_y: f32, px_per_ft: 
 /// grounding so the figure sits where the artist clicked it.
 pub fn rest_prims(puppet: &Puppet, view: View, mask: &Mask, look: &Look) -> Vec<Prim> {
     let g = mask.grid;
-    let posed = puppet.pose(&Pose::default());
+    let posed = puppet.pose_as_drawn(&Pose::default());
     let lift = posed.lift;
     let project = ortho_of(puppet, view, g.min_x, g.max_y, g.px_per_ft);
     posed.draw_list(&|p: V3| project([p[0], p[1] - lift, p[2]]), look)
@@ -67,7 +67,7 @@ pub fn rest_iou(puppet: &Puppet, view: View, mask: &Mask) -> f32 {
     if g.w == 0 || g.h == 0 || !(g.px_per_ft > 0.0) {
         return 0.0;
     }
-    let posed = puppet.pose(&Pose::default());
+    let posed = puppet.pose_as_drawn(&Pose::default());
     let lift = posed.lift;
     // How far the figure reaches past the grid on each side, in pixels.
     let [lo, hi] = posed.bounds();

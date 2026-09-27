@@ -192,6 +192,11 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
   Depth values are `-height`. Its side view faces right, like every side view.
 - Front views face the viewer: the creature's right (`_r`) is screen-left,
   negative x. In side views `_r` is the near limb.
+- A rig with `arms_raised = true` was drawn in an A-pose (arms out, so the
+  armpit is measured): its puppet stays as drawn at rest -- the fit, the
+  bake, the paintings and the UV sheet all use the drawn figure
+  (`Puppet::pose_as_drawn`) -- but `Puppet::pose` hangs the arms first
+  (`gs_puppet::hang`), because the pose files are written for hanging arms.
 - Label values are the client's `DOLL_PARTS` order plus one; 0 is outside.
 - Rig/joint/bone names are lower snake_case; `_r`/`_l` suffixes form mirror pairs.
 - The unit of one silhouette pair + rig + puppet is a **form**; the code and file

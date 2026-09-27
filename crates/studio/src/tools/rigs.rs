@@ -542,6 +542,16 @@ impl RigTool {
                 {
                     s.editor.set_from_above(above);
                 }
+                let mut raised = s.editor.rig().arms_raised;
+                if ui
+                    .checkbox(&mut raised, "arms raised")
+                    .on_hover_text(
+                        "The sheet holds the arms raised out from the body (an A-pose), so the armpit and inner arm                          are measured, not guessed. The 3D puppet's arms hang before any pose applies: the poses are                          written for a hanging arm.",
+                    )
+                    .changed()
+                {
+                    s.editor.set_arms_raised(raised);
+                }
             });
             ui.end_row();
 

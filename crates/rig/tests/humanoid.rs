@@ -24,7 +24,7 @@ fn a_rig_round_trips_through_toml() {
     let text = rig.to_toml().unwrap();
     assert_eq!(Rig::from_toml(&text).unwrap(), rig, "{text}");
     // f32 values are written tidily, not as their f64 expansion.
-    assert!(text.contains("crown = [-0.0077, 5.9463]"), "{text}");
+    assert!(text.contains("crown = [-0.0028, 5.9433]"), "{text}");
     assert!(text.contains("radius_ft = 0.35"), "{text}");
     assert!(text.contains("eye_radius_ft = 0.08"), "{text}");
     assert!(text.contains("parent = \"torso_lower\""), "{text}");
@@ -187,14 +187,15 @@ fn fnv(bytes: &[u8]) -> u64 {
 /// were moved onto the arm's centre line, and 2026-09-25 when its ankles,
 /// toes, fingertips, hips and pelvis were moved, and again that day when
 /// image-gen's joint fitter nudged most of them, twice, and again when the user re-placed
-/// the legs, arms and pelvis by hand. A change here that is not
+/// the legs, arms and pelvis by hand, and 2026-09-27 for the A-pose sheet
+/// (its arms raised, `arms_raised`). A change here that is not
 /// a rig edit is a labeller regression.
 #[test]
 fn the_part_channel_is_what_it_was_before_bones_were_recorded() {
     let rig = humanoid();
     let outlines = Outlines::load(&data().join("outlines.json")).unwrap();
     let outline = outlines.get("humanoid", View::Front).unwrap().outline();
-    for (px, pinned) in [(256, 0x311666bd520a3a8cu64), (512, 0x588b57721c289f54)] {
+    for (px, pinned) in [(256, 0x14d1c582e72d7330u64), (512, 0xfaf98a48b28725f9)] {
         let mask = rig_bake::rasterize(&outline, px);
         let bones: Vec<_> = rig.bake_bones().into_iter().map(|(_, b)| b).collect();
         let map = rig_bake::label(&mask, &bones);

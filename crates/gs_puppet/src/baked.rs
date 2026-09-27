@@ -73,6 +73,10 @@ pub struct BakedPuppet {
     /// (`Puppet::side_shift`). Absent (0) for every other puppet.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub side_shift: f64,
+    /// Drawn with the arms raised (`Puppet::arms_raised`): absent for
+    /// every puppet drawn with them hanging.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub arms_raised: bool,
     pub height: f64,
     pub groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -109,6 +113,7 @@ impl Puppet {
             view: self.view,
             from_above: self.from_above,
             side_shift: wide(self.side_shift),
+            arms_raised: self.arms_raised,
             height: wide(self.height),
             groups: self.groups[..groups.min(self.groups.len())].to_vec(),
             eyes: self
@@ -221,17 +226,21 @@ impl Puppet {
                 radius: e.radius as f32,
             });
         }
-        Ok(Puppet {
+        let mut puppet = Puppet {
             family: baked.family.clone(),
             body_type: baked.body_type.clone(),
             view: baked.view,
             from_above: baked.from_above,
             side_shift: baked.side_shift as f32,
+            arms_raised: baked.arms_raised,
             height: baked.height as f32,
             segments,
             groups: baked.groups.clone(),
             eyes,
-        })
+            arm_hang: Vec::new(),
+        };
+        puppet.arm_hang = puppet.arm_hangs();
+        Ok(puppet)
     }
 
     pub fn to_baked_toml(&self) -> Result<String, PuppetError> {

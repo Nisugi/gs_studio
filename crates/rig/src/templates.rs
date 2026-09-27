@@ -85,6 +85,7 @@ impl Template {
             ref_ft,
             axis: axis.to_owned(),
             from_above: self.from_above(),
+            arms_raised: false,
             anchors: Anchors {
                 head: self.anchors.head.to_owned(),
                 mouth: self.anchors.mouth.to_owned(),

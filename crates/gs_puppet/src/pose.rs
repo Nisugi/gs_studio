@@ -139,7 +139,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::math::{
-    axis_angle, euler, quat_from_m3, quat_mirror, quat_to_m3, slerp, Quat, Xf, QUAT_IDENTITY, V3,
+    axis_angle, euler, mul_mm, quat_from_m3, quat_mirror, quat_to_m3, slerp, Quat, Xf, QUAT_IDENTITY, V3,
 };
 use crate::puppet::Puppet;
 
@@ -836,19 +836,35 @@ impl Puppet {
     /// Forward kinematics, then drop (or raise) the figure so its lowest
     /// station surface touches y = 0. Only the body counts: a staff's butt
     /// may reach the ground, a robe's hem may sweep it, neither lifts the
-    /// body. Then hanging garments are aimed ([`crate::outfit`]).
+    /// body. Then hanging garments are aimed ([`crate::outfit`]). An arm
+    /// drawn raised hangs first ([`Puppet::arm_hang`]): the poses are
+    /// written for a hanging arm.
     pub fn pose(&self, pose: &Pose) -> Posed<'_> {
+        self.pose_with(pose, true)
+    }
+
+    /// [`Puppet::pose`] from the figure as drawn, raised arms and all: what
+    /// is compared with the silhouettes it was drawn from.
+    pub fn pose_as_drawn(&self, pose: &Pose) -> Posed<'_> {
+        self.pose_with(pose, false)
+    }
+
+    fn pose_with(&self, pose: &Pose, hang: bool) -> Posed<'_> {
         let mut xf: Vec<Xf> = Vec::with_capacity(self.segments.len());
         let root_pivot = self.segments.first().map(|s| s.head).unwrap_or([0.0; 3]);
         let root = Xf::about(root_pivot, quat_to_m3(pose.root));
         let mut cache: Option<(&str, BonePose)> = None;
-        for s in &self.segments {
+        for (i, s) in self.segments.iter().enumerate() {
             if cache.as_ref().is_none_or(|(b, _)| *b != s.bone) {
                 cache = Some((&s.bone, pose.bone(&s.bone)));
             }
             let bp = &cache.as_ref().expect("just set").1;
             let r = if s.chain_index == 0 {
-                quat_to_m3(bp.rot)
+                let r = quat_to_m3(bp.rot);
+                match self.arm_hang.iter().find(|(k, _)| *k == i).filter(|_| hang) {
+                    Some((_, h)) => mul_mm(&r, h),
+                    None => r,
+                }
             } else {
                 axis_angle(s.hinge, bp.bend.get(s.chain_index - 1).copied().unwrap_or(0.0))
             };

@@ -2,6 +2,8 @@
 //! stations of the named segments -- for checking a builder change by numbers.
 //!
 //!   cargo run --release -p gs_puppet --example dump_segments -- <family> <segment> [segment ...]
+//!
+//! `DUMP_SEGMENTS_DATA=<dir>` reads another data root.
 
 use std::path::Path;
 
@@ -11,7 +13,7 @@ fn main() {
         eprintln!("usage: dump_segments <family> <segment> [segment ...]");
         std::process::exit(2);
     };
-    let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
+    let data = std::env::var_os("DUMP_SEGMENTS_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"));
     let rig = rig::Rig::load(&data.join("rigs").join(rig::Rig::file_name(family))).expect("rig");
     let outlines = rig::Outlines::load(&data.join("outlines.json")).expect("outlines");
     let p = gs_puppet::Puppet::build(&rig, &outlines).expect("builds");

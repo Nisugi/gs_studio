@@ -117,6 +117,13 @@ pub struct Rig {
     /// bake is 2D either way); this only changes how the 3D puppet reads it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub from_above: bool,
+    /// The sheet holds the arms raised out from the body (an A-pose, which
+    /// shows the armpit and the inner arm a hanging arm hides): the 3D
+    /// puppet's arms hang before any pose applies, the poses being written
+    /// for a hanging arm (`gs_puppet::hang`). The silhouettes, the bake and
+    /// the paintings stay as drawn.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub arms_raised: bool,
     /// Radius of the painted eye discs, in feet. None = Auto: a share of
     /// the head bone's measured radius (see `bake`).
     #[serde(default, skip_serializing_if = "Option::is_none", serialize_with = "ser_opt_f32")]

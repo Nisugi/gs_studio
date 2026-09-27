@@ -364,6 +364,13 @@ impl Editor {
         }
     }
 
+    /// Whether the sheet holds the arms raised (`Rig::arms_raised`).
+    pub fn set_arms_raised(&mut self, on: bool) {
+        if self.rig.arms_raised != on {
+            self.edit(None).arms_raised = on;
+        }
+    }
+
     pub fn undo(&mut self) -> bool {
         (self.drag, self.depth_drag) = (None, None);
         let done = self.history.undo(&mut self.rig);
