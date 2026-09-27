@@ -346,6 +346,10 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   midnight, no Lornon); `moon_arc(hour, high)` is the arc for any moon
   (`moon_position` is it at midnight), `lornon_light` Lornon's share, and
   both moons light nothing by day, half at dusk and dawn (`night_share`).
+  `Sky.facing` (**a new field**: the way the view faces, a compass
+  bearing) and `moon_sky_arc(hour, high, facing)`: the moons rise due
+  east, are highest due south and set due west, round the viewer; None
+  keeps `moon_arc`'s viewer-side arc.
   `MoonLight` gains `lornon_color`, `lornon_blood_color`, `lornon_strength`.
 
 Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`;
@@ -460,7 +464,11 @@ host keeps one per session.
   make, for a host that tracks the moons itself (Hydra:
   `docs/game-sky-spec.md` at the gs-studio root says what to track).
 
-Tests: +7 in `sky::tests`, built on the looks and lines as the game sent
+`GameSky::walked(command)` / `facing()` and `bearing_of`: a movement
+command with a bearing turns the view that way; up, down, out and portals
+keep it; `GameSky::sky` carries it.
+
+Tests: +8 in `sky::tests`, built on the looks and lines as the game sent
 them.
 
 ### 6.19 `png_meta`: text chunks by keyword

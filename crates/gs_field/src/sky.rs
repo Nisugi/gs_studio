@@ -373,6 +373,28 @@ pub struct GameSky {
     /// The last weather line, and when.
     line: Option<(f64, WeatherLine)>,
     gust: Option<f64>,
+    /// The way the player last walked, a compass bearing ([`GameSky::walked`]).
+    facing: Option<f32>,
+}
+
+/// The compass bearing a movement command walks, degrees (0 north, 90
+/// east): `n`, `north`, `go north`, `ne`, `northeast` ... None for one with
+/// no bearing -- up, down, out, a portal (`go door`, `go gate`) -- which
+/// keeps the way the player faces.
+pub fn bearing_of(command: &str) -> Option<f32> {
+    let c = command.trim().to_ascii_lowercase();
+    let word = c.strip_prefix("go ").or_else(|| c.strip_prefix("walk ")).unwrap_or(&c).trim();
+    Some(match word {
+        "n" | "north" => 0.0,
+        "ne" | "northeast" => 45.0,
+        "e" | "east" => 90.0,
+        "se" | "southeast" => 135.0,
+        "s" | "south" => 180.0,
+        "sw" | "southwest" => 225.0,
+        "w" | "west" => 270.0,
+        "nw" | "northwest" => 315.0,
+        _ => return None,
+    })
 }
 
 impl GameSky {
@@ -407,6 +429,20 @@ impl GameSky {
         Some(SkyNews::Weather(w))
     }
 
+    /// The player sent `command`: a move with a bearing ([`bearing_of`])
+    /// turns the view that way; any other keeps it. True when it turned.
+    pub fn walked(&mut self, command: &str) -> bool {
+        let Some(b) = bearing_of(command) else { return false };
+        self.facing = Some(b);
+        true
+    }
+
+    /// The way the view faces, a compass bearing, once the player has
+    /// walked somewhere with one.
+    pub fn facing(&self) -> Option<f32> {
+        self.facing
+    }
+
     /// The room's `<roommeta>`, as it comes (on every move and look).
     pub fn set_room(&mut self, meta: RoomMeta, unix: f64) {
         self.room = Some((unix, meta));
@@ -425,7 +461,7 @@ impl GameSky {
     /// `month`/`day` at `game_hour`. Cloud is left to the host (its weather
     /// brings its own).
     pub fn sky(&self, unix: f64, month: u32, day: u32, game_hour: f32) -> Sky {
-        moons_sky(self.moon_age(Moon::Liabo, unix), self.moon_age(Moon::Lornon, unix), month, day, game_hour)
+        Sky { facing: self.facing, ..moons_sky(self.moon_age(Moon::Liabo, unix), self.moon_age(Moon::Lornon, unix), month, day, game_hour) }
     }
 
     /// What falls now and how hard, 0..1: None indoors or in the clear.
@@ -651,6 +687,23 @@ mod tests {
         sky.set_room(RoomMeta { inside: true, ..snowing }, 2020.0);
         assert_eq!((sky.weather(2021.0), sky.outdoor()), (None, Some(false)));
         assert_eq!(read_weather_line("You say, \"Snowflakes drift to the ground.\""), None);
+    }
+
+    /// A move with a bearing turns the view; up, down, out and a portal
+    /// keep it.
+    #[test]
+    fn walking_turns_the_view() {
+        let mut sky = GameSky::default();
+        assert_eq!(sky.facing(), None);
+        assert!(sky.walked("west"));
+        assert_eq!(sky.facing(), Some(270.0));
+        for keep in ["go door", "up", "down", "out", "climb ladder", "go gate"] {
+            assert!(!sky.walked(keep));
+            assert_eq!(sky.facing(), Some(270.0), "{keep}");
+        }
+        assert!(sky.walked("go ne") && sky.facing() == Some(45.0));
+        assert!(sky.walked("S") && sky.facing() == Some(180.0));
+        assert_eq!(sky.sky(0.0, 1, 1, 22.0).facing, Some(180.0));
     }
 
     #[test]

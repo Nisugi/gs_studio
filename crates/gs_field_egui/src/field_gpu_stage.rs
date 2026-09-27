@@ -730,8 +730,24 @@ fn moon_light(cam: &FieldCamera, moon: &crate::creature_light::MoonNow, wind: f3
     let toward = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
     // with the wind, else left to right; a little away from the viewer too
     let drift = (CLOUD_DRIFT + CLOUD_WIND * wind.abs()) * if wind < 0.0 { -1.0 } else { 1.0 };
-    FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()])
+    // Its disc: where it is round the viewer, but its height squeezed into
+    // the sky the frame shows -- the camera looks level, and a moon at its
+    // true height would leave the frame an hour after rising.
+    let top_deg = (cam.cy / cam.f.max(1e-3)).atan().to_degrees();
+    let disc_el = (moon.elevation / gs_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * top_deg * DISC_SKY_SHARE;
+    let (sd, cd) = disc_el.to_radians().sin_cos();
+    let disc = [0, 1, 2].map(|i| cd * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + sd * up[i]);
+    FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()]).with_disc(
+        disc,
+        moon.disc_deg.to_radians(),
+        moon.phase,
+        moon.companion,
+    )
 }
+
+/// How much of the sky above the horizon a moon's disc climbs through, at
+/// its highest.
+const DISC_SKY_SHARE: f32 = 0.8;
 
 // ------------------------------------------------------------------ the stage
 
@@ -1242,7 +1258,16 @@ mod tests {
     fn the_moon_shines_from_where_it_is() {
         let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
         let at = |az: f32, el: f32| {
-            let m = crate::creature_light::MoonNow { azimuth: az, elevation: el, colour: "#ffffff".into(), brightness: 1.0, clouds: 0.3 };
+            let m = crate::creature_light::MoonNow {
+                azimuth: az,
+                elevation: el,
+                colour: "#ffffff".into(),
+                brightness: 1.0,
+                clouds: 0.3,
+                phase: 0.3,
+                disc_deg: 2.0,
+                companion: true,
+            };
             moon_light(&cam, &m, 0.0)
         };
         let high = at(0.0, 55.0);
@@ -1252,6 +1277,13 @@ mod tests {
         assert!(at(-70.0, 5.0).pos[0] < -0.9 && at(70.0, 5.0).pos[0] > 0.9, "rises left, sets right");
         assert_eq!(high.kind, field_gpu::LightKind::Moon);
         assert_eq!(high.prop[0], 0.3, "the cloud cover rides along");
+        // ahead and high, its disc is drawn in the frame's sky, below its top
+        let ahead = at(180.0, 55.0);
+        let d = ahead.beam;
+        assert!(d[2] > 0.5 && ahead.pos[2] > 0.3, "ahead: {d:?}");
+        let y = cam.cy + cam.f * d[1] / d[2];
+        assert!(y > 0.0 && y < cam.cy, "in the sky, in the frame: row {y}");
+        assert!((d[3] - 2.0f32.to_radians()).abs() < 1e-6 && (ahead.prop[3] - 1.3).abs() < 1e-6, "radius, phase + companion");
     }
 
     /// Each weather kind turns on its own parts; none is none.

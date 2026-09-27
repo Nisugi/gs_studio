@@ -582,6 +582,18 @@ across -- and differ only in the right-hand panel:
   runs later as it wanes. Lornon is a second, dimmer light, a cloudy grey
   (`lornon_color`, `lornon_strength` in `[moon]`), turning crimson from
   Eorgaen 20 to Lornon's Eve on the 31st (*Lornon's Eve* shows it).
+  *Facing* (N .. NW; in the game, the way you last walked -- a portal, up
+  or down keeps it) puts the moons on the compass: each rises in the east,
+  is highest in the south and sets in the west, lighting the scene from
+  where that is round you -- facing west late at night the setting moon
+  is ahead, backlighting the creatures. None keeps them on your side of
+  the scene. A moon ahead of you is drawn in the sky (the GPU pass): Liabo
+  large and silver-white with small red Tilaok circling it, Lornon smaller
+  and grey (crimson by Lornon's Eve), each lit to its phase, dimmed by the
+  drifting cloud, only where the backdrop is sky (its depth map says
+  where) and behind whatever stands in front. The camera looks level, so a
+  disc's height is squeezed into the sky the frame shows; where it is
+  round you, and the light it throws, are true.
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).

@@ -165,7 +165,10 @@ at night) is **not decided**; the default is no.
 ## 6. What Hydra keeps, and what it hands over
 
 Keep: the room's `RoomMeta` and when it came; the last weather line (kind,
-gust, time); the last `look lornon` (time, reply). Liabo's looks only as a
+gust, time); the last `look lornon` (time, reply); the way the player last
+walked (`gs_field::sky::bearing_of` of each movement command -- n, ne, ...,
+`go north`; up, down, out and portals like `go door` keep it), which faces
+the view: `Sky.facing`, a compass bearing. Liabo's looks only as a
 check.
 
 Hand the renderer:

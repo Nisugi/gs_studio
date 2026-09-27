@@ -16,11 +16,11 @@ impl StageState {
     /// The sky at `now` (unix seconds) and `game_hour`, under `clouds`.
     pub fn sky(&self, now: f64, game_hour: f32, clouds: f32) -> Sky {
         if !self.game_sky {
-            return Sky { moon: self.light_moon, clouds, ..Sky::default() };
+            return Sky { moon: self.light_moon, clouds, facing: self.facing, ..Sky::default() };
         }
         let at = self.sky_instant(now, game_hour);
         let (_, month, day) = if self.lornons_eve { (0, 12, 31) } else { eastern_date(at as i64) };
-        Sky { clouds, ..GameSky::default().sky(at, month, day, game_hour) }
+        Sky { clouds, facing: self.facing, ..GameSky::default().sky(at, month, day, game_hour) }
     }
 
     /// The game's moons at the instant shown, one line: how lit each is,

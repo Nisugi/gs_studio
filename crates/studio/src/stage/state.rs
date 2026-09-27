@@ -156,6 +156,9 @@ pub struct StageState {
     pub game_sky: bool,
     pub sky_at: Option<f64>,
     pub lornons_eve: bool,
+    /// The way the view faces, a compass bearing (0 north .. 270 west):
+    /// the moons keep to the compass round it. None = the viewer-side arc.
+    pub facing: Option<f32>,
     /// Weather preview: 0 = clear, else 1 + the index into the renderer's
     /// weather kinds; how much falls (0..1); wind (-1..1).
     pub weather_kind: usize,
@@ -235,6 +238,7 @@ impl StageState {
             game_sky: false,
             sky_at: None,
             lornons_eve: false,
+            facing: None,
             weather_kind: 0,
             weather_intensity: 0.6,
             weather_wind: 0.15,

@@ -39,7 +39,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use gs_field::lighting::{lornon_light, moon_arc, moon_light, GlobalLighting, SceneLight, SceneLighting, Sky};
+use gs_field::lighting::{lornon_light, moon_light, moon_sky_arc, GlobalLighting, SceneLight, SceneLighting, Sky};
 use vellum_light::{
     apply, apply_backdrop, auto_scene_light, with_intensity, LightEnv, LightFrame, SceneColours, Srgb8Lut, YMap,
 };
@@ -186,7 +186,19 @@ pub struct MoonNow {
     pub brightness: f32,
     /// How much of the sky the clouds cover, 0..1.
     pub clouds: f32,
+    /// Where it is in its cycle, 0 new .. 0.5 full .. 1: how its disc is lit.
+    pub phase: f32,
+    /// Its disc's angular radius, degrees (0 = none drawn).
+    pub disc_deg: f32,
+    /// Tilaok circles it (Liabo's).
+    pub companion: bool,
 }
+
+/// The moons' discs in the sky, angular radius, degrees: Liabo "very close"
+/// and the largest; Lornon large but far. Drawn bigger than a real moon
+/// looks: the stage is small.
+pub const LIABO_DISC_DEG: f32 = 2.2;
+pub const LORNON_DISC_DEG: f32 = 1.4;
 
 /// What a bake needs besides pixels: every light, at intensity x strength.
 #[derive(Debug, Clone)]
@@ -430,9 +442,15 @@ impl LightState {
         } else {
             (sky.moon_high, moon_light(hour, &clear), global.moon.color.clone())
         };
-        let (azimuth, elevation) = moon_arc(hour, high)?;
+        let (azimuth, elevation) = moon_sky_arc(hour, high, sky.facing)?;
         let brightness = lit * global.moon.strength.max(0.0) * self.clock.strength.clamp(0.0, 1.0);
-        (brightness > 0.0).then(|| MoonNow { azimuth, elevation, colour, brightness, clouds: sky.clouds.clamp(0.0, 1.0) })
+        // its phase: how full, and growing or waning by the hour it is highest
+        let full = if lornon { sky.lornon } else { sky.moon }.clamp(0.0, 1.0);
+        let by_hour = ((high - 12.0) / 24.0).rem_euclid(1.0);
+        let a = (1.0 - 2.0 * full).acos() / std::f32::consts::TAU;
+        let phase = if by_hour < 0.5 { a } else { 1.0 - a };
+        let disc_deg = if lornon { LORNON_DISC_DEG } else { LIABO_DISC_DEG };
+        (brightness > 0.0).then(|| MoonNow { azimuth, elevation, colour, brightness, clouds: sky.clouds.clamp(0.0, 1.0), phase, disc_deg, companion: !lornon })
     }
 
     pub fn set_global(&mut self, global: GlobalLighting) {
@@ -529,6 +547,7 @@ impl LightState {
             lornon: q(s.lornon),
             lornon_high: q(s.lornon_high),
             lornon_blood: q(s.lornon_blood),
+            facing: s.facing,
         };
         let sky = (!self.keep_pixels).then_some(&sky);
         let lit = SceneLighting::resolve_under(&scene, &auto, &global, hour, self.clock.outdoor_guess, sky)?;
@@ -968,6 +987,12 @@ mod tests {
         state.update(&ctx);
         let moon = state.moon_now().expect("the moon at 23:00");
         assert!(moon.elevation > 30.0 && moon.brightness > 0.9);
+        assert!((moon.phase - 0.5).abs() < 1e-3 && moon.companion && moon.disc_deg == LIABO_DISC_DEG, "full, Liabo's disc: {moon:?}");
+        // facing south at midnight, the full moon is ahead of the viewer
+        state.set_clock(LightClock { sky: Sky { facing: Some(180.0), ..Sky::default() }, ..clock(0.0, true) });
+        let ahead = state.moon_now().expect("up at midnight");
+        assert!((ahead.azimuth.abs() - 180.0).abs() < 1e-3, "{ahead:?}");
+        state.set_clock(clock(23.0, true));
         assert_eq!(state.moons_now(), vec![moon.clone()], "no Lornon unless the sky has one");
         // Lornon: its own hours, dimmer, grey -- crimson by Lornon's Eve
         let lornon = Sky { lornon: 1.0, lornon_high: 21.0, lornon_blood: 1.0, ..Sky::default() };

@@ -185,6 +185,10 @@ impl StageTool {
         if std::env::var_os("GS_STUDIO_LORNONS_EVE").is_some() {
             stage.lornons_eve = true;
         }
+        // GS_STUDIO_FACING=<n|ne|e|...|w|nw>: the way the view faces
+        if let Some(b) = std::env::var("GS_STUDIO_FACING").ok().and_then(|f| gs_field::sky::bearing_of(&f)) {
+            stage.facing = Some(b);
+        }
         let lighting = gs_field::lighting::GlobalLighting::load();
         art.set_global_lighting(lighting.clone());
         StageTool { stage, art, lighting }
@@ -574,6 +578,19 @@ fn weather_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     }
 }
 
+/// The Facing picker's ways: none, then the compass.
+const FACINGS: [(&str, Option<f32>); 9] = [
+    ("None", None),
+    ("N", Some(0.0)),
+    ("NE", Some(45.0)),
+    ("E", Some(90.0)),
+    ("SE", Some(135.0)),
+    ("S", Some(180.0)),
+    ("SW", Some(225.0)),
+    ("W", Some(270.0)),
+    ("NW", Some(315.0)),
+];
+
 /// The lighting preview: which game hour the stage shows, and the player's
 /// Lighting strength. On the Scenes panel's Light section and on Preview.
 fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
@@ -609,6 +626,17 @@ fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
             "How full the moon is: 0 = new, 1 = full. It rises at 18:00 on the left, is highest at midnight and sets at 06:00 on the right; outdoors only",
         );
     }
+    ui.horizontal(|ui| {
+        ui.label("Facing").on_hover_text(
+            "The way the view faces -- in the game, the way you last walked: the moons rise in the east, are highest in the south and set in the west, and are drawn in the sky when they are ahead of you. None: they keep to your side of the scene",
+        );
+        let label = |f: Option<f32>| FACINGS.iter().find(|(_, b)| *b == f).map_or("?", |(n, _)| *n);
+        egui::ComboBox::from_id_salt("light_facing").selected_text(label(stage.facing)).show_ui(ui, |ui| {
+            for (name, bearing) in FACINGS {
+                ui.selectable_value(&mut stage.facing, bearing, name);
+            }
+        });
+    });
     ui.add(egui::Slider::new(&mut stage.light_clouds, 0.0..=1.0).text("Clouds")).on_hover_text(
         "How much cloud covers the sky: on the GPU its shadows drift over the moonlit ground; rain, snow and fog bring their own",
     );

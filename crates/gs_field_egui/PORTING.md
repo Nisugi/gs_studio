@@ -806,6 +806,18 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     disc 1.5 m wide round each pixel (12 fixed taps, by how the two
     surfaces face each other over the distance), times its own albedo.
     The frame's bindings gain the two targets (9, 10).
+  - The moons in the sky. `MoonNow` gains `phase`, `disc_deg` and
+    `companion` (**new fields**; `LIABO_DISC_DEG`, `LORNON_DISC_DEG`), and
+    keeps to the compass when `Sky.facing` says which way the view faces.
+    `FieldLight::with_disc` (**a new method**) puts a moon's disc on its
+    light -- where it is drawn (its height squeezed into the frame's sky:
+    the camera looks level), its angular radius, its phase, whether Tilaok
+    circles it -- in `beam` and `prop[3]`, which a moon had no use for;
+    `FieldLight::moon` now leaves `beam` zero (no disc). The shader draws
+    each disc on the backdrop's sky pixels, round on the screen where its
+    centre falls (a true circle of sky off to one side of the wide camera
+    would project as an oval), lit to its phase, under the drifting cloud,
+    with a glow.
   - `creature_puppet`'s texture loader refuses a sheet or normal sheet
     stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
     puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`

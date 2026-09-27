@@ -30,8 +30,8 @@ struct Light {
     fall: vec4<f32>,   // r0, range, light radius (shadow softness), bounce
     surf: vec4<f32>,   // wrap on creatures, wrap on the ground, sheen on creatures, sheen on the ground (x wetness)
     shine: vec4<f32>,  // shininess on creatures, on the ground, brightness factor (flicker / pulse), prop shown
-    prop: vec4<f32>,   // torch: flame base without sway (xyz), stick length; mote: core colour (rgb); moon: cloud cover, wind across, wind deeper (m/s)
-    beam: vec4<f32>,   // the beam's axis across the floor (xyz, camera space), half its width in degrees (>= 180: all round)
+    prop: vec4<f32>,   // torch: flame base without sway (xyz), stick length; mote: core colour (rgb); moon: cloud cover, wind across, wind deeper (m/s), phase (0 new .. 0.5 full; +1: Tilaok circles it)
+    beam: vec4<f32>,   // the beam's axis across the floor (xyz, camera space), half its width in degrees (>= 180: all round); moon: where its disc is drawn (xyz), its angular radius (0 = none)
 };
 
 // The weather (FieldWeather; all zero: none).
@@ -775,6 +775,59 @@ fn bounce_at(P: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> vec3<f32> {
     return acc * U.bounce.x;
 }
 
+// ---- the moons themselves, in the sky: a disc per moon light with one
+// (beam.w its angular radius, beam.xyz where it is drawn -- its height
+// squeezed into the frame's sky), lit to its phase (fract(prop.w), growing
+// lit on the right), dim on its dark side, under the cloud crossing it,
+// with a faint glow; Tilaok, small and red, circles one with prop.w >= 1.
+// Drawn round on the screen, where its centre falls: the camera is a wide
+// pinhole, and a true circle of sky off to the side projects as an oval.
+const DISC_GLOW: f32 = 2.2;
+// Lornon, "the dark moon", shows dimmer than Liabo, "a beacon"
+const LORNON_DISC: f32 = 0.3;
+const TILAOK_SRGB: vec3<f32> = vec3<f32>(1.0, 0.48, 0.23);
+// (how much of the pixel is the disc, how lit it is there; uv: the pixel
+// from the disc's centre in its radii, u right, v up; aa: a pixel, in radii)
+fn disc_at(uv: vec2<f32>, aa: f32, age: f32) -> vec2<f32> {
+    let inside = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, length(uv));
+    // the terminator: an ellipse across the disc, cos(phase angle) wide --
+    // growing, lit to its right; waning, to its left (mirrored)
+    let xt = cos(6.2831853 * age) * sqrt(max(1.0 - uv.y * uv.y, 0.0));
+    let s = select(-xt - uv.x, uv.x - xt, fract(age) < 0.5);
+    return vec2<f32>(inside, smoothstep(-0.06, 0.06, s));
+}
+fn moon_discs(px: vec2<f32>) -> vec3<f32> {
+    var o = vec3<f32>(0.0);
+    let n_lights = u32(U.misc.w);
+    for (var li = 0u; li < n_lights; li = li + 1u) {
+        let Lt = U.lights[li];
+        if (Lt.pos.w < 1.5 || Lt.beam.w <= 0.0) { continue; }
+        let c = normalize(Lt.beam.xyz);
+        if (c.z < 0.2) { continue; }
+        // its radius on the screen: as drawn at the middle of the view
+        let rp = U.cam.x * tan(Lt.beam.w);
+        let d = (px - proj(c)) * vec2<f32>(1.0, -1.0);
+        if (dot(d, d) > 64.0 * rp * rp) { continue; }
+        let aa = 1.0 / max(rp, 1.0);
+        let age = fract(Lt.prop.w);
+        let clear = mix(0.08, 1.0, cloud_mask(vec3<f32>(0.0), Lt));
+        let hue = Lt.col.rgb / max(max(Lt.col.r, Lt.col.g), max(Lt.col.b, 1e-6));
+        let full = 0.5 * (1.0 - cos(6.2831853 * age));
+        let dl = disc_at(d / rp, aa, age);
+        let glow = exp(-max(length(d) / rp - 1.0, 0.0) * 2.5) * 0.12 * (0.2 + 0.8 * full);
+        // (the one without a companion is Lornon)
+        let bright = select(LORNON_DISC, 1.0, Lt.prop.w >= 1.0);
+        o = o + hue * bright * (DISC_GLOW * dl.x * (dl.y + 0.03 * (1.0 - dl.y)) + glow) * clear;
+        if (Lt.prop.w >= 1.0) {
+            // Tilaok, "in a frenzied dance" round it
+            let a = U.up.w * 0.35 + 1.3;
+            let dt = disc_at((d / rp - vec2<f32>(cos(a), sin(a) * 0.45) * 2.8) / 0.3, aa / 0.3, age);
+            o = o + s2l(TILAOK_SRGB) * DISC_GLOW * dt.x * (dt.y + 0.05 * (1.0 - dt.y)) * clear;
+        }
+    }
+    return o;
+}
+
 fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
     let W = U.weather;
     let uv = (px - U.bgmap.xy) / U.bgmap.zw;
@@ -831,6 +884,9 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             if (Lt.pos.w < 1.5) { continue; }
             let open = max(dot(up, Lt.pos.xyz), 0.0) * (1.0 - 0.9 * Lt.prop.x);
             col = col + alb_bg * Lt.col.rgb * Lt.col.w * (open + Lt.fall.w);
+        }
+        if (!light_only) {
+            col = col + moon_discs(px);
         }
     }
     col = mix(col, s2l(bg_a.rgb) * 2.2, bg_l.a);

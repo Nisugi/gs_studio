@@ -272,8 +272,20 @@ impl FieldLight {
             brightness: 1.0,
             show: false,
             prop: [c, wind[0], wind[1], 0.0],
-            beam: ALL_ROUND,
+            // no disc drawn ([`FieldLight::with_disc`])
+            beam: [0.0; 4],
         }
+    }
+
+    /// A moon's disc in the sky: drawn toward `toward` (camera space, unit;
+    /// the light keeps its own direction), `radius` radians across, lit to
+    /// `phase` (0 new .. 0.5 full, growing lit on the right); `companion`:
+    /// Tilaok circles it. The disc rides in `beam` (xyz, radius) and the
+    /// phase in `prop[3]` (+1 with a companion), which a moon has no use for.
+    pub fn with_disc(mut self, toward: [f32; 3], radius: f32, phase: f32, companion: bool) -> FieldLight {
+        self.beam = [toward[0], toward[1], toward[2], radius.clamp(0.0, 1.0)];
+        self.prop[3] = phase.rem_euclid(1.0) + if companion { 1.0 } else { 0.0 };
+        self
     }
 
     /// This light shining only within a beam `spread` degrees wide, aimed

@@ -589,7 +589,8 @@ impl MoonLight {
 /// and weather when it has them, [`crate::sky::GameSky`]): how full the
 /// moon (Liabo) is, 0 = new .. 1 = full, and the game hour it is highest;
 /// Lornon's the same (0 = not lit), and how crimson it has turned, 0..1;
-/// how much cloud covers the sky, 0 = clear .. 1 = overcast.
+/// how much cloud covers the sky, 0 = clear .. 1 = overcast; and which way
+/// the view faces, when the host knows ([`moon_sky_arc`]).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sky {
     pub moon: f32,
@@ -598,12 +599,18 @@ pub struct Sky {
     pub lornon: f32,
     pub lornon_high: f32,
     pub lornon_blood: f32,
+    /// The way the view faces, a compass bearing in degrees (0 north, 90
+    /// east, 180 south, 270 west) -- the way the player last walked. The
+    /// moons then rise in the east, are highest in the south and set in
+    /// the west, and stand where that puts them round the viewer. None =
+    /// the viewer-side arc ([`moon_arc`]).
+    pub facing: Option<f32>,
 }
 
 impl Default for Sky {
-    /// A full moon highest at midnight, no Lornon, no cloud.
+    /// A full moon highest at midnight, no Lornon, no cloud, no facing.
     fn default() -> Self {
-        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0 }
+        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0, facing: None }
     }
 }
 
@@ -620,6 +627,25 @@ pub fn moon_arc(game_hour: f32, high: f32) -> Option<(f32, f32)> {
     }
     let elevation = MOON_PEAK_DEG * (std::f32::consts::PI * s).sin();
     (elevation > 0.0).then_some((MOON_SWING_DEG * (2.0 * s - 1.0), elevation))
+}
+
+/// Where a moon highest at `high` is at `game_hour`, for a view facing
+/// `facing` (a compass bearing, [`Sky::facing`]): it rises due east six
+/// hours before, is highest due south, sets due west six hours after, at
+/// the heights [`moon_arc`] gives; (azimuth, elevation) in its terms --
+/// 0 behind the viewer, -90 screen-left, +90 screen-right, 180 ahead. No
+/// facing: [`moon_arc`].
+pub fn moon_sky_arc(game_hour: f32, high: f32, facing: Option<f32>) -> Option<(f32, f32)> {
+    let Some(facing) = facing else { return moon_arc(game_hour, high) };
+    let s = (game_hour - (high - MOON_UP_HOURS / 2.0)).rem_euclid(24.0) / MOON_UP_HOURS;
+    if !(0.0..=1.0).contains(&s) {
+        return None;
+    }
+    let elevation = MOON_PEAK_DEG * (std::f32::consts::PI * s).sin();
+    // its bearing, then where that is round the viewer
+    let bearing = 90.0 + 180.0 * s;
+    let az = (180.0 - (bearing - facing)).rem_euclid(360.0);
+    (elevation > 0.0).then_some((if az > 180.0 { az - 360.0 } else { az }, elevation))
 }
 
 /// A full moon's arc ([`moon_arc`] highest at midnight): up at 18:00, down
@@ -640,16 +666,16 @@ pub const MOON_SWING_DEG: f32 = 70.0;
 /// lights nothing the sun does not), less what the clouds hold back (on
 /// average: they drift).
 pub fn moon_light(game_hour: f32, sky: &Sky) -> f32 {
-    moon_light_of(game_hour, sky.moon, sky.moon_high, sky.clouds)
+    moon_light_of(game_hour, sky.moon, sky.moon_high, sky.clouds, sky.facing)
 }
 
 /// [`moon_light`] for Lornon, as a share of a full Lornon's light.
 pub fn lornon_light(game_hour: f32, sky: &Sky) -> f32 {
-    moon_light_of(game_hour, sky.lornon, sky.lornon_high, sky.clouds)
+    moon_light_of(game_hour, sky.lornon, sky.lornon_high, sky.clouds, sky.facing)
 }
 
-fn moon_light_of(game_hour: f32, full: f32, high: f32, clouds: f32) -> f32 {
-    let Some((_, elevation)) = moon_arc(game_hour, high) else { return 0.0 };
+fn moon_light_of(game_hour: f32, full: f32, high: f32, clouds: f32, facing: Option<f32>) -> f32 {
+    let Some((_, elevation)) = moon_sky_arc(game_hour, high, facing) else { return 0.0 };
     let t = (elevation / 12.0).clamp(0.0, 1.0);
     full.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * night_share(game_hour) * (1.0 - 0.9 * clouds.clamp(0.0, 1.0))
 }
@@ -1017,6 +1043,23 @@ key = \"#112233\"
         assert!(moon_light(0.0, &sky) > 0.99 && moon_light(18.1, &sky) < 0.1 && moon_light(12.0, &sky) == 0.0);
         assert!(moon_light(0.0, &Sky { moon: 0.5, ..Sky::default() }) < 0.51);
         assert!(moon_light(0.0, &Sky { clouds: 1.0, ..Sky::default() }) < 0.11, "overcast");
+    }
+
+    /// Facing a way, the moon rises in the east, is highest in the south
+    /// and sets in the west, round the viewer: facing south it crosses the
+    /// view left to right; facing north it passes behind, right to left;
+    /// facing west it sets ahead.
+    #[test]
+    fn a_moon_keeps_to_the_compass() {
+        let at = |h: f32, facing: f32| moon_sky_arc(h, 0.0, Some(facing)).unwrap();
+        let (rise, top, set) = (at(18.5, 180.0), at(0.0, 180.0), at(5.5, 180.0));
+        assert!(rise.0 < -80.0 && (top.0.abs() - 180.0).abs() < 1e-3 && set.0 > 80.0, "facing south: {rise:?} {top:?} {set:?}");
+        assert!((top.1 - MOON_PEAK_DEG).abs() < 1e-3);
+        let (rise, top) = (at(18.5, 0.0), at(0.0, 0.0));
+        assert!(rise.0 > 80.0 && top.0.abs() < 1e-3, "facing north: east on the right, highest behind: {rise:?} {top:?}");
+        assert!(at(5.5, 270.0).0.abs() > 160.0, "facing west, it sets ahead");
+        assert_eq!(moon_sky_arc(0.0, 0.0, None), moon_arc(0.0, 0.0));
+        assert_eq!(moon_sky_arc(12.0, 0.0, Some(90.0)), None, "down by day");
     }
 
     /// A waning moon runs later: highest at 06:00 when half full, up from
