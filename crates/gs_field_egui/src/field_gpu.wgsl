@@ -54,13 +54,14 @@ struct Field {
     layers: array<Layer, 32>,
     lights: array<Light, 8>,
     weather: Weather,
+    bounce: vec4<f32>, // strength (0 = none), gather radius (m), scene px per bounce texel
 };
 
 // One piece of the frame.
 struct Draw {
     ndc: vec4<f32>,    // its quad, normalised device coords: x0, y0, x1, y1
     map: vec4<f32>,    // scene px = framebuffer px * map.xy + map.zw
-    mode: vec4<f32>,   // x: 0 everything, 1 the backdrop, 2 one layer (y = its index)
+    mode: vec4<f32>,   // x: 0 everything, 1 the backdrop, 2 one layer (y = its index), 3 the bounce pass
 };
 
 @group(0) @binding(0) var<uniform> U: Field;
@@ -72,6 +73,10 @@ struct Draw {
 @group(0) @binding(6) var at_albedo: texture_2d<f32>;
 @group(0) @binding(7) var at_lit: texture_2d<f32>;
 @group(0) @binding(8) var at_geo: texture_2d<f32>;
+// the frame's direct light (what each surface reflects) and its surfaces
+// (normal, depth; 0 = nothing or sky), for bounce
+@group(0) @binding(9) var bn_light: texture_2d<f32>;
+@group(0) @binding(10) var bn_surf: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> D: Draw;
 
 struct VsOut {
@@ -734,6 +739,42 @@ struct Surf {
     alb: vec3<f32>,    // colour, sRGB (debug view)
 };
 
+// ---- bounce: what the lit surfaces near P reflect onto it
+// One bounce, in screen space: taps on a disc round the pixel -- as wide on
+// screen as U.bounce.y metres at its depth -- read the frame's direct light
+// (the bounce pass, D.mode.x = 3, which gathers nothing itself); each tap is
+// a patch of the surface there, its light reaching P by how the two face
+// each other over the distance. Fixed taps, no jitter (it speckles).
+const BOUNCE_TAPS: i32 = 12;
+fn bounce_at(P: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> vec3<f32> {
+    if (U.bounce.x <= 0.0 || u32(D.mode.x + 0.5) == 3u) { return vec3<f32>(0.0); }
+    let f = U.cam.x;
+    let r_px = clamp(U.bounce.y * f / max(P.z, 0.1), 3.0, 0.3 * U.size.y);
+    let tap_px = 3.14159 * r_px * r_px / f32(BOUNCE_TAPS);
+    var acc = vec3<f32>(0.0);
+    for (var k = 0; k < BOUNCE_TAPS; k = k + 1) {
+        let a = f32(k) * 2.3999632;
+        let q = px + vec2<f32>(cos(a), sin(a)) * sqrt((f32(k) + 0.5) / f32(BOUNCE_TAPS)) * r_px;
+        if (any(q < vec2<f32>(0.0)) || any(q > U.size.xy)) { continue; }
+        let uv = q / U.size.xy;
+        let s = textureSampleLevel(bn_surf, s_near, uv, 0.0);
+        if (s.w <= 0.0) { continue; }
+        let Q = ray(q) * s.w;
+        let d = Q - P;
+        let d2 = dot(d, d);
+        if (d2 < 1e-4) { continue; }
+        let w = d * inverseSqrt(d2);
+        let facing = max(dot(n, w), 0.0) * max(dot(s.xyz, -w), 0.0);
+        if (facing <= 0.0) { continue; }
+        // the patch the tap stands for, m^2: its screen area at its depth,
+        // turned the way it faces
+        let area = tap_px * (s.w / f) * (s.w / f) / max(abs(dot(s.xyz, normalize(Q))), 0.2);
+        let light = textureSampleLevel(bn_light, s_lin, uv, 0.0).rgb;
+        acc = acc + light * facing * area / (3.14159 * d2 + area);
+    }
+    return acc * U.bounce.x;
+}
+
 fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
     let W = U.weather;
     let uv = (px - U.bgmap.xy) / U.bgmap.zw;
@@ -779,6 +820,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             col = col + light_term(bg_p, bg_n, alb_bg, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
                                    Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z);
         }
+        col = col + alb_bg * bounce_at(bg_p, bg_n, px);
     } else {
         // Sky and far scenery: the moon lights them as open ground facing
         // up, unshadowed, under the cloud on average -- no seam where the
@@ -867,6 +909,7 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
                            Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z);
     }
+    c = c + alb * bounce_at(P, n, px);
     if (W.a.x > 0.0 && !light_only) {
         // lightning comes from above and behind: it catches their tops and backs
         let Ls = normalize(U.up.xyz * 0.75 + vec3<f32>(0.0, 0.0, 0.65));
@@ -948,4 +991,37 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (view == 4) { return vec4<f32>(a_view, 1.0); }
     return vec4<f32>(encode(props(col, px, nearest_z)), 1.0);
+}
+
+// The frame's direct light, for bounce (D.mode.x = 3): per texel, what the
+// nearest surface there reflects of the lamps and moons (its colour times
+// their light, no night, no weather), and its normal and depth (0 where
+// nothing is, or sky).
+struct BounceOut {
+    @location(0) light: vec4<f32>,
+    @location(1) surf: vec4<f32>,
+};
+
+@fragment
+fn fs_bounce(in: VsOut) -> BounceOut {
+    let px = in.pos.xy * D.map.xy + D.map.zw;
+    let bg = backdrop_at(px, true);
+    var col = bg.col;
+    var z = bg.z;
+    var n = bg.n;
+    let n_layers = u32(U.misc.z);
+    for (var i = 0u; i < n_layers; i = i + 1u) {
+        let s = layer_at(i, px, true);
+        if (s.a <= 0.0) { continue; }
+        col = mix(col, s.col, s.a);
+        // far to near: the last solid one is the nearest
+        if (s.a > 0.5) {
+            z = s.z;
+            n = s.n;
+        }
+    }
+    var o: BounceOut;
+    o.light = vec4<f32>(col, 1.0);
+    o.surf = vec4<f32>(n, select(z, 0.0, z > 60.0));
+    return o;
 }

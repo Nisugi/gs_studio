@@ -78,6 +78,8 @@ Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
 Torchlight" prototype scene, unzipped to `target/torchlight`, to compare
 with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame,
 `TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` turns on its weather,
+`TORCHLIGHT_BOUNCE=0` turns bounce light off -- the prototype has none, so a
+comparison with it needs that,
 `TORCHLIGHT_BENCH=1` times the pass offscreen on every GPU, case by case,
 shading every pixel and capped at the art's size -- run it after a shader
 change; `TORCHLIGHT_BENCH_PNG=<prefix>` saves a crowd both ways,

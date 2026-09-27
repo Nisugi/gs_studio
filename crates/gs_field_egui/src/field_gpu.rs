@@ -556,7 +556,22 @@ pub struct FieldFrame {
     /// no more detail to show, and the cost stops growing with the window.
     /// 0 = every screen pixel ([`DETAIL`] is the stage's).
     pub detail: f32,
+    /// Bounce light, 0 = none, 1 = as it falls ([`BOUNCE`] is the stage's):
+    /// what the lamps and moons light reflects onto what faces it nearby
+    /// -- lit ground warming a creature's underside, a lit rock tinting
+    /// what stands by it. One bounce, in screen space: the frame's direct
+    /// light at a quarter of its size, gathered round each pixel.
+    pub bounce: f32,
 }
+
+/// The stage's [`FieldFrame::bounce`].
+pub const BOUNCE: f32 = 1.0;
+/// How far round a pixel bounce light is gathered from, metres.
+const BOUNCE_RADIUS_M: f32 = 1.5;
+/// Scene pixels per texel of the frame's direct light the bounce gathers.
+const BOUNCE_DOWN: f32 = 4.0;
+/// The direct light and its surfaces (normal, depth), linear and past 1.
+const BOUNCE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// The stage's [`FieldFrame::detail`]: shaded no finer than the art.
 pub const DETAIL: f32 = 1.0;
@@ -589,7 +604,7 @@ impl FieldFrame {
 }
 
 /// Floats in the uniform block (field_gpu.wgsl `Field`).
-const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS;
+const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS + 4;
 /// Floats in the shader's `Weather`.
 const WEATHER_FLOATS: usize = 28;
 
@@ -649,6 +664,7 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
     for rgb in [w.fog, flash, w.dust, w.rain_tint] {
         u.extend([rgb[0], rgb[1], rgb[2], 0.0]);
     }
+    u.extend([frame.bounce.max(0.0), BOUNCE_RADIUS_M, BOUNCE_DOWN, 0.0]);
     debug_assert_eq!(u.len(), UNIFORM_FLOATS);
     u
 }
@@ -982,6 +998,17 @@ struct Gpu {
     blits: wgpu::Buffer,
     /// Per draw slot: the texture its piece is shaded small into.
     scratch: Vec<Option<Scratch>>,
+    /// The frame's direct light, for bounce: two targets (the light each
+    /// surface reflects; its normal and depth) at [`BOUNCE_DOWN`] scene
+    /// pixels a texel, drawn once a frame before its pieces.
+    bounce_pipeline: wgpu::RenderPipeline,
+    /// (size, direct light, surfaces)
+    bounce: Option<([u32; 2], wgpu::TextureView, wgpu::TextureView)>,
+    /// Stands in for the bounce textures while the pass draws into them.
+    dummy: wgpu::TextureView,
+    /// The frame's bindings for the bounce pass itself (the dummy in the
+    /// bounce slots).
+    bind_bounce: Option<wgpu::BindGroup>,
     /// (key, size, textures)
     backdrop: Option<(u64, [u32; 2], Textures)>,
     atlas: Textures,
@@ -1050,6 +1077,9 @@ impl Gpu {
                 texture(6),
                 texture(7),
                 texture(8),
+                // the frame's direct light and its surfaces, for bounce
+                texture(9),
+                texture(10),
             ],
         });
         let draw_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1182,7 +1212,47 @@ impl Gpu {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let bounce_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("field_gpu bounce"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_bounce"),
+                targets: &[
+                    Some(wgpu::ColorTargetState { format: BOUNCE_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+                    Some(wgpu::ColorTargetState { format: BOUNCE_FORMAT, blend: None, write_mask: wgpu::ColorWrites::ALL }),
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let dummy = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("field_gpu bounce stand-in"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: BOUNCE_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         Gpu {
+            bounce_pipeline,
+            bounce: None,
+            dummy,
+            bind_bounce: None,
             opaque: pipeline(None, "field_gpu opaque"),
             blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
             format: target_format,
@@ -1310,6 +1380,7 @@ impl Offscreen {
         let place = Placement { origin: egui::Pos2::ZERO, scale: self.size[0] as f32 / frame.camera.size[0] };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.size[0] as f32, self.size[1] as f32));
         self.gpu.next_slot = 0;
+        self.gpu.bounce_pass(queue, encoder, frame);
         let prepared = self.gpu.prepare_piece(device, queue, encoder, frame, Piece::Everything, place, rect, self.size, 1.0);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("field_gpu offscreen"),
@@ -1390,6 +1461,34 @@ struct FieldCallback {
 }
 
 impl Gpu {
+    /// The frame's direct light, for bounce ([`FieldFrame::bounce`]): drawn
+    /// once a frame, before its pieces, into the bounce targets (a draw slot
+    /// of its own). Nothing when the frame has no bounce.
+    fn bounce_pass(&mut self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &FieldFrame) {
+        if frame.bounce <= 0.0 || self.next_slot >= DRAW_SLOTS {
+            return;
+        }
+        let (Some(bind), Some((_, rad, geo))) = (&self.bind_bounce, &self.bounce) else { return };
+        let slot = self.next_slot;
+        self.next_slot += 1;
+        // the whole target; a texel's scene pixel is its own times BOUNCE_DOWN
+        let u: [f32; DRAW_FLOATS] = [-1.0, 1.0, 1.0, -1.0, BOUNCE_DOWN, BOUNCE_DOWN, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0];
+        queue.write_buffer(&self.draws, (slot * DRAW_STRIDE) as u64, bytemuck::cast_slice(&u));
+        let clear = wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("field_gpu bounce"),
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment { view: rad, depth_slice: None, resolve_target: None, ops: clear }),
+                Some(wgpu::RenderPassColorAttachment { view: geo, depth_slice: None, resolve_target: None, ops: clear }),
+            ],
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.bounce_pipeline);
+        pass.set_bind_group(0, bind, &[]);
+        pass.set_bind_group(1, &self.draw_bind, &[slot * DRAW_STRIDE]);
+        pass.draw(0..6, 0..1);
+    }
+
     /// `img` into the atlas at `at`: its pixels, its slot, its depth span.
     fn put(&mut self, queue: &wgpu::Queue, img: &LitImage, at: [u32; 2]) {
         self.atlas.upload_slot(queue, at, img);
@@ -1449,19 +1548,43 @@ impl Gpu {
                 None => [0.0, 0.0, 0.0, 0.0],
             })
             .collect();
+        // the bounce's targets, for this frame's size
+        let want = [(frame.camera.size[0] / BOUNCE_DOWN).ceil().max(1.0) as u32, (frame.camera.size[1] / BOUNCE_DOWN).ceil().max(1.0) as u32];
+        if self.bounce.as_ref().is_none_or(|(size, _, _)| *size != want) {
+            let make = |what: &str| {
+                device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: Some(&format!("field_gpu bounce {what}")),
+                        size: wgpu::Extent3d { width: want[0], height: want[1], depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: BOUNCE_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    })
+                    .create_view(&wgpu::TextureViewDescriptor::default())
+            };
+            self.bounce = Some((want, make("light"), make("surfaces")));
+            self.bind = None;
+        }
         if self.bind.is_none() {
-            let Some((_, _, bdt)) = &self.backdrop else { return };
+            let (Some((_, _, bdt)), Some((_, rad, geo))) = (&self.backdrop, &self.bounce) else { return };
             let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
             let views = [view(&bdt.albedo), view(&bdt.lit), view(&bdt.geo), view(&self.atlas.albedo), view(&self.atlas.lit), view(&self.atlas.geo)];
-            let mut entries = vec![
-                wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.s_lin) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.s_near) },
-            ];
-            for (i, v) in views.iter().enumerate() {
-                entries.push(wgpu::BindGroupEntry { binding: 3 + i as u32, resource: wgpu::BindingResource::TextureView(v) });
-            }
-            self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("field_gpu frame"), layout: &self.layout, entries: &entries }));
+            let group = |bounce: [&wgpu::TextureView; 2], label: &str| {
+                let mut entries = vec![
+                    wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.s_lin) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.s_near) },
+                ];
+                for (i, v) in views.iter().chain(bounce).enumerate() {
+                    entries.push(wgpu::BindGroupEntry { binding: 3 + i as u32, resource: wgpu::BindingResource::TextureView(v) });
+                }
+                device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout: &self.layout, entries: &entries })
+            };
+            self.bind = Some(group([rad, geo], "field_gpu frame"));
+            self.bind_bounce = Some(group([&self.dummy, &self.dummy], "field_gpu frame, bounce pass"));
         }
         let spans: Vec<[f32; 2]> = layers.iter().map(|l| self.spans.get(&l.image.key).copied().unwrap_or(NO_SPAN)).collect();
         let u = uniforms(frame, &uv, &spans, self.srgb_target);
@@ -1650,6 +1773,7 @@ impl egui_wgpu::CallbackTrait for FieldCallback {
             gpu.frame_id = frame.id;
             gpu.next_slot = 0;
             gpu.upload_frame(device, queue, &frame);
+            gpu.bounce_pass(queue, encoder, &frame);
         }
         let prepared = gpu.prepare_piece(device, queue, encoder, &frame, self.piece, self.place, self.rect, screen.size_in_pixels, screen.pixels_per_point);
         self.slot.store(prepared.map_or(u32::MAX, Prepared::pack), std::sync::atomic::Ordering::Relaxed);
@@ -1869,9 +1993,10 @@ mod tests {
             view: FieldView::Lit,
             weather: FieldWeather::default(),
             detail: DETAIL,
+            bounce: BOUNCE,
         };
         let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], &vec![[-0.5, 2.0]; MAX_LAYERS], false);
-        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16, "the WGSL struct's size");
+        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16 + 16, "the WGSL struct's size");
         assert_eq!((u[14], u[15]), (MAX_LAYERS as f32, MAX_LIGHTS as f32));
         assert_eq!(&u[16..20], &[0.0, 0.0, 1264.0, 848.0], "the backdrop's place");
         // the first MAX_LAYERS are written, the rest fall off

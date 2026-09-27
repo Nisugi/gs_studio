@@ -640,6 +640,13 @@ across -- and differ only in the right-hand panel:
   stops growing with the window (`FieldFrame::detail`; a crowd with lamps
   and both moons at twice the art's size, 5.3 -> 1.8 ms a frame on an
   RX 7900 GRE, looking the same to a mean OKLab dE of 0.003-0.005).
+  Bounce light (`FieldFrame::bounce`): what the lamps and moons light
+  reflects onto what faces it nearby, in its own colour -- torch-lit
+  ground warming a creature's shins and underside, moonlit snow lifting
+  the figures standing in it, a lit rock tinting its neighbour. One
+  bounce, in screen space: the frame's direct light at a quarter of its
+  size, gathered on a disc 1.5 m wide round each pixel by how the two
+  surfaces face each other (about 20-35% on the pass's cost).
 - **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
   holds in front of creatures. Paint white over a rock, cactus or tree trunk
   in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create

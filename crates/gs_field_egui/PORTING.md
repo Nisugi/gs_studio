@@ -798,6 +798,14 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     when the fit fails. A sprite's depth map -- and the bulge of one with
     none -- is for a figure 1.8 m tall, scaled to the creature's height on
     the stage.
+  - Bounce light: `FieldFrame.bounce` (**a new field**; `field_gpu::BOUNCE`,
+    1, is the stage's, 0 turns it off). Once a frame, before its pieces, a
+    bounce pass draws the frame's direct lamp and moon light -- what each
+    surface reflects, and its normal and depth -- at a quarter of its size
+    into two Rgba16Float targets; every piece then gathers from them on a
+    disc 1.5 m wide round each pixel (12 fixed taps, by how the two
+    surfaces face each other over the distance), times its own albedo.
+    The frame's bindings gain the two targets (9, 10).
   - `creature_puppet`'s texture loader refuses a sheet or normal sheet
     stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
     puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`

@@ -861,6 +861,7 @@ impl StageGpu {
             view: FieldView::Lit,
             weather,
             detail: field_gpu::DETAIL,
+            bounce: field_gpu::BOUNCE,
         };
         Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass, f })
     }
