@@ -21,9 +21,10 @@
 //! side as the side silhouette shows it, from the creature's right (-x),
 //! and used again, as a mirror image, for the left.
 //!
-//! What no painting sees -- an armpit, the inside of a thigh -- is filled
-//! from the nearest painted pixel of the same patch, so the sheet has no
-//! holes. A pixel off every patch stays transparent.
+//! What no painting sees -- an armpit, the inside of a thigh, a neck hidden
+//! under the head -- takes the colour of the painted surface nearest it on
+//! the body, in 3D and across patches ([`fill_unseen`]), so the sheet has
+//! no holes. A pixel off every patch stays transparent.
 
 use rig_bake::Grid;
 
@@ -266,6 +267,7 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
     // 0 = off every patch, 1 = on a patch but unseen, 2 = painted.
     let mut state = vec![0u8; w * h];
     let mut owner = vec![usize::MAX; w * h];
+    let mut points: Vec<Option<V3>> = vec![None; w * h];
     for y in 0..h {
         for x in 0..w {
             let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
@@ -273,6 +275,7 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
             owner[i] = seg;
             state[i] = 1;
             let Some((point, normal)) = rest_point(p, seg, station, theta) else { continue };
+            points[i] = Some(point);
             let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
             for (look, grid, painting, depth) in &views {
                 let facing = dot(normal, look.toward());
@@ -309,6 +312,7 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
             }
         }
     }
+    fill_unseen(&mut rgba, &mut state, &points, &owner, w, h);
     fill_holes(&mut rgba, &mut state, &owner, w, h);
     rgba
 }
@@ -396,6 +400,126 @@ fn rest_point(p: &Puppet, seg: usize, station: f32, theta: f32) -> Option<(V3, V
     // semi-axes, so a flat cross-section faces the right way.
     let normal = norm_or(add(scale(s.axis_w, cs / w.max(1e-3)), scale(s.axis_d, sn / d.max(1e-3))), [0.0, 0.0, 1.0]);
     Some((point, normal))
+}
+
+/// Colour the unseen pixels from the painted surface nearest them ON THE
+/// BODY, not on the sheet: every painted pixel is binned by its rest point
+/// into cubes of [`FILL_LEVELS`] sizes, and an unseen one takes the
+/// distance-weighted mean colour of the cubes round it at the finest size
+/// that has any. Near paint that is the colour just beside it -- across a
+/// patch's edge too, so a neck no view sees takes the jaw's and the
+/// chest's -- and far from any, the broad mean of the skin round it, where
+/// growing across the sheet drew streaks of whatever edge was nearest.
+/// A few smoothing passes over the filled pixels soften the steps where one
+/// cube size hands over to the next. What this leaves (a pixel with no
+/// surface point) is for [`fill_holes`].
+fn fill_unseen(rgba: &mut [u8], state: &mut [u8], points: &[Option<V3>], owner: &[usize], w: usize, h: usize) {
+    #[derive(Default, Clone, Copy)]
+    struct Cube {
+        rgb: [f32; 3],
+        at: V3,
+        n: f32,
+    }
+    let cube_of = |p: V3, size: f32| -> [i32; 3] { p.map(|v| (v / size).floor() as i32) };
+    // 21 bits a coordinate: a million cubes of the finest size each way.
+    let key = |c: [i32; 3]| -> u64 { c.iter().fold(0u64, |k, &v| (k << 21) | (v as u32 as u64 & 0x1f_ffff)) };
+    let size = |level: usize| FILL_CELL_FT * (1u32 << level) as f32;
+    let mut levels: Vec<Cubes<Cube>> = (0..FILL_LEVELS).map(|_| Cubes::default()).collect();
+    for i in 0..w * h {
+        let (2, Some(p)) = (state[i], points[i]) else { continue };
+        let c = [rgba[i * 4] as f32, rgba[i * 4 + 1] as f32, rgba[i * 4 + 2] as f32];
+        for (level, cubes) in levels.iter_mut().enumerate() {
+            let q = cubes.entry(key(cube_of(p, size(level)))).or_default();
+            q.rgb = std::array::from_fn(|k| q.rgb[k] + c[k]);
+            q.at = add(q.at, p);
+            q.n += 1.0;
+        }
+    }
+    let mut filled = Vec::new();
+    for i in 0..w * h {
+        let (1, Some(p)) = (state[i], points[i]) else { continue };
+        for (level, cubes) in levels.iter().enumerate() {
+            let s = size(level);
+            let c = cube_of(p, s);
+            let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+            for d in 0..27i32 {
+                let at = [c[0] + d % 3 - 1, c[1] + d / 3 % 3 - 1, c[2] + d / 9 - 1];
+                let Some(q) = cubes.get(&key(at)) else { continue };
+                let far = crate::math::len(crate::math::sub(scale(q.at, 1.0 / q.n), p)) / s;
+                let wt = q.n.sqrt() * (-far * far).exp();
+                for k in 0..3 {
+                    sum[k] += q.rgb[k] / q.n * wt;
+                }
+                weight += wt;
+            }
+            if weight > 0.0 {
+                rgba[i * 4..i * 4 + 3].copy_from_slice(&sum.map(|v| (v / weight).round().clamp(0.0, 255.0) as u8));
+                rgba[i * 4 + 3] = 255;
+                filled.push(i);
+                break;
+            }
+        }
+    }
+    for &i in &filled {
+        state[i] = 2;
+    }
+    for _ in 0..FILL_SMOOTH_PASSES {
+        let before = rgba.to_vec();
+        for &i in &filled {
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let (mut sum, mut n) = ([0u32; 3], 0u32);
+            for (dx, dy) in [(0isize, 0isize), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (qx, qy) = (x + dx, y + dy);
+                if qx < 0 || qy < 0 || qx as usize >= w || qy as usize >= h {
+                    continue;
+                }
+                let j = qy as usize * w + qx as usize;
+                if state[j] == 2 && owner[j] == owner[i] {
+                    for k in 0..3 {
+                        sum[k] += before[j * 4 + k] as u32;
+                    }
+                    n += 1;
+                }
+            }
+            for k in 0..3 {
+                rgba[i * 4 + k] = (sum[k] / n) as u8;
+            }
+        }
+    }
+}
+
+/// The finest cube of [`fill_unseen`], feet; each coarser size doubles it.
+const FILL_CELL_FT: f32 = 0.04;
+/// Cube sizes of [`fill_unseen`]: the coarsest is 0.04 x 2^7 = 5.12 ft,
+/// wider than any patch of skin no painting sees.
+const FILL_LEVELS: usize = 8;
+/// Smoothing passes over the pixels [`fill_unseen`] coloured.
+const FILL_SMOOTH_PASSES: usize = 6;
+
+/// A map keyed by a packed cube coordinate. The standard hasher is built to
+/// resist hostile keys and is slow for the million lookups a sheet makes;
+/// this mixes the key with splitmix64's finaliser, enough for the low bits
+/// hashbrown indexes by to depend on every coordinate.
+type Cubes<V> = std::collections::HashMap<u64, V, std::hash::BuildHasherDefault<CubeHasher>>;
+
+#[derive(Default)]
+struct CubeHasher(u64);
+
+impl std::hash::Hasher for CubeHasher {
+    fn finish(&self) -> u64 {
+        let mut z = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 << 8) | b as u64;
+        }
+    }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = v;
+    }
 }
 
 /// Grow painted pixels into their patch's unseen ones, a ring at a time,
