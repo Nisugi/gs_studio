@@ -789,6 +789,15 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     signature**): which scene lamps the pass lights
     (`StageGpu::lamps_in_pass`). A lamp past `MAX_LIGHTS` keeps its old
     flame and ground pool instead of vanishing.
+  - Backdrop depth maps: `field_gpu_stage::RelDepth` (**a new type**), a
+    backdrop's `<stem>.depth.png` (`depth_path`), loaded with its occluder
+    mask (`CreatureArtCache::backdrop_depths`, **a new field**, and
+    `backdrop_depth`); `backdrop_geo` fits it to metres against the
+    camera's flat ground on the near rows (`n = a / z + b`, trimmed of what
+    is not ground), sky past 60 m, normals from the 3D surface, flat ground
+    when the fit fails. A sprite's depth map -- and the bulge of one with
+    none -- is for a figure 1.8 m tall, scaled to the creature's height on
+    the stage.
   - `creature_puppet`'s texture loader refuses a sheet or normal sheet
     stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
     puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`

@@ -620,12 +620,21 @@ across -- and differ only in the right-hand panel:
   it swells and fades toward the preset's own brighter and dimmer shades as
   it pulses. The scene's own light (*Light this scene*, the hour, the
   darkness) still sets the night it all sits in.
-  Geometry: a backdrop is flat ground below the horizon for now; a sprite
-  with `<art>_depth.png` and `<art>_normal.png` beside it (16-bit depth in
-  R and G over -0.5..2 m from its feet, a glow mask in B; a camera-space
-  normal map, z < 0 toward the viewer) is lit by them, one without is rounded from its outline; a
+  Geometry: a backdrop with `<stem>.depth.png` beside it (a monocular
+  model's relative depth, 16 bit in R and G, near = high) has its real
+  shape -- ledges, rocks, slopes, and its sky -- the stage fitting that
+  depth to metres against the flat ground its camera sees on the near
+  rows (`field_gpu_stage::backdrop_geo`); one without is flat ground below
+  the horizon and sky above. A sprite with `<art>_depth.png` and
+  `<art>_normal.png` beside it (16-bit depth in R and G over -0.5..2 m from
+  its feet for a figure 1.8 m tall, scaled to the creature's height on the
+  stage, a glow mask in B; a camera-space normal map, z < 0 toward the
+  viewer) is lit by them, one without is rounded from its outline; a
   puppet brings its own surface (`gs_field_egui::field_gpu`,
-  `field_gpu_stage`). The pass shades no finer than the art: a stage shown
+  `field_gpu_stage`). `tools/depth_maps.py` makes both kinds for every
+  creature and backdrop in the pool with Depth Anything V2 (on the ComfyUI
+  venv's GPU torch; `--model large` for finer faces, a non-commercial
+  licence; a map already there is kept unless `--force`). The pass shades no finer than the art: a stage shown
   bigger than its backdrop (a detached field, half a wide screen) is
   shaded at the painting's own size and stretched to fit, so its cost
   stops growing with the window (`FieldFrame::detail`; a crowd with lamps

@@ -17,10 +17,14 @@
 //! ([`METRES_PER_CARD_UNIT`]), but the solver draws cards `mscale` times
 //! the camera's own units (a crowded field shrinks them), so the camera's
 //! units are `1.524 / mscale` metres: that keeps a creature's true size and
-//! the lights' distances in one scale. A backdrop without a depth map is
-//! read as flat ground below the horizon and sky above; a sprite without
-//! `<art>_depth.png` / `<art>_normal.png` beside it is rounded from its
-//! outline (a tube profile); a puppet brings its real surface.
+//! the lights' distances in one scale. A backdrop with `<stem>.depth.png`
+//! beside it (a monocular model's relative depth, `tools/depth_maps.py`)
+//! is fitted to metres against the flat ground this camera sees
+//! ([`backdrop_geo`]); one without is flat ground below the horizon and
+//! sky above. A sprite's `<art>_depth.png` / `<art>_normal.png` beside it
+//! are made for a figure 1.8 m tall and scaled to the creature's height on
+//! the stage; one without is rounded from its outline (a tube profile); a
+//! puppet brings its real surface.
 //!
 //! Lamps. A scene's `lights` become the pass's lights, each kind with its
 //! own physics ([`lamp_physics`]: the notes' torch and mote, and campfire,
@@ -48,8 +52,22 @@ const DEAD_TINT: f32 = 0.155;
 /// `z_range`; lights-and-weather.md "Geometry from depth maps").
 const CREATURE_Z: [f32; 2] = [-0.5, 2.0];
 /// How far a sprite without a depth map bulges toward the viewer at its
-/// middle, metres, and how wide its rounded rim is (share of its height).
+/// middle, metres (for a figure [`NOMINAL_FIGURE_M`] tall, scaled to the
+/// creature's own), and how wide its rounded rim is (share of its height).
 const PROFILE_RELIEF_M: f32 = 0.3;
+/// The height a sprite's depth map (and the bulge of one without) is made
+/// for, metres: the prototype's figures, `tools/depth_maps.py`'s.
+const NOMINAL_FIGURE_M: f32 = 1.8;
+/// A backdrop's relative depth is fitted to the flat ground this near and
+/// no nearer than [`FIT_NEAREST_M`], metres; past [`SKY_M`] is sky (the
+/// shader's own test).
+const FIT_FARTHEST_M: f32 = 25.0;
+const FIT_NEAREST_M: f32 = 0.5;
+const SKY_M: f32 = 60.0;
+/// Neighbouring backdrop pixels this far apart in depth (a share of it) are
+/// across an edge, not one surface: at the painting's own size, far ground
+/// changes a few percent a row.
+const EDGE_JUMP: f32 = 0.15;
 const PROFILE_RIM: f32 = 0.06;
 /// Cached lit images (backdrops, sprites, skins) kept at most.
 const CACHE_MAX: usize = 96;
@@ -218,6 +236,180 @@ pub fn ground_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4]) -> V
         geo.extend(std::iter::repeat_n(g, w));
     }
     geo
+}
+
+/// A backdrop's relative depth (`<stem>.depth.png`, [`depth_path`]; made by
+/// `tools/depth_maps.py`): per pixel how near, 0..1, from a monocular model
+/// -- inverse depth up to an unknown scale and shift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelDepth {
+    pub w: usize,
+    pub h: usize,
+    pub near: Vec<f32>,
+}
+
+impl RelDepth {
+    /// From the PNG: 16 bit in R (high byte) and G.
+    pub fn from_png(bytes: &[u8]) -> Result<RelDepth, String> {
+        let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?.to_rgb8();
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        let near = img.pixels().map(|p| (p.0[0] as f32 * 256.0 + p.0[1] as f32) / 65535.0).collect();
+        Ok(RelDepth { w, h, near })
+    }
+
+    /// Bilinear, at `u`, `v` across it (0..1).
+    fn at(&self, u: f32, v: f32) -> f32 {
+        let (x, y) = ((u * self.w as f32 - 0.5).clamp(0.0, (self.w - 1) as f32), (v * self.h as f32 - 0.5).clamp(0.0, (self.h - 1) as f32));
+        let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+        let p = |x: usize, y: usize| self.near[y * self.w + x];
+        let top = p(x0, y0) + (p(x1, y0) - p(x0, y0)) * fx;
+        let bottom = p(x0, y1) + (p(x1, y1) - p(x0, y1)) * fx;
+        top + (bottom - top) * fy
+    }
+}
+
+/// `v` (`w` x `h`) under a 1-4-6-4-1 kernel along rows, then columns.
+fn smooth(v: &[f32], w: usize, h: usize) -> Vec<f32> {
+    const K: [f32; 5] = [1.0 / 16.0, 4.0 / 16.0, 6.0 / 16.0, 4.0 / 16.0, 1.0 / 16.0];
+    let pass = |src: &[f32], along_rows: bool| {
+        let mut out = vec![0.0f32; src.len()];
+        for j in 0..h {
+            for i in 0..w {
+                out[j * w + i] = K
+                    .iter()
+                    .enumerate()
+                    .map(|(t, k)| {
+                        let d = t as isize - 2;
+                        let (x, y) = if along_rows { ((i as isize + d).clamp(0, w as isize - 1) as usize, j) } else { (i, (j as isize + d).clamp(0, h as isize - 1) as usize) };
+                        k * src[y * w + x]
+                    })
+                    .sum();
+            }
+        }
+        out
+    };
+    pass(&pass(v, true), false)
+}
+
+/// Where a backdrop's relative depth lives: `<stem>.depth.png` beside it.
+pub fn depth_path(background: &str) -> String {
+    let stem = background.rsplit_once('.').map_or(background, |(s, _)| s);
+    format!("{stem}.depth.png")
+}
+
+/// A backdrop's geometry from its relative depth, in metres: the model's
+/// nearness `n` is `a / z + b` for true depth `z`; `a` and `b` are fitted
+/// on the painting's lower part against the flat ground this camera sees
+/// there (rows [`FIT_NEAREST_M`]..[`FIT_FARTHEST_M`] away), twice more
+/// without the pixels that disagree most (a rock, a trunk: not ground).
+/// Then every pixel has its depth; what the fit puts past [`SKY_M`], or
+/// no nearer than the far limit, is sky. Normals from the surface in 3D.
+/// None when the fit fails (too little ground, or nearness that does not
+/// grow toward the camera): the flat ground stands in.
+pub fn backdrop_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4], rel: &RelDepth) -> Option<Vec<[f32; 4]>> {
+    if w < 3 || h < 3 || rel.w == 0 || rel.h == 0 {
+        return None;
+    }
+    let near: Vec<f32> = (0..h).flat_map(|j| (0..w).map(move |i| (i, j))).map(|(i, j)| rel.at((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32)).collect();
+    // A monocular model works at about 518 px and its depth is scaled up:
+    // a ripple every few pixels, which slopes turn into streaks under a
+    // grazing lamp. Smoothed away first (a 1-4-6-4-1 kernel, twice, each way).
+    let near = smooth(&smooth(&near, w, h), w, h);
+    let row_y = |j: usize| rect[1] + (j as f32 + 0.5) * rect[3] / h as f32;
+    let col_x = |i: usize| rect[0] + (i as f32 + 0.5) * rect[2] / w as f32;
+    // the fit: nearness against 1 / ground depth, on the near ground
+    let step = (w / 160).max(1);
+    let mut pairs: Vec<(f32, f32)> = Vec::new();
+    for j in 0..h {
+        let z = camera.ground_depth(row_y(j));
+        if z.is_finite() && (FIT_NEAREST_M..FIT_FARTHEST_M).contains(&z) {
+            pairs.extend((0..w).step_by(step).map(|i| (1.0 / z, near[j * w + i])));
+        }
+    }
+    let fit = |pairs: &[(f32, f32)]| {
+        let n = pairs.len() as f64;
+        let (sx, sy) = pairs.iter().fold((0.0f64, 0.0f64), |(a, b), (x, y)| (a + *x as f64, b + *y as f64));
+        let (mx, my) = (sx / n, sy / n);
+        let (sxx, sxy) = pairs.iter().fold((0.0f64, 0.0f64), |(a, b), (x, y)| (a + (*x as f64 - mx).powi(2), b + (*x as f64 - mx) * (*y as f64 - my)));
+        let a = sxy / sxx.max(1e-12);
+        (a as f32, (my - a * mx) as f32)
+    };
+    if pairs.len() < 64 {
+        return None;
+    }
+    let (mut a, mut b) = fit(&pairs);
+    for _ in 0..2 {
+        let mut res: Vec<f32> = pairs.iter().map(|(x, y)| (y - (a * x + b)).abs()).collect();
+        res.sort_by(f32::total_cmp);
+        let cut = res[res.len() * 7 / 10].max(1e-4) * 2.0;
+        let kept: Vec<(f32, f32)> = pairs.iter().copied().filter(|(x, y)| (y - (a * x + b)).abs() <= cut).collect();
+        if kept.len() < 32 {
+            break;
+        }
+        (a, b) = fit(&kept);
+    }
+    if !(a > 1e-4) {
+        return None;
+    }
+    let depth: Vec<f32> = near.iter().map(|&n| if n - b > 1e-5 { (a / (n - b)).clamp(0.3, 100.0) } else { 100.0 }).collect();
+    let sky = |z: f32| z > SKY_M;
+    let point = |i: usize, j: usize| {
+        let z = depth[j * w + i];
+        let r = camera.ray(col_x(i), row_y(j));
+        [r[0] * z, r[1] * z, r[2] * z]
+    };
+    let mut geo = vec![[0.0f32, 0.0, -1.0, 100.0]; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let z = depth[j * w + i];
+            if sky(z) {
+                continue;
+            }
+            // central differences, one-sided across a jump (an edge: more
+            // than EDGE_JUMP of the depth) or the sky
+            let same = |ii: usize, jj: usize| {
+                let q = depth[jj * w + ii];
+                !sky(q) && (q - z).abs() < EDGE_JUMP * z
+            };
+            let (l, r) = (i.saturating_sub(1), (i + 1).min(w - 1));
+            let (u, d) = (j.saturating_sub(1), (j + 1).min(h - 1));
+            let (l, r) = match (same(l, j), same(r, j)) {
+                (true, true) => (l, r),
+                (true, false) => (l, i),
+                (false, true) => (i, r),
+                _ => (i, i),
+            };
+            let (u, d) = match (same(i, u), same(i, d)) {
+                (true, true) => (u, d),
+                (true, false) => (u, j),
+                (false, true) => (j, d),
+                _ => (j, j),
+            };
+            let p = point(i, j);
+            let mut n = if l == r || u == d {
+                [0.0, 0.0, -1.0]
+            } else {
+                let (pl, pr, pu, pd) = (point(l, j), point(r, j), point(i, u), point(i, d));
+                let dx = [pr[0] - pl[0], pr[1] - pl[1], pr[2] - pl[2]];
+                let dy = [pd[0] - pu[0], pd[1] - pu[1], pd[2] - pu[2]];
+                let c = [dx[1] * dy[2] - dx[2] * dy[1], dx[2] * dy[0] - dx[0] * dy[2], dx[0] * dy[1] - dx[1] * dy[0]];
+                let len = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt();
+                if len > 1e-9 {
+                    c.map(|v| v / len)
+                } else {
+                    [0.0, 0.0, -1.0]
+                }
+            };
+            // facing the camera
+            if n[0] * p[0] + n[1] * p[1] + n[2] * p[2] > 0.0 {
+                n = n.map(|v| -v);
+            }
+            geo[j * w + i] = [n[0], n[1], n[2], z];
+        }
+    }
+    Some(geo)
 }
 
 /// A sprite with no depth map, rounded from its outline: the pixels a rim's
@@ -574,6 +766,9 @@ pub struct StageGpu {
     ppp: f32,
     /// Per scene lamp: lit by this pass ([`StageGpu::lamps_in_pass`]).
     in_pass: Vec<bool>,
+    /// The camera's focal length, stage pixels (metres per stage pixel at
+    /// depth z is z / f).
+    f: f32,
 }
 
 /// The pass's lights: the moons first, then the scene's lamps in order (None:
@@ -631,16 +826,20 @@ impl StageGpu {
             pitch: 0.0,
             height: p.cam_h * k,
         };
-        let bg_key = key_of(("backdrop", tex.id(), rect.map(f32::to_bits), f.to_bits(), p.horizon.to_bits(), camera.height.to_bits()));
+        // its depth map, if it has one: fitted to this camera's ground
+        let depth = scene.and_then(|s| s.background.as_deref()).and_then(|bg| cache.backdrop_depth(bg));
+        let bg_key = key_of((
+            "backdrop",
+            tex.id(),
+            rect.map(f32::to_bits),
+            f.to_bits(),
+            p.horizon.to_bits(),
+            camera.height.to_bits(),
+            depth.map(|d| Arc::as_ptr(d) as usize),
+        ));
         let backdrop = cached(bg_key, || {
-            Some(LitImage {
-                key: bg_key,
-                w: px.w as u32,
-                h: px.h as u32,
-                albedo: px.albedo.clone(),
-                lit: Arc::new(with_glow(&px.lit, None)),
-                geo: Arc::new(ground_geo(&camera, px.w, px.h, rect)),
-            })
+            let geo = depth.and_then(|d| backdrop_geo(&camera, px.w, px.h, rect, d)).unwrap_or_else(|| ground_geo(&camera, px.w, px.h, rect));
+            Some(LitImage { key: bg_key, w: px.w as u32, h: px.h as u32, albedo: px.albedo.clone(), lit: Arc::new(with_glow(&px.lit, None)), geo: Arc::new(geo) })
         })?;
         let t = ctx.input(|i| i.time) as f32;
         let wind = crate::field_weather::weather(ctx).map_or(0.0, |w| w.wind);
@@ -663,7 +862,7 @@ impl StageGpu {
             weather,
             detail: field_gpu::DETAIL,
         };
-        Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass })
+        Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass, f })
     }
 
     /// Which of the scene's lamps (by index) this pass lights and draws: the
@@ -719,7 +918,11 @@ impl StageGpu {
         let Some(px) = cache.light.gpu_pixels(tex.id()) else { return false };
         let maps = (art.extra("depth"), art.extra("normal"));
         let (w, h) = upload_size(px.w, px.h, dest.height() * self.ppp);
-        let key = key_of(("sprite", tex.id(), maps.0.cloned(), maps.1.cloned(), w, h));
+        // depth maps (and the bulge of art with none) are made for a figure
+        // NOMINAL_FIGURE_M tall: this creature's, at its height on the stage
+        let figure_m = self.stage_rect(dest)[3] * (art.bbox[3] - art.bbox[1]).clamp(0.05, 1.0) * ground_z * self.k / self.f.max(1e-3);
+        let depth_scale = ((figure_m / NOMINAL_FIGURE_M).clamp(0.05, 20.0) * 50.0).round() / 50.0;
+        let key = key_of(("sprite", tex.id(), maps.0.cloned(), maps.1.cloned(), w, h, depth_scale.to_bits()));
         let Some(image) = cached(key, || {
             let albedo = downsample(&px.albedo, px.w, px.h, w, h);
             let lit = downsample(&px.lit, px.w, px.h, w, h);
@@ -733,6 +936,7 @@ impl StageGpu {
                 }
                 None => (profile_geo(&albedo, w, h), None),
             };
+            let geo: Vec<[f32; 4]> = geo.into_iter().map(|g| [g[0], g[1], g[2], g[3] * depth_scale]).collect();
             Some(LitImage {
                 key,
                 w: w as u32,
@@ -891,6 +1095,57 @@ mod tests {
             }
             assert!(outline > 500, "the outline is there: {outline} pixels");
         }
+    }
+
+    /// A backdrop's relative depth -- ground that is `a / z + b`, a rock
+    /// standing nearer on it, sky beyond the far limit -- fits back to the
+    /// camera's ground in metres: the ground at its depth, facing up; the
+    /// rock nearer, facing the viewer; the sky as sky. Nearness that does
+    /// not grow toward the camera fits nothing.
+    #[test]
+    fn a_backdrops_depth_map_fits_to_the_ground_it_shows() {
+        let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
+        let (w, h) = (176, 94);
+        let rect = [0.0, 0.0, 880.0, 470.0];
+        let flat = ground_geo(&cam, w, h, rect);
+        let rock = |i: usize, j: usize| (70..90).contains(&i) && (70..85).contains(&j);
+        let near: Vec<f32> = (0..w * h)
+            .map(|k| {
+                let (i, j) = (k % w, k / w);
+                let z = flat[k][3];
+                if z >= 100.0 {
+                    0.01
+                } else if rock(i, j) {
+                    0.05 + 0.6 / 3.0
+                } else {
+                    0.05 + 0.6 / z
+                }
+            })
+            .collect();
+        let rel = RelDepth { w, h, near };
+        let geo = backdrop_geo(&cam, w, h, rect, &rel).expect("a fit");
+        for (k, g) in geo.iter().enumerate() {
+            let (i, j) = (k % w, k / w);
+            let want = flat[k][3];
+            if want >= 100.0 {
+                assert!(g[3] > SKY_M, "sky at {i},{j}: {g:?}");
+            } else if rock(i, j) {
+                let inner = (74..86).contains(&i) && (74..81).contains(&j);
+                assert!(!inner || (g[3] - 3.0).abs() < 0.15, "the rock stands at 3 m: {g:?}");
+            } else if want < 40.0 && !(-4..=4).any(|di: isize| (-4..=4).any(|dj: isize| rock((i as isize + di).max(0) as usize, (j as isize + dj).max(0) as usize))) {
+                // (the smoothing softens the rock's edge over 4 pixels)
+                assert!((g[3] - want).abs() < 0.03 * want, "ground at {i},{j}: {} vs {want}", g[3]);
+                // (this grid is coarse -- 5 stage pixels a row -- so far
+                // ground jumps more a row than an edge does; near it, not)
+                // (nor on the last rows, where the smoothing runs out of rows)
+                if want < 15.0 && j + 3 < h {
+                    assert!(g[1] < -0.95, "ground faces up (y is down): {g:?}");
+                }
+            }
+        }
+        let flat_near = RelDepth { w, h, near: vec![0.5; w * h] };
+        assert_eq!(backdrop_geo(&cam, w, h, rect, &flat_near), None, "nearness that does not grow toward the camera");
+        assert_eq!(depth_path("scenes/forest.png"), "scenes/forest.depth.png");
     }
 
     #[test]

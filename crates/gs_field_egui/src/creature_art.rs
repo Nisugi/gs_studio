@@ -114,6 +114,9 @@ pub struct CreatureArtCache {
     /// ADDITION (not in VellumFE): background pool path -> the occluders
     /// its `<name>.occluders.png` mask paints (None = no mask, or unusable).
     pub occluders: HashMap<String, Option<std::sync::Arc<crate::field_occluders::Occluders>>>,
+    /// ADDITION (not in VellumFE): background pool path -> its relative
+    /// depth, `<name>.depth.png` (`field_gpu_stage::RelDepth`; None = none).
+    pub backdrop_depths: HashMap<String, Option<std::sync::Arc<crate::field_gpu_stage::RelDepth>>>,
 }
 
 // TextureHandle has no Debug; summarize (WidgetRenderSettings derives it).
@@ -291,6 +294,12 @@ impl CreatureArtCache {
     /// (see `field_occluders`), if it has a mask and it was prepared.
     pub fn occluders(&self, background: &str) -> Option<&crate::field_occluders::Occluders> {
         self.occluders.get(background).and_then(|o| o.as_deref())
+    }
+
+    /// ADDITION (not in VellumFE): a background's relative depth map, if it
+    /// has one and it was prepared.
+    pub fn backdrop_depth(&self, background: &str) -> Option<&std::sync::Arc<crate::field_gpu_stage::RelDepth>> {
+        self.backdrop_depths.get(background).and_then(|d| d.as_ref())
     }
 
     pub fn scene_background(&self, pool_path: &str) -> Option<&egui::TextureHandle> {
@@ -705,6 +714,20 @@ impl CreatureArtStore {
                     None => None,
                 };
                 cache.occluders.insert(bg.clone(), occ);
+            }
+            // ADDITION (not in VellumFE): the backdrop's depth map.
+            if !cache.backdrop_depths.contains_key(bg) {
+                let abs = skins::resolve_image_path(&cache.root, &crate::field_gpu_stage::depth_path(bg));
+                let depth = abs.is_file().then(|| std::fs::read(&abs).map_err(|e| e.to_string()).and_then(|b| crate::field_gpu_stage::RelDepth::from_png(&b)));
+                let depth = match depth {
+                    Some(Ok(d)) => Some(std::sync::Arc::new(d)),
+                    Some(Err(e)) => {
+                        tracing::warn!("backdrop depth {}: {e}", abs.display());
+                        None
+                    }
+                    None => None,
+                };
+                cache.backdrop_depths.insert(bg.clone(), depth);
             }
         }
         for prop in &scene.props {

@@ -16,6 +16,8 @@ game's sky).
     cargo test -p studio editor_is_egui_free   # one test (name filter)
     python -m unittest tools/test_refit_joints.py tools/test_snap_joints.py   # the rig tools
     python tools/pair_sheet.py [form ...]      # each form's two views + joints: is the sheet ONE pose?
+    G:\dev\comfy\venv\Scripts\python.exe tools/depth_maps.py [--model small|large] [--force] [name ...]
+                                               # depth + normal maps for the pool's sprites and backdrops (GPU)
     cargo run -p studio                        # the app, binary gs-studio
     cargo run -p studio -- --pool <dir> --tab preview
     cargo build --release -p studio --features bundled-art   # packs art into the exe (needs GS_STUDIO_EMBED_POOL)
