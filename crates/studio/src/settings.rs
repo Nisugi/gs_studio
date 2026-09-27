@@ -1,10 +1,12 @@
-//! Remembered folders: `<gs-studio home>/settings.toml`.
+//! Remembered folders, and whether the stage lights on the GPU:
+//! `<gs-studio home>/settings.toml`.
 //!
 //! Each folder resolves `--flag` > environment variable > this file > the
 //! built-in default, so a flag or variable still wins for one run without
 //! rewriting what was remembered. The file is written whenever a folder is
-//! changed IN THE APP (Data Open, Pool Set, Publish Set, an outline import);
-//! a folder that came from a flag or variable is never saved.
+//! changed IN THE APP (Data Open, Pool Set, Publish Set, an outline import)
+//! or the Preview tab's *Light on the GPU (v2)* is ticked or cleared; a
+//! folder that came from a flag or variable is never saved.
 //!
 //! It always lives in the gs-studio home (`data_home::default_home_or_local`),
 //! wherever the pool points, so it can be found before anything else is
@@ -32,6 +34,9 @@ pub struct Settings {
     /// The silhouette source, `scale-chart.html`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chart: Option<PathBuf>,
+    /// The stage lights on the GPU (the v2 pass), as last ticked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_light: Option<bool>,
 }
 
 impl Settings {
@@ -54,7 +59,7 @@ impl Settings {
         let path = home.join(FILE_NAME);
         std::fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
         let text = toml::to_string(self).map_err(|e| e.to_string())?;
-        let text = format!("# gs-studio: remembered folders. Flags and environment variables override these.\n{text}");
+        let text = format!("# gs-studio: remembered folders and view choices. Flags and environment variables override these.\n{text}");
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
@@ -64,14 +69,14 @@ pub fn home() -> PathBuf {
     crate::data_home::default_home_or_local()
 }
 
-/// The one mutation the app makes: change one folder and write the file.
+/// The one mutation the app makes: change one setting and write the file.
 /// Returns what to show if the write failed (the change still applies for
 /// this run).
 pub fn remember(edit: impl FnOnce(&mut Settings)) -> Option<String> {
     let home = home();
     let (mut settings, _) = Settings::load(&home);
     edit(&mut settings);
-    settings.save(&home).err().map(|e| format!("could not remember the folder: {e}"))
+    settings.save(&home).err().map(|e| format!("could not remember the setting: {e}"))
 }
 
 #[cfg(test)]

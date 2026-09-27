@@ -855,8 +855,11 @@ mod tests {
         // the weather (and point lights), behind the creatures and in front
         // of them -- and the firelight laid over a sprite's base art and a
         // prop's; lamps drawn in depth order between the cards; card labels
-        // lifted over occluders.
-        assert_eq!(regions, 17, "exactly the seventeen documented additions");
+        // lifted over occluders -- and the v2 GPU lighting pass
+        // (field_gpu_stage): its frame started before the backdrop, its
+        // backdrop over the image, and its lit body in place of the
+        // sprite's image.
+        assert_eq!(regions, 20, "exactly the twenty documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

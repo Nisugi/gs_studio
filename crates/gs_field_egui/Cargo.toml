@@ -22,6 +22,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tracing = "0.1"
 # ADDITION (not in VellumFE): creature-field lighting (lit twins).
 vellum_light = { path = "../vellum_light" }
+# ADDITION (not in VellumFE): the v2 field lighting pass (`field_gpu`),
+# drawn through an egui_wgpu paint callback. MUST be the same source and
+# branch as egui (the host's renderer owns the callback resources).
+egui-wgpu = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui-wgpu", default-features = false }
+bytemuck = "1"
 
 [dev-dependencies]
 tempfile = "3"

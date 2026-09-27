@@ -136,8 +136,22 @@ struct Plan {
     keyframes: Vec<((LightEnv, vellum_light::Derived), f32)>,
 }
 
-/// One baked layer: slot, pixels, size, texture name.
-type Baked = (Slot, Vec<u8>, usize, usize, String);
+/// One baked layer: slot, pixels, size, texture name, and -- when the v2
+/// pass wants them kept -- the scene pass alone (a creature's colour the
+/// local lights shine on).
+type Baked = (Slot, Vec<u8>, usize, usize, String, Option<Vec<u8>>);
+
+/// What the v2 lighting pass ([`crate::field_gpu`]) needs of a texture the
+/// cache shows (ADDITION, not in VellumFE): straight RGBA8 of the colour the
+/// local lights shine on (a creature's scene-lit art; a backdrop's
+/// painting) and of the v1 result on screen now. Unlit, both are the art.
+#[derive(Debug)]
+pub struct LitPixels {
+    pub w: usize,
+    pub h: usize,
+    pub albedo: Arc<Vec<u8>>,
+    pub lit: Arc<Vec<u8>>,
+}
 
 struct Job {
     key: u64,
@@ -167,6 +181,16 @@ pub struct LightState {
     /// Lit texture -> the unlit original it replaced (fire light lays the
     /// original back over it, see `field_lights`).
     by_lit: HashMap<egui::TextureId, egui::TextureHandle>,
+    /// Keep the pixels the v2 pass reads ([`LightState::gpu_pixels`]):
+    /// only while it draws, they cost two copies of every lit layer.
+    keep_pixels: bool,
+    /// Lit texture -> its pixels (bases, pose art and backdrops only).
+    pixels: HashMap<egui::TextureId, Arc<LitPixels>>,
+    /// Slot -> the lit texture its pixels are kept for (to drop them when
+    /// the slot is re-lit).
+    pixels_of: HashMap<Slot, egui::TextureId>,
+    /// Original (unlit) texture -> its pixels, made when first asked for.
+    unlit: std::sync::Mutex<HashMap<egui::TextureId, Arc<LitPixels>>>,
 }
 
 /// The lights in force, for whoever lights something the cache does not
@@ -326,6 +350,42 @@ impl LightState {
         self.by_lit.get(&id).cloned()
     }
 
+    /// Keep the pixels the v2 lighting pass reads (it is drawing), or drop
+    /// them. Turning it on re-bakes every layer so the pixels exist.
+    pub fn set_keep_pixels(&mut self, keep: bool) {
+        if keep == self.keep_pixels {
+            return;
+        }
+        self.keep_pixels = keep;
+        if keep {
+            self.applied = None;
+        } else {
+            self.pixels.clear();
+            self.pixels_of.clear();
+            if let Ok(mut u) = self.unlit.lock() {
+                u.clear();
+            }
+        }
+    }
+
+    /// The pixels behind a texture the cache shows now (a creature base,
+    /// its pose art, a backdrop), for the v2 lighting pass: None when it is
+    /// not one of those, or its bake has not kept them yet.
+    pub fn gpu_pixels(&self, id: egui::TextureId) -> Option<Arc<LitPixels>> {
+        if let Some(p) = self.pixels.get(&id) {
+            return Some(p.clone());
+        }
+        let mut unlit = self.unlit.lock().ok()?;
+        if let Some(p) = unlit.get(&id) {
+            return Some(p.clone());
+        }
+        let layer = self.layers.values().find(|l| l.original.id() == id)?;
+        let rgba = Arc::new(layer.px.rgba.clone());
+        let p = Arc::new(LitPixels { w: layer.px.w, h: layer.px.h, albedo: rgba.clone(), lit: rgba });
+        unlit.insert(id, p.clone());
+        Some(p)
+    }
+
     /// A bake is running.
     pub fn busy(&self) -> bool {
         self.job.is_some()
@@ -396,7 +456,7 @@ impl LightState {
                             self.lit.clear();
                         }
                         self.applied = Some(key);
-                        for (slot, rgba, w, h, name) in results {
+                        for (slot, rgba, w, h, name, scene) in results {
                             let image = egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba);
                             let tex = ctx.load_texture(format!("{name}#light"), image, egui::TextureOptions::LINEAR);
                             match slot {
@@ -406,6 +466,14 @@ impl LightState {
                                 slot => {
                                     if let Some(layer) = self.layers.get(&slot) {
                                         self.by_lit.insert(tex.id(), layer.original.clone());
+                                        if self.keep_pixels && matches!(slot, Slot::Base(_) | Slot::Variant(_) | Slot::Backdrop(_)) {
+                                            let albedo = scene.unwrap_or_else(|| layer.px.rgba.clone());
+                                            let px = LitPixels { w, h, albedo: Arc::new(albedo), lit: Arc::new(rgba) };
+                                            if let Some(old) = self.pixels_of.insert(slot.clone(), tex.id()) {
+                                                self.pixels.remove(&old);
+                                            }
+                                            self.pixels.insert(tex.id(), Arc::new(px));
+                                        }
                                     }
                                     self.lit.insert(slot.clone());
                                     swaps.push((slot, tex));
@@ -423,6 +491,8 @@ impl LightState {
         let Some(plan) = plan else {
             // Unlit: put every original back.
             self.by_lit.clear();
+            self.pixels.clear();
+            self.pixels_of.clear();
             if self.applied.take().is_some() || !self.lit.is_empty() {
                 for slot in self.lit.drain() {
                     if let Some(layer) = self.layers.get(&slot) {
@@ -487,13 +557,22 @@ impl LightState {
         }
         let (tx, rx) = channel();
         let key = plan.key;
+        let keep = self.keep_pixels;
         let spawned = std::thread::Builder::new().name("creature-light".into()).spawn(move || {
             let lut = Srgb8Lut::new();
             let out: Vec<Baked> = work
                 .into_iter()
                 .map(|(slot, px, role, standing, wearer, name)| {
+                    // the v2 pass lights a creature's SCENE-lit colour: keep it
+                    let mut scene = None;
                     let rgba = match role {
                         Role::Backdrop => bake_backdrop(&plan, &px, &lut),
+                        Role::Own | Role::Pose { .. } if keep => {
+                            let standing = if matches!(role, Role::Pose { .. }) { standing.as_deref() } else { None };
+                            let (s, lit) = bake_split(&plan, &px, standing, &lut);
+                            scene = Some(s);
+                            lit
+                        }
                         Role::Own => bake_one(&plan, &px, None, None, YMap::IDENTITY, &lut),
                         Role::Pose { .. } => bake_one(&plan, &px, standing.as_deref(), None, YMap::IDENTITY, &lut),
                         Role::Wound { anchored, .. } => {
@@ -510,7 +589,7 @@ impl LightState {
                             bake_rows(&plan, &px, base, rows, ymap, &lut)
                         }
                     };
-                    (slot, rgba, px.w, px.h, name)
+                    (slot, rgba, px.w, px.h, name, scene)
                 })
                 .collect();
             let _ = tx.send(out);
@@ -550,6 +629,33 @@ fn bake_one(plan: &Plan, px: &Px, standing: Option<&Px>, rows: Option<&Px>, ymap
         frame_of(&b)
     };
     blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr2, ymap, lut))
+}
+
+/// [`bake_one`] for a creature's own art, also handing back the scene pass
+/// alone: (scene-lit, fully lit). The v2 lighting pass shines its local
+/// lights on the first and shows them over the second.
+fn bake_split(plan: &Plan, px: &Px, standing: Option<&Px>, lut: &Srgb8Lut) -> (Vec<u8>, Vec<u8>) {
+    let base = standing.unwrap_or(px);
+    let frame_of = |range_src: &[u8]| {
+        let (l_lo, l_hi) = LightFrame::value_range(range_src, lut);
+        let (y_top, y_bot) = LightFrame::content_rows(&base.rgba, base.w);
+        LightFrame { l_lo, l_hi, y_top, y_bot }
+    };
+    let (se, sd) = &plan.scene;
+    let mut lit = px.rgba.clone();
+    apply(&mut lit, px.w, se, sd, &frame_of(&base.rgba), YMap::IDENTITY, lut);
+    if plan.keyframes.is_empty() {
+        return (lit.clone(), lit);
+    }
+    let fr2 = if standing.is_none() {
+        frame_of(&lit)
+    } else {
+        let mut b = base.rgba.clone();
+        apply(&mut b, base.w, se, sd, &frame_of(&base.rgba), YMap::IDENTITY, lut);
+        frame_of(&b)
+    };
+    let full = blend_keyframes(plan, &lit, |k, (e, d)| apply(k, px.w, e, d, &fr2, YMap::IDENTITY, lut));
+    (lit, full)
 }
 
 /// [`bake_one`] with the active art's content rows given, not measured

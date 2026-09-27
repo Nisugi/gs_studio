@@ -92,6 +92,7 @@ fn main() -> eframe::Result {
     if let Some(note) = &settings_note {
         eprintln!("gs-studio: {note}");
     }
+    let gpu_light = saved.gpu_light == Some(true);
     let data = data_root::from_environment(cli.data, saved.data);
     eprintln!("gs-studio: data root {} ({})", data.path.display(), data.source);
     if let Some(target) = &cli.project {
@@ -158,5 +159,19 @@ fn main() -> eframe::Result {
     };
     let startup =
         app::Startup { data, pool, publish, chart: saved.chart, settings_note, tab, room: cli.room, exit_after_secs };
-    eframe::run_native("gs_studio", options, Box::new(move |_cc| Ok(Box::new(app::StudioApp::new(startup)))))
+    eframe::run_native(
+        "gs_studio",
+        options,
+        Box::new(move |cc| {
+            // The v2 field lighting pass needs the wgpu renderer.
+            if let Some(rs) = cc.wgpu_render_state.as_ref() {
+                gs_field_egui::field_gpu::init(&cc.egui_ctx, rs);
+            }
+            // on as last ticked in the Preview tab, or for one run by the variable
+            if gpu_light || std::env::var_os("GS_STUDIO_V2_LIGHT").is_some() {
+                gs_field_egui::field_gpu_stage::set_enabled(&cc.egui_ctx, true);
+            }
+            Ok(Box::new(app::StudioApp::new(startup)))
+        }),
+    )
 }

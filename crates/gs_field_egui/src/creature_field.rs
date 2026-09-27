@@ -204,6 +204,20 @@ pub fn render_creature_field_content(
     // objects on it — resizing the window can no longer make them
     // drift apart.
     let scene = view.scene;
+// >>>doll
+    // The v2 lighting pass (field_gpu_stage.rs), when a host turned it on:
+    // the backdrop and every creature body become GPU pieces lit by the
+    // scene's lamps. None = the old drawing, untouched.
+    let backdrop_tex = scene
+        .and_then(|s| s.background.as_deref())
+        .and_then(|bg| art_cache.and_then(|c| c.scene_background(bg)));
+    let backdrop_rect = backdrop_tex
+        .and_then(|t| backdrop_stage_rect(t.size_vec2().x, t.size_vec2().y))
+        .map(|(x0, y0, x1, y1)| [x0, y0, x1 - x0, y1 - y0]);
+    let gpu = crate::field_gpu_stage::StageGpu::begin(ui.ctx(), field, scene, art_cache, backdrop_tex, backdrop_rect, map.origin, map.scale);
+    crate::field_lights::set_gpu(gpu.is_some());
+    crate::field_gpu_stage::set_current(gpu);
+// <<<doll
     if let Some(scene) = scene {
         if let Some(color) = scene.background_color.as_deref().and_then(parse_hex_rgb) {
             painter.rect_filled(rect, 0.0, color);
@@ -222,6 +236,10 @@ pub fn render_creature_field_content(
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     Color32::WHITE,
                 );
+// >>>doll
+                // The v2 pass's backdrop, lit by the lamps, over the image.
+                crate::field_gpu_stage::with_current(|g| g.paint_backdrop(&stage_painter));
+// <<<doll
             }
         }
     }
@@ -735,6 +753,11 @@ fn paint_creature_card(
         } else {
             Color32::WHITE
         };
+// >>>doll
+        // The v2 pass lights the body itself (lamps, shadows), when on.
+        let gpu_drawn = crate::field_gpu_stage::with_current(|g| g.paint_sprite(painter, cache, &art.texture, art, dest, field.ground_z(unit), dead)).unwrap_or(false);
+        if !gpu_drawn {
+// <<<doll
         painter.image(
             art.texture.id(),
             dest,
@@ -745,6 +768,7 @@ fn paint_creature_card(
         // Firelight: the unlit art laid back over the lit, fire-tinted.
         if !dead {
             crate::field_lights::paint_sprite_glow(painter, cache, &art.texture, dest);
+        }
         }
 // <<<doll
         body = dest;
@@ -1421,9 +1445,21 @@ fn paint_creature_puppet(
     // The figure's own contact shadow, under it: the card's generic ellipse
     // is already down, and this one is shaped like the pose.
     place.paint(painter, &posed.shadow);
-    place.paint_figure_shadows(painter, &posed, &lamps, flicker);
-    place.paint_figure(painter, &posed);
-    place.paint_figure_lamps(painter, &posed, &lamps, flicker);
+    // The v2 pass lights the skin itself (lamps, the shadows it casts and
+    // takes), when on and the surface was kept (scene lighting is up).
+    let gpu_drawn = crate::field_gpu_stage::with_current(|g| match (posed.skin.as_ref(), posed.surface.as_ref()) {
+        (Some(skin), Some(surface)) if !skin.is_empty() => {
+            let m_per_ft = unit.standing.h * crate::field_gpu_stage::METRES_PER_CARD_UNIT / posed.standing_ft.max(1e-3);
+            g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft, dead)
+        }
+        _ => false,
+    })
+    .unwrap_or(false);
+    if !gpu_drawn {
+        place.paint_figure_shadows(painter, &posed, &lamps, flicker);
+        place.paint_figure(painter, &posed);
+        place.paint_figure_lamps(painter, &posed, &lamps, flicker);
+    }
 
     // Skin status overlays ride the same code as sprite cards, over the
     // posed body rect. The puppet has no texture, so anchors come from the

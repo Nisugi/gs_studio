@@ -1047,8 +1047,10 @@ dependencies = [
 name = "gs_field_egui"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "eframe",
  "egui",
+ "egui-wgpu",
  "gs_field",
  "gs_puppet",
  "image",

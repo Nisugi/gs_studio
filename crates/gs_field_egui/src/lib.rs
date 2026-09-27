@@ -35,6 +35,11 @@ pub mod creature_light;
 /// Addition since the port (not in VellumFE): the no-art creature puppet,
 /// preferred over the flat doll whenever a baked puppet resolves.
 pub mod creature_puppet;
+/// Addition since the port (not in VellumFE): the v2 lighting pass -- local
+/// lights and their shadows on the GPU, over each layer's v1 result.
+pub mod field_gpu;
+/// Addition since the port (not in VellumFE): [`field_gpu`] on the stage.
+pub mod field_gpu_stage;
 pub mod field_lights;
 pub mod field_occluders;
 pub mod field_weather;

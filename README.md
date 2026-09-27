@@ -61,8 +61,9 @@ top bar, plus a publish directory set on the Rigs tab:
 Every folder resolves `--flag` > environment variable > **remembered** >
 default. A folder changed in the app (Data Open, Pool Set, Publish Set, and
 the silhouette chart after a successful Import) is remembered in
-`<gs-studio home>/settings.toml`; one that came from a flag or variable is
-used for that run only and never written.
+`<gs-studio home>/settings.toml`, as is the Preview tab's *Light on the GPU
+(v2)*; one that came from a flag or variable is used for that run only and
+never written.
 
 **Silhouettes.** The Rigs tab has a strip above the editor: the path of
 `scale-chart.html` and *Import*, which converts the chart into
@@ -570,6 +571,28 @@ across -- and differ only in the right-hand panel:
   away from each lamp -- only what is lower than the flame reaches the
   floor, so a low campfire throws long leg shadows -- as dark as the light
   it blocks (`gs_puppet::ShadowCaster`).
+  *Light on the GPU (v2)* (under Lights, where the wgpu renderer runs; off
+  until ticked, then remembered; `GS_STUDIO_V2_LIGHT=1` turns it on for one
+  run) swaps that look for Niffy's v2 model (`lights-and-weather.md`):
+  every lamp lights the backdrop and every creature from where it is, with
+  real falloff, light wrapping round forms, and the shadows each creature
+  casts on the ground, on itself and on the others; torches and wisps are
+  drawn by the pass (flame and sparks, the wisp's glowing mote). Each kind
+  has its own physics (`field_gpu_stage::lamp_physics`): the torch and the
+  wisp are the notes' table (a torch made with its default reach lights to
+  14 m, a wisp to 10 m; Reach scales that), a campfire is a bigger fire
+  with softer shadows, a lantern a small steady flame with sharp ones, a
+  glow a wide soft source; a beam lights only its wedge. A wisp or a glow
+  can take one of Niffy's presets (Golden, Arcane, Ember, Void): on the GPU
+  it swells and fades toward the preset's own brighter and dimmer shades as
+  it pulses. The scene's own light (*Light this scene*, the hour, the
+  darkness) still sets the night it all sits in.
+  Geometry: a backdrop is flat ground below the horizon for now; a sprite
+  with `<art>_depth.png` and `<art>_normal.png` beside it (16-bit depth in
+  R and G over -0.5..2 m from its feet, a glow mask in B; a camera-space
+  normal map, z < 0 toward the viewer) is lit by them, one without is rounded from its outline; a
+  puppet brings its own surface (`gs_field_egui::field_gpu`,
+  `field_gpu_stage`).
 - **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
   holds in front of creatures. Paint white over a rock, cactus or tree trunk
   in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create

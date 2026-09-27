@@ -27,7 +27,11 @@ it at a game hour, for lighting checks; `GS_STUDIO_PUPPETS=humanoid,canine` spaw
 forms' puppets, forced, since default art draws everything as a sprite
 (`humanoid/rotting citadel arbalester` spawns that creature in its own skin);
 `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
-*Splats* checkbox). Other env: `GS_STUDIO_DATA`,
+*Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
+torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
+lighting pass for the run, the Preview tab's *Light on the GPU (v2)*, remembered in
+`settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
+in the thousands: the night relight bakes on a worker thread first. Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
 Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
 (projection-first renders, in the family's order: `projection_order` in
@@ -61,7 +65,10 @@ to the puppet),
 overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
 Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
 `gs_field_egui` `stage_demo` /
-`puppet_tune`, `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
+`puppet_tune` / `torchlight` (the v2 lighting pass on Niffy's "Swamp
+Torchlight" prototype scene, unzipped to `target/torchlight`, to compare
+with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame),
+`gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
 Lighting: `cargo run -p vellum_light --bin vlight -- golden <dir>` checks the
 relight port against relight.py's golden cases (OKLab dE <= 0.01); `bench`
 prints timings.

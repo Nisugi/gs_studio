@@ -730,6 +730,8 @@ impl CreatureArtStore {
         // ADDITION (not in VellumFE): light the scene. A scene without
         // [light] puts every original texture back.
         cache.light.set_scene(scene.light.clone(), scene.background.clone());
+        // ADDITION: the v2 pass reads each layer's pixels while it draws
+        cache.light.set_keep_pixels(crate::field_gpu_stage::enabled(ctx));
         let swaps = cache.light.update(ctx);
         for (slot, tex) in swaps {
             cache.swap_texture(&slot, tex);

@@ -86,6 +86,31 @@ impl StageTool {
             if let Some(name) = scenes::list_scenes().first() {
                 stage.load_scene_by_name(name);
             }
+            // GS_STUDIO_SMOKE_LIGHTS=1: the scene lit, with a torch at the
+            // front left and a wisp to the right (in memory only), for
+            // checking lamps and the v2 pass with no one at the window;
+            // =all adds every other kind: a campfire, a glow, and a lantern
+            // at the back right throwing its beam left, and makes the wisp
+            // an Arcane one.
+            if let Some(which) = std::env::var_os("GS_STUDIO_SMOKE_LIGHTS") {
+                use gs_field::lighting::{LampKind, SceneLight};
+                stage.scene_mut().light = Some(SceneLight::default());
+                let mut lamps = vec![(LampKind::Torch, 170.0, 430.0), (LampKind::Wisp, 640.0, 330.0)];
+                let all = which == "all";
+                if all {
+                    lamps.extend([(LampKind::Campfire, 300.0, 300.0), (LampKind::Glow, 80.0, 280.0), (LampKind::Lantern, 820.0, 290.0)]);
+                }
+                for (kind, sx, sy) in lamps {
+                    stage.add_light(kind);
+                    stage.drag_selected_light_to(sx, sy);
+                    let lamp = stage.selected_light.and_then(|k| stage.scene_mut().lights.get_mut(k));
+                    match (all, kind, lamp) {
+                        (true, LampKind::Wisp, Some(l)) => l.color = gs_field_egui::field_gpu::MOTE_PRESETS[1].1[1].into(),
+                        (true, LampKind::Lantern, Some(l)) => l.aim = 195.0,
+                        _ => {}
+                    }
+                }
+            }
             eprintln!(
                 "gs-studio: smoke stage: {} cast, {} spawned, scene '{}'",
                 stage.cast.len(),
@@ -811,6 +836,23 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     use gs_field::lighting::LampKind;
     ui.separator();
     ui.heading("Lights");
+    // The v2 pass: lamps light the backdrop and every body on the GPU, with
+    // real falloff and shadows (gs_field_egui::field_gpu_stage).
+    let ctx = ui.ctx().clone();
+    if gs_field_egui::field_gpu::available(&ctx) {
+        let mut v2 = gs_field_egui::field_gpu_stage::enabled(&ctx);
+        if ui
+            .checkbox(&mut v2, "Light on the GPU (v2)")
+            .on_hover_text("Lamps light the backdrop and every creature from where they are, with shadows. Scenes still need Light this scene for their night look.")
+            .changed()
+        {
+            gs_field_egui::field_gpu_stage::set_enabled(&ctx, v2);
+            // remembered for the next run (settings.toml)
+            if let Some(e) = crate::settings::remember(|s| s.gpu_light = Some(v2)) {
+                eprintln!("gs-studio: {e}");
+            }
+        }
+    }
     ui.horizontal(|ui| {
         for (label, kind) in [
             ("+ Campfire", LampKind::Campfire),
@@ -871,6 +913,18 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
             edited.color = hex_rgb(rgb);
         }
     });
+    if matches!(edited.kind, LampKind::Wisp | LampKind::Glow) {
+        // Niffy's presets: on the GPU (v2) a preset's light swells and fades
+        // toward its own brighter and dimmer shades as it pulses.
+        ui.horizontal(|ui| {
+            ui.label("Preset");
+            for (name, [_, base, _]) in gs_field_egui::field_gpu::MOTE_PRESETS {
+                if ui.small_button(name).on_hover_text("Its colour; on the GPU (v2) it pulses toward the preset's own shades").clicked() {
+                    edited.color = base.to_string();
+                }
+            }
+        });
+    }
     ui.horizontal(|ui| {
         ui.label("x");
         ui.add(egui::DragValue::new(&mut edited.x).speed(2.0));

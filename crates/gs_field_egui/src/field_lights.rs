@@ -113,11 +113,23 @@ thread_local! {
     static LIGHTS: RefCell<Vec<PointLight>> = const { RefCell::new(Vec::new()) };
     /// The lamps near the creature being drawn (set by [`set_creature`]).
     static NEAR: RefCell<Vec<Near>> = const { RefCell::new(Vec::new()) };
+    /// The v2 pass (field_gpu_stage) lights this frame: no ground pools or
+    /// fire-tinted copies, and it draws torches and wisps itself.
+    static GPU: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The v2 lighting pass lights this frame (see [`GPU`]'s docs).
+pub fn set_gpu(on: bool) {
+    GPU.with(|g| g.set(on));
+}
+
+fn gpu() -> bool {
+    GPU.with(|g| g.get())
 }
 
 /// Height of a lamp's light above the floor, world units: the middle of
 /// its flame as [`paint_lamp`] draws it.
-fn flame_height(kind: LampKind) -> f32 {
+pub(crate) fn flame_height(kind: LampKind) -> f32 {
     match kind {
         // The upper part of the flame: a tall fire lights from high in it.
         LampKind::Campfire => FLAME_H,
@@ -294,6 +306,9 @@ pub fn paint_sprite_glow(
     drawn: &egui::TextureHandle,
     dest: egui::Rect,
 ) {
+    if gpu() {
+        return;
+    }
     let Some(glow) = current() else { return };
     let Some(original) = cache.light.original_of(drawn.id()) else { return };
     paint_glow_texture(painter, original.id(), dest, glow);
@@ -475,6 +490,9 @@ fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32,
 }
 
 pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
+    if gpu() && matches!(light.kind, LampKind::Torch | LampKind::Wisp) {
+        return;
+    }
     let (lx, lz, up) = at(field, light, i, t);
     let (foot, ppu) = place(field, to_screen, scale, lx, lz);
     let f = flicker(light, i, t);
@@ -553,8 +571,10 @@ pub fn paint_back(
         return false;
     }
     let t = ctx.input(|i| i.time) as f32;
-    for (i, light) in lights.iter().enumerate() {
-        ground_pool(painter, field, to_screen, scale, light, i, t, backdrop);
+    if !gpu() {
+        for (i, light) in lights.iter().enumerate() {
+            ground_pool(painter, field, to_screen, scale, light, i, t, backdrop);
+        }
     }
     true
 }

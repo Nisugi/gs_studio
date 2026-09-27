@@ -691,3 +691,54 @@ so toggling redraws, and `PuppetKey::splat` (a `SplatKey`, the
 by `set_puppet_splat_params`) shapes the cloud. No wounds, effects or contour on the cloud: it is the
 look test for a splat renderer, CPU-drawn like the skin. VellumFE need not
 expose it.
+
+### 7.28 The v2 lighting pass (GPU)
+
+Niffy's local-lights design (`lights-and-weather.md`, "Swamp Torchlight"):
+lamps light the backdrop and every creature from where they are, with
+inverse-square falloff, wrap, bounce, sheen and the shadows every creature
+casts on the backdrop, itself and the others; torches and wisps are drawn
+by the pass (flame, sparks, stick; the mote's glow). Off by default.
+
+- `field_gpu` (+ `field_gpu.wgsl`): the pass, an `egui_wgpu` paint
+  callback. A host calls `field_gpu::init(ctx, render_state)` once
+  (eframe's `CreationContext::wgpu_render_state`); `available(ctx)` then
+  holds. A frame is a `SharedFrame` (camera in metres, the backdrop and up
+  to 32 creature layers, each its colour + v1 result + normal/depth, up to
+  8 lights) drawn in pieces -- `Piece::Backdrop`, then `Piece::Layer(i)` in
+  the stage's own far-to-near order -- so every egui shape between them
+  keeps its place. v1 is untouched: each layer brings its v1 result and the
+  pass adds the lights on top, so flicker costs a uniform upload. Checked
+  against the prototype's own shader (`examples/torchlight.rs`: mean OKLab
+  dE 0.0014 whole, 0.0015 in pieces).
+- `field_gpu_stage`: the stage glue. `set_enabled(ctx, bool)` /
+  `enabled(ctx)`; `StageGpu::begin` (None = draw the old way) builds the
+  camera from the solver's projection (camera units are `1.524 / mscale`
+  m, cards' 5 ft units scaled by the solver's `mscale`), the backdrop
+  (flat ground below the horizon, sky above, until backdrops ship depth
+  maps) and the lights: each lamp kind's physics is `lamp_physics` (the
+  notes' torch and mote; campfire, lantern and glow by likeness), its range
+  `lamp_range` (the kind's range at the reach it is made with, scaled by the
+  lamp's own), its beam a wedge on the floor (`FieldLight::aimed`, the
+  shader's `beam_gain`, equal to gs_field's `PointLight::beam`), and a wisp
+  or glow whose colour is one of `field_gpu::MOTE_PRESETS` pulses toward
+  that preset's own shades (`mote_shades`); `paint_backdrop`, `paint_sprite` (a sprite's
+  `<art>_depth.png` + `<art>_normal.png` siblings when present, the
+  prototype's packing, else its outline rounded into a tube profile) and
+  `paint_skin` (a puppet's own surface). Layers upload at about their drawn
+  size; one that would overfill the atlas is drawn the old way.
+- `creature_light`: `set_keep_pixels` / `gpu_pixels` keep, while the pass
+  draws, each base / pose / backdrop layer's scene-pass and final pixels
+  (`LitPixels`); `bake_split` is `bake_one` handing back the scene pass too.
+- `creature_field`: when `StageGpu::begin` returns a frame, the backdrop
+  and each sprite / puppet body are GPU pieces (the frame is handed to the
+  card painters through `field_gpu_stage::set_current` / `with_current`, a
+  thread-local, so no ported signature changes); `field_lights::set_gpu`
+  then skips the ground pools, the sprite fire-glow and the torch / wisp
+  drawings, and the puppet's own lamp light and lamp shadows are skipped.
+- `creature_art::prepare_scene_art` tells the light state to keep pixels
+  while the pass is enabled.
+
+VellumFE: call `field_gpu::init` in its eframe creation closure and
+`field_gpu_stage::set_enabled` from a setting to use it; without either,
+nothing changes.

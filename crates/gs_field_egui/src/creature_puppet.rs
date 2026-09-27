@@ -675,6 +675,12 @@ impl PuppetPlacement {
 
     /// Paint the figure through this placement: its skin when it has one,
     /// otherwise its display list.
+    /// Where [`PuppetPlacement::paint_figure`] draws `skin`, on screen.
+    pub fn skin_rect(&self, skin: &gs_puppet::Skin) -> egui::Rect {
+        let min = egui::pos2(self.foot.x + skin.origin[0] * self.scale, self.foot.y + skin.origin[1] * self.scale);
+        egui::Rect::from_min_size(min, egui::vec2(skin.w as f32 * self.scale, skin.h as f32 * self.scale))
+    }
+
     pub fn paint_figure(&self, painter: &egui::Painter, posed: &PosedPuppet) {
         let Some(skin) = posed.skin.as_ref().filter(|s| !s.is_empty()) else {
             return self.paint(painter, &posed.prims);
