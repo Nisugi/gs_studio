@@ -55,3 +55,12 @@ intensity = 0.7
 [darkness]
 outdoor = 0.7
 indoor = 0.88
+
+# The moon over outdoor scenes: it rises at 18:00, is highest at midnight and
+# sets at 06:00. Where the GPU pass draws it is a light from the sky with
+# shadows; elsewhere it lifts the darkness evenly, by `lift` at a full moon in
+# a clear sky. strength: 0 = no moonlight .. 1 = as shipped.
+[moon]
+color = "#b4c4ec"
+strength = 1.0
+lift = 0.4

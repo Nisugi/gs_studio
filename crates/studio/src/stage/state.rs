@@ -146,6 +146,10 @@ pub struct StageState {
     /// clock) and the Lighting strength (the player's setting, 0..1).
     pub light_hour: Option<f32>,
     pub light_strength: f32,
+    /// The sky over it: how full the moon is (0 = new .. 1 = full) and how
+    /// much cloud covers the sky (0..1; weather adds its own).
+    pub light_moon: f32,
+    pub light_clouds: f32,
     /// Weather preview: 0 = clear, else 1 + the index into the renderer's
     /// weather kinds; how much falls (0..1); wind (-1..1).
     pub weather_kind: usize,
@@ -157,6 +161,9 @@ pub struct StageState {
     pub show_props: bool,
     /// Living puppets breathe (their body type's `[idle]` cycle).
     pub show_breath: bool,
+    /// Puppet skins shaded by the scene's sun and sky instead of their own
+    /// cel light (the flat hull; `creature_light::LightClock::sun_lit`).
+    pub sun_lit_skins: bool,
     /// Puppets drawn as Gaussian splat clouds instead of the smooth skin.
     pub show_splats: bool,
     /// The cloud's shape (`gs_puppet::splat::SplatParams`).
@@ -217,12 +224,15 @@ impl StageState {
             prop_filter: String::new(),
             light_hour: None,
             light_strength: 1.0,
+            light_moon: 1.0,
+            light_clouds: 0.0,
             weather_kind: 0,
             weather_intensity: 0.6,
             weather_wind: 0.15,
             show_occluders: false,
             show_props: true,
             show_breath: true,
+            sun_lit_skins: false,
             show_splats: false,
             splat_params: gs_puppet::splat::SplatParams::default(),
             selected_prop: None,

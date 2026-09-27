@@ -25,13 +25,24 @@ struct Layer {
 };
 
 struct Light {
-    pos: vec4<f32>,    // xyz = camera space, metres; w = kind (0 torch, 1 mote)
+    pos: vec4<f32>,    // xyz = camera space, metres (the moon: toward it, unit); w = kind (0 torch, 1 mote, 2 moon)
     col: vec4<f32>,    // rgb = this frame's colour, linear; w = power (flicker in)
     fall: vec4<f32>,   // r0, range, light radius (shadow softness), bounce
     surf: vec4<f32>,   // wrap on creatures, wrap on the ground, sheen on creatures, sheen on the ground (x wetness)
     shine: vec4<f32>,  // shininess on creatures, on the ground, brightness factor (flicker / pulse), prop shown
-    prop: vec4<f32>,   // torch: flame base without sway (xyz), stick length; mote: core colour (rgb)
+    prop: vec4<f32>,   // torch: flame base without sway (xyz), stick length; mote: core colour (rgb); moon: cloud cover, wind across, wind deeper (m/s)
     beam: vec4<f32>,   // the beam's axis across the floor (xyz, camera space), half its width in degrees (>= 180: all round)
+};
+
+// The weather (FieldWeather; all zero: none).
+struct Weather {
+    a: vec4<f32>,          // lightning now, where its cloud is (0..1 across), mist density at the ground, mist height (m)
+    b: vec4<f32>,          // rain amount, rain slant (wind), snowfall, snow lying
+    c: vec4<f32>,          // blowing sand, its wind (m/s), the snow's wind (m/s), mist drift (m/s)
+    fog: vec4<f32>,        // the night air's own light, rgb linear
+    flash_tint: vec4<f32>, // lightning's colour, rgb linear
+    dust: vec4<f32>,       // blowing sand's colour, rgb linear
+    rain_tint: vec4<f32>,  // the rain's colour, rgb linear (white; blood)
 };
 
 struct Field {
@@ -42,6 +53,7 @@ struct Field {
     bgmap: vec4<f32>,  // where the backdrop image lies, scene px: x, y, w, h
     layers: array<Layer, 32>,
     lights: array<Light, 8>,
+    weather: Weather,
 };
 
 // One piece of the frame.
@@ -262,6 +274,54 @@ fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: ve
     return o;
 }
 
+// ---- the moon: a light at infinity, from the sky
+const CLOUD_H: f32 = 600.0;      // the cloud deck, metres up
+const CLOUD_SCALE: f32 = 16.0;   // metres of it per noise unit
+// How far toward the moon a shadow march runs: 60 m, or until the ray
+// would pass the camera (the moon is usually behind the viewer).
+fn moon_reach(P: vec3<f32>, l: vec3<f32>) -> f32 {
+    var t = 60.0;
+    if (l.z < -1e-4) { t = min(t, (P.z - 0.3) / -l.z); }
+    return max(t, 0.0);
+}
+// 1 where the moon shines through, 0 under cloud: a drifting noise field on
+// the cloud deck, read where the ray from P to the moon crosses it. `c` of
+// the sky is covered.
+fn cloud_mask(P: vec3<f32>, Lt: Light) -> f32 {
+    let c = Lt.prop.x;
+    if (c <= 0.001) { return 1.0; }
+    if (c >= 0.999) { return 0.0; }
+    let up = U.up.xyz;
+    let l = Lt.pos.xyz;
+    let h = U.cam.w + dot(P, up);
+    let Q = P + l * ((CLOUD_H - h) / max(dot(l, up), 0.05));
+    let deeper = vec3<f32>(0.0, up.z, -up.y);
+    let uv = (vec2<f32>(Q.x, dot(Q, deeper)) - Lt.prop.yz * U.up.w) / CLOUD_SCALE;
+    let n = fbm(uv);
+    let thr = 0.47 + 0.56 * (c - 0.5);
+    // far off, the patches crowd together: toward the average, which the
+    // sky past the flat ground takes, so the two meet without a seam
+    return mix(smoothstep(thr - 0.05, thr + 0.05, n), 1.0 - 0.9 * c, smoothstep(25.0, 60.0, P.z));
+}
+fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, sheen: f32, shin: f32, start: f32) -> vec3<f32> {
+    let l = Lt.pos.xyz;
+    let ndl = dot(n, l);
+    let shade = max((ndl + wrap) / (1.0 + wrap), 0.0);
+    var lit = 0.0;
+    if (shade > 0.0) {
+        let t = moon_reach(P, l);
+        lit = cloud_mask(P, Lt) * shadow_all(P, P + l * t, start, Lt.fall.z * t);
+    }
+    var o = alb * Lt.col.rgb * Lt.col.w * (shade * lit + Lt.fall.w);
+    if (sheen > 0.0 && lit > 0.0) {
+        let v = normalize(-P);
+        let h = normalize(l + v);
+        let fres = 0.04 + 0.96 * pow(1.0 - max(dot(v, h), 0.0), 5.0);
+        o = o + Lt.col.rgb * Lt.col.w * sheen * fres * pow(max(dot(n, h), 0.0), shin) * (shin + 8.0) / 8.0 * max(ndl, 0.0) * lit;
+    }
+    return o;
+}
+
 // ---- a torch's flame, sparks, stick and halo
 fn flame(px: vec2<f32>, t: f32, T: vec3<f32>, T0: vec3<f32>, flick: f32) -> vec4<f32> {
     let up = U.up.xyz;
@@ -366,6 +426,274 @@ fn mote_prop(px: vec2<f32>, Lt: Light, nearest_z: f32) -> vec3<f32> {
 }
 
 // What one surface shows at a pixel, before the lights' own flame / glow.
+// ---- weather (the prototype's, lights-and-weather.md "Weather"; U.weather)
+const SNOW_SRGB = vec3<f32>(0.93, 0.95, 0.98);
+fn hash31(p0: vec3<f32>) -> f32 {
+    var p = fract(p0 * 0.1031);
+    p = p + dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+}
+fn vn3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash31(i), hash31(i + vec3<f32>(1.0, 0.0, 0.0)), u.x),
+                   mix(hash31(i + vec3<f32>(0.0, 1.0, 0.0)), hash31(i + vec3<f32>(1.0, 1.0, 0.0)), u.x), u.y),
+               mix(mix(hash31(i + vec3<f32>(0.0, 0.0, 1.0)), hash31(i + vec3<f32>(1.0, 0.0, 1.0)), u.x),
+                   mix(hash31(i + vec3<f32>(0.0, 1.0, 1.0)), hash31(i + vec3<f32>(1.0, 1.0, 1.0)), u.x), u.y), u.z);
+}
+fn fbm3(p: vec3<f32>) -> f32 { return 0.62 * vn3(p) + 0.38 * vn3(p * 2.3 + 7.1); }
+// along the ground, away from the camera
+fn ground_fwd() -> vec3<f32> { return vec3<f32>(0.0, U.up.z, -U.up.y); }
+fn fmod(x: f32, y: f32) -> f32 { return x - y * floor(x / y); }
+fn sq(x: f32) -> f32 { return x * x; }
+// The camera's ground plane under pixel px (splashes and streaming sand sit
+// on it: a painted depth is too flat up close), and the ground one pixel
+// spans there, metres.
+fn ground_under(px: vec2<f32>) -> vec3<f32> {
+    let r = ray(px);
+    return r * (U.cam.w / max(-dot(r, U.up.xyz), 1e-3));
+}
+fn ground_foot(z: f32) -> f32 { return z / U.cam.x + z * z / (U.cam.x * max(U.cam.w, 0.3)); }
+
+// Light arriving at a point in the air: the night air's own, the lamps
+// near it, the moon, the lightning.
+fn air_light(P: vec3<f32>) -> vec3<f32> {
+    var L = U.weather.fog.rgb;
+    let n_lights = u32(U.misc.w);
+    for (var li = 0u; li < n_lights; li = li + 1u) {
+        let Lt = U.lights[li];
+        if (Lt.pos.w > 1.5) {
+            L = L + Lt.col.rgb * Lt.col.w * 0.05 * (1.0 - 0.9 * Lt.prop.x);
+            continue;
+        }
+        let d = Lt.pos.xyz - P;
+        let k = select(0.05, 0.07, Lt.pos.w > 0.5);
+        L = L + Lt.col.rgb * Lt.col.w / (dot(d, d) + Lt.fall.x * Lt.fall.x) * k * beam_gain(P, Lt);
+    }
+    return L + U.weather.flash_tint.rgb * U.weather.a.x * 0.035;
+}
+
+// gust fronts: bands of stronger wind travelling across the ground with it
+fn gust_at(P: vec3<f32>, wind: f32) -> f32 {
+    let t = U.up.w;
+    let g = vec2<f32>(P.x - t * wind, dot(P, ground_fwd()));
+    return smoothstep(0.3, 0.85, vn(vec2<f32>(g.x * 0.07, g.y * 0.05 + t * 0.04)));
+}
+
+// Mist, blowing sand, blizzard haze and rain haze between the camera and a
+// surface z_to metres out along this pixel's ray (12 steps, to 30 m at
+// most): xyz = the light they add, w = the share of the surface that shows.
+fn medium(px: vec2<f32>, z_to: f32) -> vec4<f32> {
+    let W = U.weather;
+    if (W.a.z <= 0.0 && W.c.x <= 0.0 && W.b.z <= 0.0 && W.b.x <= 0.0) { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+    let dir = ray(px);
+    let z_max = min(z_to, 30.0);
+    let dl = length(dir);
+    let fwd = ground_fwd();
+    let t = U.up.w;
+    var T = 1.0;
+    var S = vec3<f32>(0.0);
+    var prev = 0.0;
+    for (var i = 0; i < 12; i = i + 1) {
+        let z1 = z_max * pow((f32(i) + 1.0) / 12.0, 1.5);
+        let P = dir * (0.5 * (prev + z1));
+        let h = dot(P, U.up.xyz) + U.cam.w;
+        let gz = dot(P, fwd);
+        var dM = 0.010 * W.b.x;
+        var dS = 0.0;
+        var dW = 0.0;
+        if (W.a.z > 0.0) {
+            let n = fbm3(vec3<f32>(P.x + t * W.c.w, h * 1.8, gz + t * W.c.w * 0.35) * 0.55);
+            dM = dM + W.a.z * exp(-max(h, 0.0) / max(W.a.w, 0.05)) * (0.2 + 1.6 * smoothstep(0.32, 0.78, n));
+        }
+        if (W.c.x > 0.0) {
+            let g = mix(gust_at(P, W.c.y), 1.0, W.c.x * W.c.x);
+            let n = fbm3(vec3<f32>((P.x - t * W.c.y * 0.9) * 0.18, h * 0.7, gz * 0.35 + t * 0.1));
+            dS = (0.015 + 0.30 * W.c.x) * g * exp(-max(h, 0.0) / (1.0 + 5.0 * W.c.x)) * (0.3 + 1.4 * smoothstep(0.25, 0.8, n));
+        }
+        if (W.b.z > 0.0) {
+            let n = fbm3(vec3<f32>((P.x - t * W.c.z) * 0.25, h * 0.5 - t * 0.3, gz * 0.3));
+            dW = (0.004 + 0.16 * W.b.z * W.b.z) * (0.5 + smoothstep(0.3, 0.8, n));
+        }
+        let dens = dM + dS + dW;
+        if (dens > 0.0) {
+            let tint = (vec3<f32>(dM) + W.dust.rgb * 1.8 * dS + vec3<f32>(1.25) * dW) / dens;
+            let a = 1.0 - exp(-dens * (z1 - prev) * dl);
+            S = S + T * a * air_light(P) * tint;
+            T = T * (1.0 - a);
+        }
+        prev = z1;
+    }
+    return vec4<f32>(S, T);
+}
+
+// rain: streaks on slabs at set distances, hidden behind anything nearer
+fn rain_streaks(px: vec2<f32>, scene_z: f32) -> vec3<f32> {
+    let W = U.weather;
+    var acc = vec3<f32>(0.0);
+    var zs = array<f32, 7>(1.7, 2.5, 3.5, 4.8, 6.6, 9.2, 13.5);
+    let t = U.up.w;
+    for (var i = 0; i < 7; i = i + 1) {
+        let zL = zs[i];
+        if (zL >= scene_z) { break; }
+        let fi = f32(i) * 13.1;
+        let ppm = U.cam.x / zL;
+        var w = (px - U.cam.yz) / ppm;                        // metres on the slab, y down
+        w.x = w.x - W.b.y * w.y;                              // wind slants the fall
+        let cw = 0.05 + 0.006 * zL;
+        let col = floor(w.x / cw);
+        if (hash12(vec2<f32>(col, fi + 1.0)) > 0.25 + 0.75 * W.b.x) { continue; }
+        let xoff = (hash12(vec2<f32>(col, fi + 2.0)) - 0.5) * 0.7 * cw;
+        let speed = 7.5 + 2.5 * hash12(vec2<f32>(col, fi + 3.0));
+        let period = mix(3.2, 0.9, W.b.x) * (0.7 + 0.6 * hash12(vec2<f32>(col, fi + 4.0)));
+        let fy = fmod(w.y - t * speed + hash12(vec2<f32>(col, fi + 5.0)) * period, period);
+        let along = fy / (speed * 0.028);
+        if (along > 1.0) { continue; }
+        let dxp = abs(w.x - (col + 0.5) * cw - xoff) * ppm;
+        let wpx = 0.0022 * ppm;
+        var cov = clamp(1.0 - dxp / (wpx + 0.6), 0.0, 1.0) * min(1.0, wpx / 0.6 + 0.25);
+        cov = cov * (1.0 - along) * smoothstep(0.0, 0.12, along);
+        let focus = mix(0.35, 1.0, smoothstep(1.5, 3.5, zL));    // nearest drops are out of focus
+        let haze = exp(-W.a.z * 0.35 * zL);
+        let Lc = W.fog.rgb * 2.2 + (air_light(ray(px) * zL) - W.fog.rgb) * 6.0;
+        acc = acc + Lc * cov * focus * haze * (0.6 + 0.4 * hash12(vec2<f32>(col, fi + 6.0)));
+    }
+    return acc * W.rain_tint.rgb;
+}
+
+// blowing sand: short fast streaks along the wind on slabs at set
+// distances, thickest near the ground and in the gusts
+fn sand_grains(px: vec2<f32>, scene_z: f32) -> vec3<f32> {
+    let W = U.weather;
+    var acc = vec3<f32>(0.0);
+    var zs = array<f32, 7>(1.6, 2.4, 3.4, 4.7, 6.4, 8.8, 12.5);
+    let t = U.up.w;
+    let amt = W.c.x;
+    let dir = select(-1.0, 1.0, W.c.y >= 0.0);
+    let speed0 = abs(W.c.y);
+    for (var i = 0; i < 7; i = i + 1) {
+        let zL = zs[i];
+        if (zL >= scene_z) { break; }
+        let fi = f32(i) * 17.3;
+        let ppm = U.cam.x / zL;
+        let P = ray(px) * zL;
+        let h = dot(P, U.up.xyz) + U.cam.w;
+        if (h < -0.02) { continue; }
+        let lift = exp(-max(h, 0.0) / (0.35 + 2.2 * amt));         // most sand skims low
+        let g = mix(gust_at(P, W.c.y), 1.0, amt * amt);
+        var w = (px - U.cam.yz) / ppm;
+        w.y = w.y + 0.02 * sin(w.x * 3.0 + t * 5.0 + fi);           // a little tumble
+        let ch = 0.03 + 0.003 * zL;
+        let row = floor(w.y / ch);
+        if (hash12(vec2<f32>(row, fi + 1.0)) > (0.15 + 0.85 * amt) * lift * (0.35 + 0.65 * g)) { continue; }
+        let yoff = (hash12(vec2<f32>(row, fi + 2.0)) - 0.5) * 0.6 * ch;
+        let sp = speed0 * (0.75 + 0.5 * hash12(vec2<f32>(row, fi + 3.0)));
+        let period = mix(2.4, 0.5, amt) * (0.7 + 0.6 * hash12(vec2<f32>(row, fi + 4.0)));
+        let fx = fmod(w.x * dir - t * sp + hash12(vec2<f32>(row, fi + 5.0)) * period, period);
+        let len = sp * (0.008 + 0.014 * hash12(vec2<f32>(row, fi + 6.0)));
+        let along = fx / max(len, 1e-3);
+        if (along > 1.0) { continue; }
+        let dyp = abs(w.y - (row + 0.5) * ch - yoff) * ppm;
+        let wpx = 0.0011 * ppm;
+        var cov = clamp(1.0 - dyp / (wpx + 0.6), 0.0, 1.0) * min(1.0, wpx / 0.6 + 0.2);
+        cov = cov * (1.0 - along) * smoothstep(0.0, 0.15, along);
+        let focus = mix(0.35, 1.0, smoothstep(1.4, 3.4, zL));
+        let Lc = W.dust.rgb * (W.fog.rgb * 2.5 + (air_light(P) - W.fog.rgb) * 6.0);
+        acc = acc + Lc * cov * focus * (0.35 + 0.65 * lift);
+    }
+    return acc;
+}
+
+// snowflakes: soft discs drifting down and across with the wind, wobbling,
+// streaked in a blizzard, on slabs at set distances
+fn snow_flakes(px: vec2<f32>, scene_z: f32) -> vec3<f32> {
+    let W = U.weather;
+    var acc = vec3<f32>(0.0);
+    var zs = array<f32, 7>(1.4, 2.1, 3.0, 4.3, 6.0, 8.5, 12.5);
+    let t = U.up.w;
+    let vel = vec2<f32>(W.c.z, mix(0.9, 2.6, W.b.z));                // m/s, y down
+    let spd = length(vel);
+    let vdir = vel / spd;
+    for (var i = 0; i < 7; i = i + 1) {
+        let zL = zs[i];
+        if (zL >= scene_z) { break; }
+        let fi = f32(i) * 11.7;
+        let ppm = U.cam.x / zL;
+        let w = (px - U.cam.yz) / ppm;
+        let q = w - vel * t;
+        let cs = 0.13;
+        let cell = floor(q / cs);
+        if (hash12(cell + fi) > mix(0.22, 0.95, W.b.z)) { continue; }
+        var c = (cell + 0.3 + 0.4 * vec2<f32>(hash12(cell + fi + 1.0), hash12(cell + fi + 2.0))) * cs;
+        c.x = c.x + 0.02 * sin(t * (1.1 + hash12(cell + fi + 3.0)) + 6.28 * hash12(cell + fi + 4.0));   // wobble
+        let d = q - c;
+        let blur = spd * 0.006;                                          // motion blur over ~1/160 s
+        let along = max(abs(dot(d, vdir)) - blur * 0.5, 0.0);
+        let across = dot(d, vec2<f32>(-vdir.y, vdir.x));
+        let hr = hash12(cell + fi + 5.0);
+        let r = 0.002 + 0.005 * hr * hr;
+        let focus = smoothstep(1.3, 3.2, zL);
+        let rpx = r * ppm;
+        let soft = mix(rpx * 0.9, 0.8, focus);                           // the nearest are out of focus
+        let dpx = length(vec2<f32>(along, across)) * ppm;
+        var cov = (1.0 - smoothstep(max(rpx - soft, 0.0), rpx + soft, dpx)) * min(1.0, r * ppm / 0.6 + 0.15);
+        cov = cov * mix(0.3, 1.0, focus) / (1.0 + blur * ppm / max(rpx, 0.5) * 0.35);
+        acc = acc + (W.fog.rgb * 4.0 + (air_light(ray(px) * zL) - W.fog.rgb) * 8.0) * cov;
+    }
+    return acc;
+}
+
+// everything falling between the camera and a surface scene_z metres out
+fn weather_front(px: vec2<f32>, scene_z: f32) -> vec3<f32> {
+    let W = U.weather;
+    var c = vec3<f32>(0.0);
+    if (W.b.x > 0.0) { c = c + rain_streaks(px, scene_z); }
+    if (W.c.x > 0.0) { c = c + sand_grains(px, scene_z); }
+    if (W.b.z > 0.0) { c = c + snow_flakes(px, scene_z); }
+    return c;
+}
+
+// a drop landing near this ground point: a crown on stone, rings on water
+fn splash(P: vec3<f32>, wet: f32, foot: f32) -> f32 {
+    let rain = U.weather.b.x;
+    let g = vec2<f32>(P.x, dot(P, ground_fwd()));
+    let cs = 0.3;
+    let cell = floor(g / cs);
+    let h0 = hash12(cell + 3.7);
+    let per = mix(1.8, 0.45, rain) * (0.8 + 0.4 * h0);
+    let tt = U.up.w / per + h0;
+    let cyc = floor(tt);
+    let age = fract(tt);
+    if (hash12(cell + cyc * 1.37) > 0.3 + 0.7 * rain) { return 0.0; }
+    let c = (cell + 0.25 + 0.5 * vec2<f32>(hash12(cell + cyc * 2.1), hash12(cell + cyc * 3.3 + 9.0))) * cs;
+    let d = length(g - c);
+    let w = 0.008 + 0.004 * age;
+    let we = max(w, 0.7 * foot);
+    let ring = exp(-sq((d - (0.01 + age * 0.075)) / we)) * pow(1.0 - age, 1.8) * (w / we);
+    let wc = max(0.012, 0.7 * foot);
+    let crown = exp(-sq(d / wc)) * (1.0 - smoothstep(0.0, 0.3, age)) * (0.012 / wc);
+    return mix(crown, ring, wet);
+}
+
+// Lightning lifts the night for a moment and cools it (the prototype
+// raises the night pass's exposure; here its result, in linear light).
+fn storm_lift(c: vec3<f32>) -> vec3<f32> {
+    let f = U.weather.a.x;
+    if (f <= 0.0) { return c; }
+    let lifted = c * (1.0 + 2.2 * f);
+    let tint = U.weather.flash_tint.rgb;
+    let cool = dot(lifted, LUM) * tint / max(dot(tint, LUM), 1e-4);
+    return mix(lifted, cool, min(1.0, 0.6 * f) * 0.6);
+}
+
+// Snow settled on a surface, as the pixel's own light would show it: the
+// light its night result gave its colour, now on snow.
+fn snowed(base: vec3<f32>, alb: vec3<f32>, cov: f32) -> vec3<f32> {
+    let lit = dot(base, LUM) / max(dot(alb, LUM), 1e-3);
+    return mix(base, s2l(SNOW_SRGB) * lit, cov);
+}
+
 struct Surf {
     col: vec3<f32>,    // lit colour, linear
     a: f32,            // coverage
@@ -375,6 +703,7 @@ struct Surf {
 };
 
 fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
+    let W = U.weather;
     let uv = (px - U.bgmap.xy) / U.bgmap.zw;
     let bg_a = textureSampleLevel(bg_albedo, s_lin, uv, 0.0);
     let bg_l = textureSampleLevel(bg_lit, s_lin, uv, 0.0);
@@ -383,23 +712,80 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
     let bg_z = bg_g.w;
     let sky = bg_z > 60.0;
     let bg_p = ray(px) * bg_z;
-    let alb_bg = s2l(bg_a.rgb);
+    let up = U.up.xyz;
+    let rain = W.b.x;
+    // rain darkens what it soaks
+    let soak = pow(1.0 - 0.2 * rain, 2.2);
+    var alb_bg = s2l(bg_a.rgb) * soak;
+    var base = s2l(bg_l.rgb) * soak;
     // dark painted pixels count as water, where the scene has any
-    let water = (1.0 - clamp(dot(alb_bg, LUM) * 3.0, 0.0, 1.0)) * U.misc.x;
-    let wet = 0.25 + 0.75 * water;
-    var col = select(s2l(bg_l.rgb), vec3<f32>(0.0), light_only);
+    var water = (1.0 - clamp(dot(s2l(bg_a.rgb), LUM) * 3.0, 0.0, 1.0)) * U.misc.x;
+    if (W.b.w > 0.0 && !sky) {
+        // snow settles on ground that faces up, in drifts laid out on the
+        // camera's ground plane, not on open water
+        let Pg0 = ground_under(px);
+        let G = vec2<f32>(Pg0.x, dot(Pg0, ground_fwd()));
+        let th = 0.12 + 0.8 * W.b.w;
+        let patchy = 1.0 - smoothstep(th - 0.07, th + 0.07, fbm(G * 1.7));
+        let cov = smoothstep(0.35, 0.8, dot(bg_n, up)) * patchy * (1.0 - 0.8 * water);
+        base = snowed(base, alb_bg, cov);
+        alb_bg = mix(alb_bg, s2l(SNOW_SRGB), cov);
+        water = water * (1.0 - cov);
+    }
+    let wet = max(0.25 + 0.75 * water, 0.8 * rain);
+    var col = select(storm_lift(base), vec3<f32>(0.0), light_only);
     if (!sky) {
         let n_lights = u32(U.misc.w);
         for (var li = 0u; li < n_lights; li = li + 1u) {
             let Lt = U.lights[li];
+            if (Lt.pos.w > 1.5) {
+                col = col + moon_term(bg_p, bg_n, alb_bg, Lt, Lt.surf.y, wet * Lt.surf.w, Lt.shine.y, 0.08);
+                continue;
+            }
             let gain = beam_gain(bg_p, Lt);
             if (gain <= 0.0) { continue; }
             col = col + light_term(bg_p, bg_n, alb_bg, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
                                    Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y,
                                    shadow_all(bg_p, Lt.pos.xyz, 0.08, Lt.fall.z));
         }
+    } else {
+        // Sky and far scenery: the moon lights them as open ground facing
+        // up, unshadowed, under the cloud on average -- no seam where the
+        // flat ground gives out at the horizon.
+        let n_lights = u32(U.misc.w);
+        for (var li = 0u; li < n_lights; li = li + 1u) {
+            let Lt = U.lights[li];
+            if (Lt.pos.w < 1.5) { continue; }
+            let open = max(dot(up, Lt.pos.xyz), 0.0) * (1.0 - 0.9 * Lt.prop.x);
+            col = col + alb_bg * Lt.col.rgb * Lt.col.w * (open + Lt.fall.w);
+        }
     }
-    col = mix(col, alb_bg * 2.2, bg_l.a);
+    col = mix(col, s2l(bg_a.rgb) * 2.2, bg_l.a);
+    if (!light_only) {
+        if (W.a.x > 0.0) {
+            // distant lightning: the haze and the cloud above the strike light up most
+            let sv = px / U.size.xy;
+            let far = smoothstep(10.0, 50.0, bg_z);
+            let cloud = exp(-sq((sv.x - W.a.y) / 0.3)) * (1.0 - smoothstep(0.05, 0.42, sv.y));
+            col = col + W.flash_tint.rgb * W.a.x * (0.004 + 0.018 * far + 0.07 * cloud * far);
+        }
+        let Pg = ground_under(px);
+        let gz = dot(Pg, ground_fwd());
+        if (rain > 0.0 && !sky && dot(bg_n, up) > 0.45 && bg_z < 22.0) {
+            let sp = splash(Pg, smoothstep(0.35, 0.8, water), ground_foot(gz)) * (1.0 - smoothstep(8.0, 22.0, bg_z));
+            col = col + (W.fog.rgb * 1.5 + (air_light(bg_p) - W.fog.rgb) * 2.5) * sp * (0.4 + 0.6 * rain) * W.rain_tint.rgb;
+        }
+        if (W.c.x > 0.0 && !sky && dot(bg_n, up) > 0.3 && bg_z < 30.0) {
+            // sand streaming along the ground with the wind
+            let G = vec2<f32>(Pg.x, gz);
+            let g = mix(gust_at(Pg, W.c.y), 1.0, W.c.x * W.c.x);
+            let st = smoothstep(0.5, 0.82, fbm(vec2<f32>((G.x - U.up.w * W.c.y * 0.8) * 1.2, G.y * 7.0)));
+            let fade = 1.0 - smoothstep(0.025, 0.09, ground_foot(gz));   // too fine to see far off
+            col = col + W.dust.rgb * (W.fog.rgb * 3.0 + (air_light(Pg) - W.fog.rgb) * 3.0) * st * g * (0.3 + 0.7 * W.c.x) * fade;
+        }
+        let m = medium(px, bg_z);
+        col = col * m.w + m.xyz + weather_front(px, bg_z);
+    }
     var s: Surf;
     s.col = col;
     s.a = 1.0;
@@ -410,6 +796,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
 }
 
 fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
+    let W = U.weather;
     var s: Surf;
     s.a = 0.0;
     s.z = 1e4;
@@ -424,18 +811,43 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
     let n = normal_of(g4.xyz);
     let z = Ly.z.x + g4.w;
     let P = ray(px) * z;
-    let alb = s2l(a4.rgb) * Ly.z.y;
-    var c = select(s2l(l4.rgb) * Ly.z.y, vec3<f32>(0.0), light_only);
+    var alb = s2l(a4.rgb) * Ly.z.y;
+    var base = s2l(l4.rgb) * Ly.z.y;
+    if (W.b.w > 0.0) {
+        // snow settles on their tops too
+        let nf = fbm(ray(px).xy * z * 9.0 + f32(i) * 5.0);
+        let th = 0.1 + 0.7 * W.b.w;
+        let cov = smoothstep(0.45, 0.85, dot(n, U.up.xyz)) * (1.0 - smoothstep(th - 0.08, th + 0.08, nf)) * 0.85 * (1.0 - l4.a);
+        base = snowed(base, alb, cov);
+        alb = mix(alb, s2l(SNOW_SRGB) * Ly.z.y, cov);
+    }
+    var c = select(storm_lift(base), vec3<f32>(0.0), light_only);
+    // rain makes them shine
+    let sheen_k = 1.0 + 1.4 * W.b.x;
     let n_lights = u32(U.misc.w);
     for (var li = 0u; li < n_lights; li = li + 1u) {
         let Lt = U.lights[li];
+        if (Lt.pos.w > 1.5) {
+            c = c + moon_term(P, n, alb, Lt, Lt.surf.x, Lt.surf.z * sheen_k, Lt.shine.x, 0.15);
+            continue;
+        }
         let gain = beam_gain(P, Lt);
         if (gain <= 0.0) { continue; }
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                           Lt.surf.x, Lt.fall.w, Lt.surf.z, Lt.shine.x,
+                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x,
                            shadow_all(P, Lt.pos.xyz, 0.15, Lt.fall.z));
     }
-    s.col = mix(c, alb * 2.2, l4.a);               // glowing parts: never lit, never darkened
+    if (W.a.x > 0.0 && !light_only) {
+        // lightning comes from above and behind: it catches their tops and backs
+        let Ls = normalize(U.up.xyz * 0.75 + vec3<f32>(0.0, 0.0, 0.65));
+        c = c + alb * W.flash_tint.rgb * W.a.x * 0.10 * max(dot(n, Ls), 0.0);
+    }
+    var col = mix(c, s2l(a4.rgb) * Ly.z.y * 2.2, l4.a);     // glowing parts: never lit, never darkened
+    if (!light_only) {
+        let m = medium(px, z);
+        col = col * m.w + m.xyz + weather_front(px, z);
+    }
+    s.col = col;
     s.a = a4.a;
     s.z = z;
     s.n = n;

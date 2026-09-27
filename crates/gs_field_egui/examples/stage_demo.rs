@@ -465,6 +465,7 @@ impl eframe::App for Demo {
                 game_hour: Some(env("STAGE_DEMO_HOUR", 12.0)),
                 strength: env("STAGE_DEMO_STRENGTH", 1.0),
                 outdoor_guess: None,
+                ..Default::default()
             });
             self.art.prepare_scene_art(&ctx, scene);
             if self.art.lighting_busy() {

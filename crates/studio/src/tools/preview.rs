@@ -147,6 +147,30 @@ impl StageTool {
         if let Some(hour) = std::env::var("GS_STUDIO_LIGHT_HOUR").ok().and_then(|h| h.trim().parse::<f32>().ok()) {
             stage.light_hour = Some(hour.rem_euclid(24.0));
         }
+        // GS_STUDIO_WEATHER=<kind>[:<intensity>] sets the weather (Rain,
+        // Storm, Snow, Sleet, Blood rain, Fog, Sand; any case).
+        if let Ok(w) = std::env::var("GS_STUDIO_WEATHER") {
+            let (kind, amount) = w.split_once(':').map_or((w.as_str(), None), |(k, a)| (k, a.trim().parse::<f32>().ok()));
+            let kinds = gs_field_egui::field_weather::WeatherKind::ALL;
+            if let Some(k) = kinds.iter().position(|k| k.label().eq_ignore_ascii_case(kind.trim())) {
+                stage.weather_kind = k + 1;
+                if let Some(a) = amount {
+                    stage.weather_intensity = a.clamp(0.0, 1.0);
+                }
+            }
+        }
+        // GS_STUDIO_SUN_LIT=1 shades the puppets by the scene (Lit by the scene).
+        if std::env::var_os("GS_STUDIO_SUN_LIT").is_some() {
+            stage.sun_lit_skins = true;
+        }
+        // ... and GS_STUDIO_LIGHT_CLOUDS / GS_STUDIO_LIGHT_MOON set its sky (0..1).
+        let sky = |k: &str| std::env::var(k).ok().and_then(|v| v.trim().parse::<f32>().ok()).map(|v| v.clamp(0.0, 1.0));
+        if let Some(v) = sky("GS_STUDIO_LIGHT_CLOUDS") {
+            stage.light_clouds = v;
+        }
+        if let Some(v) = sky("GS_STUDIO_LIGHT_MOON") {
+            stage.light_moon = v;
+        }
         let lighting = gs_field::lighting::GlobalLighting::load();
         art.set_global_lighting(lighting.clone());
         StageTool { stage, art, lighting }
@@ -275,18 +299,22 @@ impl StageTool {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64());
         let game_hour = stage.light_hour.unwrap_or_else(|| crate::stage::elanthian_time::elanthian_hour_f(now));
-        self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
-            game_hour: Some(game_hour),
-            strength: stage.light_strength,
-            outdoor_guess: None,
-        });
-        self.art.prepare_scene_art(&ctx, stage.scene());
         use gs_field_egui::field_weather::{set_weather, Weather, WeatherKind};
         let weather = stage.weather_kind.checked_sub(1).and_then(|k| WeatherKind::ALL.get(k)).map(|&kind| Weather {
             kind,
             intensity: stage.weather_intensity,
             wind: stage.weather_wind,
         });
+        // the sky's own cloud, or the weather's if it brings more
+        let clouds = stage.light_clouds.max(weather.map_or(0.0, |w| w.cloud_cover()));
+        self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
+            game_hour: Some(game_hour),
+            strength: stage.light_strength,
+            outdoor_guess: None,
+            sky: gs_field::lighting::Sky { moon: stage.light_moon, clouds },
+            sun_lit: stage.sun_lit_skins,
+        });
+        self.art.prepare_scene_art(&ctx, stage.scene());
         set_weather(&ctx, weather);
         gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
         gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
@@ -534,6 +562,12 @@ fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
     }
     ui.add(egui::Slider::new(&mut stage.light_strength, 0.0..=1.0).text("Lighting strength"))
         .on_hover_text("The player's setting: scales every light, scene and time of day alike");
+    ui.add(egui::Slider::new(&mut stage.light_moon, 0.0..=1.0).text("Moon")).on_hover_text(
+        "How full the moon is: 0 = new, 1 = full. It rises at 18:00 on the left, is highest at midnight and sets at 06:00 on the right; outdoors only",
+    );
+    ui.add(egui::Slider::new(&mut stage.light_clouds, 0.0..=1.0).text("Clouds")).on_hover_text(
+        "How much cloud covers the sky: on the GPU its shadows drift over the moonlit ground; rain, snow and fog bring their own",
+    );
 }
 
 fn light_colour_row(
@@ -596,6 +630,21 @@ fn global_light_ui(ui: &mut egui::Ui, global: &mut gs_field::lighting::GlobalLig
             .on_hover_text("At the darkest of night; half of it at dusk and dawn")
             .changed();
         changed |= ui.add(egui::Slider::new(&mut d.indoor, 0.0..=1.0).text("Indoors")).on_hover_text("At every hour: a room needs a lamp").changed();
+        ui.strong("Moon");
+        let m = &mut global.moon;
+        ui.horizontal(|ui| {
+            ui.label("Colour");
+            let mut rgb = parse_hex_rgb(&m.color).unwrap_or(NEUTRAL_SLATE);
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                m.color = hex_rgb(rgb);
+                changed = true;
+            }
+        });
+        changed |= ui.add(egui::Slider::new(&mut m.strength, 0.0..=2.0).text("Strength")).changed();
+        changed |= ui
+            .add(egui::Slider::new(&mut m.lift, 0.0..=1.0).text("Lift"))
+            .on_hover_text("Without the GPU pass: how much of the darkness a full, clear, high moon takes away")
+            .changed();
         let phases = [("Dawn", &mut global.phase.dawn), ("Dusk", &mut global.phase.dusk), ("Night", &mut global.phase.night)];
         for (label, slot) in phases {
             let Some(f) = slot.as_mut() else { continue };
@@ -1163,6 +1212,12 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         ui.checkbox(&mut stage.show_breath, "Breathing").on_hover_text(
             "A living puppet breathes: the slow cycle in its body type's poses file ([idle] in \
              poses/<body_type>.toml), each creature at its own point in it",
+        );
+        ui.checkbox(&mut stage.sun_lit_skins, "Lit by the scene").on_hover_text(
+            "Shade each skin by the scene's sun and sky -- the paint flat, a warm sun from the front \
+             left tinted by the scene's key light, a cool fill tinted by its ambient, a rim along the \
+             edges -- instead of the skin's own fixed light; the time of day goes on top. Needs \
+             Light this scene",
         );
         ui.checkbox(&mut stage.show_splats, "Splats").on_hover_text(
             "Draw every puppet as a Gaussian splat cloud instead of its smooth skin: one soft \

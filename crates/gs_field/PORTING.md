@@ -329,8 +329,16 @@ depends on. Still Android-safe: `vellum_light` has no dependencies.
   dark at every hour unless it has lamps or sets `darkness = 0`**. Scenes
   without `[light]` are unaffected.
 
+* The moon: `GlobalLighting.moon` (`MoonLight`, `[moon]` in
+  `global/lighting.toml`: colour, strength, lift); `Sky` (the host's moon
+  fullness and cloud cover); `moon_position(hour)` (its arc: up 18:00 to
+  06:00, left to right, on the viewer's side) and `moon_light(hour, sky)`
+  (how much of it reaches the field). `SceneLighting::resolve_under(..,
+  sky)` is `resolve` with the moon lifting the darkness evenly, for a
+  frontend that does not light the moon itself; `resolve` is unchanged.
+
 Tests: +4 in `lighting::tests`, including Niffy's `scene_light_example.toml`;
-+1 for the default darkness.
++1 for the default darkness; +2 for the moon.
 
 ### 6.11 Puppet textures
 

@@ -12,6 +12,8 @@
 //!
 //! Env: `TORCHLIGHT_BG=desert`; `TORCHLIGHT_T=<s>` freezes time there;
 //! `TORCHLIGHT_VIEW=0..4` (lit, light only, normals, depth, albedo);
+//! `TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` (any) turns on the
+//! prototype's weather at its defaults;
 //! `TORCHLIGHT_PIECES=1` draws the backdrop and each layer as separate
 //! callbacks, the stage's way, instead of in one;
 //! `TORCHLIGHT_SHOT=<png>` saves the scene at the prototype's 1264x848 and
@@ -57,6 +59,8 @@ struct Backdrop {
     feet: [[f32; 2]; 2],
     torch: ([f32; 2], f32),
     mote: ([f32; 2], f32),
+    /// Blowing sand's colour, sRGB 0..1.
+    dust: [f32; 3],
 }
 const BACKDROPS: [Backdrop; 2] = [
     Backdrop {
@@ -70,6 +74,7 @@ const BACKDROPS: [Backdrop; 2] = [
         feet: [[690.0, 730.0], [420.0, 700.0]],
         torch: ([105.0, 690.0], 0.8),
         mote: ([930.0, 357.0], 1.7),
+        dust: [0.6622558082974083, 0.55654482237131, 0.4078805974784152],
     },
     Backdrop {
         name: "desert",
@@ -82,6 +87,7 @@ const BACKDROPS: [Backdrop; 2] = [
         feet: [[720.0, 735.0], [430.0, 700.0]],
         torch: ([105.0, 700.0], 0.8),
         mote: ([940.0, 385.0], 1.7),
+        dust: [0.7946740494322824, 0.6277302186864314, 0.4294282767155073],
     },
 ];
 
@@ -160,6 +166,35 @@ fn load(dir: &Path, bd: &'static Backdrop) -> Scene {
 }
 
 impl Scene {
+    /// `TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` (any of them): the
+    /// prototype's weather at its default settings; none by default.
+    fn weather(&self, t: f32) -> field_gpu::FieldWeather {
+        let want = std::env::var("TORCHLIGHT_WEATHER").unwrap_or_default();
+        let on = |w: &str| want.split(',').any(|x| x.trim() == w);
+        let s2l = |c: f32| if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+        let mut w = field_gpu::FieldWeather { dust: self.bd.dust.map(s2l), ..Default::default() };
+        if on("storm") {
+            let (l, x) = field_gpu::lightning(t, 7.0, 0.7);
+            (w.flash, w.flash_x) = (l * 0.6, x);
+        }
+        // the night air: the prototype's uFogAmb, with the flash's lift
+        let expo = NIGHT_EXPOSURE * (1.0 + 2.2 * w.flash);
+        w.fog = [0, 1, 2].map(|k| (NIGHT_AMB[k] + (NIGHT_KEY[k] - NIGHT_AMB[k]) * 0.4) * expo * 0.3);
+        if on("mist") {
+            (w.mist, w.mist_h, w.mist_drift) = (0.4 * 0.35, 0.8, 0.4);
+        }
+        if on("rain") {
+            (w.rain, w.wind) = (0.5, 0.15);
+        }
+        if on("sand") {
+            (w.sand, w.sand_wind) = (0.35, (3.0 + 15.0 * 0.6) * (0.5 + 0.5 * 0.35 + 0.3));
+        }
+        if on("snow") {
+            (w.snow, w.snow_wind, w.snow_cover) = (0.3, 0.2 * (0.6 + 11.0 * 0.3 * 0.3), 0.45);
+        }
+        w
+    }
+
     fn frame(&self, t: f32, view: FieldView, shadows: bool, torch: bool, mote: bool) -> FieldFrame {
         let cam = self.camera;
         let up = cam.up();
@@ -211,6 +246,7 @@ impl Scene {
             water: self.bd.water,
             shadows,
             view,
+            weather: self.weather(t),
         }
     }
 }

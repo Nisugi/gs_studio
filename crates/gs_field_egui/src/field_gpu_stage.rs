@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use gs_field::lighting::{LampKind, PointLight};
 
-use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement, SharedFrame};
+use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, FieldWeather, LayerDraw, LitImage, Piece, Placement, SharedFrame};
 
 /// Metres in a card (world) unit: `gs_field::cards::UNITS_PER_FOOT` is 0.2.
 pub const METRES_PER_CARD_UNIT: f32 = 1.524;
@@ -103,6 +103,23 @@ fn cached(key: u64, make: impl FnOnce() -> Option<LitImage>) -> Option<Arc<LitIm
         c.images.remove(&old);
     }
     Some(img)
+}
+
+/// [`scene_air`] for a backdrop, worked out once.
+fn air_of(key: u64, px: &crate::creature_light::LitPixels) -> ([f32; 3], [f32; 3]) {
+    static AIR: OnceLock<Mutex<HashMap<u64, ([f32; 3], [f32; 3])>>> = OnceLock::new();
+    let map = AIR.get_or_init(Mutex::default);
+    if let Some(a) = map.lock().ok().and_then(|m| m.get(&key).copied()) {
+        return a;
+    }
+    let a = scene_air(px);
+    if let Ok(mut m) = map.lock() {
+        if m.len() > 32 {
+            m.clear();
+        }
+        m.insert(key, a);
+    }
+    a
 }
 
 fn key_of(parts: impl Hash) -> u64 {
@@ -385,7 +402,8 @@ fn scene_light(field: &gs_field::solver::CreatureField, cam: &FieldCamera, k: f3
             l.show = light.kind == LampKind::Wisp;
             l
         }
-        field_gpu::LightKind::Torch => {
+        // a flame (no lamp kind is a moon)
+        field_gpu::LightKind::Torch | field_gpu::LightKind::Moon => {
             let (f, sway) = field_gpu::torch_flicker(t + index as f32 * 11.3, light.flicker.clamp(0.0, 1.0));
             // the author's colour, warming and reddening as the notes' torch does
             let (now, rest) = (field_gpu::torch_colour(f), field_gpu::torch_colour(1.0));
@@ -405,6 +423,123 @@ fn scene_light(field: &gs_field::solver::CreatureField, cam: &FieldCamera, k: f3
     l.wrap_creature = phys.wrap_creature;
     l.wrap_ground = phys.wrap_ground;
     Some(l.aimed(cam, light.aim, light.spread))
+}
+
+// ------------------------------------------------------------------ weather
+
+/// A storm's lightning: strikes a minute, how far off (0 near .. 1 far) and
+/// how strongly a strike lifts the night (the notes' defaults).
+const STORM_PER_MIN: f32 = 7.0;
+const STORM_DIST: f32 = 0.4;
+const STORM_STRENGTH: f32 = 0.6;
+/// The night air's light as a share of the lit backdrop's mean.
+const FOG_OF_SCENE: f32 = 0.9;
+/// Blood rain's colour.
+const BLOOD_RAIN: &str = "#b0302a";
+
+/// A backdrop's air: its fog colour (the lit backdrop's mean, linear, a
+/// share of it) and its dust (the notes': half #c9a472, half the painted
+/// ground's colour -- the lower 40% of the backdrop).
+fn scene_air(px: &crate::creature_light::LitPixels) -> ([f32; 3], [f32; 3]) {
+    let (w, h) = (px.w.max(1), px.h.max(1));
+    let mut lit = [0.0f32; 3];
+    let mut ground = [0.0f32; 3];
+    let (mut n, mut ng) = (0.0f32, 0.0f32);
+    let step = ((w * h) / 20000).max(1);
+    for i in (0..w * h).step_by(step) {
+        let (l, a) = (&px.lit[i * 4..i * 4 + 3], &px.albedo[i * 4..i * 4 + 3]);
+        for k in 0..3 {
+            lit[k] += s2l(l[k]);
+        }
+        n += 1.0;
+        if i / w >= h * 6 / 10 {
+            for k in 0..3 {
+                ground[k] += a[k] as f32 / 255.0;
+            }
+            ng += 1.0;
+        }
+    }
+    let base = hex_lin("#c9a472");
+    let fog = lit.map(|c| c / n.max(1.0) * FOG_OF_SCENE);
+    let dust = [0, 1, 2].map(|k| {
+        let g = ground[k] / ng.max(1.0);
+        let g = if g <= 0.04045 { g / 12.92 } else { ((g + 0.055) / 1.055).powf(2.4) };
+        0.5 * base[k] + 0.5 * g
+    });
+    (fog, dust)
+}
+
+fn s2l(c: u8) -> f32 {
+    let c = c as f32 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// The host's weather as the pass draws it, at `t` seconds, in a scene whose
+/// air is `fog` and dust `dust`.
+pub fn field_weather(w: Option<&crate::field_weather::Weather>, t: f32, fog: [f32; 3], dust: [f32; 3]) -> FieldWeather {
+    use crate::field_weather::WeatherKind as K;
+    let mut f = FieldWeather { fog, dust, ..FieldWeather::default() };
+    let Some(w) = w.filter(|w| w.intensity > 0.0) else { return f };
+    let i = w.intensity.clamp(0.0, 1.0);
+    let snow_wind = |amount: f32| w.wind * (0.6 + 11.0 * amount * amount);
+    match w.kind {
+        K::Rain | K::BloodRain => {
+            f.rain = i;
+            f.wind = w.wind;
+            if w.kind == K::BloodRain {
+                f.rain_tint = hex_lin(BLOOD_RAIN).map(|c| c * 2.5);
+            }
+        }
+        K::Storm => {
+            f.rain = i;
+            f.wind = w.wind;
+            let (l, x) = field_gpu::lightning(t, STORM_PER_MIN, STORM_DIST);
+            f.flash = l * STORM_STRENGTH;
+            f.flash_x = x;
+        }
+        K::Snow => {
+            f.snow = i;
+            f.snow_wind = snow_wind(i);
+            f.snow_cover = 0.2 + 0.4 * i;
+        }
+        K::Sleet => {
+            f.rain = 0.6 * i;
+            f.wind = w.wind;
+            f.snow = 0.5 * i;
+            f.snow_wind = snow_wind(0.5 * i);
+        }
+        K::Fog => f.mist = 0.35 * i,
+        K::Sand => {
+            f.sand = i;
+            f.sand_wind = if w.wind < 0.0 { -1.0 } else { 1.0 } * (3.0 + 15.0 * w.wind.abs()) * (0.8 + 0.5 * i);
+        }
+    }
+    f
+}
+
+/// The moon's brightness at full ([`MoonNow::brightness`] 1): what it adds
+/// to a surface facing it, before the surface's colour.
+const MOON_POWER: f32 = 0.32;
+/// How fast cloud shadows drift with no wind, and how much a full wind adds
+/// (m/s, left to right).
+const CLOUD_DRIFT: f32 = 3.0;
+const CLOUD_WIND: f32 = 9.0;
+
+/// The moon as the pass's light, from where it is in the sky.
+fn moon_light(cam: &FieldCamera, moon: &crate::creature_light::MoonNow, wind: f32) -> FieldLight {
+    let up = cam.up();
+    let deeper = [0.0, up[2], -up[1]];
+    let (sa, ca) = moon.azimuth.to_radians().sin_cos();
+    let (se, ce) = moon.elevation.to_radians().sin_cos();
+    // across the floor sin(az), toward the viewer cos(az); up by elevation
+    let toward = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
+    // with the wind, else left to right; a little away from the viewer too
+    let drift = (CLOUD_DRIFT + CLOUD_WIND * wind.abs()) * if wind < 0.0 { -1.0 } else { 1.0 };
+    FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()])
 }
 
 // ------------------------------------------------------------------ the stage
@@ -486,9 +621,14 @@ impl StageGpu {
             })
         })?;
         let t = ctx.input(|i| i.time) as f32;
-        let lights = scene
-            .map(|s| s.lights.iter().enumerate().filter_map(|(i, l)| scene_light(field, &camera, k, l, i, t)).take(field_gpu::MAX_LIGHTS).collect())
-            .unwrap_or_default();
+        let wind = crate::field_weather::weather(ctx).map_or(0.0, |w| w.wind);
+        let mut lights: Vec<FieldLight> = cache.light.moon_now().map(|m| moon_light(&camera, &m, wind)).into_iter().collect();
+        let room = field_gpu::MAX_LIGHTS - lights.len();
+        if let Some(s) = scene {
+            lights.extend(s.lights.iter().enumerate().filter_map(|(i, l)| scene_light(field, &camera, k, l, i, t)).take(room));
+        }
+        let (fog, dust) = air_of(bg_key, &px);
+        let weather = field_weather(crate::field_weather::weather(ctx).as_ref(), t, fog, dust);
         let frame = FieldFrame {
             id: FieldFrame::next_id(),
             camera,
@@ -500,6 +640,7 @@ impl StageGpu {
             water: 0.0,
             shadows: true,
             view: FieldView::Lit,
+            weather,
         };
         Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, used: std::cell::Cell::new(0.0), ppp: ctx.pixels_per_point() })
     }
@@ -735,6 +876,44 @@ mod tests {
         let (b2, d2) = field_gpu::mote_shades("#808080");
         let grey = lin("#808080");
         assert!(b2[0] > grey[0] && d2[0] < grey[0]);
+    }
+
+    /// The moon at midnight is high and behind the viewer; rising, it is
+    /// low on the left; setting, low on the right.
+    #[test]
+    fn the_moon_shines_from_where_it_is() {
+        let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
+        let at = |az: f32, el: f32| {
+            let m = crate::creature_light::MoonNow { azimuth: az, elevation: el, colour: "#ffffff".into(), brightness: 1.0, clouds: 0.3 };
+            moon_light(&cam, &m, 0.0)
+        };
+        let high = at(0.0, 55.0);
+        assert!(high.pos[1] < -0.8 && high.pos[2] < -0.5 && high.pos[0].abs() < 1e-5, "up (y is down) and toward the viewer: {:?}", high.pos);
+        let len = high.pos.iter().map(|v| v * v).sum::<f32>().sqrt();
+        assert!((len - 1.0).abs() < 1e-4);
+        assert!(at(-70.0, 5.0).pos[0] < -0.9 && at(70.0, 5.0).pos[0] > 0.9, "rises left, sets right");
+        assert_eq!(high.kind, field_gpu::LightKind::Moon);
+        assert_eq!(high.prop[0], 0.3, "the cloud cover rides along");
+    }
+
+    /// Each weather kind turns on its own parts; none is none.
+    #[test]
+    fn weather_kinds_draw_their_own_parts() {
+        use crate::field_weather::{Weather, WeatherKind as K};
+        let at = |kind, wind: f32| field_weather(Some(&Weather { kind, intensity: 0.8, wind }), 2.0, [0.1; 3], [0.5; 3]);
+        assert!(!field_weather(None, 2.0, [0.1; 3], [0.5; 3]).any());
+        let rain = at(K::Rain, 0.2);
+        assert!(rain.rain == 0.8 && rain.wind == 0.2 && rain.snow == 0.0 && rain.flash == 0.0);
+        assert!(at(K::Storm, 0.0).rain > 0.0, "a storm rains");
+        let snow = at(K::Snow, 0.5);
+        assert!(snow.snow == 0.8 && snow.snow_cover > 0.0 && snow.snow_wind > 0.0 && snow.rain == 0.0);
+        let sleet = at(K::Sleet, 0.0);
+        assert!(sleet.rain > 0.0 && sleet.snow > 0.0);
+        assert!(at(K::Fog, 0.0).mist > 0.0);
+        let sand = at(K::Sand, -0.5);
+        assert!(sand.sand == 0.8 && sand.sand_wind < -3.0, "the sand blows with the wind: {}", sand.sand_wind);
+        assert!(at(K::BloodRain, 0.0).rain_tint[0] > at(K::BloodRain, 0.0).rain_tint[1] * 3.0, "blood rain is red");
+        assert_eq!(rain.fog, [0.1; 3]);
     }
 
     #[test]

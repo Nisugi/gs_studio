@@ -556,7 +556,15 @@ across -- and differ only in the right-hand panel:
   time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;
   *Restore shipped defaults*). *Preview*
   picks the hour: the live Elanthian clock, the Dawn / Day / Dusk / Night
-  buttons or the slider, plus the player's Lighting strength. Creatures,
+  buttons or the slider, plus the player's Lighting strength, and the sky:
+  *Moon* (how full, 0 = new .. 1 = full) and *Clouds* (how much of the sky
+  is covered; rain, snow and fog bring their own). Outdoors the moon rises
+  at 18:00 low on the left, is highest at midnight and sets at 06:00 low on
+  the right, always on the viewer's side; on the GPU (v2) it is a light
+  from the sky with soft shadows, a fill from the whole sky and cloud
+  shadows drifting with the wind, and elsewhere it lifts the darkness
+  evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
+  lift, under *Global time-of-day defaults*). Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
 - **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*,
@@ -610,8 +618,20 @@ across -- and differ only in the right-hand panel:
   front, lamps too. *Reload mask* after
   painting; *Show* tints them red (`gs_field_egui::field_occluders`).
 - **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
-  Sleet, Blood rain or Fog, with Amount and Wind -- a preview of what the
-  game sets from the room (`gs_field_egui::field_weather`).
+  Sleet, Blood rain, Fog or Sand, with Amount and Wind -- a preview of what
+  the game sets from the room (`gs_field_egui::field_weather`), which also
+  brings its cloud over the moon. Painted over the stage, or, where the
+  GPU pass draws, Niffy's weather at depth (`field_gpu_stage::field_weather`,
+  the prototype's model, within a mean OKLab dE of 0.003 of it for storm,
+  mist, rain and sand, 0.013 for snow): rain falls on slabs from 1.7 to
+  13.5 m, in front of and behind each creature, darkens and wets the
+  ground and splashes on it (rings on water); a storm's lightning strikes
+  now and then, lifting the night, lighting the far haze and the cloud
+  above the strike and catching the creatures' tops; fog is mist hugging
+  the ground, lit by the lamps it drifts past; snow falls, closes in with
+  haze and settles on whatever faces up, ground and creatures; sand blows
+  in gusts, streams along the ground and turns the air its colour. The
+  air's own light is the lit backdrop's, the dust half its ground's colour.
 - **Preview**: the Cast (creature-pool base art grouped by bestiary area,
   filter, *Add generic*), **Spawn by name**, the Roster, and for the selected
   creature the simulator: Target, the crtrStatus flags, dead / boss / mini
@@ -637,7 +657,13 @@ elephantid or suine puppet never appeared on the stage however much art was
 in the pool.
 
 The **Puppets** list at the top of the Preview panel (with the *Held
-weapons*, *Breathing* and *Splats* checkboxes; *Splats* draws every puppet
+weapons*, *Breathing*, *Lit by the scene* and *Splats* checkboxes; *Lit by
+the scene* shades every skin by the scene's sun and sky instead of its own
+fixed cel light -- the paint flat, a warm sun high to the front left
+tinted by the hue of the scene's key light, a cool fill by its ambient, a
+rim along the edges facing the sun, the time of day on top
+(`creature_light::LightClock::sun_lit`, Niffy's flat hull; off by
+default); *Splats* draws every puppet
 as a Gaussian splat cloud instead of its smooth skin, `gs_puppet::splat`,
 the look test for a splat renderer, with sliders for the sample spacing,
 each splat's overlap past its step and its opacity) is the direct way in:

@@ -39,7 +39,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use gs_field::lighting::{GlobalLighting, SceneLight, SceneLighting};
+use gs_field::lighting::{moon_light, moon_position, GlobalLighting, SceneLight, SceneLighting, Sky};
 use vellum_light::{
     apply, apply_backdrop, auto_scene_light, with_intensity, LightEnv, LightFrame, SceneColours, Srgb8Lut, YMap,
 };
@@ -120,12 +120,71 @@ pub struct LightClock {
     pub strength: f32,
     /// The room's indoor/outdoor guess when the scene does not say.
     pub outdoor_guess: Option<bool>,
+    /// The moon's fullness and the cloud over it (outdoors, at night).
+    pub sky: Sky,
+    /// Shade puppet skins by the scene's sun and sky -- the paint flat,
+    /// the light from the scene -- instead of by their own fixed cel light
+    /// ([`ResolvedLight::sun`]).
+    pub sun_lit: bool,
 }
 
 impl Default for LightClock {
     fn default() -> Self {
-        LightClock { game_hour: None, strength: 1.0, outdoor_guess: None }
+        LightClock { game_hour: None, strength: 1.0, outdoor_guess: None, sky: Sky::default(), sun_lit: false }
     }
+}
+
+/// Where a sun-lit skin's sun is, relative to the screen: x right, y up,
+/// z toward the viewer -- high and to the front left, the way paintings are
+/// lit. Its light and the sky's are the prototype's day (a warm white sun,
+/// a cool fill), tinted toward the hues of the scene's key and ambient
+/// colours by the scene light's strength.
+pub const SUN_TOWARD: [f32; 3] = [-0.55, 0.75, 0.55];
+const SUN_RGB: [u8; 3] = [255, 244, 226];
+const SUN_FILL_RGB: [u8; 3] = [150, 170, 200];
+const SUN_STRENGTH: f32 = 1.0;
+const SUN_FILL: f32 = 0.45;
+
+/// The sun and sky a sun-lit skin is shaded by under the scene light `env`.
+fn scene_sun(env: &LightEnv) -> gs_puppet::SceneLight {
+    let t = (env.strength * env.intensity).clamp(0.0, 1.0);
+    // A backdrop's key and ambient are the average colours of its lit and
+    // shaded parts, mid-tones: their hue tints the light, not their
+    // darkness (brightest channel lifted to full).
+    let hex = |h: &str| {
+        let h = h.trim().trim_start_matches('#');
+        let p = |i: usize| h.get(i..i + 2).and_then(|s| u8::from_str_radix(s, 16).ok());
+        let c = [p(0)?, p(2)?, p(4)?];
+        let top = c.iter().copied().max().unwrap_or(0).max(1) as f32;
+        Some(c.map(|v| (v as f32 * 255.0 / top).round() as u8))
+    };
+    let mix = |a: [u8; 3], b: Option<[u8; 3]>| match b {
+        Some(b) => [0, 1, 2].map(|k| (a[k] as f32 + (b[k] as f32 - a[k] as f32) * t).round() as u8),
+        None => a,
+    };
+    gs_puppet::SceneLight {
+        toward: SUN_TOWARD,
+        rgb: mix(SUN_RGB, hex(&env.key)),
+        strength: SUN_STRENGTH,
+        fill_rgb: mix(SUN_FILL_RGB, env.ambient.as_deref().and_then(hex)),
+        fill: SUN_FILL,
+    }
+}
+
+/// The moon as the v2 pass lights it now ([`LightState::moon_now`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MoonNow {
+    /// Degrees ([`gs_field::lighting::moon_position`]): azimuth 0 = behind
+    /// the viewer, -90 screen-left; elevation above the horizon.
+    pub azimuth: f32,
+    pub elevation: f32,
+    /// `#rrggbb`.
+    pub colour: String,
+    /// Its fullness, fading at the horizon, times the moon's strength and
+    /// the player's Lighting strength; the clouds are not in it.
+    pub brightness: f32,
+    /// How much of the sky the clouds cover, 0..1.
+    pub clouds: f32,
 }
 
 /// What a bake needs besides pixels: every light, at intensity x strength.
@@ -200,6 +259,11 @@ pub struct ResolvedLight {
     pub key: u64,
     pub scene: (LightEnv, vellum_light::Derived),
     pub keyframes: Vec<((LightEnv, vellum_light::Derived), f32)>,
+    /// With [`LightClock::sun_lit`]: the sun and sky that shade puppet
+    /// skins, its `toward` relative to the SCREEN (x right, y up, z toward
+    /// the viewer; the skin turns it into its own frame). The time of day
+    /// then goes on top ([`ResolvedLight::light_image_timed`]).
+    pub sun: Option<gs_puppet::SceneLight>,
 }
 
 impl ResolvedLight {
@@ -209,6 +273,21 @@ impl ResolvedLight {
         let plan = Plan { key: self.key, scene: self.scene.clone(), keyframes: self.keyframes.clone() };
         let px = Px { w, h: rgba.len() / (w * 4).max(1), rgba: rgba.to_vec() };
         let out = bake_one(&plan, &px, None, None, YMap::IDENTITY, &lut);
+        rgba.copy_from_slice(&out);
+    }
+
+    /// The time of day alone on an image already lit by the scene (a
+    /// sun-lit skin: the scene pass's tint is in its sun and sky already).
+    pub fn light_image_timed(&self, rgba: &mut [u8], w: usize) {
+        if self.keyframes.is_empty() {
+            return;
+        }
+        let lut = Srgb8Lut::new();
+        let plan = Plan { key: self.key, scene: self.scene.clone(), keyframes: self.keyframes.clone() };
+        let (l_lo, l_hi) = LightFrame::value_range(rgba, &lut);
+        let (y_top, y_bot) = LightFrame::content_rows(rgba, w);
+        let frame = LightFrame { l_lo, l_hi, y_top, y_bot };
+        let out = blend_keyframes(&plan, rgba, |k, (e, d)| apply(k, w, e, d, &frame, YMap::IDENTITY, &lut));
         rgba.copy_from_slice(&out);
     }
 }
@@ -323,6 +402,27 @@ impl LightState {
         self.clock = clock;
     }
 
+    /// The moon over the scene now, for the v2 pass: None indoors, while it
+    /// is down, in an unlit scene or with lighting off.
+    pub fn moon_now(&self) -> Option<MoonNow> {
+        let (light, _) = self.scene.as_ref()?;
+        let hour = self.clock.game_hour?;
+        let global = self.global.as_ref()?;
+        if self.clock.strength <= 0.0 || !light.is_outdoor(self.clock.outdoor_guess) {
+            return None;
+        }
+        let (azimuth, elevation) = moon_position(hour)?;
+        let clear = Sky { clouds: 0.0, ..self.clock.sky };
+        let brightness = moon_light(hour, &clear) * global.moon.strength.max(0.0) * self.clock.strength.clamp(0.0, 1.0);
+        (brightness > 0.0).then(|| MoonNow {
+            azimuth,
+            elevation,
+            colour: global.moon.color.clone(),
+            brightness,
+            clouds: self.clock.sky.clouds.clamp(0.0, 1.0),
+        })
+    }
+
     pub fn set_global(&mut self, global: GlobalLighting) {
         self.global = Some(global);
     }
@@ -406,7 +506,12 @@ impl LightState {
         let scene = gs_field::scenes::StageScene { light: Some(light), background, ..Default::default() };
         // Quantize the hour so the weights move in 1/QUANTUM steps.
         let hour = self.clock.game_hour.map(|h| (h * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM);
-        let lit = SceneLighting::resolve(&scene, &auto, &global, hour, self.clock.outdoor_guess)?;
+        // The v2 pass lights the moon itself (a light with shadows); without
+        // it the moon lifts the dark evenly. Quantized like the hour.
+        let q = |v: f32| (v * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM;
+        let sky = Sky { moon: q(self.clock.sky.moon), clouds: q(self.clock.sky.clouds) };
+        let sky = (!self.keep_pixels).then_some(&sky);
+        let lit = SceneLighting::resolve_under(&scene, &auto, &global, hour, self.clock.outdoor_guess, sky)?;
         let strength = self.clock.strength.clamp(0.0, 1.0);
         let mut h = std::collections::hash_map::DefaultHasher::new();
         env_hash(&mut h, &lit.scene);
@@ -508,8 +613,15 @@ impl LightState {
             self.worn.clear();
             self.worn_for = Some(plan.key);
         }
-        if self.current.as_ref().is_none_or(|c| c.key != plan.key) {
-            self.current = Some(Arc::new(ResolvedLight { key: plan.key, scene: plan.scene.clone(), keyframes: plan.keyframes.clone() }));
+        // Puppets key on the plan and on how their skins are shaded.
+        let puppet_key = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (plan.key, self.clock.sun_lit).hash(&mut h);
+            h.finish()
+        };
+        if self.current.as_ref().is_none_or(|c| c.key != puppet_key) {
+            let sun = self.clock.sun_lit.then(|| scene_sun(&plan.scene.0));
+            self.current = Some(Arc::new(ResolvedLight { key: puppet_key, scene: plan.scene.clone(), keyframes: plan.keyframes.clone(), sun }));
             self.generation += 1;
         }
 
@@ -801,6 +913,42 @@ mod tests {
         panic!("no bake arrived");
     }
 
+    /// Skins lit by the scene get a sun (and re-key, so cached skins are
+    /// re-made); the moon is up at night outdoors, not by day or indoors.
+    #[test]
+    fn puppets_get_the_scenes_sun_and_moon() {
+        let ctx = egui::Context::default();
+        let mut state = LightState::default();
+        let backdrop: Vec<u8> = (0..16 * 8).flat_map(|i| [(i * 2) as u8, 120, 200 - i as u8, 255]).collect();
+        state.register(Slot::Backdrop("scenes/test.png".into()), Arc::new(Px { w: 16, h: 8, rgba: backdrop }), tex(&ctx, "bg"), Role::Backdrop, "bg".into());
+        state.set_scene(Some(SceneLight::default()), Some("scenes/test.png".into()));
+        state.set_global(GlobalLighting::default());
+        let clock = |hour: f32, sun_lit: bool| LightClock { game_hour: Some(hour), sun_lit, ..Default::default() };
+        state.set_clock(clock(23.0, false));
+        bake(&mut state, &ctx);
+        let plain = state.current().unwrap();
+        assert!(plain.sun.is_none());
+        state.set_clock(clock(23.0, true));
+        state.update(&ctx);
+        let lit = state.current().unwrap();
+        let sun = lit.sun.expect("a sun");
+        assert_ne!(lit.key, plain.key, "the skins re-key");
+        assert_eq!(sun.toward, SUN_TOWARD);
+        assert!(sun.rgb.iter().copied().max() >= Some(200), "a bright sun, only tinted: {:?}", sun.rgb);
+        let moon = state.moon_now().expect("the moon at 23:00");
+        assert!(moon.elevation > 30.0 && moon.brightness > 0.9);
+        state.set_clock(clock(12.0, true));
+        assert!(state.moon_now().is_none(), "down by day");
+        state.set_clock(clock(23.0, true));
+        state.set_scene(Some(SceneLight { outdoor: Some(false), ..SceneLight::default() }), Some("scenes/test.png".into()));
+        assert!(state.moon_now().is_none(), "none indoors");
+        // the time of day alone leaves an image with no keyframes as it is
+        let bare = ResolvedLight { key: 0, scene: lit.scene.clone(), keyframes: Vec::new(), sun: None };
+        let mut img = vec![10u8, 20, 30, 255, 200, 100, 50, 255];
+        bare.light_image_timed(&mut img, 2);
+        assert_eq!(img, vec![10, 20, 30, 255, 200, 100, 50, 255]);
+    }
+
     /// Lit twins arrive for every layer; turning the light off hands every
     /// original back; no [light] means no bake at all.
     #[test]
@@ -825,7 +973,7 @@ mod tests {
         assert!(state.current().is_none());
 
         state.set_scene(Some(SceneLight::default()), Some("scenes/test.png".into()));
-        state.set_clock(LightClock { game_hour: Some(23.0), strength: 1.0, outdoor_guess: None });
+        state.set_clock(LightClock { game_hour: Some(23.0), strength: 1.0, outdoor_guess: None, ..Default::default() });
         let swaps = bake(&mut state, &ctx);
         let slots: HashSet<Slot> = swaps.iter().map(|(s, _)| s.clone()).collect();
         assert_eq!(slots.len(), 2, "both layers lit");
@@ -880,7 +1028,7 @@ mod tests {
         assert_eq!(worn(&cache, "status/webbed.png", web_tex.clone(), &art, None, true).id(), web_tex.id());
 
         cache.light.set_scene(Some(SceneLight::default()), None);
-        cache.light.set_clock(LightClock { game_hour: Some(12.0), strength: 1.0, outdoor_guess: None });
+        cache.light.set_clock(LightClock { game_hour: Some(12.0), strength: 1.0, outdoor_guess: None, ..Default::default() });
         for (slot, t) in bake(&mut cache.light, &ctx) {
             cache.swap_texture(&slot, t);
         }

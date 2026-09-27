@@ -841,7 +841,17 @@ pub fn pose_puppet_with(
         // a sprite would be. What each pixel shows is kept for the lamps.
         let (mut skin, kept) = posed.skin_surface(&project, &look, texture, key.effects);
         if !skin.is_empty() {
-            light.light_image(&mut skin.rgba, skin.w);
+            match &light.sun {
+                // The flat hull: the paint shaded by the scene's sun and sky
+                // (turned from the screen into the skin's frame), then the
+                // time of day.
+                Some(sun) => {
+                    let lit = kept.scene_lit(&gs_puppet::SceneLight { toward: screen_to_skin(&kept, sun.toward), ..*sun }, &skin);
+                    skin.rgba = lit;
+                    light.light_image_timed(&mut skin.rgba, skin.w);
+                }
+                None => light.light_image(&mut skin.rgba, skin.w),
+            }
             surface = Some(Arc::new(kept));
             caster = Some(Arc::new(posed.shadow_caster(&look)));
         }
@@ -859,6 +869,17 @@ pub fn pose_puppet_with(
         standing_ft: puppet.height.max(0.01),
         px_per_ft,
     }
+}
+
+/// A direction given relative to the screen (x right, y up, z toward the
+/// viewer) in a skin's own frame: the sun stays where the scene has it
+/// however the creature is turned.
+fn screen_to_skin(surface: &gs_puppet::SkinSurface, v: [f32; 3]) -> [f32; 3] {
+    let back = surface.to_cam();
+    let up = [0.0f32, 1.0, 0.0];
+    let right = [up[1] * back[2] - up[2] * back[1], up[2] * back[0] - up[0] * back[2], up[0] * back[1] - up[1] * back[0]];
+    let len = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt().max(1e-6);
+    [0, 1, 2].map(|k| right[k] / len * v[0] + up[k] * v[1] + back[k] * v[2])
 }
 
 /// [`Posed::bounds`] with the draw list's yaw applied, so the reported box

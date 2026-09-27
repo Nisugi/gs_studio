@@ -738,6 +738,41 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   drawings, and the puppet's own lamp light and lamp shadows are skipped.
 - `creature_art::prepare_scene_art` tells the light state to keep pixels
   while the pass is enabled.
+- The moon. `LightClock.sky` (`gs_field::lighting::Sky`: the moon's
+  fullness and the cloud cover; **a new field**, so a host building a
+  `LightClock` literal adds it or `..Default::default()`).
+  `LightState::moon_now()` (`MoonNow`: where it is, its colour and
+  brightness, the cloud) feeds the pass a `LightKind::Moon` light
+  (`FieldLight::moon`): a light at infinity with soft shadows (the march
+  runs to where the ray would pass the camera), a fill from the whole sky,
+  and cloud shadows drifting on a deck 600 m up with the weather's wind;
+  sky and far scenery past the flat ground take it facing up, unshadowed.
+  Without the pass the bake takes the moon as an even lift of the darkness
+  (`SceneLighting::resolve_under`); with it, it does not.
+  `WeatherKind::cloud_cover` / `Weather::cloud_cover`: the cloud a weather
+  brings, which the host adds to the sky's.
+- Skins lit by the scene (Niffy's flat hull). `LightClock.sun_lit` (**a
+  new field**) puts a sun in `ResolvedLight.sun` (`gs_puppet::SceneLight`,
+  its direction relative to the screen, `SUN_TOWARD`; also **a new
+  field**) and re-keys the puppets; `pose_puppet_with` then shades the skin
+  with `SkinSurface::scene_lit` (the sun turned into the skin's frame) and
+  lays only the time of day over it (`ResolvedLight::light_image_timed`),
+  the scene pass's tint being in the sun and sky already.
+- Weather on the GPU (the notes' phase 3). `FieldFrame.weather`
+  (`FieldWeather`, **a new field**: lightning, mist, rain, snow and its
+  cover, blowing sand, the air's light, the dust and rain colours) and
+  `field_gpu::lightning` (the prototype's storm signal). Each piece takes
+  the weather up to its own surface -- the air between it and the camera
+  (a 12-step march), the drops, flakes and grains in front of it, rain's
+  soak and splashes, snow lying on what faces up, lightning's lift -- so
+  it falls between creatures at the right depths (`examples/torchlight`
+  with `TORCHLIGHT_WEATHER`, against the prototype: mean OKLab dE 0.0027
+  storm + mist + rain, 0.0011 sand, 0.0126 snow). `field_gpu_stage::
+  field_weather` maps the host's `Weather` onto it; the backdrop's air and
+  dust colours come from its own pixels. `field_weather::paint_back` /
+  `paint_front` draw nothing while the pass draws the stage.
+  `WeatherKind::Sand` is **a new variant** (a host matching on the kinds
+  adds it; painted, it is a sand-coloured haze).
 - One deliberate difference from the prototype: a torch's or a mote's
   halo is hidden by anything well in front of it (fading out from 8 cm to
   60 cm in front, so a hand at the flame still lets the glare spill). The

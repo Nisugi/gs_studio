@@ -26,11 +26,20 @@ pub enum WeatherKind {
     /// GemStone's own: rain the colour of blood.
     BloodRain,
     Fog,
+    /// Windblown sand, gusts up to a sandstorm.
+    Sand,
 }
 
 impl WeatherKind {
-    pub const ALL: [WeatherKind; 6] =
-        [WeatherKind::Rain, WeatherKind::Storm, WeatherKind::Snow, WeatherKind::Sleet, WeatherKind::BloodRain, WeatherKind::Fog];
+    pub const ALL: [WeatherKind; 7] = [
+        WeatherKind::Rain,
+        WeatherKind::Storm,
+        WeatherKind::Snow,
+        WeatherKind::Sleet,
+        WeatherKind::BloodRain,
+        WeatherKind::Fog,
+        WeatherKind::Sand,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -40,6 +49,22 @@ impl WeatherKind {
             WeatherKind::Sleet => "Sleet",
             WeatherKind::BloodRain => "Blood rain",
             WeatherKind::Fog => "Fog",
+            WeatherKind::Sand => "Sand",
+        }
+    }
+}
+
+impl WeatherKind {
+    /// How much of the sky its clouds cover at full intensity (fog is low
+    /// cloud: it greys the moon rather than hiding it).
+    pub fn cloud_cover(self) -> f32 {
+        match self {
+            WeatherKind::Storm => 1.0,
+            WeatherKind::Snow | WeatherKind::Sleet => 0.9,
+            WeatherKind::Rain | WeatherKind::BloodRain => 0.85,
+            WeatherKind::Fog => 0.6,
+            // a dust storm's sky is its own dust, not cloud
+            WeatherKind::Sand => 0.3,
         }
     }
 }
@@ -51,6 +76,14 @@ pub struct Weather {
     pub intensity: f32,
     /// -1..1: wind, leaning everything left or right.
     pub wind: f32,
+}
+
+impl Weather {
+    /// How much of the sky its clouds cover: most of its kind's at a
+    /// drizzle, all of it at full intensity.
+    pub fn cloud_cover(&self) -> f32 {
+        self.kind.cloud_cover() * (0.6 + 0.4 * self.intensity.clamp(0.0, 1.0))
+    }
 }
 
 fn weather_id() -> egui::Id {
@@ -130,7 +163,7 @@ fn snow(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, layer: &Layer
 
 /// Fog: a haze that thickens toward the horizon (the stage's upper third),
 /// with slow drifting banks.
-fn fog(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool) {
+fn fog(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool, rgb: [u8; 3]) {
     let k = w.intensity.clamp(0.0, 1.0);
     // One smooth vertical gradient (per-vertex colour), thick at the
     // horizon: behind the creatures the far haze, in front a lighter veil.
@@ -140,7 +173,7 @@ fn fog(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool) {
         let u = b as f32 / steps as f32;
         let far = 1.0 - u;
         let a = if front { 55.0 * k * (0.25 + 0.5 * far) } else { 120.0 * k * far * far };
-        let c = Color32::from_rgba_unmultiplied(214, 218, 222, a as u8);
+        let c = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a as u8);
         let y = stage.top() + u * stage.height();
         mesh.colored_vertex(pos2(stage.left(), y), c);
         mesh.colored_vertex(pos2(stage.right(), y), c);
@@ -156,7 +189,8 @@ fn fog(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool) {
             let cx = stage.left() + ((hash(i, 91) + t * (0.01 + 0.02 * hash(i, 92)) * (1.0 + w.wind)).fract() * 1.4 - 0.2) * stage.width();
             let cy = stage.top() + (0.35 + 0.5 * hash(i, 93)) * stage.height();
             let r = stage.width() * (0.12 + 0.1 * hash(i, 94));
-            painter.add(egui::Shape::ellipse_filled(Pos2::new(cx, cy), vec2(r, r * 0.25), Color32::from_rgba_unmultiplied(224, 228, 232, (40.0 * k) as u8)));
+            let [r8, g8, b8] = rgb.map(|c| c.saturating_add(10));
+            painter.add(egui::Shape::ellipse_filled(Pos2::new(cx, cy), vec2(r, r * 0.25), Color32::from_rgba_unmultiplied(r8, g8, b8, (40.0 * k) as u8)));
         }
     }
 }
@@ -195,7 +229,8 @@ fn paint(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool)
                 painter.rect_filled(stage, 0.0, Color32::from_rgba_unmultiplied(90, 0, 0, (30.0 * w.intensity) as u8));
             }
         }
-        WeatherKind::Fog => fog(&painter, stage, w, t, front),
+        WeatherKind::Fog => fog(&painter, stage, w, t, front, [214, 218, 222]),
+        WeatherKind::Sand => fog(&painter, stage, w, t, front, [201, 164, 114]),
     }
 }
 
@@ -203,16 +238,21 @@ fn paint(painter: &egui::Painter, stage: Rect, w: &Weather, t: f32, front: bool)
 /// something is falling (the field keeps repainting).
 pub fn paint_back(painter: &egui::Painter, stage: Rect, ctx: &egui::Context) -> bool {
     let Some(w) = weather(ctx).filter(|w| w.intensity > 0.0) else { return false };
-    let t = ctx.input(|i| i.time) as f32;
-    paint(painter, stage, &w, t, false);
+    // the v2 pass draws it, at its depths, when it draws the stage
+    if crate::field_gpu_stage::with_current(|_| ()).is_none() {
+        let t = ctx.input(|i| i.time) as f32;
+        paint(painter, stage, &w, t, false);
+    }
     true
 }
 
 /// The weather in front of the creatures (after the last one).
 pub fn paint_front(painter: &egui::Painter, stage: Rect, ctx: &egui::Context) -> bool {
     let Some(w) = weather(ctx).filter(|w| w.intensity > 0.0) else { return false };
-    let t = ctx.input(|i| i.time) as f32;
-    paint(painter, stage, &w, t, true);
+    if crate::field_gpu_stage::with_current(|_| ()).is_none() {
+        let t = ctx.input(|i| i.time) as f32;
+        paint(painter, stage, &w, t, true);
+    }
     ctx.request_repaint_after(std::time::Duration::from_millis(33));
     true
 }

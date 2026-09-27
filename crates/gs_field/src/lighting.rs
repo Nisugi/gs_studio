@@ -491,6 +491,77 @@ pub struct GlobalLighting {
     pub phase: PhaseTable,
     #[serde(default)]
     pub darkness: Darkness,
+    #[serde(default)]
+    pub moon: MoonLight,
+}
+
+/// The moon's light over an outdoor scene: `[moon]` in
+/// `global/lighting.toml`. Where the GPU pass draws, it is a light from the
+/// sky with shadows; elsewhere it lifts the darkness evenly, by `lift` at a
+/// full moon in a clear sky.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MoonLight {
+    /// `#rrggbb`.
+    pub color: String,
+    /// 0 = no moonlight .. 1 = as shipped (more is brighter).
+    pub strength: f32,
+    /// Share of the darkness a full, clear, high moon takes away where the
+    /// GPU pass does not draw, 0..1.
+    pub lift: f32,
+}
+
+pub const MOON_COLOUR: &str = "#b4c4ec";
+pub const MOON_LIFT: f32 = 0.4;
+
+impl Default for MoonLight {
+    fn default() -> Self {
+        MoonLight { color: MOON_COLOUR.into(), strength: 1.0, lift: MOON_LIFT }
+    }
+}
+
+/// The sky over the field right now, from the host (the game's own moon
+/// and weather when it has them): how full the moon is, 0 = new .. 1 =
+/// full, and how much cloud covers the sky, 0 = clear .. 1 = overcast.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sky {
+    pub moon: f32,
+    pub clouds: f32,
+}
+
+impl Default for Sky {
+    fn default() -> Self {
+        Sky { moon: 1.0, clouds: 0.0 }
+    }
+}
+
+/// Where the moon is at `game_hour`, degrees: (azimuth, elevation), or
+/// None while it is down. It rises at 18:00 low on the left, is highest
+/// ([`MOON_PEAK_DEG`]) at midnight and sets at 06:00 low on the right,
+/// always on the viewer's side of the scene: azimuth 0 is straight behind
+/// the viewer, -90 screen-left, +90 screen-right.
+pub fn moon_position(game_hour: f32) -> Option<(f32, f32)> {
+    let s = (game_hour - MOON_RISE_HOUR).rem_euclid(24.0) / MOON_UP_HOURS;
+    if !(0.0..=1.0).contains(&s) {
+        return None;
+    }
+    let elevation = MOON_PEAK_DEG * (std::f32::consts::PI * s).sin();
+    (elevation > 0.0).then_some((MOON_SWING_DEG * (2.0 * s - 1.0), elevation))
+}
+
+pub const MOON_RISE_HOUR: f32 = 18.0;
+pub const MOON_UP_HOURS: f32 = 12.0;
+pub const MOON_PEAK_DEG: f32 = 55.0;
+/// How far round it swings either side, degrees.
+pub const MOON_SWING_DEG: f32 = 70.0;
+
+/// How much of a full moon's light reaches the field at `game_hour`, 0..1:
+/// its fullness, fading in over its first 12 degrees above the horizon,
+/// less what the clouds hold back (on average: they drift).
+pub fn moon_light(game_hour: f32, sky: &Sky) -> f32 {
+    let Some((_, elevation)) = moon_position(game_hour) else { return 0.0 };
+    let t = (elevation / 12.0).clamp(0.0, 1.0);
+    sky.moon.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * (1.0 - 0.9 * sky.clouds.clamp(0.0, 1.0))
 }
 
 /// How black the dark is beyond the lamps in a lit scene that does not set
@@ -559,6 +630,7 @@ impl Default for GlobalLighting {
         GlobalLighting {
             phase: PhaseTable { dawn: f(Phase::Dawn), day: None, dusk: f(Phase::Dusk), night: f(Phase::Night) },
             darkness: Darkness::default(),
+            moon: MoonLight::default(),
         }
     }
 }
@@ -593,6 +665,7 @@ impl GlobalLighting {
                 night: keep(file.phase.night, shipped.phase.night),
             },
             darkness: file.darkness,
+            moon: file.moon,
         })
     }
 
@@ -645,9 +718,30 @@ impl SceneLighting {
         game_hour: Option<f32>,
         outdoor_guess: Option<bool>,
     ) -> Option<SceneLighting> {
+        SceneLighting::resolve_under(scene, auto, global, game_hour, outdoor_guess, None)
+    }
+
+    /// [`SceneLighting::resolve`] under `sky`: outdoors, the moon lifts the
+    /// darkness evenly ([`MoonLight::lift`] at a full, clear, high moon).
+    /// For a frontend that does not light the moon itself; one that does
+    /// (the GPU pass) passes None.
+    pub fn resolve_under(
+        scene: &crate::scenes::StageScene,
+        auto: &SceneColours,
+        global: &GlobalLighting,
+        game_hour: Option<f32>,
+        outdoor_guess: Option<bool>,
+        sky: Option<&Sky>,
+    ) -> Option<SceneLighting> {
         let light = scene.light.as_ref()?;
         let outdoor = light.is_outdoor(outdoor_guess);
-        let dark = light.darkness.unwrap_or(global.darkness.at(outdoor)).clamp(0.0, 1.0);
+        let moon = match (sky, game_hour) {
+            (Some(sky), Some(h)) if outdoor => {
+                moon_light(h, sky) * global.moon.lift.clamp(0.0, 1.0) * global.moon.strength.clamp(0.0, 1.0)
+            }
+            _ => 0.0,
+        };
+        let dark = (light.darkness.unwrap_or(global.darkness.at(outdoor)) * (1.0 - moon)).clamp(0.0, 1.0);
         let mut keyframes: Vec<(Phase, Option<LightEnv>, f32)> = match game_hour.filter(|_| outdoor) {
             None => Vec::new(),
             Some(h) => vellum_light::phase_keyframes(h, vellum_light::PhaseBoundaries::default())
@@ -798,6 +892,46 @@ key = \"#112233\"
         assert_eq!(from_file, PointLight::new(LampKind::Wisp, 10.0, 2.0));
         let lit: PointLight = toml::from_str("kind = \"lantern\"\nx = 10.0\nz = 2.0\naim = 180.0\n").unwrap();
         assert_eq!((lit.spread, lit.aim, lit.color.as_str()), (LANTERN_SPREAD, 180.0, LANTERN_COLOUR));
+    }
+
+    /// The moon rises at 18:00 on the left, is highest at midnight, sets at
+    /// 06:00 on the right, and is down all day.
+    #[test]
+    fn the_moon_crosses_the_night() {
+        assert_eq!(moon_position(12.0), None);
+        assert_eq!(moon_position(17.9), None);
+        let (az, el) = moon_position(0.0).unwrap();
+        assert!(az.abs() < 1e-3 && (el - MOON_PEAK_DEG).abs() < 1e-3, "midnight: {az} {el}");
+        let (rise_az, rise_el) = moon_position(18.5).unwrap();
+        let (set_az, set_el) = moon_position(5.5).unwrap();
+        assert!(rise_az < -60.0 && set_az > 60.0 && rise_el < 10.0 && set_el < 10.0);
+        let sky = Sky::default();
+        assert!(moon_light(0.0, &sky) > 0.99 && moon_light(18.1, &sky) < 0.1 && moon_light(12.0, &sky) == 0.0);
+        assert!(moon_light(0.0, &Sky { moon: 0.5, clouds: 0.0 }) < 0.51);
+        assert!(moon_light(0.0, &Sky { moon: 1.0, clouds: 1.0 }) < 0.11, "overcast");
+    }
+
+    /// Where nothing lights the moon itself, it lifts the darkness evenly;
+    /// clouds, a new moon, day and indoors take the lift away.
+    #[test]
+    fn the_moon_lifts_the_dark() {
+        let global = GlobalLighting::default();
+        let scene = crate::scenes::StageScene { light: Some(SceneLight::default()), ..Default::default() };
+        let night_exposure = |sky: Option<&Sky>| {
+            let l = SceneLighting::resolve_under(&scene, &desert(), &global, Some(0.0), None, sky).unwrap();
+            let k = l.keyframes.iter().find(|k| k.0 == Phase::Night).unwrap();
+            vellum_light::with_intensity(k.1.as_ref(), 1.0).1.exposure
+        };
+        let (dark, moonlit) = (night_exposure(None), night_exposure(Some(&Sky::default())));
+        let want = DARKNESS_FLOOR.powf(OUTDOOR_DARKNESS * (1.0 - MOON_LIFT)) / DARKNESS_FLOOR.powf(OUTDOOR_DARKNESS);
+        assert!((moonlit / dark - want).abs() < 1e-3, "{moonlit} / {dark} vs {want}");
+        let clouded = night_exposure(Some(&Sky { moon: 1.0, clouds: 1.0 }));
+        assert!(clouded < moonlit && clouded > dark);
+        assert_eq!(night_exposure(Some(&Sky { moon: 0.0, clouds: 0.0 })), dark, "a new moon");
+        let mut inside = scene.clone();
+        inside.light.as_mut().unwrap().outdoor = Some(false);
+        let lit = |sky| SceneLighting::resolve_under(&inside, &desert(), &global, Some(0.0), None, sky).unwrap().keyframes[0].1.as_ref().map(|e| e.exposure);
+        assert_eq!(lit(Some(&Sky::default())), lit(None), "no moon indoors");
     }
 
     fn desert() -> SceneColours {

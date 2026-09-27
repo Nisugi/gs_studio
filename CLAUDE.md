@@ -23,10 +23,13 @@ projection-first export, texture generator plan).
 Headless smoke run of the app: `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the
 window by itself and prints what the stage / calibrators hold;
 `GS_STUDIO_SMOKE=1` pre-populates the stage (`GS_STUDIO_LIGHT_HOUR=23` holds
-it at a game hour, for lighting checks; `GS_STUDIO_PUPPETS=humanoid,canine` spawns those
+it at a game hour, for lighting checks, `GS_STUDIO_LIGHT_MOON` / `GS_STUDIO_LIGHT_CLOUDS`
+(0..1) set its sky; `GS_STUDIO_PUPPETS=humanoid,canine` spawns those
 forms' puppets, forced, since default art draws everything as a sprite
 (`humanoid/rotting citadel arbalester` spawns that creature in its own skin);
-`GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
+`GS_STUDIO_SUN_LIT=1` shades their skins by the scene's sun, the Preview tab's
+*Lit by the scene*; `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
+Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
 lighting pass for the run, the Preview tab's *Light on the GPU (v2)*, remembered in
@@ -67,7 +70,8 @@ Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
 `gs_field_egui` `stage_demo` /
 `puppet_tune` / `torchlight` (the v2 lighting pass on Niffy's "Swamp
 Torchlight" prototype scene, unzipped to `target/torchlight`, to compare
-with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame),
+with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame,
+`TORCHLIGHT_WEATHER=storm,mist,rain,sand,snow` turns on its weather),
 `gs_calibrators` `calibrators_demo`, `rig_bake` `preview`.
 Lighting: `cargo run -p vellum_light --bin vlight -- golden <dir>` checks the
 relight port against relight.py's golden cases (OKLab dE <= 0.01); `bench`

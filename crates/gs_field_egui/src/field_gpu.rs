@@ -136,6 +136,8 @@ pub struct LayerDraw {
 pub enum LightKind {
     Torch,
     Mote,
+    /// A light at infinity from the sky ([`FieldLight::moon`]).
+    Moon,
 }
 
 /// One local light in this frame (lights-and-weather.md's table; see
@@ -179,6 +181,10 @@ pub struct FieldLight {
 
 /// A light that shines every way (no beam).
 pub const ALL_ROUND: [f32; 4] = [0.0, 0.0, 0.0, 180.0];
+/// The moon's shadow softness (radians; cloud spreads it) and the fill
+/// the whole sky adds round it, as a share of its direct light.
+pub const MOON_SOFT: f32 = 0.02;
+pub const MOON_FILL: f32 = 0.22;
 /// Degrees over which a beam's edge fades out (gs_field's `BEAM_SOFT_DEG`;
 /// the shader's `BEAM_SOFT_DEG`).
 pub const BEAM_SOFT_DEG: f32 = 14.0;
@@ -235,6 +241,37 @@ impl FieldLight {
             brightness: pulse,
             show: true,
             prop: [core[0], core[1], core[2], 0.0],
+            beam: ALL_ROUND,
+        }
+    }
+
+    /// The moon: a light from the sky along `toward` (camera space, unit,
+    /// pointing at the moon), `colour` linear, `power` its brightness, with
+    /// soft shadows and a fill from the whole sky; `clouds` (0..1) is how
+    /// much of the sky drifting cloud covers, their shadows moving with
+    /// `wind` (m/s across the floor: screen-right, away from the viewer).
+    pub fn moon(toward: [f32; 3], colour: [f32; 3], power: f32, clouds: f32, wind: [f32; 2]) -> FieldLight {
+        let c = clouds.clamp(0.0, 1.0);
+        FieldLight {
+            kind: LightKind::Moon,
+            pos: toward,
+            colour,
+            power,
+            r0: 0.0,
+            range: 1.0,
+            // radians: the moon's own size, spread by the cloud
+            radius: MOON_SOFT + 0.05 * c,
+            // the whole sky's fill, dimmed by cloud
+            bounce: MOON_FILL * (1.0 - 0.5 * c),
+            wrap_creature: 0.2,
+            wrap_ground: 0.1,
+            sheen_creature: 0.2,
+            sheen_ground: 0.8,
+            shine_creature: 24.0,
+            shine_ground: 80.0,
+            brightness: 1.0,
+            show: false,
+            prop: [c, wind[0], wind[1], 0.0],
             beam: ALL_ROUND,
         }
     }
@@ -366,6 +403,113 @@ pub fn mote_colour(base: &str, bright: &str, dim: &str, k: f32, shift: f32) -> [
     [0, 1, 2].map(|i| if kk >= 0.0 { b[i] + (hi[i] - b[i]) * kk } else { b[i] + (lo[i] - b[i]) * -kk })
 }
 
+// ------------------------------------------------------------------ weather
+
+/// Lightning's colour: a flash lifts the night toward it.
+pub const FLASH_TINT: &str = "#c9d4ff";
+
+/// The weather the pass draws in a frame (lights-and-weather.md "Weather",
+/// the prototype's model); [`FieldWeather::default`] is none.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldWeather {
+    /// Lightning now (0..~1.6: [`lightning`] times the storm's strength)
+    /// and where its cloud is across the scene (0..1).
+    pub flash: f32,
+    pub flash_x: f32,
+    /// Ground mist: its density at the ground (per metre; the notes' 0.35
+    /// x the slider) and how high it reaches (m, where it has thinned to
+    /// 1/e), and how fast it drifts (m/s).
+    pub mist: f32,
+    pub mist_h: f32,
+    pub mist_drift: f32,
+    /// Rain: how much falls (0..1) and how far the wind slants it.
+    pub rain: f32,
+    pub wind: f32,
+    /// Snow: how much falls (0..1), the wind driving it (m/s, signed) and
+    /// how much lies on what faces up (0..1).
+    pub snow: f32,
+    pub snow_wind: f32,
+    pub snow_cover: f32,
+    /// Blowing sand: how much (0..1) and its wind (m/s, signed).
+    pub sand: f32,
+    pub sand_wind: f32,
+    /// The night air's own light, linear: what lights haze, drops and
+    /// flakes where no lamp is near.
+    pub fog: [f32; 3],
+    /// Blowing sand's colour and the rain's, linear.
+    pub dust: [f32; 3],
+    pub rain_tint: [f32; 3],
+}
+
+impl Default for FieldWeather {
+    fn default() -> Self {
+        FieldWeather {
+            flash: 0.0,
+            flash_x: 0.5,
+            mist: 0.0,
+            mist_h: 0.8,
+            mist_drift: 0.4,
+            rain: 0.0,
+            wind: 0.0,
+            snow: 0.0,
+            snow_wind: 0.0,
+            snow_cover: 0.0,
+            sand: 0.0,
+            sand_wind: 0.0,
+            fog: [0.02, 0.025, 0.035],
+            dust: [0.66, 0.56, 0.41],
+            rain_tint: [1.0; 3],
+        }
+    }
+}
+
+impl FieldWeather {
+    /// Is there any weather to draw?
+    pub fn any(&self) -> bool {
+        self.flash > 0.0 || self.mist > 0.0 || self.rain > 0.0 || self.snow > 0.0 || self.snow_cover > 0.0 || self.sand > 0.0
+    }
+}
+
+/// Distant lightning at `t` seconds, the prototype's storm: strikes about
+/// `per_min` a minute, each one to four strobes and an afterglow, over a
+/// slow rumble; `dist` 0 (near) .. 1 (far) softens and slows them.
+/// Returns (brightness 0..1.6, where the strike's cloud is across 0..1).
+pub fn lightning(t: f32, per_min: f32, dist: f32) -> (f32, f32) {
+    let h01 = |k: i64| (hash(k) + 1.0) * 0.5;
+    let gap = 60.0 / per_min.max(0.5);
+    let k0 = (t / gap).floor() as i64;
+    let (decay, soften) = (0.07 + 0.22 * dist, 1.0 - 0.45 * dist);
+    let (mut l, mut x) = (0.0f32, 0.5f32);
+    for k in (k0 - 2)..=(k0 + 1) {
+        let tk = (k as f32 + 0.5 + (h01(k * 7 + 1) - 0.5) * 0.8) * gap;
+        let age = t - tk;
+        if !(0.0..=6.0).contains(&age) {
+            continue;
+        }
+        let peak = (0.45 + 0.55 * h01(k * 7 + 3)) * soften;
+        let strobes = 1 + (h01(k * 7 + 2) * 3.99).floor() as i64;
+        let (mut e, mut off) = (0.0f32, 0.0f32);
+        for s in 0..strobes {
+            if s > 0 {
+                off += 0.06 + 0.22 * h01(k * 13 + s);
+            }
+            let a = age - off;
+            if a < 0.0 {
+                break;
+            }
+            let amp = peak * if s > 0 { 0.45 + 0.55 * h01(k * 17 + s) } else { 1.0 };
+            e += amp * if a < 0.025 { a / 0.025 } else { (-(a - 0.025) / decay).exp() };
+        }
+        e += peak * (0.22 + 0.3 * dist) * (-age / (0.7 + 0.9 * dist)).exp();
+        if e > l {
+            l = e;
+            x = 0.12 + 0.76 * h01(k * 7 + 5);
+        }
+    }
+    let rumble = 0.08 * (0.5 + 0.5 * vnoise(t * 0.35, 21)) * (0.6 + 0.4 * dist);
+    ((l + rumble).min(1.6), x)
+}
+
 // ------------------------------------------------------------------ frame
 
 /// What the pass draws: everything else is [`FieldFrame`]'s.
@@ -405,6 +549,7 @@ pub struct FieldFrame {
     pub water: f32,
     pub shadows: bool,
     pub view: FieldView,
+    pub weather: FieldWeather,
 }
 
 /// A frame being filled while the UI is laid out: egui prepares every
@@ -432,7 +577,9 @@ impl FieldFrame {
 }
 
 /// Floats in the uniform block (field_gpu.wgsl `Field`).
-const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28;
+const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS;
+/// Floats in the shader's `Weather`.
+const WEATHER_FLOATS: usize = 28;
 
 fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f32> {
     let mut u = Vec::with_capacity(UNIFORM_FLOATS);
@@ -468,6 +615,7 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f3
                 let kind = match l.kind {
                     LightKind::Torch => 0.0,
                     LightKind::Mote => 1.0,
+                    LightKind::Moon => 2.0,
                 };
                 u.extend([l.pos[0], l.pos[1], l.pos[2], kind]);
                 u.extend([l.colour[0], l.colour[1], l.colour[2], l.power]);
@@ -479,6 +627,14 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], srgb_target: bool) -> Vec<f3
             }
             None => u.extend([0.0; 28]),
         }
+    }
+    let w = &frame.weather;
+    let flash = hex_lin(FLASH_TINT);
+    u.extend([w.flash, w.flash_x, w.mist, w.mist_h]);
+    u.extend([w.rain, w.wind, w.snow, w.snow_cover]);
+    u.extend([w.sand, w.sand_wind, w.snow_wind, w.mist_drift]);
+    for rgb in [w.fog, flash, w.dust, w.rain_tint] {
+        u.extend([rgb[0], rgb[1], rgb[2], 0.0]);
     }
     debug_assert_eq!(u.len(), UNIFORM_FLOATS);
     u
@@ -1098,6 +1254,24 @@ mod tests {
         assert!(swell[2] > fade[2], "swelling is paler");
     }
 
+    /// Lightning comes in strikes over a low rumble: bright now and then,
+    /// never past 1.6, never dark; a farther storm peaks lower.
+    #[test]
+    fn lightning_strikes_now_and_then() {
+        let run = |dist: f32| (0..6000).map(|i| lightning(i as f32 * 0.02, 7.0, dist).0).collect::<Vec<f32>>();
+        let near = run(0.0);
+        let far = run(1.0);
+        let peak = near.iter().copied().fold(0.0f32, f32::max);
+        let low = near.iter().copied().fold(f32::MAX, f32::min);
+        assert!(peak > 0.6 && peak <= 1.6, "strikes: {peak}");
+        assert!(low > 0.0 && low < 0.1, "the rumble under them: {low}");
+        let bright = near.iter().filter(|&&l| l > 0.4).count() as f32 / near.len() as f32;
+        assert!(bright > 0.005 && bright < 0.2, "now and then: {bright}");
+        assert!(far.iter().copied().fold(0.0f32, f32::max) < peak, "farther is softer");
+        let (_, x) = lightning(3.0, 7.0, 0.3);
+        assert!((0.12..=0.88).contains(&x));
+    }
+
     #[test]
     fn the_uniform_block_matches_the_shader_and_keeps_the_first_layers() {
         let img = Arc::new(LitImage { key: 1, w: 1, h: 1, albedo: Arc::new(vec![0; 4]), lit: Arc::new(vec![0; 4]), geo: Arc::new(vec![[0.0; 4]]) });
@@ -1113,9 +1287,10 @@ mod tests {
             water: 1.0,
             shadows: true,
             view: FieldView::Lit,
+            weather: FieldWeather::default(),
         };
         let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], false);
-        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112, "the WGSL struct's size");
+        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16, "the WGSL struct's size");
         assert_eq!((u[14], u[15]), (MAX_LAYERS as f32, MAX_LIGHTS as f32));
         assert_eq!(&u[16..20], &[0.0, 0.0, 1264.0, 848.0], "the backdrop's place");
         // the first MAX_LAYERS are written, the rest fall off
