@@ -22,6 +22,8 @@ fn main() {
             println!("{name}: no such segment");
             continue;
         };
+        let parent = s.parent.map_or("-".to_owned(), |i| p.segments[i].name.clone());
+        println!("{name}: bone {} chain {} head {:?} tail {:?} parent {parent}", s.bone, s.chain_index, s.head, s.tail);
         println!("{name} (y, z, w, d):");
         for st in &s.stations {
             println!("  {:.2} {:.2} {:.2} {:.2}", st.c[1], st.c[2], st.w, st.d);

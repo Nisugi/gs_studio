@@ -49,6 +49,10 @@ pub fn mul_mm(a: &M3, b: &M3) -> M3 {
     }
     out
 }
+/// The inverse of a rotation.
+pub fn transpose(m: &M3) -> M3 {
+    [[m[0][0], m[1][0], m[2][0]], [m[0][1], m[1][1], m[2][1]], [m[0][2], m[1][2], m[2][2]]]
+}
 pub fn rot_x(deg: f32) -> M3 {
     let (s, c) = deg.to_radians().sin_cos();
     [[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]]

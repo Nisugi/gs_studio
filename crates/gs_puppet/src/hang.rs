@@ -25,6 +25,16 @@ use crate::puppet::{Kind, Puppet};
 /// had there, and the flesh up to the shoulder goes with the arm.
 pub const TRUNK_CLIP_HANG_DEG: f32 = 12.0;
 
+/// The collarbone's lift at a full raise, degrees: a raised arm does not
+/// turn about a fixed shoulder -- the collarbone and shoulder blade turn
+/// with it (roughly a third of every degree past the first 30), so the
+/// shoulder rides up over the torso and the side runs straight from hip to
+/// raised arm.
+pub const CLAVICLE_LIFT_DEG: f32 = 35.0;
+/// How far an arm is raised before the collarbone starts to lift, degrees
+/// from hanging straight down.
+const CLAVICLE_FROM_DEG: f32 = 30.0;
+
 /// A drawn arm this much further out than it can hang is turned down.
 pub const HANG_MIN_DEG: f32 = 6.0;
 /// How far a hanging arm keeps clear of the body beside it, feet.
@@ -36,7 +46,44 @@ const SHOULDER_SHARE: f32 = 0.6;
 /// Degrees a step while turning an arm down.
 const STEP_DEG: f32 = 0.5;
 
+/// The collarbone's turn for an arm posed `r` (its rotation about the
+/// shoulder, in the collarbone's frame, hang included): about the
+/// collarbone's inner end (`clavicle`: inner end to shoulder), lifting the
+/// shoulder by [`CLAVICLE_LIFT_DEG`] over the raise past
+/// [`CLAVICLE_FROM_DEG`]. None while the arm is below that.
+pub(crate) fn clavicle_lift(arm_dir: V3, r: &M3, clavicle: V3) -> Option<M3> {
+    let d = mul_mv(r, arm_dir);
+    let l = len(d);
+    if l < 1e-6 {
+        return None;
+    }
+    let raised = (-d[1] / l).clamp(-1.0, 1.0).acos().to_degrees();
+    let lift = CLAVICLE_LIFT_DEG * ((raised - CLAVICLE_FROM_DEG) / (180.0 - CLAVICLE_FROM_DEG)).clamp(0.0, 1.0);
+    if lift <= 0.0 {
+        return None;
+    }
+    // about the axis across the collarbone and up: turning by +lift raises its outer end
+    let axis = [-clavicle[2], 0.0, clavicle[0]];
+    let al = len(axis);
+    (al > 1e-6).then(|| axis_angle([axis[0] / al, 0.0, axis[2] / al], lift))
+}
+
 impl Puppet {
+    /// Each arm whose parent is its collarbone -- a trunk segment ending at
+    /// the arm's shoulder -- as (arm's first segment, collarbone segment).
+    pub(crate) fn arm_girdles(&self) -> Vec<(usize, usize)> {
+        let segs = &self.segments;
+        (0..segs.len())
+            .filter_map(|i| {
+                let s = &segs[i];
+                let arm = s.chain_index == 0 && matches!(s.kind, Kind::Limb) && s.part.as_deref().is_some_and(|p| p.ends_with("Arm"));
+                let p = s.parent?;
+                let c = &segs[p];
+                (arm && matches!(c.kind, Kind::Trunk) && len(sub(c.tail, s.head)) < 0.05 && len(sub(c.tail, c.head)) > 0.05).then_some((i, p))
+            })
+            .collect()
+    }
+
     /// Every arm drawn raised, turned down to hang, when the rig says the
     /// sheet was drawn so ([`Puppet::arms_raised`]; none otherwise): (its
     /// first segment, the turn about that segment's head, in rest space). An arm is a limb
@@ -185,6 +232,20 @@ mod tests {
             let side = if p.segments[*a].tail[0] < 0.0 { -1.0 } else { 1.0 };
             assert!(p.arm_clear(&p.subtree(*a), *a, p.segments[*a].head, r, side, &body));
         }
+        // arms up: the collarbone lifts the shoulder, the arm points where
+        // the pose says all the same
+        let set = crate::PoseSet::from_toml(crate::SHIPPED_POSES.iter().find(|(n, _)| *n == "biped").unwrap().1).unwrap();
+        let up = set.get("arms_up").unwrap().clone();
+        let (lifted, fixed) = (p.pose(&up), p.pose_with(&up, true, false));
+        let arm = p.segments.iter().position(|s| s.bone == "arm_l" && s.chain_index == 0).unwrap();
+        let (s, a) = (&p.segments[arm], lifted.xf[arm]);
+        let rise = a.point(s.head)[1] - lifted.xf[s.parent.unwrap()].point(p.segments[s.parent.unwrap()].head)[1];
+        let hanging = p.pose(&Pose::default());
+        let rest = hanging.xf[arm].point(s.head)[1] - hanging.xf[s.parent.unwrap()].point(p.segments[s.parent.unwrap()].head)[1];
+        assert!(rise > rest + 0.15, "the shoulder rides up: {rise} vs {rest}");
+        let dir = |x: &crate::math::Xf| crate::math::norm_or(x.dir(sub(s.tail, s.head)), [0.0; 3]);
+        let (d1, d2) = (dir(&a), dir(&fixed.xf[arm]));
+        assert!(d1.iter().zip(d2).all(|(x, y)| (x - y).abs() < 1e-3), "{d1:?} vs {d2:?}");
         // the baked puppet keeps the flag, and its arms hang the same
         let back = Puppet::from_baked(&p.to_baked()).unwrap();
         assert!(back.arms_raised && back.arm_hang.len() == 2);

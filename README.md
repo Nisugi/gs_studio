@@ -434,7 +434,16 @@ toggle switches the canvas to a DEPTH pass where those guesses are corrected.
   the body about its shoulder until its forearm and hand would come within
   0.02 ft of the body beside them), since the pose files are written for a
   hanging arm. `rig_check` prints each arm's drawn and hanging angle. The
-  humanoid's sheet is drawn so.
+  humanoid's sheet is drawn so. The torso beside a raised arm ends where
+  it would beside a hanging one, so the flesh from the armpit up to the
+  shoulder is the arm's.
+- **The shoulder rides up** on every armed form, drawn raised or not: an
+  arm is not turned about a fixed shoulder. Past its first 30 degrees of
+  raise, its collarbone (the trunk segment from the neck's base to the
+  shoulder) turns up about its inner end, up to 35 degrees with the arm
+  straight up, and the arm turns back by as much, so it points where the
+  pose says from a higher shoulder -- the shoulder over the torso and the
+  side straight from hip to raised arm (`gs_puppet::hang::clavicle_lift`).
 - **Guessed** joints are hollow and dim; **overridden** ones are filled and
   bright, with a faint tick and leader back to where the guess was, so the
   correction can be judged against it. The right panel says "*n* of *m*

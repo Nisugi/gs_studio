@@ -139,7 +139,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::math::{
-    axis_angle, euler, mul_mm, quat_from_m3, quat_mirror, quat_to_m3, slerp, Quat, Xf, QUAT_IDENTITY, V3,
+    axis_angle, euler, mul_mm, quat_from_m3, quat_mirror, quat_to_m3, slerp, sub, transpose, Quat, Xf, M3, QUAT_IDENTITY, V3,
 };
 use crate::puppet::Puppet;
 
@@ -840,17 +840,36 @@ impl Puppet {
     /// drawn raised hangs first ([`Puppet::arm_hang`]): the poses are
     /// written for a hanging arm.
     pub fn pose(&self, pose: &Pose) -> Posed<'_> {
-        self.pose_with(pose, true)
+        self.pose_with(pose, true, true)
     }
 
     /// [`Puppet::pose`] from the figure as drawn, raised arms and all: what
     /// is compared with the silhouettes it was drawn from.
     pub fn pose_as_drawn(&self, pose: &Pose) -> Posed<'_> {
-        self.pose_with(pose, false)
+        self.pose_with(pose, false, false)
     }
 
-    fn pose_with(&self, pose: &Pose, hang: bool) -> Posed<'_> {
+    pub(crate) fn pose_with(&self, pose: &Pose, hang: bool, girdle: bool) -> Posed<'_> {
         let mut xf: Vec<Xf> = Vec::with_capacity(self.segments.len());
+        // A raised arm lifts its collarbone ([`crate::hang::clavicle_lift`]):
+        // the collarbone turns up about its inner end and the arm turns back
+        // by as much, so it points where the pose says, from a higher
+        // shoulder. (Not as drawn: the fit sees the sheet.)
+        let mut lift: Vec<(usize, M3)> = Vec::new();
+        if girdle {
+            for (arm, clavicle) in self.arm_girdles() {
+                let a = &self.segments[arm];
+                let mut r = quat_to_m3(pose.bone(&a.bone).rot);
+                if let Some((_, h)) = self.arm_hang.iter().find(|(k, _)| *k == arm) {
+                    r = mul_mm(&r, h);
+                }
+                let c = &self.segments[clavicle];
+                if let Some(g) = crate::hang::clavicle_lift(sub(a.tail, a.head), &r, sub(c.tail, c.head)) {
+                    lift.push((clavicle, g));
+                    lift.push((arm, transpose(&g)));
+                }
+            }
+        }
         let root_pivot = self.segments.first().map(|s| s.head).unwrap_or([0.0; 3]);
         let root = Xf::about(root_pivot, quat_to_m3(pose.root));
         let mut cache: Option<(&str, BonePose)> = None;
@@ -861,8 +880,14 @@ impl Puppet {
             let bp = &cache.as_ref().expect("just set").1;
             let r = if s.chain_index == 0 {
                 let r = quat_to_m3(bp.rot);
-                match self.arm_hang.iter().find(|(k, _)| *k == i).filter(|_| hang) {
+                let r = match self.arm_hang.iter().find(|(k, _)| *k == i).filter(|_| hang) {
                     Some((_, h)) => mul_mm(&r, h),
+                    None => r,
+                };
+                // the collarbone turns after its pose; the arm turns back first
+                match lift.iter().find(|(k, _)| *k == i) {
+                    Some((_, g)) if self.segments[i].kind == crate::Kind::Trunk => mul_mm(&r, g),
+                    Some((_, g)) => mul_mm(g, &r),
                     None => r,
                 }
             } else {
