@@ -1,8 +1,8 @@
 # How the game's own text reads to `gs_field::sky`. Compiled in.
 #
-# Seen in play (Lich logs, Sept 2026); add what is new as it turns up. A
-# weather line matches whole (runs of spaces count as one); a `look <moon>`
-# phrase matches inside the reply's first clause.
+# Seen in play (Lich logs, Sept 2026, and the older log archive); add what
+# is new as it turns up. A weather line matches whole (runs of spaces count
+# as one); a `look <moon>` phrase matches inside the reply's first clause.
 
 # look <moon>: "<Moon> <where> [as] <phase>[.,] ..." -- the phase words: how
 # much of the moon they mean is lit (0..1), and whether it is growing where
@@ -13,11 +13,13 @@
 "less than full" = { lit = 0.9, waxing = false }
 "almost complete" = { lit = 0.9, waxing = true }
 "half full" = { lit = 0.5 }
+"full moon" = { lit = 1.0 }
 
 # ... and the where words: hours since the moon was highest (negative =
 # still rising toward it).
 [places]
 "almost arrives at her azimuth" = -0.5
+"sits at the peak of her ascent" = 0.0
 "falls farther toward the western horizon" = 4.0
 
 # Weather lines, as the game sends them while something falls outdoors
@@ -52,6 +54,7 @@ lines = [
 kind = "sleet"
 lines = [
     "With a screech, a gust of wind wheels through the area, laden with stinging sleet!",
+    "Without warning, the winds intensify, howling as they rush through the area.  Snow and sleet ride violently upon them, raking across your face!",
     "Gusting winds fling shards of cutting ice and pounding hail at you as they sweep through the area with brutal force!",
     "The fury of the storm assails you, its icy talons searching cruelly for exposed flesh!",
 ]
@@ -65,4 +68,5 @@ lines = [
     "Heavy gusts of wind cause the area to be blinded in white snow.",
     "With a screech, a gust of wind wheels through the area, laden with stinging sleet!",
     "Gusting winds fling shards of cutting ice and pounding hail at you as they sweep through the area with brutal force!",
+    "Without warning, the winds intensify, howling as they rush through the area.  Snow and sleet ride violently upon them, raking across your face!",
 ]

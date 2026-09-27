@@ -70,8 +70,8 @@ Hinterwilds. Whether rain elsewhere sets 2 (or 1) is not known yet.
 
 ## 3. Weather lines
 
-- The pools are in `sky.toml`: 18 snow lines, 3 sleet lines (the
-  Hinterwilds' storm hazards), and 6 of those that are gusts.
+- The pools are in `sky.toml`: 18 snow lines, 4 sleet lines (the
+  Hinterwilds' storm hazards), and 7 of those that are gusts.
 - While something falls, a line comes every 79 s (median of 232 gaps; 90%
   within 166 s).
 - **A line says what falls, not how hard.** Consecutive lines jump between
@@ -83,7 +83,11 @@ Hinterwilds. Whether rain elsewhere sets 2 (or 1) is not known yet.
 - **Missing**: rain, thunderstorm, fog, sand and blood rain lines. The
   weather charm (wiki) names the room weathers: light, average or heavy
   rain; thunderstorm; light, average or heavy snow; blood rain. The old log
-  archive is being mined for them.
+  archive (22,849 files, 2024-2026) has none: it is hunting-ground logs,
+  and its fog, mist, sandstorm and "storm subsides" lines are spells and
+  creature attacks. The one sign of a town storm is "A rumble like thunder
+  echoes from outside." (heard indoors). Rain lines need town logs taken in
+  the rain.
 
 ## 4. What falls now (`GameSky::weather`)
 
@@ -113,6 +117,13 @@ it stays full for 1/12 of the orbit, about 14.9 h. `liabo_age(unix)` gives
 its age (0 = new, 0.5 = full). Tilaok circles Liabo and reads the same;
 Makiri is "simply too small to make out".
 
+Checked against the log archive: all 175 quintuple orb brooch readings of
+"Liabo's full moon strengthens the power of the brooch." (22 full moons,
+April 2025 to January 2026) fall inside the orbit's full window (98.3% lit
+or more); a phase trinket's "waxing crescent", "first half", "full moon"
+and "waning gibbous" each read where the orbit puts them (27%, 62%, 99%
+and 83% lit).
+
 ### 5.2 Lornon: track the last look
 
 "Around a full month" (The Elanthian Moons, an official document); no
@@ -136,6 +147,7 @@ Reply: `<Moon> <where> [as] <phase>[.,] <description>`. Seen so far:
 
 | Game time (Eastern) | Reply (first clause) | Read as |
 | --- | --- | --- |
+| 2025-04-23 00:39 | Liabo sits at the peak of her ascent as a full moon | 100%, highest 23:28 (orbit) |
 | 2026-09-23 22:56 | Lornon falls farther toward the western horizon half full | 50%, growing (setting in the evening), ~5 h past highest |
 | 2026-09-27 01:32 | Liabo almost arrives at her azimuth as less than full | ~96% lit, waning, highest 01:26 (orbit) |
 | 2026-09-27 01:32 | Lornon falls farther toward the western horizon almost complete | ~80–90%, growing, ~5 h past highest |
@@ -170,7 +182,8 @@ Hand the renderer:
 - Weather codes other than 0 and 2, and whether 2 appears outside the
   Hinterwilds.
 - Rain, thunderstorm, fog, sand and blood rain lines.
-- Phase and place words beyond the five looks: more `look liabo` /
+- Phase and place words beyond the six looks: more `look liabo` /
   `look lornon` at other hours would fill them in.
-- Lornon's true period.
+- Lornon's true period: the log archive holds no `look lornon` at all;
+  only new looks will fit it.
 - Terrain 3; the climate codes of "arid temperate" and "saltwater".

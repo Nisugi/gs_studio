@@ -7,8 +7,11 @@
 //! Not in VellumFE (an addition, `PORTING.md`). What it rests on:
 //! - Liabo, the great moon, circles in 7.449 days and is full for a twelfth
 //!   of that (the Lich script `astrolabe`, on Gillien's figures: a full moon
-//!   began 2021-05-08 22:32 UTC; a look on 2026-09-27 a day past full read
-//!   "less than full"). Tilaok circles Liabo and reads the same; Makiri is
+//!   began 2021-05-08 22:32 UTC). Checked against the log archive: every
+//!   brooch reading of "Liabo's full moon" (175, on 22 full moons from April
+//!   2025 to January 2026) falls inside its full window, and a phase
+//!   trinket's crescent, first half, full and waning gibbous each read at the
+//!   age it gives. Tilaok circles Liabo and reads the same; Makiri is
 //!   "simply too small to make out".
 //! - Lornon, the dark moon, takes "around a full month" (The Elanthian
 //!   Moons, an official document); where it is in that is taken from the
@@ -522,6 +525,8 @@ mod tests {
     const LORNON_HALF: &str = "Lornon falls farther toward the western horizon half full.  The moon is a cloudy grey, its surface cast in a bright illumination that serves to highlight the languid swirls that slowly undulate across it.";
     const LORNON_ALMOST: &str = "Lornon falls farther toward the western horizon almost complete.  The moon is a cloudy grey, its surface cast in a bright illumination that serves to highlight the languid swirls that slowly undulate across it.";
     const TILAOK_LOOK: &str = "Tilaok almost arrives at her azimuth as less than full, her fiery swaths of color slowly reflecting the darkness of the night sky.";
+    /// 2025-04-23 04:39 UTC, 00:39 game time (the log archive).
+    const LIABO_PEAK: &str = "Liabo sits at the peak of her ascent as a full moon, her exposed surface bearing beautiful";
     const AT_HALF: (f64, f32) = (1_790_218_583.0, 22.94);
     const AT_ALMOST: (f64, f32) = (1_790_487_120.0, 1.53);
 
@@ -542,6 +547,14 @@ mod tests {
         let seen = look.age(hour).unwrap();
         assert!((seen.highest() - age.highest()).abs() < 1.0, "look says highest {} vs orbit {}", seen.highest(), age.highest());
         assert!(liabo_age(began + 0.5 * LIABO_ORBIT_DAYS * DAY_SECS).lit() < 0.02, "new half an orbit on");
+        // a year and a half earlier: at the peak of her ascent as a full moon
+        let (unix, hour) = (1_745_383_140.0, 0.65);
+        let look = read_moon_look(LIABO_PEAK).unwrap();
+        assert_eq!((look.lit, look.from_highest), (Some(1.0), Some(0.0)));
+        let age = liabo_age(unix);
+        assert!(age.lit() > 0.99, "full then: {age:?}");
+        let off = (hour - age.highest() + 12.0).rem_euclid(24.0) - 12.0;
+        assert!(off.abs() < 1.5, "highest {} vs the look at {hour}", age.highest());
     }
 
     /// Each reply reads to its moon, phase and place; an unknown line, and
