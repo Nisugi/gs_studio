@@ -215,7 +215,7 @@ pub fn render_creature_field_content(
         .and_then(|t| backdrop_stage_rect(t.size_vec2().x, t.size_vec2().y))
         .map(|(x0, y0, x1, y1)| [x0, y0, x1 - x0, y1 - y0]);
     let gpu = crate::field_gpu_stage::StageGpu::begin(ui.ctx(), field, scene, art_cache, backdrop_tex, backdrop_rect, map.origin, map.scale);
-    crate::field_lights::set_gpu(gpu.is_some());
+    crate::field_lights::set_gpu(gpu.as_ref().map(|g| g.lamps_in_pass().to_vec()));
     crate::field_gpu_stage::set_current(gpu);
 // <<<doll
     if let Some(scene) = scene {
@@ -1450,7 +1450,7 @@ fn paint_creature_puppet(
     let gpu_drawn = crate::field_gpu_stage::with_current(|g| match (posed.skin.as_ref(), posed.surface.as_ref()) {
         (Some(skin), Some(surface)) if !skin.is_empty() => {
             let m_per_ft = unit.standing.h * crate::field_gpu_stage::METRES_PER_CARD_UNIT / posed.standing_ft.max(1e-3);
-            g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft, dead)
+            g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft)
         }
         _ => false,
     })

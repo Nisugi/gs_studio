@@ -40,7 +40,9 @@ use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, Fie
 
 /// Metres in a card (world) unit: `gs_field::cards::UNITS_PER_FOOT` is 0.2.
 pub const METRES_PER_CARD_UNIT: f32 = 1.524;
-/// A corpse's grey (the old path tints dead art sRGB 110/255), linear.
+/// A dead sprite's grey (the old path tints dead art sRGB 110/255), linear.
+/// A puppet's skin is a corpse's colour already (`gs_puppet`), so it takes
+/// none.
 const DEAD_TINT: f32 = 0.155;
 /// A creature depth map's range, metres from its feet (the prototype's
 /// `z_range`; lights-and-weather.md "Geometry from depth maps").
@@ -54,13 +56,10 @@ const CACHE_MAX: usize = 96;
 /// A layer is uploaded at about the size it is drawn (screen pixels, this
 /// much over, in steps of [`SIZE_STEP`]) and never above [`LAYER_MAX`] on
 /// its long side: art is often far larger than a card, and the atlas holds
-/// one frame's layers.
+/// one frame's layers (a layer it has no room for is drawn the old way).
 const OVERSAMPLE: f32 = 1.25;
 const SIZE_STEP: f32 = 64.0;
 const LAYER_MAX: f32 = 1024.0;
-/// Share of the atlas one frame's layers may fill; a layer that would pass
-/// it is drawn the old way instead of not at all.
-const ATLAS_BUDGET: f32 = 0.85;
 
 fn enabled_id() -> egui::Id {
     egui::Id::new("gs_field_egui::field_gpu_stage::enabled")
@@ -568,10 +567,33 @@ pub struct StageGpu {
     place: Placement,
     /// Metres per camera unit.
     k: f32,
-    /// Atlas pixels this frame's layers take (see [`ATLAS_BUDGET`]).
-    used: std::cell::Cell<f32>,
+    /// The atlas as this frame's layers fill it: a layer it has no room
+    /// for is drawn the old way ([`field_gpu::AtlasPlan`]).
+    plan: std::cell::RefCell<field_gpu::AtlasPlan>,
     /// Screen pixels per point, for sizing uploads.
     ppp: f32,
+    /// Per scene lamp: lit by this pass ([`StageGpu::lamps_in_pass`]).
+    in_pass: Vec<bool>,
+}
+
+/// The pass's lights: the moons first, then the scene's lamps in order (None:
+/// a lamp that gives no light) while [`field_gpu::MAX_LIGHTS`] leaves room --
+/// and, per lamp, whether it got in.
+fn admit_lamps(moons: Vec<FieldLight>, lamps: impl Iterator<Item = Option<FieldLight>>) -> (Vec<FieldLight>, Vec<bool>) {
+    let mut lights = moons;
+    lights.truncate(field_gpu::MAX_LIGHTS);
+    let mut in_pass = Vec::new();
+    for lamp in lamps {
+        let admitted = match lamp {
+            Some(l) if lights.len() < field_gpu::MAX_LIGHTS => {
+                lights.push(l);
+                true
+            }
+            _ => false,
+        };
+        in_pass.push(admitted);
+    }
+    (lights, in_pass)
 }
 
 impl StageGpu {
@@ -622,11 +644,9 @@ impl StageGpu {
         })?;
         let t = ctx.input(|i| i.time) as f32;
         let wind = crate::field_weather::weather(ctx).map_or(0.0, |w| w.wind);
-        let mut lights: Vec<FieldLight> = cache.light.moons_now().iter().map(|m| moon_light(&camera, m, wind)).collect();
-        let room = field_gpu::MAX_LIGHTS - lights.len();
-        if let Some(s) = scene {
-            lights.extend(s.lights.iter().enumerate().filter_map(|(i, l)| scene_light(field, &camera, k, l, i, t)).take(room));
-        }
+        let moons: Vec<FieldLight> = cache.light.moons_now().iter().map(|m| moon_light(&camera, m, wind)).collect();
+        let lamps = scene.map_or(&[][..], |s| &s.lights[..]);
+        let (lights, in_pass) = admit_lamps(moons, lamps.iter().enumerate().map(|(i, l)| scene_light(field, &camera, k, l, i, t)));
         let (fog, dust) = air_of(bg_key, &px);
         let weather = field_weather(crate::field_weather::weather(ctx).as_ref(), t, fog, dust);
         let frame = FieldFrame {
@@ -643,7 +663,14 @@ impl StageGpu {
             weather,
             detail: field_gpu::DETAIL,
         };
-        Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, used: std::cell::Cell::new(0.0), ppp: ctx.pixels_per_point() })
+        Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass })
+    }
+
+    /// Which of the scene's lamps (by index) this pass lights and draws: the
+    /// rest -- past the pass's [`field_gpu::MAX_LIGHTS`] -- are drawn the old
+    /// way (`field_lights::set_gpu`), not lost.
+    pub fn lamps_in_pass(&self) -> &[bool] {
+        &self.in_pass
     }
 
     /// Draw the backdrop piece (in place of the backdrop image).
@@ -656,22 +683,15 @@ impl StageGpu {
         [(screen.min.x - self.place.origin.x) / s, (screen.min.y - self.place.origin.y) / s, screen.width() / s, screen.height() / s]
     }
 
-    /// Room left in the atlas for an image of `w` x `h`: book it, or say no.
-    fn book(&self, w: usize, h: usize) -> bool {
-        let area = ((w + 4) * (h + 4)) as f32;
-        let side = field_gpu::ATLAS_SIDE as f32;
-        if self.used.get() + area > side * side * ATLAS_BUDGET {
+    /// Add a layer and paint it -- only when the frame has a layer to
+    /// spare and the atlas room for its image, decided before anything is
+    /// committed, so a refused layer is drawn the old way instead of
+    /// vanishing.
+    fn push(&self, painter: &egui::Painter, image: Arc<LitImage>, screen: egui::Rect, ground_z: f32, tint: f32) -> bool {
+        if self.frame.lock().map_or(true, |f| f.layers.len() >= field_gpu::MAX_LAYERS) || !self.plan.borrow_mut().admit(&image) {
             return false;
         }
-        self.used.set(self.used.get() + area);
-        true
-    }
-
-    fn push(&self, painter: &egui::Painter, image: Arc<LitImage>, screen: egui::Rect, ground_z: f32, dead: bool) -> bool {
-        if !self.book(image.w as usize, image.h as usize) {
-            return false;
-        }
-        let layer = LayerDraw { image, rect: self.stage_rect(screen), feet_z: ground_z * self.k, tint: if dead { DEAD_TINT } else { 1.0 } };
+        let layer = LayerDraw { image, rect: self.stage_rect(screen), feet_z: ground_z * self.k, tint };
         match field_gpu::push_layer(&self.frame, layer) {
             Some(i) => {
                 field_gpu::paint(painter, &self.frame, self.place, Piece::Layer(i));
@@ -724,13 +744,14 @@ impl StageGpu {
         }) else {
             return false;
         };
-        self.push(painter, image, dest, ground_z, dead)
+        self.push(painter, image, dest, ground_z, if dead { DEAD_TINT } else { 1.0 })
     }
 
     /// Draw a puppet's skin as a lit layer at `screen` (where its image
     /// would go), standing at solver depth `ground_z`; `m_per_ft` is how
-    /// many metres a foot of the figure is on this stage. False = not drawn.
-    #[allow(clippy::too_many_arguments)]
+    /// many metres a foot of the figure is on this stage. A dead puppet's
+    /// skin is a corpse's colour already, so it is drawn as it is. False =
+    /// not drawn.
     pub fn paint_skin(
         &self,
         painter: &egui::Painter,
@@ -739,7 +760,6 @@ impl StageGpu {
         screen: egui::Rect,
         ground_z: f32,
         m_per_ft: f32,
-        dead: bool,
     ) -> bool {
         if skin.w != surface.w || skin.h != surface.h || skin.w == 0 {
             return false;
@@ -749,48 +769,129 @@ impl StageGpu {
         let step = (skin.rgba.len() / 4096).max(1);
         let sample: Vec<u8> = skin.rgba.iter().step_by(step).copied().collect();
         let key = key_of(("skin", Arc::as_ptr(skin) as usize, skin.w, skin.h, sample, m_per_ft.to_bits()));
-        let Some(image) = cached(key, || {
-            // the skin's frame (x right, y up, +z toward the viewer) to the
-            // camera's (x right, y down, z away)
-            let back = surface.to_cam();
-            let fwd = [-back[0], -back[1], -back[2]];
-            let up = [0.0f32, 1.0, 0.0];
-            let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-            let unit = |v: [f32; 3]| {
-                let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
-                v.map(|c| c / l)
-            };
-            let right = unit(cross(fwd, up));
-            let down = cross(fwd, right);
-            let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-            let n = skin.w * skin.h;
-            let mut albedo = vec![0u8; n * 4];
-            let mut geo = vec![[0.0f32; 4]; n];
-            for i in 0..n {
-                if let Some((pos, nrm, alb, cov)) = surface.texel(i) {
-                    albedo[i * 4..i * 4 + 3].copy_from_slice(&alb);
-                    albedo[i * 4 + 3] = cov;
-                    geo[i] = [dot(nrm, right), dot(nrm, down), dot(nrm, fwd), dot(pos, fwd) * m_per_ft];
-                }
-            }
-            Some(LitImage {
-                key,
-                w: skin.w as u32,
-                h: skin.h as u32,
-                albedo: Arc::new(albedo),
-                lit: Arc::new(with_glow(&skin.rgba, None)),
-                geo: Arc::new(geo),
-            })
-        }) else {
+        let Some(image) = cached(key, || Some(skin_image(key, skin, surface, m_per_ft))) else {
             return false;
         };
-        self.push(painter, image, screen, ground_z, dead)
+        self.push(painter, image, screen, ground_z, 1.0)
     }
+}
+
+/// How far round the figure an outline pixel looks for the body's depth,
+/// pixels: past the widest outline a skin draws (the contour and a boss's
+/// gold round it).
+const OUTLINE_REACH: usize = 8;
+
+/// A puppet's skin as the pass's layer image. Every pixel the skin shows is
+/// in it, at the skin's own coverage: where the figure's surface is
+/// (`surface.texel`), its own colour, normal and depth, lit by the lamps;
+/// the contour drawn round it and a boss's gold outline -- skin with no
+/// surface -- keep their colour and are left unlit (no albedo for a lamp
+/// to light), at the depth of the nearest surface pixel, so the shadow
+/// they cast is the body's edge.
+fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::SkinSurface, m_per_ft: f32) -> LitImage {
+    // the skin's frame (x right, y up, +z toward the viewer) to the
+    // camera's (x right, y down, z away)
+    let back = surface.to_cam();
+    let fwd = [-back[0], -back[1], -back[2]];
+    let up = [0.0f32, 1.0, 0.0];
+    let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let unit = |v: [f32; 3]| {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+        v.map(|c| c / l)
+    };
+    let right = unit(cross(fwd, up));
+    let down = cross(fwd, right);
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (w, h) = (skin.w, skin.h);
+    let n = w * h;
+    let mut albedo = vec![0u8; n * 4];
+    let mut geo = vec![[0.0f32; 4]; n];
+    let mut surfaced = vec![false; n];
+    for i in 0..n {
+        let shown = skin.rgba[i * 4 + 3];
+        if let Some((pos, nrm, alb, _)) = surface.texel(i) {
+            albedo[i * 4..i * 4 + 3].copy_from_slice(&alb);
+            geo[i] = [dot(nrm, right), dot(nrm, down), dot(nrm, fwd), dot(pos, fwd) * m_per_ft];
+            surfaced[i] = true;
+        }
+        albedo[i * 4 + 3] = shown;
+    }
+    // an outline pixel: the depth of the nearest surface pixel, ring by ring
+    for i in 0..n {
+        if surfaced[i] || skin.rgba[i * 4 + 3] == 0 {
+            continue;
+        }
+        let (x, y) = ((i % w) as isize, (i / w) as isize);
+        'rings: for r in 1..=OUTLINE_REACH as isize {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r {
+                        continue;
+                    }
+                    let (qx, qy) = (x + dx, y + dy);
+                    if qx < 0 || qy < 0 || qx >= w as isize || qy >= h as isize {
+                        continue;
+                    }
+                    let j = qy as usize * w + qx as usize;
+                    if surfaced[j] {
+                        geo[i][3] = geo[j][3];
+                        break 'rings;
+                    }
+                }
+            }
+        }
+    }
+    LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(with_glow(&skin.rgba, None)), geo: Arc::new(geo) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two moons leave six of the eight slots: the first six lamps that
+    /// give light get them; one that gives none is passed over; the rest
+    /// are marked out of the pass, so the old drawing keeps them.
+    #[test]
+    fn lamps_past_the_limit_are_left_to_the_old_drawing() {
+        let torch = || Some(FieldLight::torch([0.0, 0.0, 5.0], [0.0, 0.0, 5.0], 0.8, 1.0, 1.0));
+        let moon = || FieldLight::moon([0.0, -1.0, 0.0], [1.0; 3], 0.3, 0.0, [0.0; 2]);
+        let lamps: Vec<Option<FieldLight>> = (0..9).map(|i| if i == 2 { None } else { torch() }).collect();
+        let (lights, in_pass) = admit_lamps(vec![moon(), moon()], lamps.into_iter());
+        assert_eq!(lights.len(), field_gpu::MAX_LIGHTS);
+        assert_eq!(in_pass, [true, true, false, true, true, true, true, false, false]);
+        let (lights, in_pass) = admit_lamps(Vec::new(), std::iter::repeat_with(torch).take(3));
+        assert_eq!((lights.len(), in_pass), (3, vec![true; 3]));
+    }
+
+    fn humanoid() -> gs_puppet::Puppet {
+        gs_puppet::Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+    }
+
+    /// The review's case: a humanoid with a boss's outline, framed at 300
+    /// px. Every pixel the skin shows is in the layer at the skin's own
+    /// coverage; the outline -- skin with no surface -- is kept, unlit, at
+    /// the body's depth.
+    #[test]
+    fn a_puppets_outline_reaches_the_pass() {
+        let p = humanoid();
+        let posed = p.pose(&gs_puppet::Pose::default());
+        let cam = gs_puppet::Camera::framing(p.height, [300.0, 300.0]);
+        let project = |q| cam.project(q);
+        for look in [gs_puppet::Look { boss_outline: true, ..Default::default() }, gs_puppet::Look { dead: true, ..Default::default() }] {
+            let (skin, surface) = posed.skin_surface(&project, &look, None, gs_puppet::Effects::default());
+            let img = skin_image(1, &skin, &surface, 0.3);
+            let mut outline = 0;
+            for i in 0..skin.w * skin.h {
+                assert_eq!(img.albedo[i * 4 + 3], skin.rgba[i * 4 + 3], "coverage at {i}");
+                if skin.rgba[i * 4 + 3] > 0 && surface.texel(i).is_none() {
+                    outline += 1;
+                    assert_eq!(&img.albedo[i * 4..i * 4 + 3], &[0, 0, 0], "an outline is not lit");
+                    assert!(img.geo[i][3] != 0.0, "an outline pixel stands at the body's depth");
+                }
+            }
+            assert!(outline > 500, "the outline is there: {outline} pixels");
+        }
+    }
 
     #[test]
     fn a_flat_backdrop_is_ground_below_the_horizon_and_sky_above() {

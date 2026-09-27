@@ -113,18 +113,26 @@ thread_local! {
     static LIGHTS: RefCell<Vec<PointLight>> = const { RefCell::new(Vec::new()) };
     /// The lamps near the creature being drawn (set by [`set_creature`]).
     static NEAR: RefCell<Vec<Near>> = const { RefCell::new(Vec::new()) };
-    /// The v2 pass (field_gpu_stage) lights this frame: no ground pools or
-    /// fire-tinted copies, and it draws torches and wisps itself.
-    static GPU: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The v2 pass (field_gpu_stage) lights this frame -- no fire-tinted
+    /// copies -- and, per scene lamp, whether it is one the pass lights and
+    /// draws (a torch's flame, a wisp): those get no ground pool or drawing
+    /// here. A lamp past the pass's limit keeps both.
+    static GPU: RefCell<Option<Vec<bool>>> = const { RefCell::new(None) };
 }
 
-/// The v2 lighting pass lights this frame (see [`GPU`]'s docs).
-pub fn set_gpu(on: bool) {
-    GPU.with(|g| g.set(on));
+/// The v2 lighting pass lights this frame, and these of the scene's lamps
+/// (`StageGpu::lamps_in_pass`); None = it does not (see [`GPU`]'s docs).
+pub fn set_gpu(lamps_in_pass: Option<Vec<bool>>) {
+    GPU.with(|g| *g.borrow_mut() = lamps_in_pass);
 }
 
 fn gpu() -> bool {
-    GPU.with(|g| g.get())
+    GPU.with(|g| g.borrow().is_some())
+}
+
+/// The pass lights (and draws) scene lamp `i`.
+fn in_pass(i: usize) -> bool {
+    GPU.with(|g| g.borrow().as_ref().is_some_and(|v| v.get(i).copied().unwrap_or(false)))
 }
 
 /// Height of a lamp's light above the floor, world units: the middle of
@@ -490,7 +498,7 @@ fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32,
 }
 
 pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
-    if gpu() && matches!(light.kind, LampKind::Torch | LampKind::Wisp) {
+    if in_pass(i) && matches!(light.kind, LampKind::Torch | LampKind::Wisp) {
         return;
     }
     let (lx, lz, up) = at(field, light, i, t);
@@ -571,8 +579,8 @@ pub fn paint_back(
         return false;
     }
     let t = ctx.input(|i| i.time) as f32;
-    if !gpu() {
-        for (i, light) in lights.iter().enumerate() {
+    for (i, light) in lights.iter().enumerate() {
+        if !in_pass(i) {
             ground_pool(painter, field, to_screen, scale, light, i, t, backdrop);
         }
     }

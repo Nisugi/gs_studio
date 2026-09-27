@@ -401,15 +401,16 @@ fn bench(scene: &Scene, every_backend: bool) {
         cases.push((format!("lamps + 2 moons + {w}"), with(base(true, true), 2, w)));
     }
     cases.push(("lamps + 2 moons + all weather".into(), with(base(true, true), 2, "storm,mist,rain,sand,snow")));
-    // eight torches across the ground: the cost of each more lamp
+    // six torches across the ground -- with the two moons, all the pass
+    // takes (field_gpu::MAX_LIGHTS): the cost of each more lamp
     let mut many = with(base(false, false), 2, "");
-    for i in 0..8 {
+    for i in 0..field_gpu::MAX_LIGHTS - 2 {
         let u = 120.0 + i as f32 * 140.0;
         let b = cam.point_at_height(u, 640.0 + 20.0 * (i % 3) as f32, 0.8);
         let (f, sway) = field_gpu::torch_flicker(T + i as f32, 1.0);
         many.lights.push(FieldLight::torch([b[0] + sway[0], b[1] + sway[1], b[2] + sway[2]], b, 0.8, f, 1.0));
     }
-    cases.push(("8 torches + 2 moons".into(), many));
+    cases.push((format!("{} torches + 2 moons", field_gpu::MAX_LIGHTS - 2), many));
     // a crowd: the two creatures again at six more spots, as a busy stage
     let crowd = |mut f: FieldFrame| {
         for (i, feet) in [[230.0, 650.0], [360.0, 790.0], [560.0, 640.0], [850.0, 690.0], [1000.0, 610.0], [1120.0, 780.0]].into_iter().enumerate() {
@@ -418,7 +419,8 @@ fn bench(scene: &Scene, every_backend: bool) {
             let k = c.height_m * cam.f / zf / (c.content[3] - c.content[1]);
             let cx = (c.content[0] + c.content[2]) / 2.0;
             f.layers.push(LayerDraw {
-                image: scene.creatures[i % 2].clone(),
+                // each its own image, as a stage's crowd is: eight atlas slots
+                image: Arc::new(LitImage { key: 100 + i as u64, ..(*scene.creatures[i % 2]).clone() }),
                 rect: [feet[0] - k * cx, feet[1] - k * c.content[3], c.tex[0] as f32 * k, c.tex[1] as f32 * k],
                 feet_z: zf,
                 tint: 1.0,

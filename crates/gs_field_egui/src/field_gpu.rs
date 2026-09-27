@@ -685,23 +685,94 @@ struct Shelves {
 }
 
 impl Shelves {
+    /// A slot for a `w` x `h` image (its top-left, inside its gutter), or
+    /// None -- and then nothing moves: a refused image leaves the packing as
+    /// it was, so a plan and an upload that meet the same images in the same
+    /// order agree.
     fn place(&mut self, w: u32, h: u32) -> Option<[u32; 2]> {
         let (w, h) = (w + ATLAS_PAD * 2, h + ATLAS_PAD * 2);
         if w > ATLAS_SIDE || h > ATLAS_SIDE {
             return None;
         }
-        if self.x + w > ATLAS_SIDE {
-            self.x = 0;
-            self.y += self.row_h;
-            self.row_h = 0;
+        let (mut x, mut y, mut row_h) = (self.x, self.y, self.row_h);
+        if x + w > ATLAS_SIDE {
+            x = 0;
+            y += row_h;
+            row_h = 0;
         }
-        if self.y + h > ATLAS_SIDE {
+        if y + h > ATLAS_SIDE {
             return None;
         }
-        let at = [self.x + ATLAS_PAD, self.y + ATLAS_PAD];
-        self.x += w;
-        self.row_h = self.row_h.max(h);
-        Some(at)
+        (self.x, self.y, self.row_h) = (x + w, y, row_h.max(h));
+        Some([x + ATLAS_PAD, y + ATLAS_PAD])
+    }
+}
+
+/// The atlas as one frame will fill it: its layers' images packed in the
+/// order they are pushed, one slot per image (a repeat takes none). A host
+/// pushes a layer only when [`AtlasPlan::admit`] finds it room -- a full
+/// atlas is packed afresh with exactly this frame's images in this order,
+/// so every admitted layer gets its slot. One plan per frame.
+#[derive(Debug, Default)]
+pub struct AtlasPlan {
+    shelves: Shelves,
+    keys: std::collections::HashSet<u64>,
+}
+
+impl AtlasPlan {
+    /// Room for `image` (already admitted: yes, free)? Books it when so.
+    pub fn admit(&mut self, image: &LitImage) -> bool {
+        if self.keys.contains(&image.key) {
+            return true;
+        }
+        if !image.check() || self.shelves.place(image.w, image.h).is_none() {
+            return false;
+        }
+        self.keys.insert(image.key);
+        true
+    }
+}
+
+/// Every image of `layers` packed afresh, in order, one slot per image:
+/// what a full atlas repacks to (and what [`AtlasPlan`] predicts).
+fn pack_afresh(layers: &[LayerDraw]) -> (Shelves, Vec<(usize, [u32; 2])>) {
+    let mut shelves = Shelves::default();
+    let mut seen = std::collections::HashSet::new();
+    let mut placed = Vec::new();
+    for (i, l) in layers.iter().enumerate() {
+        let img = &l.image;
+        if !img.check() || !seen.insert(img.key) {
+            continue;
+        }
+        if let Some(at) = shelves.place(img.w, img.h) {
+            placed.push((i, at));
+        }
+    }
+    (shelves, placed)
+}
+
+/// `img` inside a clear border [`ATLAS_PAD`] wide: what fills its atlas
+/// slot, gutter and all.
+fn with_gutter(img: &LitImage) -> LitImage {
+    let p = ATLAS_PAD as usize;
+    let (w, h) = (img.w as usize, img.h as usize);
+    let (pw, ph) = (w + 2 * p, h + 2 * p);
+    fn pad<T: Copy + Default>(src: &[T], w: usize, h: usize, per: usize, p: usize) -> Vec<T> {
+        let pw = w + 2 * p;
+        let mut out = vec![T::default(); pw * (h + 2 * p) * per];
+        for y in 0..h {
+            let o = ((y + p) * pw + p) * per;
+            out[o..o + w * per].copy_from_slice(&src[y * w * per..(y + 1) * w * per]);
+        }
+        out
+    }
+    LitImage {
+        key: img.key,
+        w: pw as u32,
+        h: ph as u32,
+        albedo: Arc::new(pad(&img.albedo, w, h, 4, p)),
+        lit: Arc::new(pad(&img.lit, w, h, 4, p)),
+        geo: Arc::new(pad(&img.geo, w, h, 1, p)),
     }
 }
 
@@ -767,6 +838,13 @@ impl Textures {
             lit: make(wgpu::TextureFormat::Rgba8Unorm, "lit"),
             geo: make(wgpu::TextureFormat::Rgba16Float, "geo"),
         }
+    }
+
+    /// `img` into its atlas slot at `at`, its gutter ([`ATLAS_PAD`] round
+    /// it) cleared: a slot reused after a repack may hold another image's
+    /// edge, which linear filtering at this image's border would read.
+    fn upload_slot(&self, queue: &wgpu::Queue, at: [u32; 2], img: &LitImage) {
+        self.upload(queue, [at[0] - ATLAS_PAD, at[1] - ATLAS_PAD], &with_gutter(img));
     }
 
     fn upload(&self, queue: &wgpu::Queue, at: [u32; 2], img: &LitImage) {
@@ -1312,6 +1390,13 @@ struct FieldCallback {
 }
 
 impl Gpu {
+    /// `img` into the atlas at `at`: its pixels, its slot, its depth span.
+    fn put(&mut self, queue: &wgpu::Queue, img: &LitImage, at: [u32; 2]) {
+        self.atlas.upload_slot(queue, at, img);
+        self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
+        self.spans.insert(img.key, depth_span(img));
+    }
+
     fn upload_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame) {
         let bd = &frame.backdrop;
         if !bd.check() {
@@ -1326,46 +1411,32 @@ impl Gpu {
             self.backdrop = Some((bd.key, [bd.w, bd.h], tex));
             self.bind = None;
         }
-        // creature layers: a slot each, packed afresh when the atlas fills
+        // creature layers: a slot each, in the room left while it lasts;
+        // when it runs out, this frame's images packed afresh in the order
+        // the host admitted them (`AtlasPlan`), so all of them fit
         let layers = drawn_layers(frame);
-        if layers.iter().any(|l| !self.slots.contains_key(&l.image.key)) {
-            let mut fresh = false;
+        if layers.iter().any(|l| l.image.check() && !self.slots.contains_key(&l.image.key)) {
+            let mut full = false;
             for l in layers {
                 let img = &l.image;
                 if self.slots.contains_key(&img.key) || !img.check() {
                     continue;
                 }
-                let at = match self.shelves.place(img.w, img.h) {
-                    Some(at) => at,
-                    None if !fresh => {
-                        // full: start over with only this frame's layers
-                        self.shelves = Shelves::default();
-                        self.slots.clear();
-                        self.spans.clear();
-                        fresh = true;
-                        match self.shelves.place(img.w, img.h) {
-                            Some(at) => at,
-                            None => continue,
-                        }
+                match self.shelves.place(img.w, img.h) {
+                    Some(at) => self.put(queue, img, at),
+                    None => {
+                        full = true;
+                        break;
                     }
-                    None => continue,
-                };
-                self.atlas.upload(queue, at, img);
-                self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
-                self.spans.insert(img.key, depth_span(img));
+                }
             }
-            if fresh {
-                // the layers placed before the reset lost their slots
-                for l in layers {
-                    let img = &l.image;
-                    if self.slots.contains_key(&img.key) || !img.check() {
-                        continue;
-                    }
-                    if let Some(at) = self.shelves.place(img.w, img.h) {
-                        self.atlas.upload(queue, at, img);
-                        self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
-                        self.spans.insert(img.key, depth_span(img));
-                    }
+            if full {
+                let (shelves, placed) = pack_afresh(layers);
+                self.shelves = shelves;
+                self.slots.clear();
+                self.spans.clear();
+                for (i, at) in placed {
+                    self.put(queue, &layers[i].image, at);
                 }
             }
         }
@@ -1650,6 +1721,69 @@ mod tests {
         assert!((back(f16_bits(1.7351)) - 1.7351).abs() < 1e-3);
     }
 
+    /// Three different 1024-square images pass any area budget, but only
+    /// one fits the atlas's shelves: the plan admits one. Whatever sizes
+    /// come, in whatever order, a full atlas repacked in the frame's order
+    /// places every image the plan admitted; a repeat is admitted free.
+    #[test]
+    fn the_plan_admits_what_the_repack_places() {
+        let mut bufs: HashMap<(u32, u32), (Arc<Vec<u8>>, Arc<Vec<[f32; 4]>>)> = HashMap::new();
+        let mut img = |key: u64, w: u32, h: u32| {
+            let (px, geo) = bufs
+                .entry((w, h))
+                .or_insert_with(|| (Arc::new(vec![255; (w * h * 4) as usize]), Arc::new(vec![[0.0; 4]; (w * h) as usize])))
+                .clone();
+            Arc::new(LitImage { key, w, h, albedo: px.clone(), lit: px, geo })
+        };
+        let mut plan = AtlasPlan::default();
+        let big: Vec<_> = (0..3).map(|k| img(k, 1024, 1024)).collect();
+        assert_eq!(big.iter().map(|i| plan.admit(i)).collect::<Vec<_>>(), [true, false, false]);
+        assert!(plan.admit(&big[0]), "a repeat takes no room");
+        // sizes round the gutter's edges, some repeated, in every rotation
+        let sizes = [(1020, 300), (1022, 500), (1030, 200), (500, 1020), (2044, 10), (2045, 10), (7, 2044), (600, 600), (1400, 400)];
+        for rot in 0..sizes.len() {
+            let mut plan = AtlasPlan::default();
+            let mut layers = Vec::new();
+            for (j, &(w, h)) in sizes.iter().cycle().skip(rot).take(sizes.len() * 2).enumerate() {
+                let image = img((j % 4) as u64 * 1_000_000 + w as u64 * 4096 + h as u64, w, h);
+                if plan.admit(&image) {
+                    layers.push(LayerDraw { image, rect: [0.0; 4], feet_z: 1.0, tint: 1.0 });
+                }
+            }
+            let (_, placed) = pack_afresh(&layers);
+            let unique: std::collections::HashSet<u64> = layers.iter().map(|l| l.image.key).collect();
+            assert!(!layers.is_empty());
+            assert_eq!(placed.len(), unique.len(), "rotation {rot}: every admitted image gets its slot");
+        }
+    }
+
+    /// A slot's gutter is uploaded clear with the image, so whatever held
+    /// the slot before a repack cannot bleed in at its edges.
+    #[test]
+    fn an_atlas_slot_is_filled_gutter_and_all() {
+        let (w, h) = (3u32, 2u32);
+        let img = LitImage {
+            key: 7,
+            w,
+            h,
+            albedo: Arc::new(vec![200; 24]),
+            lit: Arc::new(vec![100; 24]),
+            geo: Arc::new(vec![[0.5, 0.5, 0.5, 1.5]; 6]),
+        };
+        let g = with_gutter(&img);
+        let p = ATLAS_PAD;
+        assert!(g.check() && (g.w, g.h) == (w + 2 * p, h + 2 * p));
+        for y in 0..g.h {
+            for x in 0..g.w {
+                let i = (y * g.w + x) as usize;
+                let inside = (p..p + w).contains(&x) && (p..p + h).contains(&y);
+                assert_eq!(g.albedo[i * 4 + 3], if inside { 200 } else { 0 }, "alpha at {x},{y}");
+                assert_eq!(g.lit[i * 4], if inside { 100 } else { 0 });
+                assert_eq!(g.geo[i][3], if inside { 1.5 } else { 0.0 });
+            }
+        }
+    }
+
     #[test]
     fn shelves_pack_until_full_and_never_overlap() {
         let mut s = Shelves::default();
@@ -1666,6 +1800,12 @@ mod tests {
             }
         }
         assert!(Shelves::default().place(ATLAS_SIDE, 10).is_none(), "too wide for any shelf");
+        // a refused image leaves the packing as it was
+        let mut sh = Shelves::default();
+        sh.place(1500, 100).unwrap();
+        let before = (sh.x, sh.y, sh.row_h);
+        assert!(sh.place(1000, 2000).is_none());
+        assert_eq!((sh.x, sh.y, sh.row_h), before);
     }
 
     #[test]
