@@ -21,7 +21,9 @@
 //! `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (smoke runs);
 //! `GS_STUDIO_SHOT=<path.png>` saves one frame of the window there and
 //! closes (after 30 frames, or `GS_STUDIO_SHOT_FRAMES`); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs tab's 3D
-//! preview with the pose editor on that pose (and row) -- visual checks.
+//! preview with the pose editor on that pose (and row) -- visual checks;
+//! `GS_STUDIO_NOTE=<family>#<id>` opens it on a note pinned to the puppet
+//! (`editor::rig_notes`).
 //!
 //! gs-studio is a STANDALONE app: with no `--pool` / `GS_STUDIO_POOL` the
 //! pool is gs-studio's OWN data home (`data_home`), never VellumFE's

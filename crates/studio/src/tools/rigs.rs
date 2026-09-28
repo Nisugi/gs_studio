@@ -11,6 +11,7 @@ use crate::editor::palette::{label_rgba, LABEL_RGB};
 use crate::editor::pose_edit::{self, Origin, PairState, PoseDoc, Row, Scope, FREE, ROOT};
 use crate::editor::prompt::{NamePrompt, PromptKind};
 use crate::editor::puppet_view::{PoseSource, PuppetView};
+use crate::editor::rig_notes;
 use crate::editor::state::Editor;
 use crate::editor::structure::{AnchorSlot, MAX_NAME_LEN};
 use crate::editor::warnings::MIN_SHARE;
@@ -88,6 +89,16 @@ pub struct RigTool {
     /// Counts the presses: each death takes the next variety (which dead
     /// pose, the fall's timing), as different creatures do on the stage.
     death_seed: u64,
+    /// Notes pinned to the puppet (`editor::rig_notes`): the family's, as
+    /// read; a click on the figure pins one while `pin_notes` is on, the
+    /// pin waiting for its text in `pending`; `note_focus` is the one shown
+    /// (its pose and view, its pin ringed).
+    notes: Option<(String, Result<rig_notes::Notes, String>)>,
+    pin_notes: bool,
+    pending: Option<(rig_notes::Pin, String)>,
+    note_focus: Option<u32>,
+    /// `GS_STUDIO_NOTE`: the note to show once its family is open.
+    note_request: Option<(String, u32)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,7 +228,32 @@ impl RigTool {
             pose_quit: PoseQuit::No,
             death: None,
             death_seed: 0,
+            notes: None,
+            pin_notes: false,
+            pending: None,
+            note_focus: None,
+            note_request: None,
         })
+    }
+
+    /// Open the 3D preview on a pinned note (`GS_STUDIO_NOTE=<family>#<id>`,
+    /// for a screenshot of what it points at): its family, pose, creature
+    /// and view, the pin ringed.
+    pub fn open_note(&mut self, spec: &str) {
+        let Some((family, id)) = spec.split_once('#') else { return };
+        let Ok(id) = id.trim().parse::<u32>() else { return };
+        self.session.request(DocAction::OpenFamily(family.trim().to_owned()));
+        self.puppet_view.show = true;
+        self.note_request = Some((family.trim().to_owned(), id));
+    }
+
+    /// Show note `id`: its pose, creature and view, its pin ringed.
+    fn show_note(&mut self, note: &rig_notes::Note) {
+        let pv = &mut self.puppet_view;
+        pv.pose = note.pose.clone();
+        pv.creature = note.creature.clone();
+        [pv.yaw, pv.pitch, pv.zoom] = note.view;
+        self.note_focus = Some(note.id);
     }
 
     /// Where Publish ships from now on.
@@ -675,6 +711,103 @@ impl RigTool {
 
     // --------------------------------------------------------- 3D preview
 
+    /// Notes pinned to the puppet (`editor::rig_notes`): Pin notes (a click
+    /// on the figure pins one), the new note's text, and the list -- Show
+    /// (its pose and view), Done, Delete. Every change is written at once.
+    fn notes_panel(&mut self, ui: &mut egui::Ui, family: &str, data_root: &Path) {
+        if self.notes.as_ref().is_none_or(|(f, _)| f != family) {
+            self.notes = Some((family.to_owned(), rig_notes::Notes::load(data_root, family)));
+            self.pending = None;
+            self.note_focus = None;
+        }
+        if let Some((want, id)) = self.note_request.clone().filter(|(f, _)| f == family) {
+            self.note_request = None;
+            let note = self.notes.as_ref().and_then(|(_, n)| n.as_ref().ok()).and_then(|n| n.get(id)).cloned();
+            match note {
+                Some(note) => self.show_note(&note),
+                None => self.session.status = format!("GS_STUDIO_NOTE: {want} has no note #{id}"),
+            }
+        }
+        let Some((_, notes)) = self.notes.as_mut() else { return };
+        let notes = match notes {
+            Ok(n) => n,
+            Err(e) => {
+                ui.colored_label(ui.visuals().warn_fg_color, e.clone());
+                return;
+            }
+        };
+        let open = notes.open().count();
+        let mut changed = false;
+        let mut show: Option<rig_notes::Note> = None;
+        let title = if notes.notes.is_empty() { "Notes".to_owned() } else { format!("Notes ({open} open)") };
+        egui::CollapsingHeader::new(title)
+            .id_salt("rig_notes")
+            .open(self.pending.is_some().then_some(true))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.toggle_value(&mut self.pin_notes, "Pin notes").on_hover_text(
+                        "Click the figure to pin a note to the bone there (\"reduce this bulge\", \"the jaw hangs\"), with this pose and view: \
+                         data/notes/<family>.toml, for whoever works on the rig next",
+                    );
+                    ui.weak(format!("data/notes/{family}.toml"));
+                });
+                let (mut pin_it, mut cancel) = (false, false);
+                if let Some((pin, text)) = self.pending.as_mut() {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!("New note on {} at {:.0}%:", pin.bone, pin.along * 100.0));
+                        let edit = ui.add(egui::TextEdit::singleline(text).desired_width(260.0).hint_text("what is wrong here"));
+                        edit.request_focus();
+                        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        pin_it = (ui.button("Pin").clicked() || enter) && !text.trim().is_empty();
+                        cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    });
+                }
+                if pin_it {
+                    if let Some((pin, text)) = self.pending.take() {
+                        self.note_focus = Some(notes.add(pin, &text, &rig_notes::today()));
+                        changed = true;
+                    }
+                } else if cancel {
+                    self.pending = None;
+                }
+                let mut remove = None;
+                for note in notes.notes.iter_mut() {
+                    ui.horizontal_wrapped(|ui| {
+                        let focused = self.note_focus == Some(note.id);
+                        let label = format!("#{} {}", note.id, note.text);
+                        let text = if note.done { egui::RichText::new(label).weak().strikethrough() } else { egui::RichText::new(label) };
+                        if ui.selectable_label(focused, text).clicked() {
+                            show = Some(note.clone());
+                        }
+                        let pose = if note.pose.is_empty() { "rest" } else { note.pose.as_str() };
+                        ui.weak(format!("{} {:.0}%, {pose}", note.bone, note.along * 100.0)).on_hover_text(format!("pinned {}", note.made));
+                        if ui.small_button("Show").on_hover_text("Its pose, creature and view, the pin ringed").clicked() {
+                            show = Some(note.clone());
+                        }
+                        if ui.checkbox(&mut note.done, "Done").changed() {
+                            changed = true;
+                        }
+                        if ui.small_button("Delete").clicked() {
+                            remove = Some(note.id);
+                        }
+                    });
+                }
+                if let Some(id) = remove {
+                    notes.remove(id);
+                    changed = true;
+                }
+            });
+        if changed {
+            self.session.status = match notes.save(data_root, family) {
+                Ok(path) => format!("Notes saved: {}", path.display()),
+                Err(e) => format!("NOTES NOT SAVED: {e}"),
+            };
+        }
+        if let Some(note) = show {
+            self.show_note(&note);
+        }
+    }
+
     /// The live puppet: built from the rig as it stands (unsaved edits
     /// included), posed from the body type's pose set, orbited by dragging.
     fn puppet_panel(&mut self, ui: &mut egui::Ui) {
@@ -808,6 +941,7 @@ impl RigTool {
                 });
             }
         });
+        self.notes_panel(ui, &family, &data_root);
         egui::CollapsingHeader::new("Texture painting").id_salt("rig_texture_tools").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 export = ui
@@ -965,7 +1099,11 @@ impl RigTool {
                     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| self.pose_editor(ui, &family, &body_type));
                 });
         }
-        ui.weak(if self.pose_edit { "drag: turn   wheel: zoom   click: pick a bone" } else { "drag: turn   wheel: zoom" });
+        ui.weak(match (self.pin_notes, self.pose_edit) {
+            (true, _) => "drag: turn   wheel: zoom   click: pin a note",
+            (false, true) => "drag: turn   wheel: zoom   click: pick a bone",
+            (false, false) => "drag: turn   wheel: zoom",
+        });
 
         let pv = &mut self.puppet_view;
         // The dead pose a death falls into: this press's variety, or the one
@@ -1224,7 +1362,7 @@ impl RigTool {
                         self.pose_doc.as_ref().is_some_and(|d| d.pair_is_split(self.pose_scope, &family, &self.puppet_view.pose, stem))
                     };
                     let rows = pose_edit::rows(puppet, &split);
-                    if response.clicked() {
+                    if response.clicked() && !self.pin_notes {
                         if let Some(at) = response.interact_pointer_pos() {
                             let picked = pose_edit::pick_bone(&posed, yaw, &project, [at.x, at.y], 14.0);
                             self.pose_row = Some(picked.and_then(|b| pose_edit::row_of(&rows, &b)).map_or(ROOT.to_owned(), |r| r.key.clone()));
@@ -1236,6 +1374,34 @@ impl RigTool {
                             painter.circle_filled(Pos2::new(a[0], a[1]), 3.5, Color32::from_rgb(255, 210, 60));
                         }
                     }
+                }
+                // Notes: a click pins one (Pin notes, before the pose
+                // editor's bone pick); every open note's pin is drawn,
+                // numbered, the one shown ringed, a pin waiting for its
+                // text hollow.
+                if self.pin_notes && response.clicked() {
+                    if let Some(at) = response.interact_pointer_pos() {
+                        if let Some((i, t)) = pose_edit::pick_segment(&posed, yaw, &project, [at.x, at.y], 14.0) {
+                            let (pose, creature) = (self.puppet_view.pose.clone(), self.puppet_view.creature.clone());
+                            self.pending = rig_notes::Pin::at(&posed, i, t, &pose, &creature, [yaw, pitch, zoom]).map(|p| (p, String::new()));
+                        }
+                    }
+                }
+                if let Some((_, Ok(notes))) = &self.notes {
+                    for note in notes.open() {
+                        let Some([x, y]) = rig_notes::on_screen(&posed, note, yaw, &project) else { continue };
+                        let at = Pos2::new(x, y);
+                        let focused = self.note_focus == Some(note.id);
+                        let (fill, r) = if focused { (Color32::from_rgb(255, 210, 60), 10.0) } else { (Color32::from_rgb(230, 90, 60), 8.0) };
+                        painter.circle(at, r, fill, Stroke::new(1.5, Color32::BLACK));
+                        painter.text(at, egui::Align2::CENTER_CENTER, note.id.to_string(), egui::FontId::proportional(r + 2.0), Color32::BLACK);
+                        if focused {
+                            painter.circle_stroke(at, r + 5.0, Stroke::new(2.0, fill));
+                        }
+                    }
+                }
+                if let Some([x, y]) = self.pending.as_ref().and_then(|(pin, _)| rig_notes::on_screen(&posed, &pin.note(), yaw, &project)) {
+                    painter.circle_stroke(Pos2::new(x, y), 9.0, Stroke::new(2.5, Color32::from_rgb(255, 210, 60)));
                 }
                 painter.text(
                     rect.left_bottom() + Vec2::new(8.0, -8.0),

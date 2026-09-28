@@ -676,8 +676,14 @@ pub fn row_of<'a>(rows: &'a [Row], bone: &str) -> Option<&'a Row> {
 /// passes nearest (within `reach_px`), the nearer one on a tie. `project`
 /// takes a world point (after `yaw` turns the figure) to screen.
 pub fn pick_bone(posed: &Posed, yaw: f32, project: &dyn Fn(V3) -> ([f32; 2], f32), at: [f32; 2], reach_px: f32) -> Option<String> {
+    pick_segment(posed, yaw, project, at, reach_px).map(|(i, _)| posed.puppet.segments[i].bone.clone())
+}
+
+/// The segment under a screen point, as [`pick_bone`] finds it, and how
+/// far along it the point falls (head 0 .. tail 1): where a note pins.
+pub fn pick_segment(posed: &Posed, yaw: f32, project: &dyn Fn(V3) -> ([f32; 2], f32), at: [f32; 2], reach_px: f32) -> Option<(usize, f32)> {
     let turn = rot_y(yaw);
-    let mut best: Option<(f32, f32, &str)> = None;
+    let mut best: Option<(f32, f32, usize, f32)> = None;
     for (i, s) in posed.puppet.segments.iter().enumerate() {
         let (a, da) = project(mul_mv(&turn, posed.point(i, s.head)));
         let (b, db) = project(mul_mv(&turn, posed.point(i, s.tail)));
@@ -693,11 +699,11 @@ pub fn pick_bone(posed: &Posed, yaw: f32, project: &dyn Fn(V3) -> ([f32; 2], f32
             continue;
         }
         let depth = da + (db - da) * t;
-        if best.is_none_or(|(bd, bz, _)| d < bd - 0.5 || (d <= bd + 0.5 && depth < bz)) {
-            best = Some((d, depth, &s.bone));
+        if best.is_none_or(|(bd, bz, _, _)| d < bd - 0.5 || (d <= bd + 0.5 && depth < bz)) {
+            best = Some((d, depth, i, t));
         }
     }
-    best.map(|(_, _, b)| b.to_owned())
+    best.map(|(_, _, i, t)| (i, t))
 }
 
 /// The screen lines of `bones` in this pose (for highlighting them).

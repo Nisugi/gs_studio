@@ -1,0 +1,22 @@
+# Notes pinned to this form's puppet in gs-studio's Rigs tab (3D preview, Pin notes):
+# each on a bone, `along` it from its head (0) to its tail (1), seen in `pose` from
+# `view` = [turn, tilt, zoom]. GS_STUDIO_NOTE=<family>#<id> opens the preview on one.
+
+[[note]]
+id = 1
+text = "Bump on the right shoulder cap at rest; gone with the arms up. The left arm's trunk clip reaches the torso's top slice and the right's just misses (limb_r differs a hair): trim both arms of a pair by the thicker."
+bone = "arm_r"
+along = 0.03
+pose = "stand"
+view = [0.0, 12.0, 1.3]
+made = "2026-09-28"
+
+[[note]]
+id = 2
+text = "The ankle grows a lump when the foot points (kneel): the shin's ankle rings take in the heel and instep, ~0.6 ft front to back. End the shin at the ankle and give the heel and instep to the foot."
+bone = "leg_r"
+chain = 1
+along = 0.95
+pose = "kneel"
+view = [65.0, 8.0, 1.0]
+made = "2026-09-28"

@@ -52,7 +52,11 @@ Headless texture-generator commands: `--project <family>[/<creature>]:front|side
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
 closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs
-tab's 3D preview with the pose editor (`editor/pose_edit.rs`) on that pose.
+tab's 3D preview with the pose editor (`editor/pose_edit.rs`) on that pose;
+`GS_STUDIO_NOTE=<family>#<id>` opens it on a note pinned to the puppet
+(`<data>/notes/<family>.toml`, `editor/rig_notes.rs`: the bone, how far along it,
+the pose and view the user saw a problem in -- read these before guessing from
+a screenshot).
 
 Crate examples (`cargo run -p <crate> --example <name>`) are the visual test
 harnesses: `gs_puppet` `puppet_demo`, `audit` (every rig: stale bakes and

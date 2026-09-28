@@ -157,6 +157,9 @@ impl StudioApp {
         if let (Ok(tool), Ok(spec)) = (&mut rigs, std::env::var("GS_STUDIO_POSE_EDIT")) {
             tool.open_pose_editor(&spec);
         }
+        if let (Ok(tool), Ok(spec)) = (&mut rigs, std::env::var("GS_STUDIO_NOTE")) {
+            tool.open_note(&spec);
+        }
         StudioApp {
             data_edit: data.path.display().to_string(),
             rigs,

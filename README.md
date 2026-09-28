@@ -338,6 +338,18 @@ and already lying down, it goes limp into the dead pose nearest its own lie
 (`PoseSet::dead_hash`) instead of rolling over or standing up to reach
 another.
 
+**Notes** (a section under the 3D panel's rows) pins notes to the puppet:
+with *Pin notes* on, a click on the figure picks the bone there and how far
+along it, a line takes the note ("reduce this bulge", "the jaw hangs"), and
+*Pin* writes it to `<data>/notes/<family>.toml` with the pose, creature and
+view it was seen in (`editor::rig_notes`). Each open note is a numbered pin
+on the figure, following its bone in any pose; the list has *Show* (its
+pose, creature and view, its pin ringed), *Done* (kept in the list, off the
+figure) and *Delete*. The file is plain TOML beside the rig, for whoever
+works on the rig next: it names the bone and the view where a screenshot
+names only pixels. `GS_STUDIO_NOTE=<family>#<id>` opens the preview on a
+note, for a screenshot of what it points at.
+
 **Edit pose** (in the 3D panel's Pose row) opens the pose editor under the
 puppet, on the pose in the list (*rest* becomes `stand`). Click a bone on
 the puppet, or its name in the row list, and its sliders appear: *swing
