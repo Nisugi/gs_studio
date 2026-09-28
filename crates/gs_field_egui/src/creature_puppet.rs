@@ -1330,6 +1330,19 @@ impl PuppetCache {
         puppet
     }
 
+    /// Another tier than the skins were loaded at ([`set_texture_detail`]):
+    /// the skins, and every figure drawn in them, again. First thing
+    /// wherever either cache is read -- a figure found in the pose cache
+    /// never reached [`PuppetCache::texture`], so a still puppet kept its
+    /// old detail until something else asked for its sheet.
+    fn follow_texture_detail(&mut self) {
+        if self.texture_side != texture_detail() {
+            self.textures.clear();
+            self.posed.clear();
+            self.texture_side = texture_detail();
+        }
+    }
+
     /// The painted texture a key wears, decoded once: the creature's own
     /// skin, else (undressed) its family's. The sheet must be the size
     /// `UvLayout::fit(puppet, SHEET_SIDE)` lays out for THIS figure (a sheet
@@ -1337,12 +1350,7 @@ impl PuppetCache {
     /// warning). A creature in an outfit with no skin of its own wears none:
     /// the family's sheet has no garments on it.
     pub fn texture(&mut self, family: &Arc<str>) -> Option<Arc<gs_puppet::Texture>> {
-        if self.texture_side != texture_detail() {
-            // another tier: the skins, and every figure drawn in them, again
-            self.textures.clear();
-            self.posed.clear();
-            self.texture_side = texture_detail();
-        }
+        self.follow_texture_detail();
         if let Some(hit) = self.textures.get(family) {
             return hit.clone();
         }
@@ -1528,6 +1536,7 @@ impl PuppetCache {
         key: &PuppetKey,
         skin: bool,
     ) -> Option<Arc<PosedPuppet>> {
+        self.follow_texture_detail();
         self.tick += 1;
         let tick = self.tick;
         let light = self.light.clone().filter(|_| skin);
@@ -1840,6 +1849,23 @@ mod tests {
         let injuries: Vec<(String, u8)> =
             injuries.iter().map(|(p, r)| (p.to_string(), *r)).collect();
         PuppetKey::new(pose, &injuries, false, false, body(), false, 160.0)
+    }
+
+    /// A new texture detail reaches a figure already in the pose cache: it
+    /// is drawn again, not handed back as it was. (The cache is told it
+    /// loaded its skins at another tier -- the state `set_texture_detail`
+    /// leaves -- without touching the global the other tests read.)
+    #[test]
+    fn a_new_texture_detail_redraws_a_cached_figure() {
+        let mut cache = cache();
+        let fam: Arc<str> = Arc::from("humanoid");
+        let k = key(PoseChoice::Standing, &[]);
+        let first = cache.posed_with(&fam, &k, true).expect("posed");
+        assert!(Arc::ptr_eq(&first, &cache.posed_with(&fam, &k, true).expect("posed")), "cached");
+        cache.texture_side = texture_detail() / 2;
+        let again = cache.posed_with(&fam, &k, true).expect("posed");
+        assert!(!Arc::ptr_eq(&first, &again), "the cached figure came back at the old detail");
+        assert_eq!(cache.texture_side, texture_detail());
     }
 
     /// Every published puppet parses, has a pose set for its body type, and

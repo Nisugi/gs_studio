@@ -942,7 +942,8 @@ instead of the coyote, which ships a skin here.
 longest side of sheet a puppet's skin is drawn from (a graphics tier; one
 of `gs_puppet::SHEET_SIDES`, 2048 by default). A skin built bigger is laid
 out again at that size, filtered, when it loads
-(`gs_puppet::Texture::resampled`); a change reloads every skin. Skins load
+(`gs_puppet::Texture::resampled`); a change reloads every skin, and every
+figure drawn in one, cached or not. Skins load
 at whichever sheet size they were built at (`UvLayout::fit_to`), so a
 second pass's 2048 sheet is accepted beside the usual size. "Bigger" is by
 the layouts, not the side's number: a tier's layout only approximates it
