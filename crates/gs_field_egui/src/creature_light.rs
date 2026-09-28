@@ -744,6 +744,11 @@ impl LightState {
         let (tx, rx) = channel();
         let key = plan.key;
         let keep = self.keep_pixels;
+        // The bake finishes between frames: it asks for the frame that picks
+        // it up. Left to the host's busy poll, a bake started mid-frame (a
+        // creature's layers load while the stage paints) was never collected
+        // until the pointer moved.
+        let wake = ctx.clone();
         let spawned = std::thread::Builder::new().name("creature-light".into()).spawn(move || {
             let lut = Srgb8Lut::new();
             let out: Vec<Baked> = work
@@ -779,6 +784,7 @@ impl LightState {
                 })
                 .collect();
             let _ = tx.send(out);
+            wake.request_repaint();
         });
         match spawned {
             Ok(_) => self.job = Some(Job { key, rx }),
@@ -985,6 +991,31 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         panic!("no bake arrived");
+    }
+
+    /// A bake finishes between frames and asks for the frame that collects
+    /// it: a stage with nothing animating has no other frame coming.
+    #[test]
+    fn a_finished_bake_asks_for_a_frame() {
+        let ctx = egui::Context::default();
+        let mut state = LightState::default();
+        let backdrop: Vec<u8> = (0..16 * 8).flat_map(|i| [(i * 2) as u8, 120, 200 - i as u8, 255]).collect();
+        state.register(Slot::Backdrop("scenes/test.png".into()), Arc::new(Px { w: 16, h: 8, rgba: backdrop }), tex(&ctx, "bg"), Role::Backdrop, "bg".into());
+        state.set_scene(Some(SceneLight::default()), Some("scenes/test.png".into()));
+        state.set_global(GlobalLighting::default());
+        state.set_clock(LightClock { game_hour: Some(23.0), ..Default::default() });
+        assert!(state.update(&ctx).is_empty() && state.busy(), "the bake runs on its own thread");
+        let asked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = asked.clone();
+        ctx.set_request_repaint_callback(move |_| flag.store(true, std::sync::atomic::Ordering::SeqCst));
+        for _ in 0..500 {
+            if asked.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(asked.load(std::sync::atomic::Ordering::SeqCst), "no frame asked for: the bake would wait for the pointer to move");
+        assert!(!bake(&mut state, &ctx).is_empty(), "and that frame collects it");
     }
 
     /// Skins lit by the scene get a sun (and re-key, so cached skins are

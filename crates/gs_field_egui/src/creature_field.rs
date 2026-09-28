@@ -216,6 +216,12 @@ pub fn render_creature_field_content(
         .map(|(x0, y0, x1, y1)| [x0, y0, x1 - x0, y1 - y0]);
     let gpu = crate::field_gpu_stage::StageGpu::begin(ui.ctx(), field, scene, art_cache, backdrop_tex, backdrop_rect, map.origin, map.scale);
     crate::field_lights::set_gpu(gpu.as_ref().map(|g| g.lamps_in_pass().to_vec()));
+    // The pass moves on the clock too -- the moons' drifting cloud, the
+    // stars -- where no lamp or weather is there to ask for frames: without
+    // this a moonlit scene stood still until the pointer moved.
+    if gpu.is_some() && art_cache.is_some_and(|c| !c.light.moons_now().is_empty() || c.light.stars_now().is_some()) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
     crate::field_gpu_stage::set_current(gpu);
 // <<<doll
     if let Some(scene) = scene {

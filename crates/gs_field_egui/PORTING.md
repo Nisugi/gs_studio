@@ -802,6 +802,13 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     intercept put a whole sky 12-17 m off, with no star or moon in it.)
     A sprite's depth map -- and the bulge of one with none -- is for a
     figure 1.8 m tall, scaled to the creature's height on the stage.
+  - Frames with no one at the pointer: `render_creature_field_content`
+    asks for one every 50 ms while the pass has a moon or stars up (their
+    cloud drifts and the stars turn on the clock, and nothing else asked),
+    and the lighting worker (`LightState::update`'s bake thread) asks for
+    the frame that collects its bake. A bake started mid-frame -- a
+    creature's layers loading while the stage paints -- used to wait for
+    the pointer to move.
   - Bounce light: `FieldFrame.bounce` (**a new field**; `field_gpu::BOUNCE`,
     1, is the stage's, 0 turns it off). Once a frame, before its pieces, a
     bounce pass draws the frame's direct lamp and moon light -- what each
