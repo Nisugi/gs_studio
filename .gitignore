@@ -6,3 +6,20 @@ renders/
 # Per-machine build settings (bundled-art source paths).
 .cargo/config.toml
 data/clouds/
+
+# rig_check's overlay PNGs (the gs_puppet example writes them here)
+/canine/
+
+# data/textures: the paintings are kept (Git LFS, .gitattributes); what the
+# texture generator rebuilds is not -- Export's templates, Project's
+# renders, Build sheet's normal.png (editor/texture.rs has the table)
+data/textures/jobs.json
+data/textures/**/*_paint.png
+data/textures/**/*_depth.png
+data/textures/**/marks.json
+data/textures/**/pattern.png
+data/textures/**/patches.txt
+data/textures/**/projected/
+data/textures/**/normal.png
+# scratch paintings (zi_trio tries), not a creature's own
+data/textures/*/_*/
