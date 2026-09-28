@@ -338,7 +338,7 @@ impl StageState {
             "sprite art from the pool".to_string()
         } else {
             match cast::puppet_family(name, noun.as_deref()) {
-                Some(family) => format!("NO art in the pool -- drawing as the {family} puppet"),
+                Some(family) => format!("drawing as the {family} puppet"),
                 None => "NO art in the pool and no puppet fits -- drawing as a placeholder".to_string(),
             }
         };
@@ -974,11 +974,9 @@ mod tests {
         assert_eq!((s.selected.clone(), s.current_target()), (None, ""));
     }
 
-    /// Spawn-by-name puts a creature the pool has no art for on the stage
-    /// -- the only way to see a non-humanoid puppet without emptying the
-    /// pool -- and says so in the status line.
-    /// The Puppets list puts a family's puppet up even when the pool's art
-    /// (the `default` tier matches every creature) would otherwise win.
+    /// The Puppets list puts a family's puppet up, forced: it draws even
+    /// over a creature's own sprite. The pool's `default` stand-in no longer
+    /// needs forcing past -- any puppet beats it.
     #[test]
     fn spawning_a_puppet_forces_it_over_the_art() {
         let base = TempBase::new();
@@ -987,7 +985,7 @@ mod tests {
         std::fs::write(default.join("default.png"), b"not really a png").unwrap();
         gs_field::pool::invalidate_cache();
         let mut s = stage();
-        assert!(cast::has_art("timber wolf", Some("wolf")), "the default tier matches everything");
+        assert!(!cast::has_art("timber wolf", Some("wolf")), "the default stand-in yields to the puppet");
 
         assert!(s.spawn_puppet("canine"));
         let id = s.selected.clone().unwrap();
@@ -1017,7 +1015,7 @@ mod tests {
         let c = &s.creatures()[0];
         assert_eq!((c.name.as_str(), c.noun.as_deref()), ("a large timber wolf", Some("wolf")));
         let line = s.status_lines().last().unwrap();
-        assert!(line.contains("NO art in the pool") && line.contains("canine puppet"), "{line}");
+        assert!(line.contains("drawing as the canine puppet"), "{line}");
 
         // An explicit noun overrides the last word.
         assert!(s.spawn_named("the Beast", Some("  dummy  ".into())));

@@ -1387,7 +1387,7 @@ fn cast_list_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         if ui
             .button("Add generic")
             .on_hover_text(
-                "Spawn an anonymous \"training dummy\". It has no art, so it draws as the humanoid puppet.",
+                "Spawn an anonymous \"training dummy\". It has no sprite of its own, so it draws as the humanoid puppet.",
             )
             .clicked()
         {
@@ -1522,7 +1522,7 @@ fn spawn_by_name_ui(stage: &mut StageState, ui: &mut egui::Ui) {
                         }
                     }
                 });
-                ui.weak("[art] = a sprite in the pool wins   [puppet] = no sprite, so the 3D puppet draws");
+                ui.weak("[art] = draws as its sprite   [puppet] = draws as its 3D puppet");
             }
         }
 

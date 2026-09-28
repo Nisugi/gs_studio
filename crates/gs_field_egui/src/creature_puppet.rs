@@ -61,7 +61,8 @@ pub fn texture_detail() -> usize {
 /// family's puppet even when sprite art resolves: a studio previewing a
 /// puppet, or a client setting. Kept per `egui::Context`, like the caches,
 /// so `CreatureFieldView` is unchanged. A forced creature with no puppet
-/// falls through to the doll and the standee as usual.
+/// falls through to the doll and the standee as usual. (A puppet in its
+/// own paint needs no forcing: [`PuppetCache::wears_own_paint`].)
 pub fn set_forced_puppets(ctx: &egui::Context, ids: impl IntoIterator<Item = String>) {
     let ids: std::collections::HashSet<String> =
         ids.into_iter().map(|id| id.trim().trim_start_matches('#').to_string()).collect();
@@ -1141,6 +1142,20 @@ impl PuppetCache {
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
     }
 
+    /// [`Self::begin_frame`], then the generation of the published set this
+    /// cache holds, read again even mid-frame when the set has moved on: a
+    /// caller that decides by it (ADDITION, not in VellumFE: which sprites a
+    /// puppet sets aside) must not decide against the old set. Once a frame,
+    /// not per creature: it looks the published set up.
+    pub fn begin_frame_current(&mut self, frame: u64) -> u64 {
+        self.begin_frame(frame);
+        if self.generation != gs_field::puppets::puppets().generation() {
+            self.frame = None;
+            self.begin_frame(frame);
+        }
+        self.generation
+    }
+
     fn rigs(&self) -> Arc<PuppetRigs> {
         self.rigs
             .clone()
@@ -1413,6 +1428,22 @@ impl PuppetCache {
         };
         self.textures.insert(family.clone(), texture.clone());
         texture
+    }
+
+    /// Does this creature's puppet wear paint made for IT (ADDITION, not in
+    /// VellumFE): its own skin, or its form's sheet when its bestiary entry
+    /// names that form outright -- and does that sheet load for the figure?
+    /// Such a puppet draws ahead of the creature's sprite art. Any other
+    /// puppet (unpainted, or in the sheet of a family, a body type's default
+    /// or the generic biped, painted for no creature in particular) draws
+    /// only where no sprite of the creature's own resolves; see
+    /// `CreatureArtCache::prepare_creature_art`.
+    pub fn wears_own_paint(&mut self, name: &str, noun: Option<&str>) -> bool {
+        let Some(key) = self.family_for(name, noun) else { return false };
+        let rigs = self.rigs();
+        let own_skin = creature_of(&key).is_some_and(|c| rigs.skin(base_family(&key), c).is_some());
+        let named_form = rigs.puppet_for(name, noun).is_some_and(|d| d.tier == gs_field::dolls::DollTier::Form);
+        (own_skin || named_form) && self.texture(&key).is_some()
     }
 
     /// The doll parts this family's puppet has segments for (computed once).

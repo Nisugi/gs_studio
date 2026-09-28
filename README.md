@@ -755,12 +755,20 @@ colour of their own, and stay open once opened for the rest of the run
   0.55 s (`PuppetCache::flinch`, drawn fresh each frame); a creature killed
   mid-flinch falls from that shape (`death_flinch`).
 
-**Sprites beat puppets, so the Cast alone cannot show you a puppet.** A
-creature with base art in the pool draws as that art; only one with none
-falls back to its family's 3D puppet. The Cast list is built *from* the art
-pool, so everything in it has art by definition -- which is why a canine,
-elephantid or suine puppet never appeared on the stage however much art was
-in the pool.
+**What a creature draws as**, first that it has
+(`CreatureArtCache::prepare_creature_art`):
+
+1. a puppet in paint made for it -- its own skin, or its form's sheet when
+   its bestiary entry names that form outright;
+2. its own sprite (its name, noun or family tier of the art pool);
+3. any other puppet: unpainted, or in a sheet painted for no creature in
+   particular (its family's, its body type's default, the generic biped) --
+   which also beats the pool's `creatures/default/` stand-in;
+4. that default sprite;
+5. the doll, then the standee.
+
+The Cast list is built *from* the art pool, so its entries mostly draw as
+their sprites -- all but those with a skin of their own.
 
 The **Puppets** list at the top of the Preview panel (with the *Held
 weapons*, *Breathing*, *Lit by the scene* and *Splats* checkboxes; *Lit by
@@ -784,19 +792,19 @@ per creature skin the pool or the build holds
 (`puppets/skins/<form>/<creature>.png`), whose *Spawn* puts up that
 creature, forced to its puppet, wearing the skin. Any creature on
 the stage can be switched the same way with the simulator's *Draw as
-puppet*. This matters as soon as the pool has `creatures/default/`: that
-last tier matches every creature, so without forcing no puppet would show.
+puppet*. Forcing matters for a creature with a sprite of its own and no
+skin: its sprite beats an unpainted puppet.
 
 **Spawn by name** is the other way in. Type any creature name: it spawns with that
 name and its last word as the noun, art or no art. Suggestions come from the
 bestiary (`gs_field::bestiary`) so the names are real creatures, each tagged
-`[art]` (a sprite in the pool wins) or `[puppet]` (no sprite, so the puppet
-draws), and hovering shows its noun and family. The line under the box says
-what the typed name would get, resolved by the same `resolve_tier_art` the
-renderer runs -- so the hint cannot disagree with the card. Every spawn
-writes what it got to the status log. *Add generic* is the old shortcut: an
-anonymous "training dummy", which has no art and so draws as the humanoid
-puppet.
+`[art]` (it draws as its sprite) or `[puppet]` (it draws as its puppet), and
+hovering shows its noun and family. The line under the box says what the
+typed name would get by the renderer's own rule (`stage::cast::has_art`:
+the same `resolve_tier_art` and the order above, short of decoding a skin
+to check it fits its figure). Every spawn writes what it got to the status
+log. *Add generic* is the old shortcut: an anonymous "training dummy", which
+has no sprite of its own and so draws as the humanoid puppet.
 
 | Input | Does |
 |---|---|

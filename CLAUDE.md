@@ -28,8 +28,11 @@ window by itself and prints what the stage / calibrators hold;
 `GS_STUDIO_SMOKE=1` pre-populates the stage (`GS_STUDIO_LIGHT_HOUR=23` holds
 it at a game hour, for lighting checks, `GS_STUDIO_LIGHT_MOON` / `GS_STUDIO_LIGHT_CLOUDS`
 (0..1) set its sky; `GS_STUDIO_PUPPETS=humanoid,canine` spawns those
-forms' puppets, forced, since default art draws everything as a sprite
-(`humanoid/rotting citadel arbalester` spawns that creature in its own skin);
+forms' puppets, forced, since a creature's own sprite beats a puppet that
+wears no skin of its own (puppets in their own skins come first, and any
+puppet beats the `creatures/default` stand-in: `creature_art.rs`,
+`prepare_creature_art`) (`humanoid/rotting citadel arbalester` spawns that
+creature in its own skin);
 `GS_STUDIO_SUN_LIT=1` shades their skins by the scene's sun, the Preview tab's
 *Lit by the scene* (`GS_STUDIO_SUN=<azimuth>,<elevation>` puts the smoke
 scene's sun there); `GS_STUDIO_GAME_SKY=1` takes the moons from the game's

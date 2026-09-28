@@ -109,6 +109,10 @@ pub struct CreatureArtCache {
     /// the published puppet and rig set generations.
     doll_calibrations: HashMap<String, Option<gs_field::geometry::ArtCalibration>>,
     doll_generation: u64,
+    /// ADDITION (not in VellumFE): the puppet set generation `bases` was
+    /// resolved against (a puppet in its own paint sets a sprite aside),
+    /// as the context's `PuppetCache` holds it.
+    bases_generation: u64,
     /// ADDITION (not in VellumFE): lighting -- kept pixels, lit twins.
     pub(crate) light: crate::creature_light::LightState,
     /// ADDITION (not in VellumFE): background pool path -> the occluders
@@ -199,8 +203,7 @@ impl CreatureArtCache {
         token: &str,
         want: &WantedCreature,
     ) {
-        let generation = gs_field::dolls::rigs().generation()
-            ^ gs_field::puppets::puppets().generation().rotate_left(32);
+        let generation = puppets_generation();
         if self.doll_generation != generation {
             self.doll_generation = generation;
             self.doll_calibrations.clear();
@@ -348,6 +351,22 @@ fn pose_calibration(
     }
 }
 
+/// ADDITION (not in VellumFE): the published rig and puppet sets'
+/// generations together, for what depends on which puppet a creature gets.
+fn puppets_generation() -> u64 {
+    gs_field::dolls::rigs().generation() ^ gs_field::puppets::puppets().generation().rotate_left(32)
+}
+
+/// ADDITION (not in VellumFE): does a puppet resolve for this creature, and
+/// does it wear paint made for it ([`crate::creature_puppet::PuppetCache::wears_own_paint`])?
+fn puppet_standing(ctx: &egui::Context, want: &WantedCreature) -> (bool, bool) {
+    let shared = crate::creature_puppet::PuppetCache::shared(ctx);
+    let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
+    puppets.begin_frame(ctx.cumulative_frame_nr());
+    let has = puppets.family_for(&want.name, want.noun.as_deref()).is_some();
+    (has, has && puppets.wears_own_paint(&want.name, want.noun.as_deref()))
+}
+
 /// One creature the field wants art for this frame: the identity keys
 /// for tier resolution plus the current state that decides which extras
 /// (pose, wound overlays) must be loaded.
@@ -446,12 +465,32 @@ impl CreatureArtStore {
         use gs_field::naming;
         let cache = self.shared.clone();
         let mut cache = cache.lock().expect("creature art lock");
+        // ADDITION (not in VellumFE): which sprite a token keeps depends on
+        // the published puppets too (below), so a new puppet set decides
+        // every token again.
+        let generation = {
+            let shared = crate::creature_puppet::PuppetCache::shared(ctx);
+            let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
+            puppets.begin_frame_current(ctx.cumulative_frame_nr())
+        };
+        if cache.bases_generation != generation {
+            cache.bases_generation = generation;
+            cache.bases.clear();
+        }
         for want in wanted {
             let token = naming::name_token(&want.name);
             if token.is_empty() {
                 continue;
             }
             if !cache.bases.contains_key(token.as_str()) {
+                // ADDITION (not in VellumFE): puppets before sprites. A
+                // puppet in paint made for this creature beats all its sprite
+                // art; any puppet beats the pool's `creatures/default`
+                // stand-in; the creature's own sprite (name, noun or family
+                // art) beats a puppet painted for no one in particular. A
+                // sprite set aside leaves the token with no art, so the card
+                // draws the puppet and the no-art calibration sizes it.
+                let (has_puppet, own_paint) = puppet_standing(ctx, want);
                 let art = gs_field::cards::resolve_tier_art(
                     &cache.root,
                     &cache.card,
@@ -459,6 +498,7 @@ impl CreatureArtStore {
                     want.noun.as_deref(),
                     want.family.as_deref(),
                 )
+                .filter(|tier| !own_paint && !(has_puppet && tier.token == "default"))
                 .and_then(|tier| load_creature_art_px(ctx, &tier.base, &cache.skin_name));
                 let art = art.map(|(art, px)| {
                     let slot = crate::creature_light::Slot::Base(token.clone());
@@ -966,11 +1006,13 @@ mod tests {
     fn creature_art_resolves_from_the_pool_without_a_skin() {
         // Phase 4: the active-skin gate is gone — pool creature art plus
         // the convention status overlays load with no skin at all.
+        // (A jackal, not VellumFE's coyote: the coyote's puppet ships in a
+        // skin of its own here, and comes before its sprite.)
         let env = test_env();
-        write_png(&pool_dir().join("creatures/coyote.png"), 2);
+        write_png(&pool_dir().join("creatures/jackal.png"), 2);
         write_png(&pool_dir().join("creatures/status/rooted.png"), 2);
         std::fs::write(
-            pool_dir().join("creatures/coyote.toml"),
+            pool_dir().join("creatures/jackal.toml"),
             "kind = \"creature\"\nsize = 1.5\n[anchors]\nfeet = [0.5, 0.9]\n",
         )
         .unwrap();
@@ -983,9 +1025,9 @@ mod tests {
         };
         let mut state = CreatureArtStore::default();
         state.reset();
-        state.prepare_creature_art(&env.ctx, &[wanted("coyote")]);
+        state.prepare_creature_art(&env.ctx, &[wanted("jackal")]);
         let cache = state.shared.lock().unwrap();
-        let art = cache.base("coyote").expect("pool art resolves skinless");
+        let art = cache.base("jackal").expect("pool art resolves skinless");
         assert_eq!(art.feet, [0.5, 0.9]);
         assert_eq!(art.size, Some(1.5));
         // The convention overlay was synthesized, bound to its flag, and
@@ -1020,7 +1062,7 @@ mod tests {
         let env = test_env();
         gs_field::dolls::invalidate_cache();
         gs_field::puppets::invalidate_cache();
-        write_png(&pool_dir().join("creatures/coyote.png"), 2);
+        write_png(&pool_dir().join("creatures/jackal.png"), 2);
         let wanted = |name: &str| WantedCreature {
             name: name.to_string(),
             noun: Some(name.split(' ').next_back().unwrap_or(name).to_string()),
@@ -1048,20 +1090,20 @@ mod tests {
 
         let mut state = CreatureArtStore::default();
         state.reset();
-        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("jackal")]);
         assert_eq!(
             resolve("hill troll"),
             Some(puppet),
             "no art: the PUPPET's shape, not the doll's"
         );
-        let coyote = resolve("coyote").expect("sprite calibration");
-        assert_ne!(coyote, puppet, "art present: the sprite calibration wins");
-        assert_eq!(coyote.standing.aspect, Some(1.0));
-        assert_eq!(coyote.prone, None);
+        let jackal = resolve("jackal").expect("sprite calibration");
+        assert_ne!(jackal, puppet, "art present: the sprite calibration wins");
+        assert_eq!(jackal.standing.aspect, Some(1.0));
+        assert_eq!(jackal.prone, None);
 
         // Settled frames do not churn the store.
         let rev = gs_field::geometry::calibrations().lock().unwrap().revision();
-        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("coyote")]);
+        state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("jackal")]);
         assert_eq!(gs_field::geometry::calibrations().lock().unwrap().revision(), rev);
 
         // The store is dropped behind the cache's back: it re-feeds.
@@ -1082,6 +1124,68 @@ mod tests {
         gs_field::geometry::calibrations().lock().unwrap().refine("hill_troll", puppet);
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         assert_eq!(resolve("hill troll"), Some(sprite));
+    }
+
+    /// ADDITION (not in VellumFE). Puppets before sprites: a puppet in paint
+    /// made for the creature beats its sprite; the creature's own sprite
+    /// beats a puppet painted for no one in particular; any puppet beats the
+    /// pool's `creatures/default` stand-in. A puppet set aside for is sized
+    /// as the puppet, and a new puppet set decides every creature again.
+    #[test]
+    fn a_puppet_in_its_own_paint_comes_before_sprite_art() {
+        let env = test_env();
+        gs_field::dolls::invalidate_cache();
+        gs_field::puppets::invalidate_cache();
+        // A sheet laid out for a published family's bare puppet, as a skin.
+        let skin = |family: &str, creature: &str| {
+            let published = gs_field::puppets::puppets();
+            let puppet = gs_puppet::Puppet::from_baked_toml(&published.get(family).expect("published").baked).unwrap();
+            let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
+            let path = gs_field::puppets::puppets_dir().unwrap().join("skins").join(family).join(format!("{creature}.png"));
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let pixels = vec![0x80u8; layout.w * layout.h * 4];
+            image::save_buffer(&path, &pixels, layout.w as u32, layout.h as u32, image::ExtendedColorType::Rgba8).unwrap();
+            gs_field::puppets::invalidate_cache();
+        };
+        let wanted = |name: &str| WantedCreature {
+            name: name.to_string(),
+            noun: Some(name.split(' ').next_back().unwrap_or(name).to_string()),
+            family: None,
+            injuries: Vec::new(),
+        };
+        write_png(&pool_dir().join("creatures/default/default.png"), 2);
+        write_png(&pool_dir().join("creatures/hill_troll.png"), 4);
+        write_png(&pool_dir().join("creatures/painted_mannequin.png"), 4);
+        // No bestiary entry: the generic humanoid, in a skin of its own.
+        skin("humanoid", &crate::creature_puppet::creature_key("painted mannequin"));
+        let puppet_of = |name: &str, noun: &str| {
+            let shared = crate::creature_puppet::PuppetCache::shared(&env.ctx);
+            let mut cache = shared.lock().unwrap();
+            cache.begin_frame(env.ctx.cumulative_frame_nr());
+            (cache.wears_own_paint(name, Some(noun)), crate::creature_puppet::calibration_for(&mut cache, name, Some(noun)))
+        };
+        let (own, mannequin) = puppet_of("painted mannequin", "mannequin");
+        assert!(own, "its skin loads for the figure");
+        assert!(!puppet_of("hill troll", "troll").0, "the troll wears no paint of its own");
+        assert!(!puppet_of("plain mannequin", "mannequin").0, "the generic humanoid's sheet is nobody's own");
+
+        let mut state = CreatureArtStore::default();
+        state.reset();
+        let all = [wanted("painted mannequin"), wanted("hill troll"), wanted("plain mannequin")];
+        state.prepare_creature_art(&env.ctx, &all);
+        {
+            let cache = state.shared.lock().unwrap();
+            assert!(cache.base("painted_mannequin").is_none(), "its own paint beats its sprite");
+            assert_eq!(cache.base("hill_troll").map(|a| a.texture.size()), Some([4, 4]), "its own sprite beats an unpainted puppet");
+            assert!(cache.base("plain_mannequin").is_none(), "any puppet beats the default stand-in");
+        }
+        let resolve = |name: &str| gs_field::geometry::calibrations().lock().unwrap_or_else(|e| e.into_inner()).resolve(&gs_field::naming::name_token(name));
+        assert_eq!(resolve("painted mannequin"), mannequin, "sized as the puppet it draws as");
+
+        // The troll gets a skin of its own: the next frame draws its puppet.
+        skin("troll", &crate::creature_puppet::creature_key("hill troll"));
+        state.prepare_creature_art(&env.ctx, &all);
+        assert!(state.shared.lock().unwrap().base("hill_troll").is_none(), "a new puppet set decides again");
     }
 
     /// The flat doll is still the fallback, intact: a family that resolves

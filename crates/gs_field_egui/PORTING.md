@@ -890,6 +890,41 @@ VellumFE: call `field_gpu::init` in its eframe creation closure and
 `field_gpu_stage::set_enabled` from a setting to use it; without either,
 nothing changes.
 
+### 7.29 Puppets before sprites
+
+Sprite art beat the puppet outright (7.9), so the pool's
+`creatures/default/` stand-in, which matches every creature, hid every
+puppet. The order is now:
+
+1. a puppet in paint made for the creature: its own skin, or its form's
+   sheet when its bestiary entry names that form outright
+   (`PuppetCache::wears_own_paint`), and only when that sheet loads for the
+   figure;
+2. the creature's own sprite art (its name, noun or family tier);
+3. any other puppet: unpainted, or in the sheet of its family, its body
+   type's default or the generic biped, which were painted for no creature
+   in particular;
+4. the `creatures/default` sprite;
+5. the doll, then the standee, as before.
+
+It is decided in `CreatureArtCache::prepare_creature_art`, not in
+`creature_field.rs`, whose marked regions are unchanged: a sprite set aside
+leaves the token with no base art, so the card takes the puppet arm exactly
+as an art-less creature does, and the no-art calibration (7.7) sizes it as
+the puppet. That also closes 7.9's known limit for these creatures. `bases`
+now depends on the published puppet set, so a new set generation clears it
+(`PuppetCache::begin_frame_current` reads the set again mid-frame, so the
+decision never runs against the old set). 7.9's forcing still works, for
+a puppet in no paint of its own.
+
+Known limit: an authored variant base (`base_override`, pose art from a
+manifest) still draws over a puppet in its own paint.
+
+VellumFE sees this with no call: creatures with skins of their own, or
+with only the default stand-in, draw as puppets. The ported test
+`creature_art_resolves_from_the_pool_without_a_skin` uses a jackal
+instead of the coyote, which ships a skin here.
+
 ### 7.30 Texture detail
 
 `creature_puppet::set_texture_detail(side)` / `texture_detail()`: the

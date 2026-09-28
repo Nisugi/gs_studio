@@ -126,17 +126,43 @@ pub fn last_word(name: &str) -> String {
     name.trim().rsplit(|c: char| c.is_whitespace()).find(|w| !w.is_empty()).unwrap_or("").to_string()
 }
 
-/// Does the pool hold base art for this creature? The same resolution the
-/// renderer's art store runs (`resolve_tier_art` against the pool root and
-/// the default card skin), so a "no art -- drawing as a puppet" hint in the
-/// UI cannot disagree with what actually gets drawn.
+/// Does this creature draw as SPRITE art? The pool must hold base art for
+/// it -- the same resolution the renderer's art store runs
+/// (`resolve_tier_art` against the pool root and the default card skin) --
+/// and no puppet may come first, by the renderer's order
+/// (`CreatureArtCache::prepare_creature_art`): a puppet in a skin of its
+/// own (or its named form's sheet) beats any sprite, and any puppet beats
+/// the pool's `creatures/default` stand-in. So a "drawing as a puppet" hint
+/// in the UI does not disagree with the card. (The renderer also refuses a
+/// skin not laid out for its figure, and draws the sprite; this does not
+/// decode skins to know.)
 pub fn has_art(name: &str, noun: Option<&str>) -> bool {
     let Ok(root) = gs_field::data_dirs::global_images_dir() else {
         return false;
     };
     let family = noun.and_then(gs_field::cards::family_for_noun);
     let skin = gs_field::skins::CreatureCardSkin::default();
-    gs_field::cards::resolve_tier_art(&root, &skin, Some(name), noun, family.as_deref()).is_some()
+    let Some(tier) = gs_field::cards::resolve_tier_art(&root, &skin, Some(name), noun, family.as_deref()) else {
+        return false;
+    };
+    let set = gs_field::puppets::puppets();
+    let Some(puppet) = set.puppet_for(name, noun) else {
+        return true;
+    };
+    let own_skin = set.skin(&puppet.family, &creature_token(name)).is_some();
+    let named_form = puppet.tier == gs_field::dolls::DollTier::Form && set.get(&puppet.family).is_some_and(|rig| rig.texture.is_some());
+    tier.token != "default" && !own_skin && !named_form
+}
+
+/// A creature's bestiary name token, the key skins are filed under: its
+/// bestiary entry's (exact name, else a lone noun), else its own -- as the
+/// renderer keys them (`creature_puppet::creature_key`).
+fn creature_token(name: &str) -> String {
+    let canonical = gs_field::naming::canonical_name(name);
+    match gs_field::bestiary::shared().entry_for_name(&canonical) {
+        Some(entry) => gs_field::naming::name_token(&entry.name),
+        None => gs_field::naming::name_token(&canonical),
+    }
 }
 
 /// The family puppet a creature with no art falls back to, if any.
@@ -511,6 +537,28 @@ mod tests {
         gs_field::pool::invalidate_cache();
         assert!(has_art("timber wolf", Some("wolf")));
         assert!(!has_art("cave troll", Some("troll")));
+    }
+
+    /// ... unless a puppet comes first, by the renderer's order: one in a
+    /// skin of its own beats the creature's sprite, and any puppet beats the
+    /// pool's `creatures/default` stand-in.
+    #[test]
+    fn a_puppet_in_its_own_skin_or_over_the_default_art_is_not_sprite_art() {
+        let _base = crate::stage::test_support::TempBase::new();
+        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        std::fs::create_dir_all(creatures.join("default")).unwrap();
+        std::fs::write(creatures.join("default/default.png"), b"not really a png").unwrap();
+        std::fs::write(creatures.join("hill_troll.png"), b"not really a png").unwrap();
+        std::fs::write(creatures.join("cave_troll.png"), b"not really a png").unwrap();
+        let skins = gs_field::puppets::puppets_dir().unwrap().join("skins/troll");
+        std::fs::create_dir_all(&skins).unwrap();
+        std::fs::write(skins.join(format!("{}.png", creature_token("cave troll"))), b"not really a png").unwrap();
+        gs_field::pool::invalidate_cache();
+        gs_field::puppets::invalidate_cache();
+        assert!(has_art("hill troll", Some("troll")), "its own sprite, no skin of its own");
+        assert!(!has_art("cave troll", Some("troll")), "a skin of its own beats its sprite");
+        assert!(!has_art("forest troll", Some("troll")), "only the default stand-in: the puppet draws");
+        gs_field::puppets::invalidate_cache();
     }
 
     /// The Puppets tree: forms under the family most of their creatures
