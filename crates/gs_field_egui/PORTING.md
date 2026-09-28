@@ -705,7 +705,7 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
   (eframe's `CreationContext::wgpu_render_state`); `available(ctx)` then
   holds. A frame is a `SharedFrame` (camera in metres, the backdrop and up
   to 32 creature layers, each its colour + v1 result + normal/depth, up to
-  8 lights) drawn in pieces -- `Piece::Backdrop`, then `Piece::Layer(i)` in
+  32 lights, the first 8 that ask casting shadows) drawn in pieces -- `Piece::Backdrop`, then `Piece::Layer(i)` in
   the stage's own far-to-near order -- so every egui shape between them
   keeps its place. v1 is untouched: each layer brings its v1 result and the
   pass adds the lights on top, so flicker costs a uniform upload. Checked
@@ -829,6 +829,22 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     shader draws them, the nebulae and faint stars between on the sky
     pixels, under the moons' drifting cloud and not on the painting's
     clouds.
+  - Main lights and fills. `field_gpu::MAX_LIGHTS` is 32 (was 8) and
+    `MAX_SHADOW_LIGHTS` (**new**, 8) is how many cast shadows: the
+    frame's first that ask. `FieldLight.shadows` and `FieldLight.affects`
+    (**new fields**, `LightTargets` a **new type**: backdrop, creatures,
+    air; the constructors set true and `LightTargets::ALL`) ride in a
+    fifth vec4 of the shader's `Light` (`flags`); an unshadowed light
+    skips the march, and each loop skips a light that does not light what
+    it shades. The stage takes both from the scene lamp
+    (`PointLight::casts_shadows`, `PointLight::lights`). The old drawing
+    follows them too: a ground pool only from a lamp that lights the
+    backdrop, a scenery prop's glow (drawn the old way with v2 on too: the
+    pass does not draw props) only from one that lights scenery, a
+    creature's glow and a puppet's lamp
+    light only from one that lights creatures, and a puppet's cast shadow
+    only from one that casts shadows -- `field_lights::puppet_lamps`
+    returns those as well (**changed signature**: lamps, casting, flicker).
   - `creature_puppet`'s texture loader refuses a sheet or normal sheet
     stamped (`gs_puppet::LAYOUT_KEYWORD`) for another layout of the
     puppet, however its size compares; an unstamped one goes by its size. `WeatherKind: From<gs_field::sky::Precip>`

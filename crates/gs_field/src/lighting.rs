@@ -243,6 +243,33 @@ pub struct PointLight {
     /// How wide the beam is, degrees: 360 (or more) = all round, a fire's.
     #[serde(skip_serializing_if = "is_all_round")]
     pub spread: f32,
+    /// Whether it casts shadows: a main light (a fire, a torch) does; a
+    /// fill or an accent need not, and lights for about a third of the
+    /// cost on the GPU. None = its kind's ([`LampKind::casts_shadows`]);
+    /// read it with [`PointLight::casts_shadows`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadows: Option<bool>,
+    /// What it lights; None = all of it ([`PointLight::lights`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affects: Option<Vec<LightTarget>>,
+}
+
+/// What a point light can light (`affects = [...]` in a file).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LightTarget {
+    /// The painted scene: its ground and walls.
+    Backdrop,
+    /// The scenery props placed on the stage (a rock, a tree, a cart).
+    Scenery,
+    /// The creatures.
+    Creatures,
+    /// The air round it: its glow in mist, rain, snow and blowing sand.
+    Air,
+}
+
+impl LightTarget {
+    pub const ALL: [LightTarget; 4] = [LightTarget::Backdrop, LightTarget::Scenery, LightTarget::Creatures, LightTarget::Air];
 }
 
 /// [`PointLight`] as a file has it: anything but the place may be left out.
@@ -258,6 +285,8 @@ struct PointLightFile {
     flicker: Option<f32>,
     aim: Option<f32>,
     spread: Option<f32>,
+    shadows: Option<bool>,
+    affects: Option<Vec<LightTarget>>,
 }
 
 impl From<PointLightFile> for PointLight {
@@ -270,6 +299,8 @@ impl From<PointLightFile> for PointLight {
             flicker: f.flicker.unwrap_or(made.flicker),
             aim: f.aim.unwrap_or(made.aim),
             spread: f.spread.unwrap_or(made.spread),
+            shadows: f.shadows,
+            affects: f.affects,
             ..made
         }
     }
@@ -308,6 +339,12 @@ impl LampKind {
             LampKind::Wisp => WISP_COLOUR,
         }
     }
+
+    /// Whether a light of this kind casts shadows unless its file says:
+    /// every one but a glow, which is a fill (a lit window, a glowing pool).
+    pub fn casts_shadows(self) -> bool {
+        self != LampKind::Glow
+    }
 }
 
 impl PointLight {
@@ -320,7 +357,29 @@ impl PointLight {
             LampKind::Lantern => (3.0, 0.15, LANTERN_SPREAD),
             LampKind::Wisp => (1.6, 0.6, all_round()),
         };
-        PointLight { kind, x, z, color: kind.colour().into(), radius, intensity: 1.0, flicker, aim: 0.0, spread }
+        PointLight { kind, x, z, color: kind.colour().into(), radius, intensity: 1.0, flicker, aim: 0.0, spread, shadows: None, affects: None }
+    }
+
+    /// Does it cast shadows? Its own say, else its kind's.
+    pub fn casts_shadows(&self) -> bool {
+        self.shadows.unwrap_or(self.kind.casts_shadows())
+    }
+
+    /// Make it cast shadows or not (kept as None when that is its kind's
+    /// way, so its file stays as it was).
+    pub fn set_shadows(&mut self, on: bool) {
+        self.shadows = (on != self.kind.casts_shadows()).then_some(on);
+    }
+
+    /// Does it light `target`?
+    pub fn lights(&self, target: LightTarget) -> bool {
+        self.affects.as_ref().is_none_or(|a| a.contains(&target))
+    }
+
+    /// Make it light `target` or not (None again once it lights all).
+    pub fn set_lights(&mut self, target: LightTarget, on: bool) {
+        let now: Vec<LightTarget> = LightTarget::ALL.into_iter().filter(|&t| if t == target { on } else { self.lights(t) }).collect();
+        self.affects = (now.len() < LightTarget::ALL.len()).then_some(now);
     }
 
     /// How far the light has wandered from its floor point `t` seconds in,
@@ -1031,6 +1090,44 @@ key = \"#112233\"
         assert_eq!(from_file, PointLight::new(LampKind::Wisp, 10.0, 2.0));
         let lit: PointLight = toml::from_str("kind = \"lantern\"\nx = 10.0\nz = 2.0\naim = 180.0\n").unwrap();
         assert_eq!((lit.spread, lit.aim, lit.color.as_str()), (LANTERN_SPREAD, 180.0, LANTERN_COLOUR));
+    }
+
+    /// A lamp casts shadows as its kind does -- every one but a glow, a
+    /// fill -- unless its file says; and lights everything unless its file
+    /// names what. A file that says neither is as before.
+    #[test]
+    fn a_lamp_says_whether_it_casts_shadows_and_what_it_lights() {
+        let torch = PointLight::new(LampKind::Torch, 0.0, 1.0);
+        let glow = PointLight::new(LampKind::Glow, 0.0, 1.0);
+        assert!(torch.casts_shadows() && !glow.casts_shadows());
+        assert!(LightTarget::ALL.iter().all(|&t| torch.lights(t)));
+        let plain = toml::to_string(&torch).unwrap();
+        assert!(!plain.contains("shadows") && !plain.contains("affects"), "{plain}");
+
+        let fill: PointLight = toml::from_str("kind = \"torch\"\nx = 1.0\nz = 2.0\nshadows = false\naffects = [\"creatures\"]\n").unwrap();
+        assert!(!fill.casts_shadows());
+        assert!(fill.lights(LightTarget::Creatures));
+        assert!(!fill.lights(LightTarget::Backdrop) && !fill.lights(LightTarget::Scenery) && !fill.lights(LightTarget::Air));
+        assert_eq!(toml::from_str::<PointLight>(&toml::to_string(&fill).unwrap()).unwrap(), fill);
+        assert!(toml::from_str::<PointLight>("x = 1.0\nz = 2.0\naffects = [\"sky\"]\n").is_err(), "an unknown target is an error");
+
+        // Set back to its kind's way, it says nothing again.
+        let mut t = torch.clone();
+        t.set_shadows(false);
+        assert_eq!(t.shadows, Some(false));
+        t.set_shadows(true);
+        assert_eq!(t.shadows, None);
+        let mut lit_glow = glow.clone();
+        lit_glow.set_shadows(true);
+        assert!(lit_glow.casts_shadows() && lit_glow.shadows == Some(true));
+
+        t.set_lights(LightTarget::Air, false);
+        assert_eq!(t.affects, Some(vec![LightTarget::Backdrop, LightTarget::Scenery, LightTarget::Creatures]));
+        t.set_lights(LightTarget::Backdrop, false);
+        assert!(t.lights(LightTarget::Creatures) && t.lights(LightTarget::Scenery) && !t.lights(LightTarget::Backdrop));
+        t.set_lights(LightTarget::Backdrop, true);
+        t.set_lights(LightTarget::Air, true);
+        assert_eq!(t.affects, None, "lighting all of it again, it says nothing");
     }
 
     /// The moon rises at 18:00 on the left, is highest at midnight, sets at

@@ -1079,6 +1079,32 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         ui.add(egui::Slider::new(&mut edited.aim, 0.0..=359.0).text("Aim (deg)"))
             .on_hover_text("Which way across the floor: 0 = right, 90 = away from you, 180 = left, 270 = toward you");
     }
+    let mut shadows = edited.casts_shadows();
+    if ui
+        .checkbox(&mut shadows, "Casts shadows")
+        .on_hover_text(
+            "A main light (a fire, a torch) casts them. Off, it is a fill or an accent: it lights without them, far cheaper \
+             on the GPU (v2), which shadows only the first few lights that ask",
+        )
+        .changed()
+    {
+        edited.set_shadows(shadows);
+    }
+    ui.horizontal(|ui| {
+        use gs_field::lighting::LightTarget;
+        ui.label("Lights");
+        for (target, name, tip) in [
+            (LightTarget::Backdrop, "Backdrop", "The painted ground and walls"),
+            (LightTarget::Scenery, "Scenery", "The scenery props placed on the stage"),
+            (LightTarget::Creatures, "Creatures", "The creatures"),
+            (LightTarget::Air, "Air", "Its glow in mist, rain, snow and blowing sand (on the GPU, v2)"),
+        ] {
+            let mut on = edited.lights(target);
+            if ui.checkbox(&mut on, name).on_hover_text(tip).changed() {
+                edited.set_lights(target, on);
+            }
+        }
+    });
     ui.weak("Drag on the stage to move the selected light");
     if edited != light {
         stage.scene_mut().lights[k] = edited;

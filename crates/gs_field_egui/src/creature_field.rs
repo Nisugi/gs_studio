@@ -1438,10 +1438,10 @@ fn paint_creature_puppet(
     drop(puppets);
     let place = PuppetPlacement::fit(&posed, foot, standing_px);
     // Lamps light the figure from where their flames are, and it casts
-    // their shadows. The card's standing height is the puppet's, so that
-    // fixes feet per floor unit.
+    // the shadows of those that cast them. The card's standing height is
+    // the puppet's, so that fixes feet per floor unit.
     let ft_per_unit = posed.standing_ft / unit.standing.h.max(1e-3);
-    let (lamps, flicker) = crate::field_lights::puppet_lamps(ft_per_unit);
+    let (lamps, casting, flicker) = crate::field_lights::puppet_lamps(ft_per_unit);
     // The figure's own contact shadow, under it: the card's generic ellipse
     // is already down, and this one is shaped like the pose.
     place.paint(painter, &posed.shadow);
@@ -1456,7 +1456,7 @@ fn paint_creature_puppet(
     })
     .unwrap_or(false);
     if !gpu_drawn {
-        place.paint_figure_shadows(painter, &posed, &lamps, flicker);
+        place.paint_figure_shadows(painter, &posed, &casting, flicker);
         place.paint_figure(painter, &posed);
         place.paint_figure_lamps(painter, &posed, &lamps, flicker);
     }

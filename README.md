@@ -665,6 +665,23 @@ across -- and differ only in the right-hand panel:
   it swells and fades toward the preset's own brighter and dimmer shades as
   it pulses. The scene's own light (*Light this scene*, the hour, the
   darkness) still sets the night it all sits in.
+  *Casts shadows* (`shadows` in the file; on for every kind but a glow)
+  makes a lamp a main light; off, it is a fill or an accent -- it lights
+  without shadows, which is most of a lamp's cost on the GPU. *Lights:
+  Backdrop / Scenery / Creatures / Air* (`affects = ["backdrop", "scenery",
+  "creatures", "air"]`, all when left out) says what it lights: the painted
+  ground and walls, the scenery props placed on the stage, the creatures,
+  and its glow in the mist, rain, snow and sand -- a rim light on the
+  creatures alone, a lit window that warms the wall and not the tree before
+  it. Scenery takes lamp light the old way (its art warmed toward the
+  lamp) even with v2 on: the pass does not draw scenery props yet. The pass takes 32 lights
+  (`field_gpu::MAX_LIGHTS`), the moons first, then the lamps in the
+  scene's order; the first 8 that cast shadows (`MAX_SHADOW_LIGHTS`, the
+  moons among them) get them and the rest light without, and a lamp past
+  32 is drawn the old way. On an RX 7900 GRE with 8 creatures on the
+  stage, 6 torches and both moons take 3.0 ms a frame at 1264x848; 24
+  fills (a 4 m reach, nothing drawn) add 0.2 ms, where each shadowed
+  torch adds about 0.23 ms.
   Geometry: a backdrop with `<stem>.depth.png` beside it (a monocular
   model's relative depth, 16 bit in R and G, near = high) has its real
   shape -- ledges, rocks, slopes, and its sky -- the stage fitting that

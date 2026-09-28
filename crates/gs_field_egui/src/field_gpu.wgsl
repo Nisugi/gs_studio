@@ -5,8 +5,10 @@
 //
 // A port of Niffy's "Swamp Torchlight" prototype shader
 // (lights-and-weather.md), generalised from its two fixed creatures to
-// MAX_LAYERS layers in an atlas and MAX_LIGHTS lights. Weather is not here
-// yet. Every constant not in a uniform is the prototype's.
+// MAX_LAYERS layers in an atlas and MAX_LIGHTS lights, the first
+// MAX_SHADOW_LIGHTS that ask casting shadows (flags.x), each lighting only
+// what it is set to (flags.yzw). Every constant not in a uniform is the
+// prototype's.
 //
 // Camera space is the prototype's: x right, y DOWN, z forward, metres; a
 // pixel p of the scene looks along ((p.x - cx) / f, (p.y - cy) / f, 1).
@@ -32,6 +34,7 @@ struct Light {
     shine: vec4<f32>,  // shininess on creatures, on the ground, brightness factor (flicker / pulse), prop shown
     prop: vec4<f32>,   // torch: flame base without sway (xyz), stick length; mote: core colour (rgb); moon: cloud cover, wind across, wind deeper (m/s), phase (0 new .. 0.5 full; +1: Tilaok circles it)
     beam: vec4<f32>,   // the beam's axis across the floor (xyz, camera space), half its width in degrees (>= 180: all round); moon: where its disc is drawn (xyz), its angular radius (0 = none)
+    flags: vec4<f32>,  // 1 = yes: x casts shadows, y lights the backdrop, z the creatures, w the air
 };
 
 // The weather (FieldWeather; all zero: none).
@@ -63,7 +66,7 @@ struct Field {
     misc: vec4<f32>,   // water, shadows on, layer count, light count
     bgmap: vec4<f32>,  // where the backdrop image lies, scene px: x, y, w, h
     layers: array<Layer, 32>,
-    lights: array<Light, 8>,
+    lights: array<Light, 32>,
     weather: Weather,
     bounce: vec4<f32>, // strength (0 = none), gather radius (m), scene px per bounce texel
     sky: vec4<f32>,    // how much of the stars shows (0 = none), cloud cover, cloud drift across, deeper (m/s)
@@ -301,7 +304,7 @@ fn beam_gain(P: vec3<f32>, Lt: Light) -> f32 {
 // is marched only where it can matter: within the light's range, on a
 // surface facing it -- most of a frame's pixels, for a lamp, are neither.
 fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: vec3<f32>, pw: f32, r0: f32,
-              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, start: f32, light_r: f32) -> vec3<f32> {
+              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, start: f32, light_r: f32, shadowed: bool) -> vec3<f32> {
     let Lv = LP - P;
     let d2 = dot(Lv, Lv);
     let dd = sqrt(d2);
@@ -312,7 +315,9 @@ fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: ve
     let ndl = dot(n, l);
     let shade = max((ndl + wrap) / (1.0 + wrap), 0.0);
     var sh = 0.0;
-    if (shade > 0.0) { sh = shadow_all(P, LP, start, light_r); }
+    if (shade > 0.0) {
+        if (shadowed) { sh = shadow_all(P, LP, start, light_r); } else { sh = 1.0; }
+    }
     var o = alb * col * fall * (shade * sh + bounce);
     if (sheen > 0.0) {
         let v = normalize(-P);
@@ -362,7 +367,7 @@ fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, s
     if (shade > 0.0) {
         let t = moon_reach(P, l);
         lit = cloud_mask(P, Lt);
-        if (lit > 0.0) { lit = lit * shadow_all(P, P + l * t, start, Lt.fall.z * t); }
+        if (lit > 0.0 && Lt.flags.x > 0.5) { lit = lit * shadow_all(P, P + l * t, start, Lt.fall.z * t); }
     }
     var o = alb * Lt.col.rgb * Lt.col.w * (shade * lit + Lt.fall.w);
     if (sheen > 0.0 && lit > 0.0) {
@@ -515,6 +520,7 @@ fn air_light(P: vec3<f32>) -> vec3<f32> {
     let n_lights = u32(U.misc.w);
     for (var li = 0u; li < n_lights; li = li + 1u) {
         let Lt = U.lights[li];
+        if (Lt.flags.w < 0.5) { continue; }
         if (Lt.pos.w > 1.5) {
             L = L + Lt.col.rgb * Lt.col.w * 0.05 * (1.0 - 0.9 * Lt.prop.x);
             continue;
@@ -951,6 +957,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
         let n_lights = u32(U.misc.w);
         for (var li = 0u; li < n_lights; li = li + 1u) {
             let Lt = U.lights[li];
+            if (Lt.flags.y < 0.5) { continue; }
             if (Lt.pos.w > 1.5) {
                 col = col + moon_term(bg_p, bg_n, alb_bg, Lt, Lt.surf.y, wet * Lt.surf.w, Lt.shine.y, 0.08);
                 continue;
@@ -958,7 +965,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             let gain = beam_gain(bg_p, Lt);
             if (gain <= 0.0) { continue; }
             col = col + light_term(bg_p, bg_n, alb_bg, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z);
+                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z, Lt.flags.x > 0.5);
         }
         col = col + alb_bg * bounce_at(bg_p, bg_n, px);
     } else {
@@ -968,7 +975,7 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
         let n_lights = u32(U.misc.w);
         for (var li = 0u; li < n_lights; li = li + 1u) {
             let Lt = U.lights[li];
-            if (Lt.pos.w < 1.5) { continue; }
+            if (Lt.pos.w < 1.5 || Lt.flags.y < 0.5) { continue; }
             let open = max(dot(up, Lt.pos.xyz), 0.0) * (1.0 - 0.9 * Lt.prop.x);
             col = col + alb_bg * Lt.col.rgb * Lt.col.w * (open + Lt.fall.w);
         }
@@ -1043,6 +1050,7 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
     let n_lights = u32(U.misc.w);
     for (var li = 0u; li < n_lights; li = li + 1u) {
         let Lt = U.lights[li];
+        if (Lt.flags.z < 0.5) { continue; }
         if (Lt.pos.w > 1.5) {
             c = c + moon_term(P, n, alb, Lt, Lt.surf.x, Lt.surf.z * sheen_k, Lt.shine.x, 0.15);
             continue;
@@ -1050,7 +1058,7 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
         let gain = beam_gain(P, Lt);
         if (gain <= 0.0) { continue; }
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z);
+                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z, Lt.flags.x > 0.5);
     }
     c = c + alb * bounce_at(P, n, px);
     if (W.a.x > 0.0 && !light_only) {

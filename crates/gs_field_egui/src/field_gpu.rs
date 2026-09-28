@@ -28,7 +28,12 @@ use egui_wgpu::wgpu;
 /// draws those its old way).
 pub const MAX_LAYERS: usize = 32;
 /// Local lights one pass adds.
-pub const MAX_LIGHTS: usize = 8;
+pub const MAX_LIGHTS: usize = 32;
+/// Of those, how many cast shadows: the frame's first that ask
+/// ([`FieldLight::shadows`]); the rest light without. A shadow is most of a
+/// light's cost -- every creature layer is marched for it -- so this, not
+/// [`MAX_LIGHTS`], is what holds the pass's time down.
+pub const MAX_SHADOW_LIGHTS: usize = 8;
 /// Stars and nebulae the pass draws on the sky ([`FieldStars`]).
 pub const MAX_STARS: usize = 64;
 pub const MAX_NEBULAE: usize = 4;
@@ -180,6 +185,28 @@ pub struct FieldLight {
     /// Its beam: the axis across the floor (camera space, xyz) and half its
     /// width in degrees; [`ALL_ROUND`] shines every way ([`FieldLight::aimed`]).
     pub beam: [f32; 4],
+    /// Casts shadows: a main light. Only the frame's first
+    /// [`MAX_SHADOW_LIGHTS`] that do get them; a fill (false) lights
+    /// without, for about a third of the cost.
+    pub shadows: bool,
+    /// What it lights.
+    pub affects: LightTargets,
+}
+
+/// What a light lights ([`FieldLight::affects`]; gs_field's `LightTarget`,
+/// less scenery: the pass does not draw scenery props).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LightTargets {
+    /// The backdrop: the painted ground and walls.
+    pub backdrop: bool,
+    /// The creature layers.
+    pub creatures: bool,
+    /// The air: its glow in mist, rain, snow and blowing sand.
+    pub air: bool,
+}
+
+impl LightTargets {
+    pub const ALL: LightTargets = LightTargets { backdrop: true, creatures: true, air: true };
 }
 
 /// A light that shines every way (no beam).
@@ -217,6 +244,8 @@ impl FieldLight {
             show: true,
             prop: [base[0], base[1], base[2], stick],
             beam: ALL_ROUND,
+            shadows: true,
+            affects: LightTargets::ALL,
         }
     }
 
@@ -245,6 +274,8 @@ impl FieldLight {
             show: true,
             prop: [core[0], core[1], core[2], 0.0],
             beam: ALL_ROUND,
+            shadows: true,
+            affects: LightTargets::ALL,
         }
     }
 
@@ -277,6 +308,8 @@ impl FieldLight {
             prop: [c, wind[0], wind[1], 0.0],
             // no disc drawn ([`FieldLight::with_disc`])
             beam: [0.0; 4],
+            shadows: true,
+            affects: LightTargets::ALL,
         }
     }
 
@@ -666,7 +699,7 @@ impl FieldFrame {
 }
 
 /// Floats in the uniform block (field_gpu.wgsl `Field`).
-const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 28 + WEATHER_FLOATS + 4 + 8 + MAX_STARS * 8 + MAX_NEBULAE * 12;
+const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 32 + WEATHER_FLOATS + 4 + 8 + MAX_STARS * 8 + MAX_NEBULAE * 12;
 /// Floats in the shader's `Weather`.
 const WEATHER_FLOATS: usize = 28;
 
@@ -699,6 +732,9 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
             _ => u.extend([0.0; 12]),
         }
     }
+    // the first that ask cast shadows, up to MAX_SHADOW_LIGHTS (the moons
+    // come first in a stage's list)
+    let mut shadowed = 0;
     for i in 0..MAX_LIGHTS {
         match lights.get(i) {
             Some(l) => {
@@ -714,8 +750,12 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
                 u.extend([l.shine_creature, l.shine_ground, l.brightness, if l.show { 1.0 } else { 0.0 }]);
                 u.extend(l.prop);
                 u.extend(l.beam);
+                let casts = l.shadows && shadowed < MAX_SHADOW_LIGHTS;
+                shadowed += usize::from(casts);
+                let on = |b: bool| if b { 1.0 } else { 0.0 };
+                u.extend([on(casts), on(l.affects.backdrop), on(l.affects.creatures), on(l.affects.air)]);
             }
-            None => u.extend([0.0; 28]),
+            None => u.extend([0.0; 32]),
         }
     }
     let w = &frame.weather;
@@ -2071,7 +2111,7 @@ mod tests {
             backdrop: img.clone(),
             backdrop_rect: [0.0, 0.0, 1264.0, 848.0],
             layers: (0..40).map(|i| layer(40.0 - i as f32)).collect(),
-            lights: vec![FieldLight::torch([0.0; 3], [0.0; 3], 0.8, 1.0, 1.0); 10],
+            lights: vec![FieldLight::torch([0.0; 3], [0.0; 3], 0.8, 1.0, 1.0); MAX_LIGHTS + 2],
             time: 0.0,
             water: 1.0,
             shadows: true,
@@ -2082,8 +2122,13 @@ mod tests {
             stars: FieldStars::default(),
         };
         let u = uniforms(&frame, &vec![[0.0; 4]; MAX_LAYERS], &vec![[-0.5, 2.0]; MAX_LAYERS], false);
-        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 112 + 7 * 16 + 16 + 32 + MAX_STARS * 32 + MAX_NEBULAE * 48, "the WGSL struct's size");
+        assert_eq!(u.len() * 4, 20 * 4 + MAX_LAYERS * 48 + MAX_LIGHTS * 128 + 7 * 16 + 16 + 32 + MAX_STARS * 32 + MAX_NEBULAE * 48, "the WGSL struct's size");
         assert_eq!((u[14], u[15]), (MAX_LAYERS as f32, MAX_LIGHTS as f32));
+        // every light asks for shadows; the first MAX_SHADOW_LIGHTS get them
+        let flags = |i: usize| &u[20 + MAX_LAYERS * 12 + i * 32 + 28..][..4];
+        assert_eq!((0..MAX_LIGHTS).filter(|&i| flags(i)[0] == 1.0).count(), MAX_SHADOW_LIGHTS);
+        assert_eq!(flags(MAX_SHADOW_LIGHTS - 1), &[1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(flags(MAX_SHADOW_LIGHTS), &[0.0, 1.0, 1.0, 1.0], "past the cap: lit, unshadowed");
         assert_eq!(&u[16..20], &[0.0, 0.0, 1264.0, 848.0], "the backdrop's place");
         // the first MAX_LAYERS are written, the rest fall off
         assert_eq!(u[20 + 8], 40.0);

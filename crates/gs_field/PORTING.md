@@ -383,6 +383,14 @@ empty): kind (campfire / torch / glow / lantern / wisp), floor position
 flicker, and a beam (`aim`, `spread`; `PointLight::beam` is how much
 reaches a bearing). `PointLight::drift` is a wisp's wander and bob at a
 moment, floor units; a lantern is made with its beam.
+`PointLight.shadows: Option<bool>` and `PointLight.affects:
+Option<Vec<LightTarget>>` (**new fields**, both skip-serialized when None,
+so older files read and write as before; a host building a `PointLight`
+literal adds them or goes through `PointLight::new`): whether it casts
+shadows (None = its kind's, `LampKind::casts_shadows`: all but a glow;
+`casts_shadows()` / `set_shadows()`), and what it lights -- `LightTarget`
+(**a new type**) `backdrop`, `scenery`, `creatures`, `air`; None = all
+(`lights()` / `set_lights()`).
 
 ### 6.13 Held props
 

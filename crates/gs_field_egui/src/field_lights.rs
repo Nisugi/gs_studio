@@ -26,6 +26,12 @@
 //! air round each flame, added. A puppet casts a shadow on the ground away
 //! from each lamp that reaches it (`gs_puppet::ShadowCaster`).
 //!
+//! A lamp lights only what it is set to (`PointLight::lights`): the ground
+//! pool is the backdrop's, a scenery prop's fire-tinted copy the scenery's,
+//! a creature's and the puppet's light the creatures'. Scenery is lit here
+//! even when the v2 pass draws the rest: the pass does not draw props. One that casts no shadows
+//! (`PointLight::casts_shadows`, a fill) lights a puppet but casts nothing.
+//!
 //! A lamp with a beam (`PointLight::spread` under 360) lights only what lies
 //! within it, by bearing across the floor (`PointLight::beam`): its pool is
 //! a wedge, the glow in the air round it is thrown the same way, and
@@ -44,7 +50,7 @@
 use std::cell::RefCell;
 
 use egui::{pos2, vec2, Color32, Pos2};
-use gs_field::lighting::{LampKind, PointLight};
+use gs_field::lighting::{LampKind, LightTarget, PointLight};
 
 /// Strongest the fire's copy of a creature ever gets.
 const MAX_GLOW: f32 = 0.8;
@@ -93,6 +99,8 @@ struct Near {
     /// Its beam's bearing and width, degrees (360 = all round).
     aim: f32,
     spread: f32,
+    /// It casts shadows.
+    shadows: bool,
 }
 
 /// The fire light on the creature being drawn, per side.
@@ -194,14 +202,15 @@ pub fn set_creature(
     let (fx, _) = field.foot(unit);
     let (z, t) = (field.ground_z(unit), now_ms as f32 / 1000.0);
     let lights = scene.map(|s| s.lights.as_slice()).unwrap_or_default();
-    let glow = glow_at(lights, field, fx, z, t);
+    let glow = glow_at(lights, field, fx, z, t, LightTarget::Creatures);
     CURRENT.with(|g| *g.borrow_mut() = glow);
     let near = near_lamps(lights, field, fx, z, t);
     NEAR.with(|n| *n.borrow_mut() = near);
 }
 
-/// The lamps that may reach something standing at floor point (x, z):
-/// within their reach, with room for a body's own size.
+/// The lamps that may reach a creature standing at floor point (x, z):
+/// those that light creatures, within their reach, with room for a body's
+/// own size.
 fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Vec<Near> {
     let (_, ppu_c) = field.project_ground(x, z);
     lights
@@ -217,7 +226,7 @@ fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x:
             // Its beam must reach near the creature (it lies at -across,
             // -deeper from the lamp); a body's width of slack.
             let aimed = light.beam(-across, -deeper).max(light.beam(-across * 0.8, -deeper * 1.2)).max(light.beam(-across * 1.2, -deeper * 0.8));
-            (d < r * 1.3 && light.intensity > 0.0 && aimed > 0.0).then(|| Near {
+            (d < r * 1.3 && light.intensity > 0.0 && aimed > 0.0 && light.lights(LightTarget::Creatures)).then(|| Near {
                 across,
                 up,
                 deeper,
@@ -228,6 +237,7 @@ fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x:
                 weight: light.intensity.max(0.0) * (1.0 - (d / (r * 1.3)).min(1.0)),
                 aim: light.aim,
                 spread: light.spread,
+                shadows: light.casts_shadows(),
             })
         })
         .collect()
@@ -236,8 +246,9 @@ fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x:
 /// The lamps near the creature being drawn ([`set_creature`]) as a puppet
 /// standing there sees them: in its skin's frame (feet about its foot, +x
 /// screen-right, +z toward the viewer), `ft_per_unit` feet to a floor unit
-/// there; and their flicker now, one for the lot (weighted by reach).
-pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, f32) {
+/// there; those of them that cast shadows; and their flicker now, one for
+/// the lot (weighted by reach).
+pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, Vec<gs_puppet::Lamp>, f32) {
     NEAR.with(|n| {
         let near = n.borrow();
         let ft = ft_per_unit.max(1e-3);
@@ -255,17 +266,22 @@ pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, f32) {
                     gs_puppet::Beam { dir: [c, 0.0, -s], spread: l.spread, soft: gs_field::lighting::BEAM_SOFT_DEG }
                 }),
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let casting = lamps.iter().zip(near.iter()).filter(|(_, l)| l.shadows).map(|(lamp, _)| *lamp).collect();
         let weight: f32 = near.iter().map(|l| l.weight).sum();
         let flicker = if weight > 1e-6 { near.iter().map(|l| l.flicker * l.weight).sum::<f32>() / weight } else { 1.0 };
-        (lamps, flicker)
+        (lamps, casting, flicker)
     })
 }
 
-/// The fire glow on something standing at floor point (x, z) at time `t`.
-fn glow_at(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Option<FireGlow> {
+/// The fire glow on something standing at floor point (x, z) at time `t`,
+/// from the lamps that light `what` it is.
+fn glow_at(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32, what: LightTarget) -> Option<FireGlow> {
     let (mut left, mut right, mut rgb, mut best) = (0.0f32, 0.0f32, [255u8; 3], 0.0f32);
     for (i, light) in lights.iter().enumerate() {
+        if !light.lights(what) {
+            continue;
+        }
         let (c, side) = reach(field, light, i, t, x, z);
         if c <= 0.0 {
             continue;
@@ -333,7 +349,7 @@ pub fn paint_prop_glow(
 ) {
     let Some(original) = cache.light.original_of(drawn.id()) else { return };
     let t = painter.ctx().input(|i| i.time) as f32;
-    let glow = LIGHTS.with(|l| glow_at(&l.borrow(), field, prop.x, prop.z.max(0.4), t));
+    let glow = LIGHTS.with(|l| glow_at(&l.borrow(), field, prop.x, prop.z.max(0.4), t, LightTarget::Scenery));
     if let Some(glow) = glow {
         paint_glow_texture(painter, original.id(), dest, glow);
     }
@@ -580,7 +596,7 @@ pub fn paint_back(
     }
     let t = ctx.input(|i| i.time) as f32;
     for (i, light) in lights.iter().enumerate() {
-        if !in_pass(i) {
+        if !in_pass(i) && light.lights(LightTarget::Backdrop) {
             ground_pool(painter, field, to_screen, scale, light, i, t, backdrop);
         }
     }
@@ -671,7 +687,8 @@ mod tests {
         assert!(torch.across > 0.0 && torch.deeper < 0.0, "the torch is right of it and nearer: {torch:?}");
         assert!(torch.up > fire.up, "a torch's flame is up on its pole");
         NEAR.with(|n| *n.borrow_mut() = near);
-        let (lamps, flicker) = puppet_lamps(2.0);
+        let (lamps, casting, flicker) = puppet_lamps(2.0);
+        assert_eq!(casting, lamps, "a fire and a torch both cast shadows");
         // In the skin's frame: +x screen-right, +z toward the viewer, feet.
         assert!(lamps[0].pos[0] < 0.0 && lamps[0].pos[2] < 0.0, "{:?}", lamps[0]);
         assert!(lamps[1].pos[0] > 0.0 && lamps[1].pos[2] > 0.0, "{:?}", lamps[1]);
@@ -693,6 +710,33 @@ mod tests {
         let beam = puppet_lamps(2.0).0[0].beam.expect("a beam");
         assert!(beam.dir[0] > 0.99 && beam.spread == 60.0, "{beam:?}");
         NEAR.with(|n| n.borrow_mut().clear());
+
+        // A lamp that lights only the backdrop does not reach it; a fill
+        // lights it but casts no shadow.
+        let mut ground_only = PointLight::new(LampKind::Torch, 440.0, 3.2);
+        ground_only.set_lights(LightTarget::Creatures, false);
+        assert!(near_lamps(std::slice::from_ref(&ground_only), &field, 440.0, 3.0, 0.0).is_empty());
+        let fill = PointLight::new(LampKind::Glow, 440.0, 3.2);
+        let near = near_lamps(&[fill, PointLight::new(LampKind::Torch, 460.0, 3.0)], &field, 440.0, 3.0, 0.0);
+        NEAR.with(|n| *n.borrow_mut() = near);
+        let (lamps, casting, _) = puppet_lamps(2.0);
+        assert_eq!((lamps.len(), casting.len()), (2, 1));
+        assert_eq!(casting[0], lamps[1], "only the torch casts");
+        NEAR.with(|n| n.borrow_mut().clear());
+    }
+
+    /// A lamp's glow on a creature and on a scenery prop comes only from
+    /// lamps that light creatures, and scenery.
+    #[test]
+    fn a_lamp_glows_only_on_what_it_lights() {
+        let field = gs_field::solver::CreatureField::default();
+        let mut lamp = PointLight::new(LampKind::Campfire, 440.0, 3.0);
+        assert!(glow_at(std::slice::from_ref(&lamp), &field, 420.0, 3.0, 0.0, LightTarget::Creatures).is_some());
+        lamp.set_lights(LightTarget::Creatures, false);
+        assert!(glow_at(std::slice::from_ref(&lamp), &field, 420.0, 3.0, 0.0, LightTarget::Creatures).is_none());
+        assert!(glow_at(std::slice::from_ref(&lamp), &field, 420.0, 3.0, 0.0, LightTarget::Scenery).is_some());
+        lamp.set_lights(LightTarget::Scenery, false);
+        assert!(glow_at(std::slice::from_ref(&lamp), &field, 420.0, 3.0, 0.0, LightTarget::Scenery).is_none());
     }
 
     /// A wisp is somewhere else a moment later, up in the air; a torch is

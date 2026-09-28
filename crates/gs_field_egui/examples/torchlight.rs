@@ -405,15 +405,30 @@ fn bench(scene: &Scene, every_backend: bool) {
     }
     cases.push(("lamps + 2 moons + all weather".into(), with(base(true, true), 2, "storm,mist,rain,sand,snow")));
     // six torches across the ground -- with the two moons, all the pass
-    // takes (field_gpu::MAX_LIGHTS): the cost of each more lamp
+    // lets cast shadows (field_gpu::MAX_SHADOW_LIGHTS): the cost of each
+    // more shadowed lamp
     let mut many = with(base(false, false), 2, "");
-    for i in 0..field_gpu::MAX_LIGHTS - 2 {
+    for i in 0..field_gpu::MAX_SHADOW_LIGHTS - 2 {
         let u = 120.0 + i as f32 * 140.0;
         let b = cam.point_at_height(u, 640.0 + 20.0 * (i % 3) as f32, 0.8);
         let (f, sway) = field_gpu::torch_flicker(T + i as f32, 1.0);
         many.lights.push(FieldLight::torch([b[0] + sway[0], b[1] + sway[1], b[2] + sway[2]], b, 0.8, f, 1.0));
     }
-    cases.push((format!("{} torches + 2 moons", field_gpu::MAX_LIGHTS - 2), many));
+    // and the rest of the pass's lights as fills: unshadowed glows, 4 m
+    // reach, nothing drawn -- lit windows, accents
+    let fills = |mut f: FieldFrame| {
+        let n = field_gpu::MAX_LIGHTS - f.lights.len();
+        for i in 0..n {
+            let u = 60.0 + (i as f32 + 0.5) * (SIZE[0] - 120.0) / n as f32;
+            let p = cam.point_at_height(u, 560.0 + 50.0 * (i % 5) as f32, 1.2);
+            let mut l = FieldLight::mote(p, [1.0, 0.7, 0.4], 1.0, 0.4, 4.0);
+            (l.shadows, l.show) = (false, false);
+            f.lights.push(l);
+        }
+        f
+    };
+    cases.push((format!("{} torches + 2 moons", field_gpu::MAX_SHADOW_LIGHTS - 2), many.clone()));
+    cases.push((format!("{} torches + {} fills + 2 moons", field_gpu::MAX_SHADOW_LIGHTS - 2, field_gpu::MAX_LIGHTS - field_gpu::MAX_SHADOW_LIGHTS), fills(many.clone())));
     // a crowd: the two creatures again at six more spots, as a busy stage
     let crowd = |mut f: FieldFrame| {
         for (i, feet) in [[230.0, 650.0], [360.0, 790.0], [560.0, 640.0], [850.0, 690.0], [1000.0, 610.0], [1120.0, 780.0]].into_iter().enumerate() {
@@ -437,6 +452,8 @@ fn bench(scene: &Scene, every_backend: bool) {
     let mut crowd_off = crowd(with(base(true, true), 2, ""));
     crowd_off.shadows = false;
     cases.push(("8 creatures, shadows off".into(), crowd_off));
+    cases.push(("8 creatures, 6 torches + 2 moons".into(), crowd(many.clone())));
+    cases.push(("8 creatures, 6 torches + 24 fills + 2 moons".into(), crowd(fills(many.clone()))));
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapters = block_on(instance.enumerate_adapters(wgpu::Backends::all()));
@@ -461,14 +478,14 @@ fn bench(scene: &Scene, every_backend: bool) {
         println!("\n== {} ({:?}, {:?}) -- ms a frame", info.name, info.device_type, info.backend);
         for (detail, how) in [(0.0, "every screen pixel shaded"), (field_gpu::DETAIL, "shaded no finer than the art")] {
             println!("\n-- {how}");
-            println!("{:<38}{}", "case", sizes.map(|s| format!("{:>12}", format!("{}x{}", s[0], s[1]))).join(""));
+            println!("{:<46}{}", "case", sizes.map(|s| format!("{:>12}", format!("{}x{}", s[0], s[1]))).join(""));
             for (label, frame) in &cases {
                 let frame = FieldFrame { detail, ..frame.clone() };
                 let ms = sizes.map(|s| {
                     let repeats = (40.0 * (SIZE[0] * SIZE[1]) / (s[0] * s[1]) as f32).max(10.0) as u32;
                     field_gpu::time_offscreen(&device, &queue, &frame, s, repeats).as_secs_f64() * 1000.0
                 });
-                println!("{:<38}{}", label, ms.map(|m| format!("{m:>12.2}")).join(""));
+                println!("{:<46}{}", label, ms.map(|m| format!("{m:>12.2}")).join(""));
             }
         }
         if let Some(prefix) = pictures.take() {

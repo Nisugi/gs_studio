@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use gs_field::lighting::{LampKind, PointLight};
+use gs_field::lighting::{LampKind, LightTarget, PointLight};
 
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, FieldWeather, LayerDraw, LitImage, Piece, Placement, SharedFrame};
 
@@ -613,6 +613,12 @@ fn scene_light(field: &gs_field::solver::CreatureField, cam: &FieldCamera, k: f3
     l.bounce = phys.bounce;
     l.wrap_creature = phys.wrap_creature;
     l.wrap_ground = phys.wrap_ground;
+    l.shadows = light.casts_shadows();
+    l.affects = field_gpu::LightTargets {
+        backdrop: light.lights(LightTarget::Backdrop),
+        creatures: light.lights(LightTarget::Creatures),
+        air: light.lights(LightTarget::Air),
+    };
     Some(l.aimed(cam, light.aim, light.spread))
 }
 
@@ -1141,19 +1147,41 @@ fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::SkinSurface
 mod tests {
     use super::*;
 
-    /// Two moons leave six of the eight slots: the first six lamps that
-    /// give light get them; one that gives none is passed over; the rest
-    /// are marked out of the pass, so the old drawing keeps them.
+    /// Two moons leave MAX_LIGHTS - 2 slots: the first lamps that give
+    /// light get them; one that gives none is passed over; the rest are
+    /// marked out of the pass, so the old drawing keeps them.
     #[test]
     fn lamps_past_the_limit_are_left_to_the_old_drawing() {
         let torch = || Some(FieldLight::torch([0.0, 0.0, 5.0], [0.0, 0.0, 5.0], 0.8, 1.0, 1.0));
         let moon = || FieldLight::moon([0.0, -1.0, 0.0], [1.0; 3], 0.3, 0.0, [0.0; 2]);
-        let lamps: Vec<Option<FieldLight>> = (0..9).map(|i| if i == 2 { None } else { torch() }).collect();
+        let n = field_gpu::MAX_LIGHTS + 1;
+        let lamps: Vec<Option<FieldLight>> = (0..n).map(|i| if i == 2 { None } else { torch() }).collect();
         let (lights, in_pass) = admit_lamps(vec![moon(), moon()], lamps.into_iter());
         assert_eq!(lights.len(), field_gpu::MAX_LIGHTS);
-        assert_eq!(in_pass, [true, true, false, true, true, true, true, false, false]);
+        let expect: Vec<bool> = (0..n).map(|i| i != 2 && i <= field_gpu::MAX_LIGHTS - 2).collect();
+        assert_eq!(in_pass, expect);
         let (lights, in_pass) = admit_lamps(Vec::new(), std::iter::repeat_with(torch).take(3));
         assert_eq!((lights.len(), in_pass), (3, vec![true; 3]));
+    }
+
+    /// A scene lamp's shadows and targets reach the pass's light: a glow is
+    /// a fill (no shadows) unless it says otherwise; a torch lights what its
+    /// file names.
+    #[test]
+    fn a_lamps_shadows_and_targets_reach_the_pass() {
+        let field = gs_field::solver::CreatureField::default();
+        let cam = FieldCamera { size: [880.0, 470.0], f: 600.0, cx: 440.0, cy: 200.0, pitch: 0.0, height: 1.7 };
+        let light = |l: &PointLight| scene_light(&field, &cam, 1.0, l, 0, 0.0).expect("gives light");
+        let glow = light(&PointLight::new(LampKind::Glow, 440.0, 3.0));
+        assert!(!glow.shadows && glow.affects == field_gpu::LightTargets::ALL);
+        let mut t = PointLight::new(LampKind::Torch, 440.0, 3.0);
+        assert!(light(&t).shadows);
+        t.set_shadows(false);
+        t.set_lights(LightTarget::Backdrop, false);
+        t.set_lights(LightTarget::Air, false);
+        let fill = light(&t);
+        assert!(!fill.shadows);
+        assert_eq!(fill.affects, field_gpu::LightTargets { backdrop: false, creatures: true, air: false });
     }
 
     fn humanoid() -> gs_puppet::Puppet {
