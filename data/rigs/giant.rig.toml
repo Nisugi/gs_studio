@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "giant"
 body_type = "biped"
 view = "front"
@@ -27,7 +27,7 @@ hip_r = [-0.7052, 2.5845]
 knee_l = [0.8253, 1.1944]
 knee_r = [-0.8131, 1.1944]
 neck_base = [0.0062, 5.2156]
-pelvis = [0.0140, 2.7881]
+pelvis = [0.014, 2.7881]
 shoulder_l = [0.7625, 5.1065]
 shoulder_r = [-0.7658, 5.1065]
 sternum = [-0.0016, 4.2379]
@@ -41,7 +41,8 @@ ankle_l = -0.4345
 ankle_r = -0.5444
 crown = 0.0879
 elbow_l = 0.1198
-elbow_r = -0.1920
+elbow_r = -0.192
+fingertip_l = 0.2418
 fingertip_r = 0.1599
 hip_l = -0.1385
 hip_r = -0.0286
@@ -57,7 +58,6 @@ toe_r = 0.4153
 wrist_l = 0.1874
 wrist_r = 0.1873
 
-fingertip_l = 0.2418
 [[bones]]
 name = "skull"
 part = "head"

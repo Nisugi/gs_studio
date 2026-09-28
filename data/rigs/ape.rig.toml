@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "ape"
 body_type = "biped"
 view = "front"

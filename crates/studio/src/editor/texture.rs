@@ -393,6 +393,14 @@ pub fn build_sheet(data_root: &Path, family: &str, puppet: &Puppet, outlines: &O
 }
 
 /// The creatures of `family` that have a folder of their own paintings.
+/// A folder under a family's textures that is no creature: a scratch try
+/// (`_trio_sheruvian_monk`, a painting pass kept aside), which git ignores too
+/// (`data/textures/*/_*/`). Its sheet was shipped as a creature's skin, and
+/// refused as stale after every rig change.
+fn is_scratch(name: &str) -> bool {
+    name.starts_with('_')
+}
+
 pub fn painted_creatures(data_root: &Path, family: &str) -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_dir(dir(data_root, family))
         .into_iter()
@@ -400,7 +408,7 @@ pub fn painted_creatures(data_root: &Path, family: &str) -> Vec<String> {
         .flatten()
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-        .filter(|name| name != OUTFITS)
+        .filter(|name| name != OUTFITS && !is_scratch(name))
         .filter(|name| ["front.png", "side.png", "back.png"].iter().any(|f| creature_dir(data_root, family, name).join(f).is_file()))
         .collect();
     out.sort();
@@ -418,7 +426,7 @@ pub fn family_creatures(data_root: &Path, family: &str) -> Vec<String> {
         .flatten()
         .filter(|e| e.path().is_dir())
         .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-        .filter(|name| name != OUTFITS && name != PROJECTED)
+        .filter(|name| name != OUTFITS && name != PROJECTED && !is_scratch(name))
         .collect();
     if let Ok((_, outfits)) = outfits(data_root) {
         let saved: std::collections::BTreeSet<String> = std::fs::read_dir(data_root.join("rigs"))
@@ -446,7 +454,7 @@ pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)>
         .flatten()
         .flatten()
         .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-        .filter(|name| name != OUTFITS)
+        .filter(|name| name != OUTFITS && !is_scratch(name))
         .map(|name| {
             let sheet = creature_dir(data_root, family, &name).join(SHEET);
             (name, sheet)

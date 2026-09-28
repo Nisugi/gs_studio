@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "treekin"
 body_type = "biped"
 view = "front"
@@ -39,6 +39,7 @@ wrist_r = [-1.5536, 2.4791]
 [depth]
 ankle_l = -1.2291
 ankle_r = 1.3994
+chin = 1.0685
 elbow_l = 0.0589
 elbow_r = 1.0134
 fingertip_l = -0.0591
@@ -47,16 +48,15 @@ hip_l = 0.0216
 hip_r = 0.4373
 knee_l = -0.5075
 knee_r = 0.58
+pelvis = 1.0118
 shoulder_l = 0.3507
 shoulder_r = 0.1656
+sternum = 0.6081
 toe_l = -1.35
 toe_r = 1.2687
 wrist_l = -0.0173
 wrist_r = 0.4836
 
-chin = 1.0685
-pelvis = 1.0118
-sternum = 0.6081
 [[bones]]
 name = "skull"
 part = "head"

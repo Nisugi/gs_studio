@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "elemental_earth"
 body_type = "biped"
 view = "front"
@@ -37,10 +37,8 @@ wrist_l = [5.0546, 5.7723]
 wrist_r = [-5.0899, 5.7723]
 
 [depth]
-
-
 ankle_l = -1.3887
-ankle_r = -1.5900
+ankle_r = -1.59
 crown = -0.3715
 elbow_l = -0.3395
 elbow_r = -0.1273
@@ -56,9 +54,10 @@ shoulder_l = -0.9233
 shoulder_r = -0.3139
 sternum = -1.5198
 toe_l = 1.2585
-toe_r = 0.6490
+toe_r = 0.649
 wrist_l = 0.6722
 wrist_r = -0.4325
+
 [[bones]]
 name = "skull"
 part = "head"

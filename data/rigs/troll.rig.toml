@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "troll"
 body_type = "biped"
 view = "front"
@@ -33,8 +33,8 @@ shoulder_r = [-1.2899, 4.8681]
 sternum = [0.0083, 3.9745]
 toe_l = [1.0052, 0.0751]
 toe_r = [-0.9481, 0.0751]
-wrist_l = [2.5261, 1.3930]
-wrist_r = [-2.5342, 1.3930]
+wrist_l = [2.5261, 1.393]
+wrist_r = [-2.5342, 1.393]
 
 [depth]
 ankle_l = -0.3604
@@ -43,7 +43,7 @@ chin = 1.45
 crown = 1.4
 elbow_l = 0.4884
 elbow_r = 0.4884
-fingertip_l = 1.4410
+fingertip_l = 1.441
 fingertip_r = 1.5269
 hip_l = -0.4674
 hip_r = -1.1742
@@ -61,19 +61,19 @@ skull = 0.6
 
 [[bones]]
 name = "skull"
-radius_ft = 0.5
 part = "head"
 parent = "neck"
 joints = ["crown", "chin"]
 pivot = "chin"
+radius_ft = 0.5
 
 [[bones]]
 name = "neck"
-radius_ft = 0.35
 part = "neck"
 parent = "torso_upper"
 joints = ["chin", "neck_base"]
 pivot = "neck_base"
+radius_ft = 0.35
 
 [[bones]]
 name = "clavicle"

@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "humanoid"
 body_type = "biped"
 view = "front"
@@ -34,7 +34,7 @@ shoulder_r = [-0.5942, 4.7684]
 sternum = [-0.0133, 4.1911]
 toe_l = [0.5822, 0.0328]
 toe_r = [-0.5253, 0.0243]
-wrist_l = [1.7710, 3.0448]
+wrist_l = [1.771, 3.0448]
 wrist_r = [-1.7762, 3.0285]
 
 [depth]

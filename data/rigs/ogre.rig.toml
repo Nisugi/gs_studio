@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "ogre"
 body_type = "biped"
 view = "front"
@@ -13,7 +13,7 @@ saddle = "neck_base"
 
 [joints]
 ankle_l = [0.7828, 0.1919]
-ankle_r = [-0.8780, 0.1919]
+ankle_r = [-0.878, 0.1919]
 chin = [0.0021, 5.2654]
 crown = [-0.0545, 5.9406]
 elbow_l = [2.4877, 3.1034]
@@ -33,31 +33,31 @@ shoulder_r = [-0.8793, 4.6251]
 sternum = [-0.0086, 4.0739]
 toe_l = [0.9647, 0.0628]
 toe_r = [-1.0475, 0.0628]
-wrist_l = [3.2665, 2.0830]
-wrist_r = [-3.2669, 2.0830]
+wrist_l = [3.2665, 2.083]
+wrist_r = [-3.2669, 2.083]
 
 [depth]
 ankle_l = 0.2436
 ankle_r = 0.0183
-knee_l = -0.5503
-knee_r = -0.8181
-toe_l = 1.0154
-toe_r = 0.4891
-
-chin = -0.2050
-crown = 0.4520
+chin = -0.205
+crown = 0.452
 elbow_l = 0.8643
-elbow_r = 0.6860
+elbow_r = 0.686
 fingertip_l = -0.0065
 fingertip_r = -0.0956
 hip_l = 0.2977
 hip_r = 0.4106
+knee_l = -0.5503
+knee_r = -0.8181
 pelvis = -0.8794
 shoulder_l = -0.2191
 shoulder_r = -0.1299
 sternum = -0.2229
+toe_l = 1.0154
+toe_r = 0.4891
 wrist_l = -0.2041
 wrist_r = -0.3378
+
 [[bones]]
 name = "skull"
 part = "head"
@@ -127,7 +127,3 @@ name = "leg_l"
 part = "leftLeg"
 parent = "torso_lower"
 joints = ["hip_l", "knee_l", "ankle_l", "toe_l"]
-
-# The club and the fist holding it are not the ogre's body (held things are
-# separate props): the puppet is not measured from them. Feet, each in its
-# own view, like the joints.

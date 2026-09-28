@@ -5,6 +5,7 @@
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 //!   gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
 //!   gs-studio [--data <dir>] --build-sheet <family>[/<creature>]
+//!   gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>] --save <family>[,<family>...]
 //!   gs-studio [--data <dir>] --import-chart <scale-chart.html>
 //!   gs-studio [--data <dir>] --export-jobs
 //!
@@ -146,6 +147,22 @@ fn main() -> eframe::Result {
     let pool = pool_dir::from_environment(cli.pool, saved.pool);
     seed_from_bundle(&data, &pool);
     eprintln!("gs-studio: {}", pool.status());
+    if let Some(families) = &cli.save {
+        // The Rigs tab's Save, headless: bake, puppet, skins and outfits into
+        // the pool, Publish.
+        let mut session = editor::Session::open(&data.path, publish.clone(), Some(pool.path.clone())).unwrap_or_else(|e| fail(&format!("gs-studio: --save: {e}")));
+        for family in families.split(',').map(str::trim).filter(|f| !f.is_empty()) {
+            session.request(editor::DocAction::OpenFamily(family.to_owned()));
+            if session.editor.rig().family != family {
+                fail(&format!("gs-studio: --save: no rig '{family}' ({})", session.status));
+            }
+            match session.save() {
+                Ok(()) => println!("{family}: {}", session.status),
+                Err(e) => fail(&format!("gs-studio: --save {family}: {e}")),
+            }
+        }
+        std::process::exit(0);
+    }
     if !pool.source.is_explicit() {
         eprintln!("gs-studio: nothing pointed the pool anywhere, so this is gs-studio's own data home.");
         eprintln!("gs-studio: it does NOT read ~/.vellum-fe -- use --pool, GS_STUDIO_POOL or the Pool box for that.");

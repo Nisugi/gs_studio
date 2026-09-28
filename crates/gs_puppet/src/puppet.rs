@@ -122,6 +122,16 @@ const MAX_TAPER: f32 = 2.5;
 /// What a badly-measured limb may eat back out of a trunk that crosses it,
 /// as a share of its own length: a limb is not broader than it is long.
 const LIMB_REACH: f32 = 0.5;
+/// A raised arm's clip on the torso starts this much further up than one
+/// limb radius above the shoulder: the humanoid's chest ended 0.001 ft above
+/// the start, and a slice on that edge is the shoulder's on both sides.
+const HANG_CLIP_EDGE_FT: f32 = 0.03;
+/// A leg's chain turns at its far end when the next link runs off at more
+/// than this (cos 45 degrees: a foot off a shin, not a knee's gentle bend)...
+const CHAIN_TURN_COS: f32 = 0.707;
+/// ...and then its last rows, this many of its own half-depths from the end,
+/// keep the depth of the row before them (a shin's ankle, not the foot).
+const CHAIN_TURN_REACH: f32 = 1.2;
 /// Shortest chain length, in feet, the limb bounds are applied against, so a
 /// stubby chain (a paw) is not bounded down to nothing.
 const MIN_CHAIN_FT: f32 = 0.2;
@@ -1217,6 +1227,40 @@ impl Puppet {
                     d[k] = d[k].min(end.d + (dj - end.d) * t);
                 }
             }
+            // An upright figure's shin into its foot: the chain's last link
+            // turning sharply off it. In the other view the shin's last rows
+            // run on into the foot and read it -- the instep out in front --
+            // and its cap carried that bulk below the joint, where it stayed
+            // with the shin as the foot pointed: a lump at the ankle,
+            // kneeling (the humanoid's ankle ring was 0.6 ft deep, centred
+            // forward). Within a joint's thickness of the end, a row reaches
+            // no further toward the foot than the last row clear of it; the
+            // heel side, behind, is left as read.
+            if kind == Kind::Limb && rig.body_type == "biped" && n > 2 {
+                let foot = raws.iter().enumerate().find(|(ci, c)| {
+                    c.parent == Some(i)
+                        && c.bone == r.bone
+                        && c.chain == r.chain
+                        && !raws.iter().any(|g| g.parent == Some(*ci) && g.bone == c.bone && g.chain == c.chain)
+                        && dot(norm_or(sub(c.tail, c.head), a), a) < CHAIN_TURN_COS
+                });
+                // (Only a foot that runs along the depth axis -- out of a front
+                // view's plane -- reads into the shin's depth rows; drawn from
+                // the side, the foot is in the measured view and this is no
+                // lump of its.)
+                let along_depth = |f: &Raw| norm_or(sub(f.tail, f.head), a)[oa].abs() > 0.5;
+                if let Some((_, f)) = foot.filter(|(_, f)| along_depth(f)) {
+                    let toward = sub(f.tail, f.head)[oa].signum();
+                    let reach = CHAIN_TURN_REACH * median(&mut d.clone()).max(MIN_HALF_FT);
+                    let k0 = (n - 1).saturating_sub(((reach / ds.max(1e-4)).ceil() as usize).max(1));
+                    let limit = toward * shift[k0] + d[k0];
+                    for k in (k0 + 1)..n {
+                        let (near, away) = ((toward * shift[k] + d[k]).min(limit), d[k] - toward * shift[k]);
+                        d[k] = ((near + away) * 0.5).max(MIN_HALF_FT);
+                        shift[k] = toward * (near - away) * 0.5;
+                    }
+                }
+            }
             limit_taper(&mut w, ds);
             limit_taper(&mut d, ds);
 
@@ -1903,6 +1947,12 @@ fn measure_segment<'m>(
         trunk: bool,
         /// This is a limb and that the trunk beside it: see below.
         beside_trunk: bool,
+        /// A raised arm's clip on the torso: met level across the chest, by
+        /// height, not along the slice. The humanoid's torso ends at the
+        /// very height these clips start, and its slices, square to a bone
+        /// leaning a hundredth of a foot, dipped under one arm's start and
+        /// missed the other's: one shoulder trimmed, a bump on the other.
+        level: bool,
     }
     // Two bones of the body's barrel (back, chest, belly). A neck reaching
     // down to the brisket stood up off the withers as a fin, and a skull
@@ -1934,7 +1984,8 @@ fn measure_segment<'m>(
             // puts it. At the raised line the chest kept the flesh between
             // the armpit and the shoulder, the arm's, and stood it out beside
             // the chest when the arm went up.
-            let (b, e) = if rig.arms_raised && view == View::Front && trunk_stops_at_limb && biped_arm(other.bone) && other.k == 0 {
+            let hung = rig.arms_raised && view == View::Front && trunk_stops_at_limb && biped_arm(other.bone) && other.k == 0;
+            let (b, e) = if hung {
                 let (s, c) = crate::hang::TRUNK_CLIP_HANG_DEG.to_radians().sin_cos();
                 let e = [el * s * e[0].signum(), -el * c];
                 ([a[0] + e[0], a[1] + e[1]], e)
@@ -1945,12 +1996,16 @@ fn measure_segment<'m>(
             // An arm's root sits inside the ball of the shoulder: the torso
             // stops there too, so the shoulder is the arm's and goes up with
             // it (not a yoke on the torso the raised arm leaves behind).
+            // (A raised arm's clip starts a hair further, HANG_CLIP_EDGE_FT: a
+            // chest slice that close to the start is the shoulder's on both
+            // sides -- see `level`.)
             let a = if trunk_stops_at_limb && biped_arm(other.bone) && other.k == 0 {
-                [a[0] - e[0] / el * limb_r[o], a[1] - e[1] / el * limb_r[o]]
+                let back = limb_r[o] + if hung { HANG_CLIP_EDGE_FT } else { 0.0 };
+                [a[0] - e[0] / el * back, a[1] - e[1] / el * back]
             } else {
                 a
             };
-            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]), trunk: body(i) && body(o), beside_trunk })
+            Some(Clip { a, b, limb_r: trunk_stops_at_limb.then_some(limb_r[o]), trunk: body(i) && body(o), beside_trunk, level: hung })
         })
         .collect();
 
@@ -2067,7 +2122,8 @@ fn measure_segment<'m>(
         // alongside takes its share.
         let (free_lo, free_hi) = (-lo, hi);
         for c in &clips {
-            let Some(s) = crossing(p, n2, c.a, c.b).filter(|s| s.abs() > 0.03) else { continue };
+            let across = if c.level { [n2[0].signum(), 0.0] } else { n2 };
+            let Some(s) = crossing(p, across, c.a, c.b).filter(|s| s.abs() > 0.03) else { continue };
             let stop = match c.limb_r {
                 Some(lr) => (s.abs() - lr).max(s.abs() * 0.5),
                 None if c.trunk => s.abs() * TRUNK_OVERLAP,

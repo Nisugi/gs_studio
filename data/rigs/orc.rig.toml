@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "orc"
 body_type = "biped"
 view = "front"
@@ -12,12 +12,12 @@ mouth = "chin"
 saddle = "neck_base"
 
 [joints]
-ankle_l = [0.8780, 0.4945]
+ankle_l = [0.878, 0.4945]
 ankle_r = [-0.8754, 0.4945]
 chin = [0.0036, 5.3175]
 crown = [-0.0013, 5.9334]
-elbow_l = [2.0122, 3.3990]
-elbow_r = [-2.0230, 3.3990]
+elbow_l = [2.0122, 3.399]
+elbow_r = [-2.023, 3.399]
 eye_l = [0.111, 5.6652]
 eye_r = [-0.1447, 5.6652]
 fingertip_l = [1.9228, 1.4847]
@@ -27,7 +27,7 @@ hip_r = [-0.4662, 2.7347]
 knee_l = [0.9152, 1.0667]
 knee_r = [-0.9092, 1.0667]
 neck_base = [-0.0085, 4.9698]
-pelvis = [-0.0010, 2.9127]
+pelvis = [-0.001, 2.9127]
 shoulder_l = [0.8231, 4.6273]
 shoulder_r = [-0.8253, 4.6273]
 sternum = [-0.0089, 4.5963]
@@ -37,26 +37,26 @@ wrist_l = [2.0892, 2.5154]
 wrist_r = [-2.1009, 2.5154]
 
 [depth]
-toe_l = 0.8835
-hip_l = -0.2505
-hip_r = -0.1050
 ankle_l = 0.35
 ankle_r = -0.5677
-knee_l = -0.0950
-knee_r = -0.3703
-toe_r = 0.3273
-
 elbow_l = 0.2933
 elbow_r = 0.4713
 fingertip_l = 0.2031
 fingertip_r = 0.4463
+hip_l = -0.2505
+hip_r = -0.105
+knee_l = -0.095
+knee_r = -0.3703
 neck_base = -0.0379
 pelvis = -0.0194
 shoulder_l = -0.1635
 shoulder_r = -0.0953
 sternum = -0.0602
+toe_l = 0.8835
+toe_r = 0.3273
 wrist_l = -0.2348
 wrist_r = -0.4365
+
 [[bones]]
 name = "skull"
 part = "head"

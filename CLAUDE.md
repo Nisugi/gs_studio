@@ -48,7 +48,9 @@ in the thousands: the night relight bakes on a worker thread first. Other env: `
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
 Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
 (projection-first renders, in the family's order: `projection_order` in
-`<data>/generator.toml`, quadrupeds side-first) `--build-sheet <family>[/<creature>]` (sheet.png + normal.png from a folder's paintings), `--import-chart <scale-chart.html>` (the Rigs tab's Import: chart -> `<data>/outlines.json`) and `--export-jobs` (every template + `textures/jobs.json`),
+`<data>/generator.toml`, quadrupeds side-first) `--build-sheet <family>[/<creature>]` (sheet.png + normal.png from a folder's paintings),
+`--save <family>[,...]` (the Rigs tab's Save headless: bake, puppet, skins into the pool, publish --
+the republish after a builder change: rebuild the painted sheets with `--build-sheet` first), `--import-chart <scale-chart.html>` (the Rigs tab's Import: chart -> `<data>/outlines.json`) and `--export-jobs` (every template + `textures/jobs.json`),
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
 closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs

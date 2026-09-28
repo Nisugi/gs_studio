@@ -1,4 +1,4 @@
-version = 2
+version = 3
 family = "elemental_ice"
 body_type = "biped"
 view = "front"
@@ -17,11 +17,11 @@ ankle_r = [-0.7089, 0.2083]
 chin = [0.0743, 4.361]
 crown = [-0.0051, 4.9498]
 elbow_l = [1.3197, 3.0963]
-elbow_r = [-1.3050, 3.0963]
+elbow_r = [-1.305, 3.0963]
 eye_l = [0.1017, 4.5671]
 eye_r = [-0.2057, 4.5671]
 fingertip_l = [1.7628, 2.2655]
-fingertip_r = [-1.7850, 2.2655]
+fingertip_r = [-1.785, 2.2655]
 hip_l = [0.2319, 1.8898]
 hip_r = [-0.1438, 1.8898]
 knee_l = [0.6916, 1.1421]
@@ -31,33 +31,32 @@ pelvis = [-0.0923, 2.6712]
 shoulder_l = [0.8901, 3.6173]
 shoulder_r = [-0.8612, 3.6173]
 sternum = [0.1145, 3.1244]
-toe_l = [0.6718, 0.0000]
-toe_r = [-0.6636, 0.0000]
+toe_l = [0.6718, 0.0]
+toe_r = [-0.6636, 0.0]
 wrist_l = [1.6168, 2.5509]
 wrist_r = [-1.6267, 2.5509]
 
 [depth]
-
-
 ankle_l = -0.6391
 ankle_r = -0.6871
 chin = -0.3278
-elbow_l = -0.5140
-elbow_r = -0.1230
+elbow_l = -0.514
+elbow_r = -0.123
 fingertip_l = -1.3198
 fingertip_r = -1.2282
 hip_l = -0.7558
 hip_r = -0.7758
 knee_l = -0.5453
 knee_r = -0.4538
-shoulder_l = -0.9310
-shoulder_r = -0.9310
+pelvis = 0.8787
+shoulder_l = -0.931
+shoulder_r = -0.931
 sternum = -0.1403
 toe_l = -0.3828
 toe_r = -0.1599
 wrist_l = 1.2515
 wrist_r = 0.6947
-pelvis = 0.8787
+
 [[bones]]
 name = "skull"
 part = "head"
