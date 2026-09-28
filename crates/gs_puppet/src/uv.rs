@@ -317,9 +317,15 @@ impl Texture {
     /// average of the old sheet over its own footprint, found through the
     /// surface (new pixel -> segment, station, angle -> old pixel), so a
     /// smaller sheet is an exact, filtered copy -- what a lower graphics
-    /// tier loads. The normal sheet comes along. Unpainted stays so.
+    /// tier loads. The normal sheet comes along. Unpainted stays so. At
+    /// the layout it already has, it is itself, unchanged: a tier's layout
+    /// only approximates its side (a canine's 2048 is 1868 x 2105), and a
+    /// sheet resampled onto its own layout lost paint for nothing.
     pub fn resampled(&self, p: &Puppet, side: usize) -> Texture {
         let layout = UvLayout::fit(p, side);
+        if layout == self.layout {
+            return self.clone();
+        }
         let ratio = self.layout.px_per_ft / layout.px_per_ft.max(1e-6);
         // samples a side of each new pixel: enough to cover its footprint
         let n = ratio.ceil().clamp(1.0, 4.0) as usize;
@@ -556,6 +562,31 @@ mod tests {
 
     fn humanoid() -> Puppet {
         Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+    }
+
+    /// A sheet "laid out again" at the tier it was made for comes back
+    /// untouched, even where that tier's layout runs past the tier's side:
+    /// resampled onto its own layout, fine paint changed and unpainted
+    /// texels were filled.
+    #[test]
+    fn a_sheet_at_its_own_tier_is_not_resampled() {
+        let p = humanoid();
+        let own = UvLayout::fit(&p, 512);
+        // checker paint, fine enough that any resample changes it
+        let mut rgba = vec![0u8; own.w * own.h * 4];
+        for y in 0..own.h {
+            for x in 0..own.w {
+                if own.address([x as f32 + 0.5, y as f32 + 0.5]).is_some() {
+                    let o = (y * own.w + x) * 4;
+                    let v = if (x + y) % 2 == 0 { 230 } else { 20 };
+                    rgba[o..o + 4].copy_from_slice(&[v, 255 - v, v / 2, 255]);
+                }
+            }
+        }
+        let tex = Texture { layout: own.clone(), rgba: rgba.clone(), normal: None };
+        let again = tex.resampled(&p, 512);
+        assert_eq!(again.layout, own);
+        assert!(again.rgba == rgba, "the paint changed: resampled onto its own layout");
     }
 
     /// A second pass's 2048 sheet is found by its size; laid out again at

@@ -1403,10 +1403,14 @@ impl PuppetCache {
                         let texture = gs_puppet::Texture { layout, rgba, normal };
                         // bigger than the texture detail allows: laid out again
                         // at that size, filtered ([`set_texture_detail`])
+                        // -- by the layouts, not the side's number: a tier's
+                        // layout only approximates it (a canine's 2048 is
+                        // 1868 x 2105), and its own sheet was resampled onto
+                        // the same layout, losing paint for nothing
                         let cap = texture_detail();
-                        let long = texture.layout.w.max(texture.layout.h);
                         let side = gs_puppet::SHEET_SIDES.iter().copied().filter(|&s| s <= cap.max(gs_puppet::SHEET_SIDES[0])).max().unwrap_or(gs_puppet::SHEET_SIDE);
-                        let texture = if long > side { texture.resampled(&puppet, side) } else { texture };
+                        let target = gs_puppet::UvLayout::fit(&puppet, side);
+                        let texture = if target.px_per_ft < texture.layout.px_per_ft { texture.resampled(&puppet, side) } else { texture };
                         Some(Arc::new(texture))
                     } else {
                         tracing::warn!(

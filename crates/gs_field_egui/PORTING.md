@@ -944,4 +944,7 @@ of `gs_puppet::SHEET_SIDES`, 2048 by default). A skin built bigger is laid
 out again at that size, filtered, when it loads
 (`gs_puppet::Texture::resampled`); a change reloads every skin. Skins load
 at whichever sheet size they were built at (`UvLayout::fit_to`), so a
-second pass's 2048 sheet is accepted beside the usual size.
+second pass's 2048 sheet is accepted beside the usual size. "Bigger" is by
+the layouts, not the side's number: a tier's layout only approximates it
+(a canine's 2048 is 1868 x 2105), and a sheet at its own tier is used as
+it is.
