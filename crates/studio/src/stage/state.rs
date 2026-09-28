@@ -639,6 +639,14 @@ impl StageState {
             let obstacles = gs_field::cards::scene_obstacles(Some(&self.scene));
             self.field.set_obstacles(obstacles);
             self.obstacle_scene = Some(self.scene.clone());
+            // A backdrop picked or cleared in the Scenes tab: the floor grows
+            // deep over a painting (solver::Growth), as a loaded scene does
+            // through resolve_field_params.
+            let painted = self.scene.background.is_some();
+            if self.field.params.painted != painted {
+                self.field.params.painted = painted;
+                self.field.generation = self.field.generation.wrapping_add(1);
+            }
         }
         scene_changed
     }
@@ -1362,6 +1370,19 @@ mod tests {
         fresh.selected_light = Some(2);
         fresh.load_scene_by_name("Barley_Field");
         assert_eq!((fresh.field.params.focal, fresh.field.params.horizon), (60.0, 160.0));
+        // Its backdrop makes it painted: the floor grows deep, and the save
+        // above wrote no solver key for it (auto, as the default has it).
+        assert!(fresh.field.params.painted && fresh.field.grows_deep());
+        // A backdrop picked or cleared in the Scenes tab follows at once.
+        let mut picked = stage();
+        picked.refresh_obstacles();
+        assert!(!picked.field.params.painted);
+        picked.scene_mut().background = Some("scenes/desert.png".into());
+        picked.refresh_obstacles();
+        assert!(picked.field.params.painted && picked.field.grows_deep());
+        picked.scene_mut().background = None;
+        picked.refresh_obstacles();
+        assert!(!picked.field.params.painted && !picked.field.grows_deep());
         assert_eq!(fresh.scene_name, "Barley_Field");
         assert_eq!(fresh.scene().background.as_deref(), Some("scenes/desert.png"));
         assert_eq!((fresh.selected_prop, fresh.selected_light), (None, None), "no selection survives into another scene");

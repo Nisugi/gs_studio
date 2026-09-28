@@ -858,8 +858,10 @@ mod tests {
         // lifted over occluders -- and the v2 GPU lighting pass
         // (field_gpu_stage): its frame started before the backdrop, its
         // backdrop over the image, and its lit body in place of the
-        // sprite's image.
-        assert_eq!(regions, 20, "exactly the twenty documented additions");
+        // sprite's image -- and the floor grid drawn over the floor's own
+        // rows and columns (deep growth adds rows), and scenery props
+        // clipped to the stage like the backdrop.
+        assert_eq!(regions, 22, "exactly the twenty-two documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

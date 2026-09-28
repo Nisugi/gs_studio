@@ -61,6 +61,25 @@ pub enum SeparationBasis {
     Card,
 }
 
+/// How the floor makes room for a crowd (ADDITION, not in VellumFE).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Growth {
+    /// Deep over a painted backdrop ([`FieldParams::painted`]), wide over
+    /// none.
+    #[default]
+    Auto,
+    /// The ported way: columns join at both sides, every cell narrows and
+    /// the camera pulls its focal in to keep the floor on the stage -- the
+    /// whole field shrinks as the room fills.
+    Wide,
+    /// The camera never moves: rows join at the back, up to
+    /// [`SolverParams::max_depth`], and the floor is as wide as the view is
+    /// at its far edge (farther rows hold more). Over a painting this is the
+    /// only honest growth: the painting cannot zoom out with the cards, so
+    /// in `Wide` creatures and props shrank and slid up it as a crowd came.
+    Deep,
+}
+
 /// Placement tunables, defaults matching the v2 prototype's shipped
 /// values. Per-field and cloneable; a skin overlays them via
 /// [`FieldParams::apply_solver`].
@@ -101,6 +120,12 @@ pub struct SolverParams {
     pub shuffle_ties: bool,
     /// Constraint-loosening notches once floor growth is exhausted.
     pub relax_steps: u32,
+    /// How the floor grows ([`Growth`]).
+    pub grow: Growth,
+    /// Deep growth adds rows no farther than this, world units from the
+    /// camera: where the painted floor ends (a hall's back wall, a bank's
+    /// edge).
+    pub max_depth: f32,
 }
 
 impl Default for SolverParams {
@@ -123,6 +148,8 @@ impl Default for SolverParams {
             separation_basis: SeparationBasis::Contact,
             shuffle_ties: true,
             relax_steps: 4,
+            grow: Growth::Auto,
+            max_depth: 12.0,
         }
     }
 }
@@ -150,6 +177,10 @@ pub struct FieldParams {
     pub horizon: f32,
     /// Placement tunables (the v2 solver knobs).
     pub solver: SolverParams,
+    /// The field stands on a painted backdrop, whose camera is fixed
+    /// (ADDITION): [`Growth::Auto`] grows deep. Set by
+    /// `cards::resolve_field_params` from the scene; not a camera key.
+    pub painted: bool,
 }
 
 impl Default for FieldParams {
@@ -167,6 +198,7 @@ impl Default for FieldParams {
             dz: 1.5,
             horizon: 96.0,
             solver: SolverParams::default(),
+            painted: false,
         }
     }
 }
@@ -288,6 +320,9 @@ pub struct CreatureField {
     /// Bumped on every placement-affecting change; renderers cache quads
     /// against it instead of re-reading per frame.
     pub generation: u64,
+    /// Rows deep growth has added behind `params.rows` ([`Growth::Deep`];
+    /// wide growth leaves it alone and ignores it).
+    extra_rows: u32,
 }
 
 impl Default for CreatureField {
@@ -486,6 +521,18 @@ impl FieldParams {
         if let Some(v) = sol.shuffle_ties {
             s.shuffle_ties = v;
         }
+        match sol.grow.as_deref() {
+            None => {}
+            Some("auto") => s.grow = Growth::Auto,
+            Some("wide") => s.grow = Growth::Wide,
+            Some("deep") => s.grow = Growth::Deep,
+            Some(other) => {
+                tracing::warn!(
+                    "[creature_field.solver] grow = {other:?} (want \"auto\", \"wide\" or \"deep\"); keeping current"
+                );
+            }
+        }
+        take(&mut s.max_depth, sol.max_depth, "max_depth", 1.0, 200.0);
     }
 
     /// Snapshot the camera as authoring vocabulary — every key explicit,
@@ -530,7 +577,18 @@ impl FieldParams {
             ),
             relax_steps: Some(s.relax_steps),
             shuffle_ties: Some(s.shuffle_ties),
+            grow: Some(growth_name(s.grow).to_string()),
+            max_depth: Some(s.max_depth),
         }
+    }
+}
+
+/// The TOML word for a [`Growth`].
+pub fn growth_name(g: Growth) -> &'static str {
+    match g {
+        Growth::Auto => "auto",
+        Growth::Wide => "wide",
+        Growth::Deep => "deep",
     }
 }
 
@@ -543,20 +601,71 @@ impl CreatureField {
             next_id: 1,
             obstacles: Vec::new(),
             generation: 0,
+            extra_rows: 0,
         }
     }
 
     // ---- floor geometry -------------------------------------------------
 
-    /// All drawn columns, ascending.
+    /// All drawn columns, ascending: wide growth's columns. The floor's
+    /// columns in either growth are [`CreatureField::floor_columns`].
     pub fn columns(&self) -> &[i32] {
         &self.cols
     }
 
+    /// Does the floor grow deep ([`Growth`])? Auto: over a painting.
+    pub fn grows_deep(&self) -> bool {
+        match self.params.solver.grow {
+            Growth::Deep => true,
+            Growth::Wide => false,
+            Growth::Auto => self.params.painted,
+        }
+    }
+
+    /// Depth rows on the floor now: the params' rows, and in deep growth
+    /// the rows added behind them.
+    pub fn rows(&self) -> u32 {
+        if self.grows_deep() {
+            (self.params.rows + self.extra_rows).min(self.max_rows())
+        } else {
+            self.params.rows
+        }
+    }
+
+    /// The most rows deep growth may reach: no row edge past `max_depth`.
+    fn max_rows(&self) -> u32 {
+        let p = &self.params;
+        // (a row edge landing on max_depth fits: 8.4 - 2.4 over 1.5 is 3.99999)
+        (((p.solver.max_depth - p.z0) / p.dz.max(1e-3) + 1e-4).floor().max(0.0) as u32).max(p.rows)
+    }
+
+    /// The floor's columns, ascending, in either growth. Deep: every column
+    /// the view takes in at the floor's far edge -- farther rows hold more,
+    /// and a near square off the side of the stage is refused like any
+    /// candidate that leaves it.
+    pub fn floor_columns(&self) -> Vec<i32> {
+        if !self.grows_deep() {
+            return self.cols.clone();
+        }
+        let n = self.deep_half_cols(self.depth_at(self.rows() as f32));
+        (-n..=n).collect()
+    }
+
+    /// Columns each side of the centre that fit the view at depth `z`,
+    /// cells whole (at least one: the base floor is three wide).
+    fn deep_half_cols(&self, z: f32) -> i32 {
+        let half = (STAGE_W / 2.0 - 30.0) * z / self.params.focal.max(1e-3);
+        let cw = self.cell_w();
+        ((half - cw / 2.0) / cw).floor().max(1.0) as i32
+    }
+
     /// The floor widens sub-linearly: each added column narrows all of
     /// them, keeping a usable aspect ratio instead of flattening to a
-    /// strip.
+    /// strip. Deep growth never narrows a cell: the camera stays.
     pub fn cell_w(&self) -> f32 {
+        if self.grows_deep() {
+            return self.params.cell_w;
+        }
         let n = self.cols.len().max(3) as f32;
         self.params.cell_w * (3.0 / n).powf(0.55)
     }
@@ -577,15 +686,35 @@ impl CreatureField {
     /// used. Zone off, the outermost column each side reverts to margin so
     /// nothing sits flush against the floor's edge.
     fn usable_cols(&self) -> Vec<i32> {
-        if self.params.solver.zone_on || self.cols.len() <= 2 {
-            self.cols.clone()
+        let cols = self.floor_columns();
+        if self.params.solver.zone_on || cols.len() <= 2 {
+            cols
         } else {
-            self.cols[1..self.cols.len() - 1].to_vec()
+            cols[1..cols.len() - 1].to_vec()
         }
     }
 
+    /// Squares a creature may stand on. Deep: only those the view takes in
+    /// at their own row's middle.
     fn n_squares(&self) -> usize {
-        self.usable_cols().len() * self.params.rows as usize
+        if !self.grows_deep() {
+            return self.usable_cols().len() * self.params.rows as usize;
+        }
+        (0..self.rows())
+            .map(|row| {
+                let n = self.deep_half_cols(self.depth_at(row as f32 + 0.5));
+                self.usable_cols().iter().filter(|c| c.abs() <= n).count()
+            })
+            .sum()
+    }
+
+    /// The most growth steps a search may take: columns wide, rows deep.
+    fn growth_limit(&self) -> u32 {
+        if self.grows_deep() {
+            self.max_rows()
+        } else {
+            self.params.max_cols
+        }
     }
 
     fn half_span(&self) -> f32 {
@@ -597,8 +726,15 @@ impl CreatureField {
     }
 
     /// Grow symmetrically, one column each side, keeping the vanishing
-    /// point centred.
+    /// point centred. Deep: one row more at the back, up to `max_depth`.
     fn grow_floor(&mut self) -> bool {
+        if self.grows_deep() {
+            if self.rows() >= self.max_rows() {
+                return false;
+            }
+            self.extra_rows = self.rows() - self.params.rows + 1;
+            return true;
+        }
         if self.cols.len() as u32 + 2 > self.params.max_cols {
             return false;
         }
@@ -610,8 +746,21 @@ impl CreatureField {
     }
 
     /// Shrink one column pair, only when nobody would be left standing on
-    /// (or outside) the new edge.
+    /// (or outside) the new edge. Deep: the back row, when nobody stands in
+    /// it or beside the narrower floor it leaves.
     fn shrink_floor(&mut self) -> bool {
+        if self.grows_deep() {
+            let rows = self.rows();
+            if rows <= self.params.rows {
+                return false;
+            }
+            let n = self.deep_half_cols(self.depth_at((rows - 1) as f32));
+            if self.units.iter().any(|u| u.row >= rows - 1 || u.ci.abs() > n) {
+                return false;
+            }
+            self.extra_rows = rows - 1 - self.params.rows;
+            return true;
+        }
         if self.cols.len() <= 3 {
             return false;
         }
@@ -639,8 +788,12 @@ impl CreatureField {
     // ---- projection (virtual stage) ------------------------------------
 
     /// Effective focal length: shrinks to keep the whole floor on the
-    /// virtual stage (the prototype's autofit, always on).
+    /// virtual stage (the prototype's autofit, always on in wide growth).
+    /// Deep growth keeps the camera's own: the painting's.
     fn f_eff(&self) -> f32 {
+        if self.grows_deep() {
+            return self.params.focal;
+        }
         let hs = self.half_span();
         if hs <= 0.0 {
             return self.params.focal;
@@ -710,7 +863,7 @@ impl CreatureField {
 
     /// The floor's world depth range: near edge .. far edge.
     pub fn depth_range(&self) -> (f32, f32) {
-        (self.depth_at(0.0), self.depth_at(self.params.rows as f32))
+        (self.depth_at(0.0), self.depth_at(self.rows() as f32))
     }
 
     /// Project an arbitrary ground point for scenery: `x` is stage-space
@@ -791,8 +944,9 @@ impl CreatureField {
     /// `r` (0..=rows). For renderers.
     pub fn floor_row_line(&self, r: u32) -> ((f32, f32), (f32, f32)) {
         let z = self.depth_at(r as f32);
-        let lo = self.col_left(*self.cols.first().unwrap());
-        let hi = self.col_left(*self.cols.last().unwrap()) + self.cell_w();
+        let cols = self.floor_columns();
+        let lo = self.col_left(*cols.first().unwrap());
+        let hi = self.col_left(*cols.last().unwrap()) + self.cell_w();
         let y = self.screen_y(z);
         ((self.screen_x(lo, z), y), (self.screen_x(hi, z), y))
     }
@@ -800,13 +954,14 @@ impl CreatureField {
     /// Endpoints (virtual stage) of the floor grid line down column
     /// boundary `k` (0..=columns().len()). For renderers.
     pub fn floor_col_line(&self, k: usize) -> ((f32, f32), (f32, f32)) {
-        let x = if k < self.cols.len() {
-            self.col_left(self.cols[k])
+        let cols = self.floor_columns();
+        let x = if k < cols.len() {
+            self.col_left(cols[k])
         } else {
-            self.col_left(*self.cols.last().unwrap()) + self.cell_w()
+            self.col_left(*cols.last().unwrap()) + self.cell_w()
         };
         let zn = self.depth_at(0.0);
-        let zf = self.depth_at(self.params.rows as f32);
+        let zf = self.depth_at(self.rows() as f32);
         (
             (self.screen_x(x, zn), self.screen_y(zn)),
             (self.screen_x(x, zf), self.screen_y(zf)),
@@ -820,12 +975,13 @@ impl CreatureField {
     /// shrink keep it correct with no cached state. Returns
     /// (centre x, centre z, semi-axis x, semi-axis z).
     fn zone(&self) -> (f32, f32, f32, f32) {
-        let lo = *self.cols.first().unwrap();
-        let hi = *self.cols.last().unwrap();
+        let cols = self.floor_columns();
+        let lo = *cols.first().unwrap();
+        let hi = *cols.last().unwrap();
         let xl = self.col_left(lo);
         let xr = self.col_left(hi) + self.cell_w();
         let zn = self.depth_at(0.0);
-        let zf = self.depth_at(self.params.rows as f32);
+        let zf = self.depth_at(self.rows() as f32);
         let k = 1.0 - self.params.solver.zone_inset;
         (
             (xl + xr) / 2.0,
@@ -958,13 +1114,14 @@ impl CreatureField {
         let wx = (x - STAGE_W / 2.0) * z / self.f_eff().max(1e-3);
         let cell = self.cell_w();
         let ci_f = wx / cell;
+        let cols = self.floor_columns();
         let (lo, hi) = (
-            *self.cols.first().unwrap_or(&0) as f32,
-            *self.cols.last().unwrap_or(&0) as f32,
+            *cols.first().unwrap_or(&0) as f32,
+            *cols.last().unwrap_or(&0) as f32,
         );
         let ci = ci_f.round().clamp(lo, hi);
         let row = (((z - self.params.z0) / self.params.dz - 0.5).round())
-            .clamp(0.0, self.params.rows.saturating_sub(1) as f32);
+            .clamp(0.0, self.rows().saturating_sub(1) as f32);
         let off_z = z - self.depth_at(row + 0.5);
         if let Some(u) = self
             .units
@@ -1208,7 +1365,7 @@ impl CreatureField {
         const NX: usize = 11;
         let mut out = Vec::new();
         for ci in self.usable_cols() {
-            for row in 0..self.params.rows {
+            for row in 0..self.rows() {
                 let occ = self.occupants_of(ci, row);
                 if occ >= self.params.per_square.max(1) as usize + 1 {
                     continue;
@@ -1305,7 +1462,7 @@ impl CreatureField {
         // little overlap; falling through costs a pile-up.
         let mut loose: Option<Placement> = None;
         let mut relax: u32 = 0;
-        for _attempt in 0..(self.params.max_cols + s.relax_steps + 2) {
+        for _attempt in 0..(self.growth_limit() + s.relax_steps + 2) {
             let env_thr = 0.50 + relax as f32 * 0.15;
             let cap_thr = (s.occlusion_cap * (1.0 + relax as f32 * 0.40)).min(0.95);
             // Obstacle spans under THIS attempt's projection: `grow_floor`
@@ -1509,7 +1666,7 @@ impl CreatureField {
         // doesn't stand a short card behind a tall one, marked tight.
         let cols = self.usable_cols();
         let ci = cols[((rng.unit() * cols.len() as f32) as usize).min(cols.len() - 1)];
-        let row = (0..self.params.rows)
+        let row = (0..self.rows())
             .find(|&rw| self.height_penalty(ci, rw, standing.h) == 0)
             .unwrap_or(0);
         Placement {
@@ -2376,6 +2533,8 @@ mod tests {
             separation_basis: Some("card".into()),
             relax_steps: Some(2),
             shuffle_ties: Some(false),
+            grow: Some("deep".into()),
+            max_depth: Some(20.0),
         });
         let s = &p.solver;
         assert!(!s.zone_on);
@@ -2385,6 +2544,7 @@ mod tests {
             (0.2, 1.0, 5, 2)
         );
         assert!(!s.seed_front && !s.fall_reserve_hard && !s.shuffle_ties);
+        assert_eq!((s.grow, s.max_depth), (Growth::Deep, 20.0));
 
         // Out-of-range clamps; unknown vocabulary keeps the current value.
         let mut p = FieldParams::default();
@@ -2394,6 +2554,8 @@ mod tests {
             zone: Some("hexes".into()),
             separation_basis: Some("feet".into()),
             depth_jitter: Some(f32::NAN),
+            grow: Some("sideways".into()),
+            max_depth: Some(1000.0),
             ..Default::default()
         });
         assert_eq!(p.solver.occlusion_cap, 0.95);
@@ -2401,5 +2563,55 @@ mod tests {
         assert!(p.solver.zone_on, "unknown zone word keeps the default");
         assert_eq!(p.solver.separation_basis, SeparationBasis::Contact);
         assert_eq!(p.solver.depth_jitter, d.solver.depth_jitter);
+        assert_eq!((p.solver.grow, p.solver.max_depth), (Growth::Auto, 200.0));
+    }
+
+    fn painted() -> CreatureField {
+        CreatureField::new(FieldParams { painted: true, horizon: 160.0, ..FieldParams::default() })
+    }
+
+    /// Over a painting the camera never moves: however many arrive, the
+    /// focal and the cell stay the scene's, so a prop's place and size on
+    /// the painting and a standing creature's foot do not change; the
+    /// crowd goes to rows added at the back, no farther than max_depth.
+    #[test]
+    fn a_painted_floor_grows_deep_and_the_camera_stays() {
+        let mut f = painted();
+        assert!(f.grows_deep() && f.rows() == 3);
+        let prop = f.project_ground(300.0, 8.0);
+        arrive(&mut f, "first", kobold());
+        let first = f.foot(f.unit_of("first").unwrap());
+        fill_more(&mut f, 1, 24);
+        assert_eq!(f.project_ground(300.0, 8.0), prop, "the prop moved on the painting");
+        assert_eq!(f.foot(f.unit_of("first").unwrap()), first, "the first creature moved");
+        assert!(f.rows() > 3, "the crowd went to rows at the back: {}", f.rows());
+        assert!(f.depth_range().1 <= f.params.solver.max_depth + 1e-3, "past max_depth: {:?}", f.depth_range());
+        // farther rows hold more: the floor is as wide as the view there
+        assert!(f.floor_columns().len() > 3, "{:?}", f.floor_columns());
+        for u in f.units() {
+            let r = f.rect(u);
+            assert!(r.x0 >= 0.0 && r.x1 <= STAGE_W, "off the stage: {r:?}");
+        }
+        // an auto floor on no painting grows wide as it always has
+        let mut plain = CreatureField::new(FieldParams::default());
+        assert!(!plain.grows_deep());
+        fill(&mut plain, 24);
+        assert_eq!(plain.rows(), 3);
+        assert!(plain.columns().len() > 3);
+    }
+
+    /// Deep growth stops at max_depth, and gives the rows back as the room
+    /// empties, the way wide growth gives its columns back.
+    #[test]
+    fn deep_rows_stop_at_max_depth_and_contract_when_the_room_empties() {
+        let mut f = painted();
+        f.params.solver.max_depth = 8.4; // z0 2.4 + 4 rows of 1.5
+        fill(&mut f, 40);
+        assert_eq!(f.rows(), 4, "no row edge past max_depth");
+        let names: Vec<String> = f.units().iter().map(|u| u.members[0].clone()).collect();
+        for n in &names {
+            f.depart(n);
+        }
+        assert_eq!(f.rows(), 3, "empty floor contracts to its base rows");
     }
 }

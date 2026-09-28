@@ -79,6 +79,8 @@ pub fn sparse_solver(params: &FieldParams, base: &FieldParams) -> CreatureFieldS
         }),
         relax_steps: (s.relax_steps != b.relax_steps).then_some(s.relax_steps),
         shuffle_ties: (s.shuffle_ties != b.shuffle_ties).then_some(s.shuffle_ties),
+        grow: (s.grow != b.grow).then(|| gs_field::solver::growth_name(s.grow).to_string()),
+        max_depth: diff(s.max_depth, b.max_depth),
     }
 }
 

@@ -452,6 +452,13 @@ fn paint_scene_prop(
     prop: &gs_field::scenes::SceneProp,
     art_cache: Option<&crate::creature_art::CreatureArtCache>,
 ) {
+// >>>doll
+    // Scenery is part of the painting: clipped to the stage like the
+    // backdrop, so a tall prop (an arch over the road) is cut at the
+    // painting's edge instead of drawing over the panel round it.
+    let clipped = painter.with_clip_rect(map.stage_rect());
+    let painter = &clipped;
+// <<<doll
     let ((fx, fy), px_per_unit) = field.project_ground(prop.x, prop.z);
     let foot = map.pt(fx, fy);
     let art = art_cache.and_then(|c| c.scenery(&prop.image));
@@ -523,6 +530,13 @@ fn paint_field_floor(
     let edge = Stroke::new(1.4, Color32::from_white_alpha(26));
     let cols = field.columns();
     let rows = field.params.rows;
+// >>>doll
+    // Deep growth (solver::Growth) adds rows at the back and widens the
+    // floor with depth: the floor's own rows and columns, not the port's.
+    let _ = (cols, rows);
+    let cols = field.floor_columns();
+    let rows = field.rows();
+// <<<doll
     // Row lines (near/far edges heavier).
     for r in 0..=rows {
         let (a, b) = field.floor_row_line(r);

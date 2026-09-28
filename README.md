@@ -564,7 +564,11 @@ colour of their own, and stay open once opened for the rest of the run
   select, remove, x / z / scale / contact shadow); Camera (focal, cam_h, z0,
   dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
-  and the Solver tunables (*Solver (testing)*). An edit Save would keep
+  and the Solver tunables (*Solver (testing)*). Over a backdrop the camera
+  stays: a crowd fills rows toward the back (`[solver] grow`, `max_depth`,
+  where the painted floor ends; 12 by default) instead of every creature
+  and prop shrinking against the painting, which a scene with no backdrop
+  still does (`grow = "wide"`). An edit Save would keep
   (backdrop, props, lights, light, camera, solver) marks the scene
   "* unsaved"; loading another scene, *Clear stage scene* and closing the
   window then ask Save first / Discard / Cancel (Save needs a name: *New

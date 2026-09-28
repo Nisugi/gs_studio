@@ -499,3 +499,25 @@ text)` (**new functions**): any `tEXt` chunk, not only `vellum-meta`;
 `read_embedded_bytes` / `write_embedded_bytes` are them under `KEYWORD`,
 unchanged. gs-studio's texture sheets carry their UV layout under
 `gs_puppet::LAYOUT_KEYWORD` this way.
+
+### 6.20 `src/solver.rs`: the floor grows deep over a painting
+
+The port's floor grows only sideways: a column pair joins, every cell
+narrows (`cell_w`) and the focal pulls in to keep the floor on the stage
+(`f_eff`) -- the whole field shrinks as the room fills. Over a painted
+backdrop the painting cannot shrink with it, so creatures and props slid
+up it and shrank as a crowd came in.
+
+`solver::Growth` (**a new enum**: `Auto`, `Wide`, `Deep`) and
+`SolverParams::grow` / `max_depth` (**new fields**; TOML `grow`,
+`max_depth` in `[creature_field.solver]`, **new keys**), with
+`FieldParams::painted` (**a new field**, set by
+`cards::resolve_field_params` when the scene drawn has a `background`).
+`Auto` (the default) is `Deep` when painted, else `Wide` -- the port's
+growth, unchanged for a field with no backdrop. `Deep` keeps the camera:
+`cell_w` and the focal stay the scene's, rows join at the back up to
+`max_depth` (12 by default: where the painted floor ends) and give
+themselves back as the room empties, and the floor is as wide as the view
+at its far edge (`CreatureField::floor_columns`, `rows`, `grows_deep`: **new
+methods**; `columns()` stays the wide growth's). A prop's place and size on
+the painting, and every creature's foot, no longer change with the crowd.

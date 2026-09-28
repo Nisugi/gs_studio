@@ -431,6 +431,16 @@ pub struct CreatureFieldSolver {
     /// Shuffle the candidate list so ties don't bias. Default true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shuffle_ties: Option<bool>,
+    /// How the floor makes room for a crowd: "wide" (columns join, the
+    /// field shrinks to fit), "deep" (the camera stays, rows join at the
+    /// back) or "auto" (deep over a painted backdrop). Default "auto".
+    /// ADDITION (not in VellumFE).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grow: Option<String>,
+    /// Deep growth's farthest row edge, world units: where the painted
+    /// floor ends. Default 12. ADDITION.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_depth: Option<f32>,
 }
 
 impl CreatureFieldSolver {

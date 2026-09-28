@@ -506,6 +506,9 @@ pub fn resolve_field_params(
             params.apply_solver(&entry.solver);
         }
     }
+    // A painted backdrop's camera is fixed: the floor grows deep under
+    // `grow = "auto"` (ADDITION; solver::Growth).
+    params.painted = scene.or(default_scene).is_some_and(|s| s.background.is_some());
     params
 }
 
@@ -1167,6 +1170,24 @@ mod resolve_params_tests {
             },
             ..Default::default()
         }
+    }
+
+    /// A scene with a painted backdrop resolves painted, so its floor grows
+    /// deep under "auto"; one without, or a scene that says "wide", does
+    /// not.
+    #[test]
+    fn a_painted_scene_grows_deep_unless_it_says_otherwise() {
+        let none = FieldOverrides::default();
+        let field = |p: crate::solver::FieldParams| crate::solver::CreatureField::new(p).grows_deep();
+        let painted = StageScene { background: Some("scenes/road.png".into()), ..Default::default() };
+        let p = resolve_field_params(None, Some(&painted), None, &none);
+        assert!(p.painted && field(p));
+        assert!(!field(resolve_field_params(None, Some(&scene_with_camera()), None, &none)), "no backdrop: wide");
+        let wide = StageScene { solver: CreatureFieldSolver { grow: Some("wide".into()), ..Default::default() }, ..painted.clone() };
+        assert!(!field(resolve_field_params(None, Some(&wide), None, &none)), "the scene said wide");
+        // a room scene without its own backdrop under a painted default one
+        // is painted only if it is the one drawn: its own (none) wins
+        assert!(!resolve_field_params(Some(&painted), Some(&scene_with_camera()), None, &none).painted);
     }
 
     #[test]

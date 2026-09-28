@@ -949,3 +949,16 @@ second pass's 2048 sheet is accepted beside the usual size. "Bigger" is by
 the layouts, not the side's number: a tier's layout only approximates it
 (a canine's 2048 is 1868 x 2105), and a sheet at its own tier is used as
 it is.
+
+### 7.31 The floor over a painting, and props clipped to it
+
+Two more `creature_field.rs` regions (twenty-two in all,
+`creature_field_is_the_port_plus_marked_additions_only`):
+
+* `paint_field_floor` draws the floor's own rows and columns
+  (`CreatureField::rows` / `floor_columns`), not `params.rows` and
+  `columns()`: over a painted backdrop the floor grows deep, rows joining
+  at the back with the camera fixed (`gs_field` PORTING 6.20), so the
+  port's count left the added rows ungridded.
+* `paint_scene_prop` clips to the stage, as the backdrop always was: a
+  tall prop (an arch over a road) drew over the panel round the stage.
