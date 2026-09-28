@@ -353,23 +353,25 @@ impl StageTool {
         egui::Panel::right("stage_panel").default_size(300.0).min_size(240.0).show(ui, |ui| {
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match panel {
                 StagePanel::Scenes => {
-                    calibrate_scenery = scene_ui(stage, ui);
-                    occluders_ui(stage, ui, &art);
-                    light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
-                    lighting_changed = global_light_ui(ui, lighting, stage);
-                    weather_ui(stage, ui);
-                    ui.separator();
-                    camera_ui(stage, ui);
-                    ui.separator();
-                    solver_ui(stage, ui);
+                    super::section(ui, "stage_scene", "Scene", |ui| scene_ui(stage, ui));
+                    calibrate_scenery = super::section(ui, "stage_props", "Props", |ui| props_ui(stage, ui)).unwrap_or(false);
+                    super::section(ui, "stage_lamps", "Lamps", |ui| lights_ui(stage, ui));
+                    if stage.scene().background.is_some() {
+                        super::section(ui, "stage_occluders", "Occluders", |ui| occluders_ui(stage, ui, &art));
+                    }
+                    super::section(ui, "stage_light", "Scene light", |ui| {
+                        light_ui(stage, ui, auto.as_ref(), lighting, game_hour);
+                        lighting_changed = global_light_ui(ui, lighting, stage);
+                    });
+                    super::section(ui, "stage_weather", "Weather", |ui| weather_ui(stage, ui));
+                    super::section(ui, "stage_camera", "Camera", |ui| camera_ui(stage, ui));
+                    super::section(ui, "stage_solver", "Solver (testing)", |ui| solver_ui(stage, ui));
                 }
                 StagePanel::Preview => {
                     if stage.scene().light.is_some() {
-                        ui.heading("Light");
-                        light_preview_ui(stage, ui, game_hour);
+                        super::section(ui, "stage_light_preview", "Scene light", |ui| light_preview_ui(stage, ui, game_hour));
                     }
-                    weather_ui(stage, ui);
-                    ui.separator();
+                    super::section(ui, "stage_weather", "Weather", |ui| weather_ui(stage, ui));
                     cast_ui(stage, ui)
                 }
             });
@@ -404,8 +406,6 @@ impl crate::quit::QuitGuard for StageTool {
 fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::creature_art::SharedCreatureArt) {
     let Some(bg) = stage.scene().background.clone() else { return };
     let mask = gs_field_egui::field_occluders::mask_path(&bg);
-    ui.separator();
-    ui.heading("Occluders");
     let (count, size) = {
         let cache = art.lock().unwrap_or_else(|e| e.into_inner());
         (cache.occluders(&bg).map(|o| o.blobs.len()), cache.scene_background(&bg).map(|t| t.size()))
@@ -440,9 +440,6 @@ fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::
     });
 }
 
-/// The Scene section: backdrop + scenery props, persisted whole-file to
-/// `global/scenes/<name>.toml`. Returns true when "Calibrate scenery..." was
-/// pressed.
 /// The scene's `[light]`: the scene light read from the backdrop (each value
 /// overridable), time-of-day overrides, and the preview clock. Niffy's
 /// "Stage editor: Light section".
@@ -456,8 +453,6 @@ fn light_ui(
     use gs_field::lighting::{LightChroma, SceneLight, SCENE_BOUNCE_STRENGTH, SCENE_STRENGTH};
     use vellum_light::Phase;
 
-    ui.separator();
-    ui.heading("Light");
     let mut on = stage.scene().light.is_some();
     if ui
         .checkbox(&mut on, "Light this scene")
@@ -592,7 +587,7 @@ const FACINGS: [(&str, Option<f32>); 9] = [
 ];
 
 /// The lighting preview: which game hour the stage shows, and the player's
-/// Lighting strength. On the Scenes panel's Light section and on Preview.
+/// Lighting strength. In the Scene light section, on Scenes and on Preview.
 fn light_preview_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
     ui.label("Time of day");
     ui.horizontal_wrapped(|ui| {
@@ -798,8 +793,9 @@ fn light_phase_row(
 }
 
 
-fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
-    ui.heading("Scene");
+/// The Scene section: which scene is edited, its backdrop and colour,
+/// persisted whole-file to `global/scenes/<name>.toml`.
+fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     // The scene FILENAME is the binding: leading room uid binds that room,
     // otherwise the stem matches room title -> location -> "default".
     // There is no separate bindings store to manage.
@@ -886,9 +882,10 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
             stage.scene_mut().background_color = None;
         }
     });
+}
 
-    ui.separator();
-    ui.heading("Props");
+/// The scene's scenery props. True when "Calibrate scenery..." was pressed.
+fn props_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
     // VellumFE's Stage opened its scenery calibrator window from here; in
     // this app the calibrator is the Scenery tab, so the button goes there.
     // A save over there comes back through `StageTool::art_changed`.
@@ -897,7 +894,7 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
         .on_hover_text("Feet anchor, world size, exclusion edges -- per image. Opens the Scenery tab; the stage is kept.")
         .clicked();
     let pool = gs_field::pool::list_category("scenery");
-    if backgrounds.is_empty() && pool.is_empty() {
+    if pool.is_empty() && gs_field::pool::list_category("scenes").is_empty() {
         ui.weak(
             "Drop PNGs into global/images/scenes (backgrounds, author at 880x470) \
              or global/images/scenery (props)",
@@ -963,15 +960,12 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
             stage.clamp_prop(k);
         }
     }
-    lights_ui(stage, ui);
     calibrate_scenery
 }
 
 /// Point lights on the floor: campfires, torches, glows (`[[lights]]`).
 fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     use gs_field::lighting::LampKind;
-    ui.separator();
-    ui.heading("Lights");
     // The v2 pass: lamps light the backdrop and every body on the GPU, with
     // real falloff and shadows (gs_field_egui::field_gpu_stage).
     let ctx = ui.ctx().clone();
@@ -1205,7 +1199,6 @@ fn new_scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
 fn camera_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     use camera_limits::*;
-    ui.heading("Camera");
     // Studio-only tuning; the game never mutates live params. Edits share
     // the loader's bounds (`camera_limits`): the drags are ranged AND the
     // whole camera re-sanitizes after every frame's edits, so a value that
@@ -1250,11 +1243,6 @@ fn camera_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 }
 
 fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
-    ui.checkbox(&mut stage.show_solver_tuning, "Show solver tuning (testing)");
-    if !stage.show_solver_tuning {
-        return;
-    }
-    ui.heading("Solver");
     ui.weak("Placement tunables. Only future arrivals move -- permanence.");
     let solver = &mut stage.field.params.solver;
     ui.checkbox(&mut solver.zone_on, "Spawn ellipse (off = grid)");
@@ -1302,7 +1290,7 @@ fn solver_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 /// art beats the puppet, so this is the direct way to look at one: it spawns
 /// a real creature of that form forced to draw as the puppet.
 fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
-    egui::CollapsingHeader::new("Puppets").default_open(true).show(ui, |ui| {
+    super::section(ui, "stage_puppets", "Puppets", |ui| {
         ui.checkbox(&mut stage.show_props, "Held weapons").on_hover_text(
             "A puppet holds the first weapon its bestiary entry attacks with (a forest troll its cudgel), \
              shaped by props/weapons.toml",
@@ -1383,11 +1371,17 @@ fn puppets_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     });
 }
 
+/// The Preview panel's creatures: the published puppets, the cast to spawn
+/// from, and who is on the stage.
 fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     puppets_ui(stage, ui);
-    ui.separator();
-    ui.heading("Cast");
-    ui.weak("Built from the ART POOL, so everything here draws as its sprite. Use Puppets above, or a creature's \"Draw as puppet\", to see the 3D puppet.");
+    super::section(ui, "stage_cast", "Cast", |ui| cast_list_ui(stage, ui));
+    super::section(ui, "stage_roster", "Roster", |ui| roster_ui(stage, ui));
+}
+
+/// The cast, from the art pool, to spawn from.
+fn cast_list_ui(stage: &mut StageState, ui: &mut egui::Ui) {
+    ui.weak("Built from the ART POOL, so most of these draw as their sprites (one with a skin of its own draws as its puppet). Use Puppets above, or a creature's \"Draw as puppet\", to see the 3D puppet.");
     ui.horizontal(|ui| {
         ui.add(egui::TextEdit::singleline(&mut stage.filter).hint_text("filter").desired_width(140.0));
         if ui
@@ -1443,9 +1437,10 @@ fn cast_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     if let Some((display, noun)) = spawn_request {
         stage.spawn(&display, Some(noun));
     }
+}
 
-    ui.separator();
-    ui.heading("Roster");
+/// Who is on the stage, and the selected one's simulator.
+fn roster_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         if ui.button("Clear stage").clicked() {
             stage.clear();

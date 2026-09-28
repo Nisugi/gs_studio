@@ -198,14 +198,15 @@ all editable afterwards.
   included), bones, joints, a faint link from each parent's pivot to its
   child's, eye-disc outlines; the selected bone is highlighted and its pivot
   boxed.
-- **Right**: collapsible sections, what needs attention first.
+- **Right**: collapsible sections, what needs attention first, shut until
+  opened (the bone's open as it is clicked).
   **Warnings** (orange when there are any); **Bone: <name>** when a bone is
   selected -- its pixel count, *Parent and pivot*, **Thickness** (below) and
   its joint **Chain** (Up / Down / Remove per joint, *Append joint...*, *Pick
   on canvas*); **Parts** (legend with per-part pixel share); **Anchors and
   eyes** (which joint is head / mouth / saddle / left eye / right eye, and
   the eye radius: Auto or a value); **Depth** (below); **Map** (size /
-  aspect / span, orphan count; closed by default).
+  aspect / span, orphan count).
 
 **Thickness** (the selected bone): *Width* is the same value as the bone
 list's; *Depth* is its half-thickness in the direction the silhouette cannot
@@ -550,7 +551,11 @@ input.
 VellumFE's Studio "Stage", ported: a sandbox room drawn by the production
 renderer (`gs_field_egui::render_creature_field_content`). The two tabs are
 ONE tool sharing one stage -- roster, scene, camera and selection all carry
-across -- and differ only in the right-hand panel:
+across -- and differ only in the right-hand panel. Its sections (Scene,
+Props, Lamps, Occluders, Scene light, Weather, Camera, Solver on Scenes;
+Scene light, Weather, Puppets, Cast, Roster on Preview) start shut, their headings in a
+colour of their own, and stay open once opened for the rest of the run
+(`tools::section`; the Rigs tab's right panel is the same):
 
 - **Scenes**: the scene being edited and Save; *New scene...* (bind by Room
   uid / Room title / Location / Default, with the filename stem previewed and
@@ -559,14 +564,14 @@ across -- and differ only in the right-hand panel:
   select, remove, x / z / scale / contact shadow); Camera (focal, cam_h, z0,
   dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
-  and, behind a checkbox, the Solver tunables. An edit Save would keep
+  and the Solver tunables (*Solver (testing)*). An edit Save would keep
   (backdrop, props, lights, light, camera, solver) marks the scene
   "* unsaved"; loading another scene, *Clear stage scene* and closing the
   window then ask Save first / Discard / Cancel (Save needs a name: *New
   scene...*). With an unsaved rig too, closing asks about the rig first,
   then the scene, whichever tab is showing; Cancel on either keeps the
   window open.
-- **Light** (Scenes, under Backdrop and Color): *Light this scene* adds the
+- **Scene light** (Scenes, after Occluders): *Light this scene* adds the
   scene file's `[light]` table (Niffy's creature-field lighting,
   `gs_field::lighting` + `vellum_light`). Key, Ambient and Ground swatches and
   Saturation show the values read from the backdrop ("auto") and can each be
@@ -630,7 +635,7 @@ across -- and differ only in the right-hand panel:
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
-- **Lights** (Scenes, under Props): *+ Campfire*, *+ Torch*, *+ Glow*,
+- **Lamps** (Scenes, after Props): *+ Campfire*, *+ Torch*, *+ Glow*,
   *+ Lantern* (a shuttered lantern hung on a post, made with its beam),
   *+ Wisp* (a will-o'-the-wisp: no flame, a ball of light that floats,
   drifts and bobs on its own); select one to set its kind, colour, reach,
@@ -649,7 +654,7 @@ across -- and differ only in the right-hand panel:
   away from each lamp -- only what is lower than the flame reaches the
   floor, so a low campfire throws long leg shadows -- as dark as the light
   it blocks (`gs_puppet::ShadowCaster`).
-  *Light on the GPU (v2)* (under Lights, where the wgpu renderer runs; off
+  *Light on the GPU (v2)* (under Lamps, where the wgpu renderer runs; off
   until ticked, then remembered; `GS_STUDIO_V2_LIGHT=1` turns it on for one
   run) swaps that look for Niffy's v2 model (`lights-and-weather.md`):
   every lamp lights the backdrop and every creature from where it is, with

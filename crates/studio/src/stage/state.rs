@@ -139,7 +139,6 @@ pub struct StageState {
     /// Load-list filter box.
     pub scene_filter: String,
     /// Solver tunables are testing-only UI; hidden unless asked for.
-    pub show_solver_tuning: bool,
     /// Scenery-pool filter box.
     pub prop_filter: String,
     /// Lighting preview: the game hour shown (None = the live Elanthian
@@ -229,7 +228,6 @@ impl StageState {
             scene: Arc::new(StageScene::default()),
             scene_name: String::new(),
             scene_filter: String::new(),
-            show_solver_tuning: false,
             prop_filter: String::new(),
             light_hour: None,
             light_strength: 1.0,

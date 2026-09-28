@@ -1634,8 +1634,10 @@ impl RigTool {
 
     // --------------------------------------------------------------- right
 
-    /// Collapsible sections, what needs attention first: warnings, part
-    /// shares, anchors and eyes, depth, then the map's numbers (closed).
+    /// Sections (`super::section`, shut until opened, but for the bone just
+    /// clicked), what needs attention first: warnings (their heading in the
+    /// warning colour while there are any), the selected bone, part shares,
+    /// anchors and eyes, depth, then the map's numbers.
     fn right_panel(&mut self, ui: &mut egui::Ui) {
         let Some(bake) = self.session.last_bake() else {
             ui.label("No silhouette for this family / view.");
@@ -1645,9 +1647,9 @@ impl RigTool {
         let mut all = bake.warnings.clone();
         all.extend(self.session.depth().warnings(self.session.editor.rig()));
         let warn = ui.visuals().warn_fg_color;
-        let title = egui::RichText::new(format!("Warnings ({})", all.len()));
-        let title = if all.is_empty() { title } else { title.color(warn) };
-        egui::CollapsingHeader::new(title).id_salt("rig_sec_warnings").default_open(true).show(ui, |ui| {
+        let title = egui::RichText::new(format!("Warnings ({})", all.len())).heading();
+        let title = title.color(if all.is_empty() { super::section_colour(ui) } else { warn });
+        super::section_rich(ui, "rig_sec_warnings", title, false, |ui| {
             if all.is_empty() {
                 ui.weak("none");
             }
@@ -1658,17 +1660,16 @@ impl RigTool {
 
         if let Some(index) = self.session.editor.selected_bone() {
             let name = self.session.editor.rig().bones.get(index).map(|b| b.name.clone()).unwrap_or_default();
-            egui::CollapsingHeader::new(egui::RichText::new(format!("Bone: {name}")).strong())
-                .id_salt("rig_sec_bone")
-                .default_open(true)
-                .show(ui, |ui| self.bone_details(ui, index));
+            // open: clicking a bone's name asks for its details
+            let title = super::section_title(ui, format!("Bone: {name}"));
+            super::section_rich(ui, "rig_sec_bone", title, true, |ui| self.bone_details(ui, index));
         }
 
         let Some(bake) = self.session.last_bake() else {
             return;
         };
         let baked = &bake.baked;
-        egui::CollapsingHeader::new("Parts").id_salt("rig_sec_parts").default_open(true).show(ui, |ui| {
+        super::section(ui, "rig_sec_parts", "Parts", |ui| {
             egui::Grid::new("rig_shares").num_columns(3).show(ui, |ui| {
                 for (k, part) in PARTS.iter().enumerate() {
                     let share = baked.share(part);
@@ -1691,18 +1692,15 @@ impl RigTool {
         });
 
         let eye_used = baked.eye_radius_ft;
-        egui::CollapsingHeader::new("Anchors and eyes")
-            .id_salt("rig_sec_anchors")
-            .default_open(true)
-            .show(ui, |ui| self.anchors_and_eyes(ui, eye_used));
+        super::section(ui, "rig_sec_anchors", "Anchors and eyes", |ui| self.anchors_and_eyes(ui, eye_used));
 
-        egui::CollapsingHeader::new("Depth").id_salt("rig_sec_depth").default_open(true).show(ui, |ui| self.depth_panel(ui));
+        super::section(ui, "rig_sec_depth", "Depth", |ui| self.depth_panel(ui));
 
         let Some(bake) = self.session.last_bake() else {
             return;
         };
         let baked = &bake.baked;
-        egui::CollapsingHeader::new("Map").id_salt("rig_sec_map").default_open(false).show(ui, |ui| {
+        super::section(ui, "rig_sec_map", "Map", |ui| {
             let grid = baked.map.grid;
             ui.label(format!("{} x {} px at {:.1} px/ft", grid.w, grid.h, baked.px_per_ft));
             ui.label(format!("aspect {:.3}   span {:.3}", baked.metrics.aspect, baked.metrics.span));
