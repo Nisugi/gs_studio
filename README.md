@@ -1200,3 +1200,7 @@ bestiary name token); the stage dresses it on its family's puppet:
 `turnaround` shows an outfit with `TURNAROUND_WEAR=robe,hood`. Save and
 *Reload poses* install both files into the pool's `global/outfits/` (only
 when they parse); Publish ships them to `outfits/`, which `gs_field` embeds.
+Both are always written as the editor sees them: with no `kit.toml` in the
+data root the shipped kit goes out, with no `outfits.toml` a file saying
+nobody wears anything -- so a removed file cannot leave its old copy
+dressing creatures on the stage.

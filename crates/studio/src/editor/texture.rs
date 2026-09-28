@@ -80,16 +80,28 @@ fn masks(outlines: &Outlines, family: &str) -> (Option<Mask>, Option<Mask>) {
 /// The clothing kit (`<data>/outfits/kit.toml`, else the one gs_puppet
 /// ships) and who wears what (`<data>/outfits/outfits.toml`, else nobody).
 pub fn outfits(data_root: &Path) -> Result<(Kit, Outfits), String> {
-    let folder = data_root.join("outfits");
-    let kit = match std::fs::read_to_string(folder.join("kit.toml")) {
-        Ok(text) => Kit::from_toml(&text)?,
-        Err(_) => Kit::shipped().clone(),
-    };
-    let outfits = match std::fs::read_to_string(folder.join("outfits.toml")) {
-        Ok(text) => Outfits::from_toml(&text, &kit)?,
-        Err(_) => Outfits::default(),
-    };
+    let (kit, outfits) = outfit_texts(data_root)?;
+    let kit = Kit::from_toml(&kit)?;
+    let outfits = Outfits::from_toml(&outfits, &kit)?;
     Ok((kit, outfits))
+}
+
+/// Who wears nothing, as a file: what [`ship_outfits`] writes when the data
+/// root has no `outfits.toml`, so the runtime does not fall back to the
+/// assignments compiled into gs_field.
+const NO_OUTFITS: &str = "# No creature wears an outfit: the data root has no outfits.toml\n# (written by gs-studio's texture tool, ship_outfits).\n";
+
+/// The kit's and the assignments' text as [`outfits`] reads them: the data
+/// root's, else the kit gs_puppet ships and nobody wearing anything. A file
+/// that is there but cannot be read is an error, not "none".
+fn outfit_texts(data_root: &Path) -> Result<(String, String), String> {
+    let folder = data_root.join("outfits");
+    let read = |name: &str, missing: &str| match std::fs::read_to_string(folder.join(name)) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(missing.to_string()),
+        Err(e) => Err(format!("{}: {e}", folder.join(name).display())),
+    };
+    Ok((read("kit.toml", gs_puppet::SHIPPED_KIT)?, read("outfits.toml", NO_OUTFITS)?))
 }
 
 /// A name for an outfit, for its templates' folder: its pieces joined by
@@ -504,19 +516,21 @@ pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outli
     Ok((shipped, refused))
 }
 
-/// Put `<data>/outfits/kit.toml` and `outfits.toml` into `into` (the pool's
+/// Put the clothing as the editor sees it into `into` (the pool's
 /// `global/outfits/`, or the publish dir's `outfits/`) -- only when both
-/// parse. Returns the files copied (none when the data root has none).
+/// parse: `kit.toml` and `outfits.toml`, the data root's, else the kit
+/// gs_puppet ships and an explicit "nobody" ([`outfit_texts`]). Both are
+/// always written: copying only the files there left a removed one's old
+/// copy in `into`, and the stage kept dressing creatures the editor showed
+/// bare. Returns the files written.
 pub fn ship_outfits(data_root: &Path, into: &Path) -> Result<Vec<&'static str>, String> {
     outfits(data_root)?;
+    let (kit, outfits) = outfit_texts(data_root)?;
+    std::fs::create_dir_all(into).map_err(|e| format!("{}: {e}", into.display()))?;
     let mut shipped = Vec::new();
-    for name in ["kit.toml", "outfits.toml"] {
-        let from = data_root.join("outfits").join(name);
-        if from.is_file() {
-            std::fs::create_dir_all(into).map_err(|e| format!("{}: {e}", into.display()))?;
-            std::fs::copy(&from, into.join(name)).map_err(|e| format!("{} -> {}: {e}", from.display(), into.display()))?;
-            shipped.push(name);
-        }
+    for (name, text) in [("kit.toml", kit), ("outfits.toml", outfits)] {
+        std::fs::write(into.join(name), text).map_err(|e| format!("{}: {e}", into.join(name).display()))?;
+        shipped.push(name);
     }
     Ok(shipped)
 }
@@ -863,6 +877,38 @@ mod tests {
         let data = std::env::temp_dir().join(format!("gs_studio_texture_{tag}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&data);
         data
+    }
+
+    /// Shipping writes what the editor sees: a removed `outfits.toml` goes
+    /// out as "nobody" (not left as the old copy, nor left for the runtime to
+    /// fill from the assignments compiled into gs_field), a removed kit as
+    /// the shipped one; a file that cannot be read is an error, not "none".
+    #[test]
+    fn shipped_outfits_follow_the_data_root_removals_too() {
+        let data = scratch("outfits_data");
+        let into = scratch("outfits_into");
+        let src = data.join("outfits");
+        std::fs::create_dir_all(&src).unwrap();
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outfits");
+        std::fs::copy(repo.join("kit.toml"), src.join("kit.toml")).unwrap();
+        std::fs::copy(repo.join("outfits.toml"), src.join("outfits.toml")).unwrap();
+        ship_outfits(&data, &into).unwrap();
+        let worn = |dir: &Path| {
+            let kit = Kit::from_toml(&std::fs::read_to_string(dir.join("kit.toml")).unwrap()).unwrap();
+            Outfits::from_toml(&std::fs::read_to_string(dir.join("outfits.toml")).unwrap(), &kit).unwrap().get("grim_gigas_skald").is_some()
+        };
+        assert!(worn(&into), "the skald's outfit ships");
+        std::fs::remove_file(src.join("outfits.toml")).unwrap();
+        std::fs::remove_file(src.join("kit.toml")).unwrap();
+        assert!(!outfits(&data).unwrap().1.get("grim_gigas_skald").is_some(), "the editor: nobody dressed");
+        assert_eq!(ship_outfits(&data, &into).unwrap(), vec!["kit.toml", "outfits.toml"]);
+        assert!(!worn(&into), "the stage still dresses the skald from the old copy");
+        assert_eq!(std::fs::read_to_string(into.join("kit.toml")).unwrap(), gs_puppet::SHIPPED_KIT);
+        // a file there that cannot be read (here a folder by that name)
+        std::fs::create_dir_all(src.join("outfits.toml")).unwrap();
+        assert!(outfits(&data).is_err() && ship_outfits(&data, &into).is_err(), "an unreadable file read as none");
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_dir_all(&into);
     }
 
     /// "Paint" a template solid red, as `<folder>/<view>.png`.

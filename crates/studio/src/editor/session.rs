@@ -1078,7 +1078,10 @@ neck = { rot = [1.0, 0.0, 0.0] }
         assert!(s.status.contains("published to"), "{}", s.status);
         // Two joints already make one bone, so a (one-piece) puppet ships.
         assert!(s.status.contains("puppet built"), "{}", s.status);
-        assert_eq!(names(&out), ["poses", "puppets", "rigs"]);
+        assert_eq!(names(&out), ["outfits", "poses", "puppets", "rigs"]);
+        // no outfits in the data root: the shipped kit and nobody dressed,
+        // as the editor has it (not the embedded assignments left standing)
+        assert_eq!(names(&out.join("outfits")), ["kit.toml", "outfits.toml"]);
         assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml"]);
         assert_eq!(names(&out.join("rigs")), ["humanoid.png", "humanoid.toml"]);
         assert_eq!(names(&out.join("poses")), ["biped.toml"]);
