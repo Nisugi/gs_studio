@@ -794,10 +794,14 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
     mask (`CreatureArtCache::backdrop_depths`, **a new field**, and
     `backdrop_depth`); `backdrop_geo` fits it to metres against the
     camera's flat ground on the near rows (`n = a / z + b`, trimmed of what
-    is not ground), sky past 60 m, normals from the 3D surface, flat ground
-    when the fit fails. A sprite's depth map -- and the bulge of one with
-    none -- is for a figure 1.8 m tall, scaled to the creature's height on
-    the stage.
+    is not ground), normals from the 3D surface, flat ground when the fit
+    fails. The sky is what the model put at about no nearness (under
+    0.008) joined to the top edge, whatever the fit says; everything else
+    stands no farther than 55 m. (It was "past 60 m by the fit": painted
+    mountains became sky with stars on them, and a fit with a negative
+    intercept put a whole sky 12-17 m off, with no star or moon in it.)
+    A sprite's depth map -- and the bulge of one with none -- is for a
+    figure 1.8 m tall, scaled to the creature's height on the stage.
   - Bounce light: `FieldFrame.bounce` (**a new field**; `field_gpu::BOUNCE`,
     1, is the stage's, 0 turns it off). Once a frame, before its pieces, a
     bounce pass draws the frame's direct lamp and moon light -- what each

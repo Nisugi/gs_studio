@@ -691,8 +691,10 @@ colour of their own, and stay open once opened for the rest of the run
   model's relative depth, 16 bit in R and G, near = high) has its real
   shape -- ledges, rocks, slopes, and its sky -- the stage fitting that
   depth to metres against the flat ground its camera sees on the near
-  rows (`field_gpu_stage::backdrop_geo`); one without is flat ground below
-  the horizon and sky above. A sprite with `<art>_depth.png` and
+  rows (`field_gpu_stage::backdrop_geo`); its sky is what the model put
+  farthest (about no nearness) joined to the top edge, so far mountains
+  stay scenery and the stars and moons go behind them. One without is flat
+  ground below the horizon and sky above. A sprite with `<art>_depth.png` and
   `<art>_normal.png` beside it (16-bit depth in R and G over -0.5..2 m from
   its feet for a figure 1.8 m tall, scaled to the creature's height on the
   stage, a glow mask in B; a camera-space normal map, z < 0 toward the

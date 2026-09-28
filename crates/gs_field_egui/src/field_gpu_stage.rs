@@ -64,6 +64,19 @@ const NOMINAL_FIGURE_M: f32 = 1.8;
 const FIT_FARTHEST_M: f32 = 25.0;
 const FIT_NEAREST_M: f32 = 0.5;
 const SKY_M: f32 = 60.0;
+/// Where the sky is comes from the nearness itself, not the fit: a
+/// monocular model gives the sky about 0 (`tools/depth_maps.py` pins its
+/// farthest 0.2% there) and even far mountains more (0.014-0.07 on the snow
+/// backdrop), so nearness under this joined to the top edge is sky. The fit
+/// said "past 60 m" -- and put painted mountains in the sky, stars drawn on
+/// them, while a fit whose intercept fell below 0 put a whole sky 12-17 m
+/// away, no star or moon drawn in it (the Ojandhaart backdrops).
+const SKY_NEAR: f32 = 0.008;
+/// Less sky than this share of the frame is a speck the model got wrong.
+const SKY_MIN_SHARE: f32 = 0.002;
+/// Far scenery that is not sky stands no farther than this, metres: short
+/// of [`SKY_M`], so a mountain is never taken for sky.
+const FAR_M: f32 = 55.0;
 /// Neighbouring backdrop pixels this far apart in depth (a share of it) are
 /// across an edge, not one surface: at the painting's own size, far ground
 /// changes a few percent a row.
@@ -293,6 +306,32 @@ fn smooth(v: &[f32], w: usize, h: usize) -> Vec<f32> {
     pass(&pass(v, true), false)
 }
 
+/// The backdrop's sky (`w` x `h`, row by row): nearness under [`SKY_NEAR`]
+/// joined to the top edge -- a far tunnel mouth or a window low in a wall is
+/// as far, but walled in, and stays what it is. All false when there is less
+/// of it than [`SKY_MIN_SHARE`] of the frame.
+fn sky_of(near: &[f32], w: usize, h: usize) -> Vec<bool> {
+    let mut sky = vec![false; w * h];
+    let mut todo: Vec<usize> = (0..w).filter(|&i| near[i] < SKY_NEAR).collect();
+    for &k in &todo {
+        sky[k] = true;
+    }
+    while let Some(k) = todo.pop() {
+        let (i, j) = (k % w, k / w);
+        let around = [(i > 0).then(|| k - 1), (i + 1 < w).then(|| k + 1), (j > 0).then(|| k - w), (j + 1 < h).then(|| k + w)];
+        for n in around.into_iter().flatten() {
+            if !sky[n] && near[n] < SKY_NEAR {
+                sky[n] = true;
+                todo.push(n);
+            }
+        }
+    }
+    if (sky.iter().filter(|&&s| s).count() as f32) < SKY_MIN_SHARE * (w * h) as f32 {
+        sky.fill(false);
+    }
+    sky
+}
+
 /// Where a backdrop's relative depth lives: `<stem>.depth.png` beside it.
 pub fn depth_path(background: &str) -> String {
     let stem = background.rsplit_once('.').map_or(background, |(s, _)| s);
@@ -304,19 +343,22 @@ pub fn depth_path(background: &str) -> String {
 /// on the painting's lower part against the flat ground this camera sees
 /// there (rows [`FIT_NEAREST_M`]..[`FIT_FARTHEST_M`] away), twice more
 /// without the pixels that disagree most (a rock, a trunk: not ground).
-/// Then every pixel has its depth; what the fit puts past [`SKY_M`], or
-/// no nearer than the far limit, is sky. Normals from the surface in 3D.
+/// Then every pixel has its depth. The sky is what the model put at about
+/// no nearness, joined to the top edge ([`SKY_NEAR`]), whatever the fit
+/// makes of it; everything else stands no farther than [`FAR_M`], so far
+/// scenery is never sky. Normals from the surface in 3D.
 /// None when the fit fails (too little ground, or nearness that does not
 /// grow toward the camera): the flat ground stands in.
 pub fn backdrop_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4], rel: &RelDepth) -> Option<Vec<[f32; 4]>> {
     if w < 3 || h < 3 || rel.w == 0 || rel.h == 0 {
         return None;
     }
-    let near: Vec<f32> = (0..h).flat_map(|j| (0..w).map(move |i| (i, j))).map(|(i, j)| rel.at((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32)).collect();
+    let raw: Vec<f32> = (0..h).flat_map(|j| (0..w).map(move |i| (i, j))).map(|(i, j)| rel.at((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32)).collect();
+    let open_sky = sky_of(&raw, w, h);
     // A monocular model works at about 518 px and its depth is scaled up:
     // a ripple every few pixels, which slopes turn into streaks under a
     // grazing lamp. Smoothed away first (a 1-4-6-4-1 kernel, twice, each way).
-    let near = smooth(&smooth(&near, w, h), w, h);
+    let near = smooth(&smooth(&raw, w, h), w, h);
     let row_y = |j: usize| rect[1] + (j as f32 + 0.5) * rect[3] / h as f32;
     let col_x = |i: usize| rect[0] + (i as f32 + 0.5) * rect[2] / w as f32;
     // the fit: nearness against 1 / ground depth, on the near ground
@@ -353,7 +395,15 @@ pub fn backdrop_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4], re
     if !(a > 1e-4) {
         return None;
     }
-    let depth: Vec<f32> = near.iter().map(|&n| if n - b > 1e-5 { (a / (n - b)).clamp(0.3, 100.0) } else { 100.0 }).collect();
+    let depth: Vec<f32> = near
+        .iter()
+        .zip(&open_sky)
+        .map(|(&n, &sky)| match sky {
+            true => 100.0,
+            false if n - b > 1e-5 => (a / (n - b)).clamp(0.3, FAR_M),
+            false => FAR_M,
+        })
+        .collect();
     let sky = |z: f32| z > SKY_M;
     let point = |i: usize, j: usize| {
         let z = depth[j * w + i];
@@ -1231,7 +1281,8 @@ mod tests {
                 let (i, j) = (k % w, k / w);
                 let z = flat[k][3];
                 if z >= 100.0 {
-                    0.01
+                    // the sky: where depth_maps.py pins a model's farthest
+                    0.0
                 } else if rock(i, j) {
                     0.05 + 0.6 / 3.0
                 } else {
@@ -1263,6 +1314,39 @@ mod tests {
         let flat_near = RelDepth { w, h, near: vec![0.5; w * h] };
         assert_eq!(backdrop_geo(&cam, w, h, rect, &flat_near), None, "nearness that does not grow toward the camera");
         assert_eq!(depth_path("scenes/forest.png"), "scenes/forest.depth.png");
+    }
+
+    /// The sky is where the model put no nearness, not where the fit puts
+    /// 60 m: a fit whose intercept falls below 0 still has its sky (the
+    /// Ojandhaart backdrops' came out 12-17 m away, no star drawn in it), and
+    /// a mountain the fit puts past 60 m is far ground, not sky (stars were
+    /// drawn on the snow backdrop's peaks). A far window walled in is not sky.
+    #[test]
+    fn the_sky_is_what_the_model_put_farthest_not_past_60_m() {
+        let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
+        let (w, h) = (176, 94);
+        let rect = [0.0, 0.0, 880.0, 470.0];
+        let flat = ground_geo(&cam, w, h, rect);
+        // ground nearness 0.6 / z - 0.02: the intercept below 0
+        let ground = |z: f32| (0.6 / z - 0.02).max(0.0);
+        let peak = |i: usize, j: usize| (60..100).contains(&i) && (12..19).contains(&j);
+        let window = |i: usize, j: usize| (140..150).contains(&i) && (40..44).contains(&j);
+        let near: Vec<f32> = (0..w * h)
+            .map(|k| {
+                let (i, j) = (k % w, k / w);
+                match (flat[k][3] >= 100.0, peak(i, j), window(i, j)) {
+                    (_, true, _) => 0.02,
+                    (_, _, true) => 0.0,
+                    (true, ..) => 0.0,
+                    _ => ground(flat[k][3]),
+                }
+            })
+            .collect();
+        let geo = backdrop_geo(&cam, w, h, rect, &RelDepth { w, h, near }).expect("a fit");
+        let at = |i: usize, j: usize| geo[j * w + i][3];
+        assert!(at(20, 2) > SKY_M && at(160, 5) > SKY_M, "the sky is sky: {} {}", at(20, 2), at(160, 5));
+        assert!(at(80, 15) <= FAR_M, "a far peak is far ground: {}", at(80, 15));
+        assert!(at(145, 42) <= FAR_M, "a far window walled in is not sky: {}", at(145, 42));
     }
 
     #[test]
