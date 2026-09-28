@@ -889,3 +889,13 @@ by the pass (flame, sparks, stick; the mote's glow). Off by default.
 VellumFE: call `field_gpu::init` in its eframe creation closure and
 `field_gpu_stage::set_enabled` from a setting to use it; without either,
 nothing changes.
+
+### 7.30 Texture detail
+
+`creature_puppet::set_texture_detail(side)` / `texture_detail()`: the
+longest side of sheet a puppet's skin is drawn from (a graphics tier; one
+of `gs_puppet::SHEET_SIDES`, 2048 by default). A skin built bigger is laid
+out again at that size, filtered, when it loads
+(`gs_puppet::Texture::resampled`); a change reloads every skin. Skins load
+at whichever sheet size they were built at (`UvLayout::fit_to`), so a
+second pass's 2048 sheet is accepted beside the usual size.

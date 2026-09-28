@@ -10,7 +10,7 @@
 //!
 //! | File | Who writes it | What it is |
 //! |---|---|---|
-//! | `front_paint.png`, `side_paint.png`, `back_paint.png` | Export | the silhouettes to paint over (the back is the front mirrored), dressed in the outfit's |
+//! | `front_paint.png`, `side_paint.png`, `back_paint.png` | Export | the silhouettes to paint over (the back is the front mirrored; the side with any arm drawn raised hanging, `gs_puppet::side_silhouette`), dressed in the outfit's |
 //! | `front_depth.png`, `side_depth.png`, `back_depth.png` | Export | the rest body's depth in each template's frame, at [`DEPTH_SCALE`] times its size: a depth guide for an image generator |
 //! | `marks.json` | Export | where the puppet's eyes are in each template (a painting puts the eyes there) |
 //! | `pattern.png`, `patches.txt` | Export | the skin cut open (`gs_puppet::uv`): the sheet's layout |
@@ -31,7 +31,7 @@
 use std::path::{Path, PathBuf};
 
 use gs_puppet::{
-    depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
+    depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, side_silhouette, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
     Paintings, Puppet, Texture, UvLayout, LAYOUT_KEYWORD, MASK_PX, SHEET_SIDE,
 };
 use rig::{Outlines, View};
@@ -127,6 +127,8 @@ impl Dressed {
     /// The family bare, or wearing `outfit`.
     pub fn new(puppet: &Puppet, outlines: &Outlines, family: &str, outfit: Option<(&Outfit, &Kit)>) -> Dressed {
         let (front, side) = masks(outlines, family);
+        // an A-pose's side is painted with its arms hanging (gs_puppet::prefill)
+        let side = side.map(|m| side_silhouette(puppet, &m));
         let Some((outfit, kit)) = outfit.filter(|(o, _)| !o.pieces.is_empty()) else {
             return Dressed { puppet: puppet.clone(), front, side, outfit: None };
         };
@@ -217,6 +219,24 @@ pub fn stale_sheet(path: &Path, layout: &UvLayout) -> Option<String> {
     match gs_field::png_meta::read_text_bytes(&bytes, LAYOUT_KEYWORD) {
         Some(sig) if !layout.matches(&sig) => Some(format!("{name} was built for another layout of this rig")),
         _ => None,
+    }
+}
+
+/// [`stale_sheet`] against whichever of the sheet sizes `puppet` lays out at
+/// the sheet's own size (`UvLayout::fit_to`: a sheet from a second pass is
+/// laid out bigger); None when it is current.
+pub fn stale_sheet_for(path: &Path, puppet: &Puppet) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let name = path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    if bytes.len() < 24 {
+        // too short to say its size: as the usual sheet ([`stale_sheet`])
+        return stale_sheet(path, &UvLayout::fit(puppet, SHEET_SIDE));
+    }
+    let be = |i: usize| u32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]) as usize;
+    let (w, h) = (be(16), be(20));
+    match UvLayout::fit_to(puppet, w, h) {
+        Some(layout) => stale_sheet(path, &layout),
+        None => Some(format!("{name} is {w}x{h}, no pattern size of this rig")),
     }
 }
 
@@ -335,7 +355,9 @@ pub fn build_sheet_in(folder: &Path, d: &Dressed) -> Result<(PathBuf, usize), St
         ));
     }
     let paintings = d.paintings(as_painting(&front_px), as_painting(&side_px), as_painting(&back_px));
-    let layout = UvLayout::fit(&d.puppet, SHEET_SIDE);
+    // paintings from a second pass (2160 tall) go on a bigger sheet
+    let tallest = [&front_px, &side_px, &back_px].iter().filter_map(|p| p.as_ref().map(|(_, h, _)| *h)).max().unwrap_or(0);
+    let layout = UvLayout::fit(&d.puppet, gs_puppet::sheet_side_for(tallest));
     let rgba = prefill(&d.puppet, &layout, &paintings);
     let path = folder.join(SHEET);
     write_png(&path, layout.w, layout.h, &rgba)?;
@@ -458,11 +480,11 @@ pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outli
         let normal = sheet.with_file_name(NORMAL_SHEET);
         let normal_to = puppets.join(gs_field::puppets::skin_normal_file_name(family, creature));
         // laid out for the creature's own figure: the family's, in its outfit
-        let layout = match puppet {
-            Some(p) => Some(UvLayout::fit(&Dressed::creature(data_root, p, outlines, family, creature)?.puppet, SHEET_SIDE)),
+        let figure = match puppet {
+            Some(p) => Some(Dressed::creature(data_root, p, outlines, family, creature)?.puppet),
             None => None,
         };
-        if let Some(why) = layout.as_ref().and_then(|l| stale_sheet(sheet, l)) {
+        if let Some(why) = figure.as_ref().and_then(|f| stale_sheet_for(sheet, f)) {
             let _ = std::fs::remove_file(&to);
             let _ = std::fs::remove_file(&normal_to);
             refused.push(format!("{creature}: {why}"));
@@ -471,7 +493,7 @@ pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outli
         std::fs::copy(sheet, &to).map_err(|e| format!("{} -> {}: {e}", sheet.display(), to.display()))?;
         shipped += 1;
         if normal.is_file() {
-            if let Some(why) = layout.as_ref().and_then(|l| stale_sheet(&normal, l)) {
+            if let Some(why) = figure.as_ref().and_then(|f| stale_sheet_for(&normal, f)) {
                 let _ = std::fs::remove_file(&normal_to);
                 refused.push(format!("{creature}: {why}"));
             } else {

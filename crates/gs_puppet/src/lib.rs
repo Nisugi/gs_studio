@@ -72,11 +72,11 @@ pub use outfit::{Cut, Hang, Kit, Outfit, Outfits, Piece, SHIPPED_KIT};
 pub use paint::paint;
 pub use prefill::{bump_sheet, prefill_normals};
 pub use pose::{flinch_envelope, BonePose, FamilyPoses, Idle, IdleBone, Limit, Pose, PoseOverride, PoseSet, Posed, FLINCH_REGIONS, FLINCH_SECS, SHIPPED_POSES};
-pub use prefill::{depth_guide, dressed_silhouette, prefill, project_view, puppet_eyes, PaintView, Painting, Paintings, GRAZING};
+pub use prefill::{depth_guide, dressed_silhouette, normal_guide, prefill, project_view, puppet_eyes, side_silhouette, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinSurface};
-pub use uv::{silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, SHEET_SIDE};
+pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, SHEET_SIDE, SHEET_SIDES};
 pub use puppet::{plan_shift, side_for_plan, turned_head_up, Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]

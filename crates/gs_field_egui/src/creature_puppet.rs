@@ -39,6 +39,24 @@ use std::sync::{Arc, Mutex, OnceLock};
 use gs_field::puppets::PuppetRigs;
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
 
+/// The texture detail, a graphics tier's: the longest side of sheet a
+/// puppet's skin is drawn from, pixels (one of `gs_puppet::SHEET_SIDES`).
+/// A skin built bigger (a second pass's 2048 sheet) is laid out again at
+/// this size, filtered, when it loads (`gs_puppet::Texture::resampled`);
+/// one built smaller is used as it is. 2048 by default. ADDITION (not in
+/// VellumFE).
+static TEXTURE_DETAIL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(2048);
+
+/// Set [`texture_detail`]: skins already loaded are loaded again at it.
+pub fn set_texture_detail(side: usize) {
+    TEXTURE_DETAIL.store(side, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// See [`set_texture_detail`].
+pub fn texture_detail() -> usize {
+    TEXTURE_DETAIL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Creatures (by exist id, no leading '#') the HOST wants drawn as their
 /// family's puppet even when sprite art resolves: a studio previewing a
 /// puppet, or a client setting. Kept per `egui::Context`, like the caches,
@@ -959,6 +977,8 @@ pub struct PuppetCache {
     puppets: HashMap<Arc<str>, Option<Arc<Puppet>>>,
     /// Decoded `<family>.texture.png` sheets (None = none, or unusable).
     textures: HashMap<Arc<str>, Option<Arc<gs_puppet::Texture>>>,
+    /// The [`texture_detail`] they were loaded at.
+    texture_side: usize,
     parts: HashMap<Arc<str>, Arc<[String]>>,
     pose_sets: HashMap<Arc<str>, Option<Arc<PoseSet>>>,
     resolved: HashMap<u64, Option<Arc<str>>>,
@@ -1302,6 +1322,12 @@ impl PuppetCache {
     /// warning). A creature in an outfit with no skin of its own wears none:
     /// the family's sheet has no garments on it.
     pub fn texture(&mut self, family: &Arc<str>) -> Option<Arc<gs_puppet::Texture>> {
+        if self.texture_side != texture_detail() {
+            // another tier: the skins, and every figure drawn in them, again
+            self.textures.clear();
+            self.posed.clear();
+            self.texture_side = texture_detail();
+        }
         if let Some(hit) = self.textures.get(family) {
             return hit.clone();
         }
@@ -1331,12 +1357,15 @@ impl PuppetCache {
             (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(img) => {
                     let img = img.to_rgba8();
-                    let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
+                    // laid out at whichever sheet size this one is (a sheet from
+                    // a second pass is bigger), else the usual one -- refused below
+                    let fitted = gs_puppet::UvLayout::fit_to(&puppet, img.width() as usize, img.height() as usize);
+                    let layout = fitted.clone().unwrap_or_else(|| gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE));
                     // A sheet stamped with the layout it was built for must be
                     // this one's (the same size can be laid out differently);
                     // one from before stamps goes by its size.
                     let built_for_this = |b: &[u8]| gs_field::png_meta::read_text_bytes(b, gs_puppet::LAYOUT_KEYWORD).is_none_or(|sig| layout.matches(&sig));
-                    if (img.width() as usize, img.height() as usize) == (layout.w, layout.h) && built_for_this(&bytes[..]) {
+                    if fitted.is_some() && built_for_this(&bytes[..]) {
                         let normal = normal_bytes.and_then(|bytes| match image::load_from_memory(&bytes) {
                             Ok(n) => {
                                 let n = n.to_rgba8();
@@ -1356,7 +1385,14 @@ impl PuppetCache {
                         // No normal sheet shipped: the paint's own detail
                         // as relief (gs_puppet::bump_sheet), made once here.
                         let normal = normal.or_else(|| Some(gs_puppet::bump_sheet(&puppet, &layout, &rgba)));
-                        Some(Arc::new(gs_puppet::Texture { layout, rgba, normal }))
+                        let texture = gs_puppet::Texture { layout, rgba, normal };
+                        // bigger than the texture detail allows: laid out again
+                        // at that size, filtered ([`set_texture_detail`])
+                        let cap = texture_detail();
+                        let long = texture.layout.w.max(texture.layout.h);
+                        let side = gs_puppet::SHEET_SIDES.iter().copied().filter(|&s| s <= cap.max(gs_puppet::SHEET_SIDES[0])).max().unwrap_or(gs_puppet::SHEET_SIDE);
+                        let texture = if long > side { texture.resampled(&puppet, side) } else { texture };
+                        Some(Arc::new(texture))
                     } else {
                         tracing::warn!(
                             "puppet '{family}': texture ({}x{}) is not laid out for this puppet ({}x{}; painted for an older rig?)",

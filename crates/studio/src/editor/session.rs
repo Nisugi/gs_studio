@@ -501,14 +501,14 @@ impl Session {
         // A sheet built for another layout of the rig (it changed since, at
         // the same size) is not shipped: the game would smear its paint.
         let saved = self.saved_puppet(&family);
-        let layout = saved.as_ref().map(|p| gs_puppet::UvLayout::fit(p, gs_puppet::SHEET_SIDE));
+        let figure = saved.as_ref();
         let mut refused = Vec::new();
         let sheets = [
             (super::texture::sheet_path(&self.data_root, &family), gs_field::puppets::texture_file_name(&family)),
             (super::texture::normal_sheet_path(&self.data_root, &family), gs_field::puppets::normal_file_name(&family)),
         ];
         for (sheet, published) in sheets {
-            let stale = layout.as_ref().filter(|_| sheet.is_file()).and_then(|l| super::texture::stale_sheet(&sheet, l));
+            let stale = figure.filter(|_| sheet.is_file()).and_then(|p| super::texture::stale_sheet_for(&sheet, p));
             if sheet.is_file() && stale.is_none() {
                 let to = dir.join("puppets").join(&published);
                 std::fs::create_dir_all(dir.join("puppets")).map_err(|e| e.to_string())?;
@@ -725,7 +725,7 @@ impl Session {
         // The painted texture rides beside the puppet (or goes with it), and
         // so do its creatures' skins.
         let saved = self.saved_puppet(family);
-        let layout = saved.as_ref().map(|p| gs_puppet::UvLayout::fit(p, gs_puppet::SHEET_SIDE));
+        let figure = saved.as_ref();
         let mut refused = Vec::new();
         let sheets = [
             (super::texture::sheet_path(&self.data_root, family), gs_field::puppets::texture_file_name(family)),
@@ -733,7 +733,7 @@ impl Session {
         ];
         for (sheet, name) in sheets {
             let installed = global.join("puppets").join(name);
-            let stale = layout.as_ref().filter(|_| sheet.is_file()).and_then(|l| super::texture::stale_sheet(&sheet, l));
+            let stale = figure.filter(|_| sheet.is_file()).and_then(|p| super::texture::stale_sheet_for(&sheet, p));
             if sheet.is_file() && stale.is_none() {
                 std::fs::create_dir_all(global.join("puppets")).map_err(|e| e.to_string())?;
                 std::fs::copy(&sheet, &installed).map_err(|e| format!("{} -> {}: {e}", sheet.display(), installed.display()))?;

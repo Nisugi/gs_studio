@@ -899,6 +899,14 @@ impl Puppet {
                 }
             };
             let local = Xf::about(s.head, r);
+            // Held in a hand the hang turned (palm to the thigh,
+            // [`Puppet::arm_hang`]): turned back about the wrist first, so it
+            // points where it was built to -- the grip is made from where the
+            // hand points, not which way its palm faces.
+            let local = match s.parent.filter(|_| hang && s.kind.is_prop()).and_then(|p| Some((self.segments[p].head, self.hand_turn(p)?))) {
+                Some((wrist, turn)) => Xf::about(wrist, transpose(turn)).then_inner(&local),
+                None => local,
+            };
             let parent = s.parent.map(|p| xf[p]).unwrap_or(root);
             xf.push(parent.then_inner(&local));
         }

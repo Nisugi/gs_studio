@@ -16,7 +16,7 @@
 
 use std::collections::HashSet;
 
-use crate::math::{add, axis_angle, len, mul_mv, sub, M3, V3};
+use crate::math::{add, axis_angle, len, mul_mm, mul_mv, norm_or, sub, transpose, Xf, IDENTITY, M3, V3};
 use crate::puppet::{Kind, Puppet};
 
 /// How far out a raised arm's upper arm is taken to hang when the builder
@@ -45,6 +45,17 @@ const CLEAR_FT: f32 = 0.02;
 const SHOULDER_SHARE: f32 = 0.6;
 /// Degrees a step while turning an arm down.
 const STEP_DEG: f32 = 0.5;
+/// How far a hanging hand turns about its own length, palm to the thigh.
+const HAND_TURN_DEG: f32 = 90.0;
+/// How far a relaxed arm bends at the elbow (the pose files' `bend`,
+/// negative flexes): what the side paint-over view hangs its arms with
+/// ([`Puppet::with_arms_hung`]), as a painter draws an arm at rest.
+const RELAXED_ELBOW_DEG: f32 = -12.0;
+
+/// A hand: a mitten, or a segment the rig files as a hand.
+fn is_hand(s: &crate::Segment) -> bool {
+    s.kind == Kind::Hand || s.part.as_deref().is_some_and(|p| p.ends_with("Hand"))
+}
 
 /// The collarbone's turn for an arm posed `r` (its rotation about the
 /// shoulder, in the collarbone's frame, hang included): about the
@@ -148,11 +159,77 @@ impl Puppet {
                 .fold(hang, f32::max);
             let drawn = out_deg(sub(segs[a].tail, segs[a].head));
             if drawn - hang >= HANG_MIN_DEG {
-                out.push((a, axis_angle([0.0, 0.0, 1.0], side * (hang - drawn))));
+                let arm = axis_angle([0.0, 0.0, 1.0], side * (hang - drawn));
+                out.push((a, arm));
                 out.extend(forearm);
+                // The hand turns its palm to the thigh. Raised, it faces the
+                // viewer (the sheet draws it broad); hanging, a hand lies flat
+                // against the leg, broad from the side -- as a painter draws
+                // the side view -- so a quarter turn about its own length,
+                // the way that brings the palm (the face the front view saw)
+                // round toward the body.
+                let hand = self.subtree(a).into_iter().find(|&k| k != a && segs[k].chain_index == 0 && is_hand(&segs[k]));
+                if let Some(h) = hand {
+                    let d = norm_or(sub(segs[h].tail, segs[h].head), [0.0, -1.0, 0.0]);
+                    let fore = forearm.map_or(IDENTITY, |(_, m)| m);
+                    let palm = |deg: f32| mul_mv(&mul_mm(&arm, &mul_mm(&fore, &axis_angle(d, deg))), [0.0, 0.0, 1.0]);
+                    let deg = if palm(HAND_TURN_DEG)[0] * side < 0.0 { HAND_TURN_DEG } else { -HAND_TURN_DEG };
+                    out.push((h, axis_angle(d, deg)));
+                }
             }
         }
         out
+    }
+
+    /// The turn a hanging hand takes ([`Puppet::arm_hangs`]), for segment
+    /// `i` when it is a hand that has one.
+    pub(crate) fn hand_turn(&self, i: usize) -> Option<&M3> {
+        let s = self.segments.get(i)?;
+        if !is_hand(s) {
+            return None;
+        }
+        self.arm_hang.iter().find(|(k, _)| *k == i).map(|(_, m)| m)
+    }
+
+    /// The figure with its raised arms hung ([`Puppet::arm_hang`]: hands
+    /// turned to the thighs) and bent a little at the elbow
+    /// ([`RELAXED_ELBOW_DEG`]), in the rest frame -- standing where it
+    /// stands as drawn, only the arms and what hangs from them moved -- and
+    /// each segment's move (rest -> hung; the identity for all but the
+    /// arms). What the side paint-over view is drawn and projected through
+    /// ([`crate::prefill`]): from the side an A-pose's arm lines up with the
+    /// body and the sheet does not show it, but a painter draws it hanging
+    /// at rest down the flank, the forearm a little forward, the hand flat
+    /// against the thigh -- so the side's paint of an arm belongs on such an
+    /// arm. None when no arm hangs.
+    pub fn with_arms_hung(&self) -> Option<(Puppet, Vec<Xf>)> {
+        if self.arm_hang.is_empty() {
+            return None;
+        }
+        // hung (hands turned to the thighs) and relaxed at the elbow, against
+        // the figure as drawn, whose placing is undone
+        let relaxed = crate::Pose { bones: [("arm".to_owned(), crate::BonePose::euler([0.0; 3], vec![RELAXED_ELBOW_DEG]))].into_iter().collect(), ..crate::Pose::default() };
+        let (hung, drawn) = (self.pose_with(&relaxed, true, false), self.pose_with(&crate::Pose::default(), false, false));
+        // undo the drawn figure's own placing (its grounding), keep the hang
+        let undo = |x: &Xf| {
+            let r = transpose(&x.r);
+            Xf { r, t: mul_mv(&r, [-x.t[0], -x.t[1], -x.t[2]]) }
+        };
+        let moves: Vec<Xf> = hung.xf.iter().zip(&drawn.xf).map(|(h, d)| undo(d).then_inner(h)).collect();
+        let mut p = self.clone();
+        for (s, x) in p.segments.iter_mut().zip(&moves) {
+            (s.head, s.tail) = (x.point(s.head), x.point(s.tail));
+            (s.axis_w, s.axis_d, s.hinge) = (x.dir(s.axis_w), x.dir(s.axis_d), x.dir(s.hinge));
+            for st in &mut s.stations {
+                st.c = x.point(st.c);
+            }
+        }
+        for e in &mut p.eyes {
+            let x = &moves[e.segment];
+            (e.pos, e.normal) = (x.point(e.pos), x.dir(e.normal));
+        }
+        p.arm_hang.clear();
+        Some((p, moves))
     }
 
     /// Does the arm `chain` (first segment `root`), turned by `r` about
@@ -231,7 +308,8 @@ mod tests {
     #[test]
     fn raised_arms_hang_for_posing() {
         let p = humanoid(true);
-        assert_eq!(p.arm_hang.iter().filter(|(k, _)| p.segments[*k].chain_index == 0).count(), 2, "both arms");
+        let is_arm = |k: usize| p.segments[k].chain_index == 0 && p.segments[k].part.as_deref().is_some_and(|q| q.ends_with("Arm"));
+        assert_eq!(p.arm_hang.iter().filter(|(k, _)| is_arm(*k)).count(), 2, "both arms");
         let drawn = p.pose_as_drawn(&Pose::default());
         let posed = p.pose(&Pose::default());
         for bone in ["arm_r", "arm_l"] {
@@ -251,7 +329,7 @@ mod tests {
         // a hanging arm keeps clear of the body
         let hung: Vec<(usize, M3)> = p.arm_hang.clone();
         let body: Vec<usize> = (0..p.segments.len()).filter(|&i| p.segments[i].kind.is_body() && !hung.iter().any(|(a, _)| p.subtree(*a).contains(&i))).collect();
-        for (a, r) in hung.iter().filter(|(k, _)| p.segments[*k].chain_index == 0) {
+        for (a, r) in hung.iter().filter(|(k, _)| is_arm(*k)) {
             let side = if p.segments[*a].tail[0] < 0.0 { -1.0 } else { 1.0 };
             let forearm = hung.iter().find(|(f, _)| p.segments[*f].parent == Some(*a) && p.segments[*f].chain_index == 1).copied();
             assert!(p.arm_clear(&p.subtree(*a), *a, p.segments[*a].head, r, side, &body, forearm.as_ref()));
@@ -273,5 +351,73 @@ mod tests {
         // the baked puppet keeps the flag, and its arms hang the same
         let back = Puppet::from_baked(&p.to_baked()).unwrap();
         assert!(back.arms_raised && back.arm_hang == p.arm_hang);
+    }
+
+    /// Hanging, a hand lies flat against the thigh: broad from the side (its
+    /// wide axis along z, as a painter draws the side view), and the face
+    /// the front view saw -- the palm -- turned toward the body.
+    #[test]
+    fn a_hanging_hand_turns_its_palm_to_the_thigh() {
+        let p = humanoid(true);
+        let posed = p.pose(&Pose::default());
+        for bone in ["hand_r", "hand_l"] {
+            let i = p.segments.iter().position(|s| s.bone == bone && s.chain_index == 0).expect(bone);
+            assert!(p.hand_turn(i).is_some(), "{bone} turns");
+            let x = &posed.xf[i];
+            let wide = x.dir(p.segments[i].axis_w);
+            assert!(wide[2].abs() > 0.8, "{bone} is broad from the side: {wide:?}");
+            let palm = x.dir([0.0, 0.0, 1.0]);
+            let side = x.point(p.segments[i].head)[0].signum();
+            assert!(palm[0] * side < -0.5, "{bone}'s palm faces the body: {palm:?}");
+        }
+    }
+
+    /// A weapon held in a turned hand points where it did with the hand
+    /// unturned: the grip is made from where the hand points.
+    #[test]
+    fn a_held_weapon_keeps_its_aim_when_the_hand_turns() {
+        let p = humanoid(true);
+        let set = crate::PropSet::shipped();
+        let sword = set.prop(set.weapon("broadsword").unwrap()).unwrap();
+        let armed = p.holding(&[(crate::Hand::Right, &sword)]);
+        let mut unturned = armed.clone();
+        unturned.arm_hang.retain(|(k, _)| !is_hand(&unturned.segments[*k]));
+        assert!(unturned.arm_hang.len() < armed.arm_hang.len(), "the hands had turns to take away");
+        let (a, b) = (armed.pose(&Pose::default()), unturned.pose(&Pose::default()));
+        for i in p.segments.len()..armed.segments.len() {
+            let s = &armed.segments[i];
+            for q in [s.head, s.tail] {
+                let d = len(sub(a.point(i, q), b.point(i, q)));
+                assert!(d < 1e-4, "{} moved {d} ft with the hand's turn", s.name);
+            }
+        }
+    }
+
+    /// Hung for the side view: the arms, and only they, move -- to where
+    /// posing hangs them -- and the rest stands where it was drawn.
+    #[test]
+    fn with_arms_hung_moves_only_the_arms() {
+        let p = humanoid(true);
+        let (hung, moves) = p.with_arms_hung().expect("the A-pose's arms hang");
+        assert_eq!((hung.segments.len(), moves.len()), (p.segments.len(), p.segments.len()));
+        assert!(hung.arm_hang.is_empty(), "already hung");
+        let arms: HashSet<usize> = p.arm_hang.iter().flat_map(|(a, _)| p.subtree(*a)).collect();
+        let far = |a: V3, b: V3| len(sub(a, b));
+        for (i, (a, b)) in p.segments.iter().zip(&hung.segments).enumerate() {
+            let moved = a.stations.iter().zip(&b.stations).map(|(x, y)| far(x.c, y.c)).fold(0.0f32, f32::max);
+            if arms.contains(&i) {
+                assert!(moved > 0.05 || a.part.as_deref().is_some_and(|p| p.ends_with("Arm") && a.chain_index == 0), "{} hangs", a.name);
+            } else {
+                assert!(moved < 1e-4, "{} stays as drawn (moved {moved})", a.name);
+            }
+        }
+        let posed = p.pose(&Pose::default());
+        for bone in ["arm_r", "arm_l"] {
+            let i = p.segments.iter().position(|s| s.bone == bone && s.chain_index == 0).unwrap();
+            let s = &hung.segments[i];
+            let out = (s.tail[0] - s.head[0]).abs().atan2(s.head[1] - s.tail[1]).to_degrees();
+            assert!((out - out_deg(&posed, bone)).abs() < 0.5, "{bone}: {out} as posing hangs it");
+        }
+        assert!(humanoid(false).with_arms_hung().is_none(), "arms drawn hanging need none");
     }
 }

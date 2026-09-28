@@ -248,6 +248,13 @@ impl UvLayout {
         UvLayout::new(p, 64.0 * side as f32 / long)
     }
 
+    /// The layout of a `w` x `h` sheet for `p`: whichever of
+    /// [`SHEET_SIDES`] lays it out at that size, or None (a sheet painted
+    /// for another figure).
+    pub fn fit_to(p: &Puppet, w: usize, h: usize) -> Option<UvLayout> {
+        SHEET_SIDES.iter().map(|&side| UvLayout::fit(p, side)).find(|l| (l.w, l.h) == (w, h))
+    }
+
     /// Where a surface point lands on the sheet, pixels. `station` may be
     /// fractional (between rings); `theta` is the ring's own angle.
     pub fn locate(&self, segment: usize, station: f32, theta: f32) -> Option<[f32; 2]> {
@@ -305,6 +312,58 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// This texture laid out again at `side` (one of [`SHEET_SIDES`]),
+    /// for `p` (the puppet it was painted for): each new pixel takes the
+    /// average of the old sheet over its own footprint, found through the
+    /// surface (new pixel -> segment, station, angle -> old pixel), so a
+    /// smaller sheet is an exact, filtered copy -- what a lower graphics
+    /// tier loads. The normal sheet comes along. Unpainted stays so.
+    pub fn resampled(&self, p: &Puppet, side: usize) -> Texture {
+        let layout = UvLayout::fit(p, side);
+        let ratio = self.layout.px_per_ft / layout.px_per_ft.max(1e-6);
+        // samples a side of each new pixel: enough to cover its footprint
+        let n = ratio.ceil().clamp(1.0, 4.0) as usize;
+        let (w, h) = (layout.w, layout.h);
+        let mut rgba = vec![0u8; w * h * 4];
+        let mut normal = self.normal.as_ref().map(|_| vec![0u8; w * h * 4]);
+        for y in 0..h {
+            for x in 0..w {
+                let (mut sum, mut hits, mut nsum, mut nhits) = ([0.0f32; 3], 0usize, [0.0f32; 3], 0usize);
+                for j in 0..n {
+                    for i in 0..n {
+                        let at = [x as f32 + (i as f32 + 0.5) / n as f32, y as f32 + (j as f32 + 0.5) / n as f32];
+                        let Some((seg, station, theta)) = layout.address(at) else { continue };
+                        let Some(old) = self.layout.locate(seg, station, theta) else { continue };
+                        if let Some(c) = self.sample(old) {
+                            (0..3).for_each(|k| sum[k] += c[k]);
+                            hits += 1;
+                        }
+                        if let Some(d) = self.sample_normal(old) {
+                            (0..3).for_each(|k| nsum[k] += d[k]);
+                            nhits += 1;
+                        }
+                    }
+                }
+                let o = (y * w + x) * 4;
+                if hits * 2 >= n * n && hits > 0 {
+                    for k in 0..3 {
+                        rgba[o + k] = (sum[k] / hits as f32).round().clamp(0.0, 255.0) as u8;
+                    }
+                    rgba[o + 3] = 255;
+                }
+                if let (Some(nm), true) = (normal.as_mut(), nhits * 2 >= n * n && nhits > 0) {
+                    // a deviation, not a unit normal: its average, as it is
+                    let d = nsum.map(|v| v / nhits as f32);
+                    for k in 0..3 {
+                        nm[o + k] = encode_normal(d[k]);
+                    }
+                    nm[o + 3] = 255;
+                }
+            }
+        }
+        Texture { layout, rgba, normal }
+    }
+
     /// The colour at a sheet position (bilinear), or None where the sheet
     /// is unpainted (transparent) there.
     pub fn sample(&self, at: [f32; 2]) -> Option<[f32; 3]> {
@@ -367,8 +426,28 @@ pub fn decode_normal(b: u8) -> f32 {
 
 /// The long side, pixels, of the sheet a family's texture is painted on
 /// (`UvLayout::fit(puppet, SHEET_SIDE)`): the layout is rebuilt from the
-/// puppet wherever the texture is used, so this is the whole contract.
+/// puppet wherever the texture is used, so this is the whole contract. A
+/// sheet built from larger paintings is laid out bigger, at one of
+/// [`SHEET_SIDES`] ([`sheet_side_for`]); whoever loads it finds its layout
+/// by its size ([`UvLayout::fit_to`]).
 pub const SHEET_SIDE: usize = 1024;
+
+/// Every long side a sheet may be laid out at: a 2160-tall painting's
+/// detail wants a 2048 sheet (about 270 pixels a foot on a humanoid, the
+/// painting's 360), and the lower graphics tiers want 1024 and 512
+/// ([`Texture::resampled`]).
+pub const SHEET_SIDES: [usize; 4] = [512, 1024, 2048, 4096];
+
+/// The sheet side paintings `painting_h` pixels tall are built onto: the
+/// usual [`SHEET_SIDE`] for the 1024-tall paintings of the first pass, 2048
+/// for a second pass at 2160, 4096 past 3000.
+pub fn sheet_side_for(painting_h: usize) -> usize {
+    match painting_h {
+        0..=1536 => SHEET_SIDE,
+        1537..=3000 => 2048,
+        _ => 4096,
+    }
+}
 
 /// Grid spacing on the template, feet.
 const GRID_FT: f32 = 0.25;
@@ -477,6 +556,48 @@ mod tests {
 
     fn humanoid() -> Puppet {
         Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+    }
+
+    /// A second pass's 2048 sheet is found by its size; laid out again at
+    /// 1024 (a lower tier), each segment's paint lands on that segment's
+    /// patch of the 1024 layout -- through the surface, not a plain shrink.
+    #[test]
+    fn a_big_sheet_scales_down_through_the_surface() {
+        let p = humanoid();
+        assert_eq!(crate::sheet_side_for(1024), crate::SHEET_SIDE);
+        assert_eq!(crate::sheet_side_for(2160), 2048);
+        let big = UvLayout::fit(&p, 2048);
+        assert_eq!(UvLayout::fit_to(&p, big.w, big.h).map(|l| (l.w, l.h)), Some((big.w, big.h)));
+        assert!(UvLayout::fit_to(&p, big.w + 1, big.h).is_none(), "no pattern that size");
+        let colour = |seg: usize| [(seg * 53 % 256) as u8, (seg * 97 % 256) as u8, (seg * 151 % 256) as u8];
+        let mut rgba = vec![0u8; big.w * big.h * 4];
+        for y in 0..big.h {
+            for x in 0..big.w {
+                if let Some((seg, _, _)) = big.address([x as f32 + 0.5, y as f32 + 0.5]) {
+                    let o = (y * big.w + x) * 4;
+                    rgba[o..o + 3].copy_from_slice(&colour(seg));
+                    rgba[o + 3] = 255;
+                }
+            }
+        }
+        let small = Texture { layout: big, rgba, normal: None }.resampled(&p, 1024);
+        let want = UvLayout::fit(&p, 1024);
+        assert_eq!((small.layout.w, small.layout.h), (want.w, want.h));
+        let (mut painted, mut wrong) = (0usize, 0usize);
+        for y in 0..want.h {
+            for x in 0..want.w {
+                let o = (y * want.w + x) * 4;
+                if small.rgba[o + 3] == 0 {
+                    continue;
+                }
+                let Some((seg, _, _)) = want.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+                painted += 1;
+                if small.rgba[o..o + 3] != colour(seg) {
+                    wrong += 1;
+                }
+            }
+        }
+        assert!(painted > 1000 && wrong * 100 < painted, "{wrong} of {painted} texels on another segment's paint");
     }
 
     /// A sheet's signature is its layout's: the puppet read back from its

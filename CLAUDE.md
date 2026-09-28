@@ -113,7 +113,9 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   (`turnaround` with `TURNAROUND_HOLD` shows them); `outfit.rs` dresses it
   from the clothing kit `data/outfits/kit.toml` (`TURNAROUND_WEAR`); `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
-  that sheet (`uv_sheet --demo` shows it) and their normal maps onto a
+  that sheet (`uv_sheet --demo` shows it; the side over the figure with any
+  raised arm hung, `Puppet::with_arms_hung` / `side_silhouette`, since a
+  painter draws the side's arm hanging) and their normal maps onto a
   normal sheet (`prefill_normals`; a skin without one gets its relief from
   its own paint, `bump_sheet`; `examples/normal_strip` shows a family
   with and without it), and renders each template's

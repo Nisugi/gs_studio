@@ -21,14 +21,24 @@
 //! side as the side silhouette shows it, from the creature's right (-x),
 //! and used again, as a mirror image, for the left.
 //!
+//! The side is painted over the figure with any arm drawn raised HUNG
+//! ([`Puppet::with_arms_hung`], [`side_silhouette`]): from the side an
+//! A-pose's arm lines up with the body and its sheet shows no arm, but a
+//! painter draws one hanging down the flank anyway -- and projected through
+//! the raised arm, that arm and its hand landed on the hip and thigh. So
+//! the side view's template, depth guide and projection all use the hung
+//! figure; the front and back keep the figure as drawn.
+//!
 //! What no painting sees -- an armpit, the inside of a thigh, a neck hidden
 //! under the head -- takes the colour of the painted surface nearest it on
 //! the body, in 3D and across patches ([`fill_unseen`]), so the sheet has
 //! no holes. A pixel off every patch stays transparent.
 
+use std::borrow::Cow;
+
 use rig_bake::Grid;
 
-use crate::math::{add, dot, norm_or, scale, V3};
+use crate::math::{add, dot, mul_mv, norm_or, scale, transpose, Xf, V3};
 use crate::puppet::Puppet;
 use crate::uv::UvLayout;
 
@@ -45,8 +55,16 @@ const DEPTH_TOL_FT: f32 = 0.08;
 /// the nearest paint (the forehead) over it.
 const UP_FACING: f32 = 0.4;
 /// A projected point may miss its painting's paint by this many pixels;
-/// the nearest painted pixel within reach is taken.
+/// the nearest painted pixel within reach is taken. For marking what is
+/// left to paint ([`project_view`]).
 const REACH_PX: i32 = 6;
+/// ...and for the sheet ([`prefill`]) only this many: a miss there is
+/// paint the painting does not have -- a part painted narrower than its
+/// template, a background pixel cut out -- and taking its nearest pixel
+/// stretched one edge column (a grey band over the back of the head)
+/// across the band that projects past it. Seen squarely nearby, the
+/// surface's own paint fills it instead ([`fill_unseen`]).
+const SHEET_REACH_PX: i32 = 1;
 /// Ring samples when building the depth maps.
 const AROUND: usize = 32;
 
@@ -126,9 +144,53 @@ impl Look {
             Look::Left => ([(p[2] - g.min_x) * g.px_per_ft, row], -p[0]),
         }
     }
+
+    fn is_side(self) -> bool {
+        matches!(self, Look::Right | Look::Left)
+    }
 }
 
-/// The rest body seen from one side: nearest depth per grid pixel.
+/// The bodies the views are painted over: the figure as drawn for the front
+/// and the back, and from the side the same with any raised arm hung
+/// ([`Puppet::with_arms_hung`]), with each segment's move from the one to
+/// the other. The two share their segments and stations, so one surface
+/// address is a point on each.
+struct Bodies<'a> {
+    rest: &'a Puppet,
+    side: Option<(Puppet, Vec<Xf>)>,
+}
+
+impl<'a> Bodies<'a> {
+    fn new(p: &'a Puppet) -> Bodies<'a> {
+        Bodies { rest: p, side: p.with_arms_hung() }
+    }
+
+    /// The body `look` sees.
+    fn of(&self, look: Look) -> &Puppet {
+        match &self.side {
+            Some((hung, _)) if look.is_side() => hung,
+            _ => self.rest,
+        }
+    }
+
+    /// A direction on `look`'s body, turned back into rest space.
+    fn to_rest(&self, look: Look, segment: usize, v: V3) -> V3 {
+        match &self.side {
+            Some((_, moves)) if look.is_side() => mul_mv(&transpose(&moves[segment].r), v),
+            _ => v,
+        }
+    }
+}
+
+/// The body `look` sees, alone (see [`Bodies`]).
+fn body_for(p: &Puppet, look: Look) -> Cow<'_, Puppet> {
+    match p.with_arms_hung() {
+        Some((hung, _)) if look.is_side() => Cow::Owned(hung),
+        _ => Cow::Borrowed(p),
+    }
+}
+
+/// A body seen from one side: nearest depth per grid pixel.
 struct DepthMap {
     w: usize,
     h: usize,
@@ -220,12 +282,17 @@ fn fill(z: &mut [f32], w: usize, h: usize, t: [([f32; 2], f32); 3]) {
 impl Painting<'_> {
     /// The painted colour nearest `at` (grid pixels of `g`), within reach.
     fn sample(&self, g: &Grid, at: [f32; 2]) -> Option<[f32; 3]> {
+        self.sample_within(g, at, REACH_PX)
+    }
+
+    /// [`Painting::sample`] within `reach_px` (the grid's pixels).
+    fn sample_within(&self, g: &Grid, at: [f32; 2], reach_px: i32) -> Option<[f32; 3]> {
         if self.w == 0 || self.h == 0 || self.rgba.len() < self.w * self.h * 4 {
             return None;
         }
         let (sx, sy) = (self.w as f32 / g.w as f32, self.h as f32 / g.h as f32);
         let (cx, cy) = ((at[0] * sx).floor() as i32, (at[1] * sy).floor() as i32);
-        let reach = (REACH_PX as f32 * sx.max(sy)).ceil() as i32;
+        let reach = (reach_px as f32 * sx.max(sy)).ceil() as i32;
         let mut best: Option<(i32, [f32; 3])> = None;
         for dy in -reach..=reach {
             for dx in -reach..=reach {
@@ -250,6 +317,7 @@ impl Painting<'_> {
 /// The sheet painted from `paintings`: straight RGBA8, `layout.w` x
 /// `layout.h`, transparent off the patches.
 pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> {
+    let bodies = Bodies::new(p);
     let views: Vec<(Look, Grid, Painting, DepthMap)> = Look::ALL
         .iter()
         .filter_map(|look| {
@@ -258,7 +326,7 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
                 Look::Back => (paintings.front_grid?, paintings.back?),
                 Look::Right | Look::Left => (paintings.side_grid?, paintings.side?),
             };
-            Some((*look, grid, painting, DepthMap::new(p, *look, &grid)))
+            Some((*look, grid, painting, DepthMap::new(bodies.of(*look), *look, &grid)))
         })
         .collect();
 
@@ -274,10 +342,15 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
             let i = y * w + x;
             owner[i] = seg;
             state[i] = 1;
-            let Some((point, normal)) = rest_point(p, seg, station, theta) else { continue };
+            let Some(rest) = rest_point(p, seg, station, theta) else { continue };
+            let (point, normal) = rest;
             points[i] = Some(point);
-            let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
+            // the same address on the side's body (arms hung)
+            let side = bodies.side.as_ref().and_then(|(hung, _)| rest_point(hung, seg, station, theta)).unwrap_or(rest);
+            let on = |look: &Look| if look.is_side() { side } else { rest };
+            let (mut sum, mut weight, mut best) = ([0.0f32; 3], 0.0f32, 0.0f32);
             for (look, grid, painting, depth) in &views {
+                let (point, normal) = on(look);
                 let facing = dot(normal, look.toward());
                 if facing < MIN_FACING {
                     continue;
@@ -286,17 +359,27 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
                 if d > depth.nearest(at) + DEPTH_TOL_FT {
                     continue;
                 }
-                if let Some(c) = painting.sample(grid, at) {
+                if let Some(c) = painting.sample_within(grid, at, SHEET_REACH_PX) {
                     let wt = facing.powi(FACING_POWER);
                     for k in 0..3 {
                         sum[k] += c[k] * wt;
                     }
                     weight += wt;
+                    best = best.max(facing);
                 }
+            }
+            // Seen only at a grazing angle, a few of the painting's pixels
+            // would be smeared over the whole surface -- its edge, where a
+            // painter's background or a part painted narrower than the
+            // template shows (a grey band over the back of the head, grey
+            // down the inside of a leg). Paint seen squarely nearby fills it
+            // instead ([`fill_unseen`]).
+            if best < GRAZING {
+                (sum, weight) = ([0.0; 3], 0.0);
             }
             if weight == 0.0 && normal[1] > UP_FACING {
                 for (look, grid, painting, _) in &views {
-                    if let Some(c) = painting.sample(grid, look.project(grid, point).0) {
+                    if let Some(c) = painting.sample(grid, look.project(grid, on(look).0).0) {
                         for k in 0..3 {
                             sum[k] += c[k];
                         }
@@ -327,6 +410,7 @@ pub fn prefill(p: &Puppet, layout: &UvLayout, paintings: &Paintings) -> Vec<u8> 
 /// to the normal its own geometry gives (`Posed::skin_textured`). Views
 /// blend as the paintings do, by how squarely each faces the surface.
 pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u8> {
+    let bodies = Bodies::new(p);
     let views: Vec<(Look, Grid, Painting, DepthMap)> = Look::ALL
         .iter()
         .filter_map(|look| {
@@ -335,7 +419,7 @@ pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u
                 Look::Back => (maps.front_grid?, maps.back?),
                 Look::Right | Look::Left => (maps.side_grid?, maps.side?),
             };
-            Some((*look, grid, map, DepthMap::new(p, *look, &grid)))
+            Some((*look, grid, map, DepthMap::new(bodies.of(*look), *look, &grid)))
         })
         .collect();
 
@@ -349,9 +433,11 @@ pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u
             let i = y * w + x;
             owner[i] = seg;
             state[i] = 1;
-            let Some((point, normal)) = rest_point(p, seg, station, theta) else { continue };
+            let Some(rest) = rest_point(p, seg, station, theta) else { continue };
+            let side = bodies.side.as_ref().and_then(|(hung, _)| rest_point(hung, seg, station, theta)).unwrap_or(rest);
             let (mut sum, mut weight) = ([0.0f32; 3], 0.0f32);
             for (look, grid, map, depth) in &views {
+                let (point, normal) = if look.is_side() { side } else { rest };
                 let facing = dot(normal, look.toward());
                 if facing < MIN_FACING {
                     continue;
@@ -360,9 +446,10 @@ pub fn prefill_normals(p: &Puppet, layout: &UvLayout, maps: &Paintings) -> Vec<u
                 if d > depth.nearest(at) + DEPTH_TOL_FT {
                     continue;
                 }
-                if let Some(c) = map.sample(grid, at) {
+                if let Some(c) = map.sample_within(grid, at, SHEET_REACH_PX) {
                     let tangent = norm_or(c.map(|v| v / 127.5 - 1.0), [0.0, 0.0, 1.0]);
-                    let deviation = crate::math::sub(look.tangent_to_world(tangent), look.toward());
+                    // on the side's body (a hung arm turned from rest): back to rest
+                    let deviation = bodies.to_rest(*look, seg, crate::math::sub(look.tangent_to_world(tangent), look.toward()));
                     let wt = facing.powi(FACING_POWER);
                     for k in 0..3 {
                         sum[k] += deviation[k] * wt;
@@ -680,8 +767,21 @@ fn fill_holes(rgba: &mut [u8], state: &mut [u8], owner: &[usize], w: usize, h: u
 /// one over the bare one.
 pub fn dressed_silhouette(p: &Puppet, mask: &rig_bake::Mask, side: bool) -> rig_bake::Mask {
     let look = if side { Look::Right } else { Look::Front };
-    let worn = DepthMap::of(p, look, &mask.grid, &|s| s.kind.is_garment());
+    let worn = DepthMap::of(&body_for(p, look), look, &mask.grid, &|s| s.kind.is_garment());
     let inside = mask.inside.iter().zip(&worn.z).map(|(&body, z)| body || z.is_finite()).collect();
+    rig_bake::Mask { grid: mask.grid, inside }
+}
+
+/// The side silhouette the side view is painted over: the art's, with the
+/// arms as they hang ([`Puppet::with_arms_hung`]) added where they reach
+/// past it. From the side an A-pose's arm lines up with the body, so the
+/// sheet shows none; the side is painted, and projected, as if it hung.
+/// The mask itself when no arm hangs. The grid stays the same.
+pub fn side_silhouette(p: &Puppet, mask: &rig_bake::Mask) -> rig_bake::Mask {
+    let Some((hung, _)) = p.with_arms_hung() else { return mask.clone() };
+    let arms: std::collections::HashSet<&str> = p.arm_hang.iter().flat_map(|(a, _)| p.subtree(*a)).map(|i| p.segments[i].name.as_str()).collect();
+    let arm = DepthMap::of(&hung, Look::Right, &mask.grid, &|s| arms.contains(s.name.as_str()));
+    let inside = mask.inside.iter().zip(&arm.z).map(|(&body, z)| body || z.is_finite()).collect();
     rig_bake::Mask { grid: mask.grid, inside }
 }
 
@@ -737,9 +837,11 @@ const GUIDE_HOLE_PX: usize = 24;
 const GUIDE_BLUR_PX: usize = 2;
 
 /// A depth guide for an image generator (a ControlNet depth input): the REST
-/// body seen from `view`, in exactly the frame of that view's paint-over
-/// template -- `mask` is the silhouette it is cut from (the front one for
-/// the back view) -- at `scale` times the template's size.
+/// body seen from `view` (from the side, with any raised arm hung: see the
+/// module notes), in exactly the frame of that view's paint-over template
+/// -- `mask` is the silhouette it is cut from (the front one for the back
+/// view; for the side, [`side_silhouette`]) -- at `scale` times the
+/// template's size.
 ///
 /// Nearest surface white, farthest [`GUIDE_FAR`] grey, outside the
 /// silhouette black: the convention MiDaS-style depth models are trained on.
@@ -749,6 +851,27 @@ const GUIDE_BLUR_PX: usize = 2;
 /// ([`GUIDE_SEAM_PX`]); and a light blur softens where tubes meet.
 /// Opaque RGBA8, `mask.grid.w * scale` x `mask.grid.h * scale`.
 pub fn depth_guide(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: usize) -> Vec<u8> {
+    let (g, _, z) = guide_depth(p, mask, view, scale);
+    let (w, h) = (g.w, g.h);
+    let (near, far) = z
+        .iter()
+        .filter(|d| d.is_finite())
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &d| (a.min(d), b.max(d)));
+    let span = (far - near).max(1e-4);
+    let mut rgba = vec![0u8; w * h * 4];
+    for (px, &d) in rgba.chunks_exact_mut(4).zip(&z) {
+        let v = if d.is_finite() { GUIDE_FAR + (255.0 - GUIDE_FAR) * (far - d) / span } else { 0.0 };
+        let v = v.round().clamp(0.0, 255.0) as u8;
+        px.copy_from_slice(&[v, v, v, 255]);
+    }
+    rgba
+}
+
+/// The view's body's depth in feet behind every pixel of a guide `scale`
+/// times `view`'s template (infinite outside the silhouette), grown to the
+/// silhouette's edge and lightly blurred, as [`depth_guide`] draws it: the
+/// guide's grid, which pixels are inside, and the depths.
+fn guide_depth(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: usize) -> (Grid, Vec<bool>, Vec<f32>) {
     let s = scale.max(1);
     let t = mask.grid;
     let g = Grid { w: t.w * s, h: t.h * s, px_per_ft: t.px_per_ft * s as f32, ..t };
@@ -761,7 +884,7 @@ pub fn depth_guide(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: us
             body[row * t.w + col]
         })
         .collect();
-    let mut z = DepthMap::new(p, view.look(), &g).z;
+    let mut z = DepthMap::new(&body_for(p, view.look()), view.look(), &g).z;
     for (d, &ins) in z.iter_mut().zip(&inside) {
         if !ins {
             *d = f32::INFINITY;
@@ -769,17 +892,46 @@ pub fn depth_guide(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: us
     }
     grow_depth(&mut z, &inside, w, h);
     blur_inside(&mut z, &inside, w, h, GUIDE_BLUR_PX * s);
+    (g, inside, z)
+}
 
-    let (near, far) = z
-        .iter()
-        .filter(|d| d.is_finite())
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &d| (a.min(d), b.max(d)));
-    let span = (far - near).max(1e-4);
+/// A normal guide, [`depth_guide`]'s companion: which way the view's body
+/// faces at every pixel of `view`'s template (`scale` times its size),
+/// from the depth in feet, in the view's frame -- x right, y up, z toward
+/// the viewer -- packed as a normal map (`(n + 1) / 2` in RGB), alpha 255
+/// on the body and 0 outside. What a painting's own light can be read
+/// against: the paint's brightness over the body's facing is the light the
+/// painter put in.
+pub fn normal_guide(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: usize) -> Vec<u8> {
+    let (g, inside, z) = guide_depth(p, mask, view, scale);
+    let (w, h) = (g.w, g.h);
+    // a neighbour's depth, or this pixel's own past the body's edge
+    let at = |x: usize, y: usize, dx: isize, dy: isize| -> f32 {
+        let (nx, ny) = (x as isize + dx, y as isize + dy);
+        if nx < 0 || ny < 0 || nx as usize >= w || ny as usize >= h || !inside[ny as usize * w + nx as usize] {
+            return z[y * w + x];
+        }
+        z[ny as usize * w + nx as usize]
+    };
     let mut rgba = vec![0u8; w * h * 4];
-    for (px, &d) in rgba.chunks_exact_mut(4).zip(&z) {
-        let v = if d.is_finite() { GUIDE_FAR + (255.0 - GUIDE_FAR) * (far - d) / span } else { 0.0 };
-        let v = v.round().clamp(0.0, 255.0) as u8;
-        px.copy_from_slice(&[v, v, v, 255]);
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if !inside[i] || !z[i].is_finite() {
+                continue;
+            }
+            // depth grows away from the viewer: a surface turning away to
+            // the right deepens to the right, so it faces right; the image's
+            // rows run down, the frame's y up
+            let ddx = (at(x, y, 1, 0) - at(x, y, -1, 0)) * 0.5 * g.px_per_ft;
+            let ddy = (at(x, y, 0, 1) - at(x, y, 0, -1)) * 0.5 * g.px_per_ft;
+            let n = norm_or([ddx, -ddy, 1.0], [0.0, 0.0, 1.0]);
+            let o = i * 4;
+            for k in 0..3 {
+                rgba[o + k] = ((n[k] + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8;
+            }
+            rgba[o + 3] = 255;
+        }
     }
     rgba
 }
@@ -901,31 +1053,39 @@ fn blur_inside(z: &mut [f32], inside: &[bool], w: usize, h: usize, r: usize) {
     }
 }
 
-/// The rest body seen from one side: per pixel, the nearest surface's
-/// depth, and the point and outward normal there.
+/// The body `look` sees ([`Bodies::of`]) from that side: per pixel, the
+/// nearest surface's depth, and that surface point with its outward normal
+/// both on the figure as drawn (`rest`, where the front and back paintings
+/// see it) and on the side's body (`side`, arms hung, where the side
+/// painting sees it).
 struct SurfaceMap {
     z: Vec<f32>,
-    pos: Vec<V3>,
-    nrm: Vec<V3>,
+    rest: Vec<(V3, V3)>,
+    side: Vec<(V3, V3)>,
 }
 
 impl SurfaceMap {
-    fn new(p: &Puppet, look: Look, g: &Grid) -> SurfaceMap {
+    fn new(bodies: &Bodies, look: Look, g: &Grid) -> SurfaceMap {
         let (w, h) = (g.w, g.h);
-        let mut map = SurfaceMap { z: vec![f32::INFINITY; w * h], pos: vec![[0.0; 3]; w * h], nrm: vec![[0.0; 3]; w * h] };
-        for s in p.segments.iter().filter(|s| !s.hidden) {
-            let ring = |st: &crate::puppet::Station| -> Vec<Corner> {
+        let mut map = SurfaceMap { z: vec![f32::INFINITY; w * h], rest: vec![([0.0; 3], [0.0; 3]); w * h], side: vec![([0.0; 3], [0.0; 3]); w * h] };
+        let (seen, rest, side) = (bodies.of(look), bodies.rest, bodies.of(Look::Right));
+        for (i, s) in seen.segments.iter().enumerate().filter(|(_, s)| !s.hidden) {
+            // a ring's point and normal on one body's segment `i`, station `k`
+            let on = |b: &Puppet, k: usize, sn: f32, cs: f32| -> (V3, V3) {
+                let (s, st) = (&b.segments[i], &b.segments[i].stations[k]);
+                let q = add(st.c, add(scale(s.axis_w, st.w * cs), scale(s.axis_d, st.d * sn)));
+                (q, norm_or(add(scale(s.axis_w, cs / st.w.max(1e-3)), scale(s.axis_d, sn / st.d.max(1e-3))), [0.0, 0.0, 1.0]))
+            };
+            let ring = |k: usize| -> Vec<Corner> {
                 (0..AROUND)
                     .map(|j| {
                         let (sn, cs) = (j as f32 / AROUND as f32 * std::f32::consts::TAU).sin_cos();
-                        let q = add(st.c, add(scale(s.axis_w, st.w * cs), scale(s.axis_d, st.d * sn)));
-                        let n = norm_or(add(scale(s.axis_w, cs / st.w.max(1e-3)), scale(s.axis_d, sn / st.d.max(1e-3))), [0.0, 0.0, 1.0]);
-                        let (at, d) = look.project(g, q);
-                        Corner { at, d, q, n }
+                        let (at, d) = look.project(g, on(seen, k, sn, cs).0);
+                        Corner { at, d, rest: on(rest, k, sn, cs), side: on(side, k, sn, cs) }
                     })
                     .collect()
             };
-            let rings: Vec<_> = s.stations.iter().map(ring).collect();
+            let rings: Vec<_> = (0..s.stations.len()).map(ring).collect();
             for pair in rings.windows(2) {
                 for j in 0..AROUND {
                     let j1 = (j + 1) % AROUND;
@@ -967,8 +1127,8 @@ impl SurfaceMap {
                 if d < self.z[i] {
                     self.z[i] = d;
                     let mix = |f: &dyn Fn(&Corner) -> V3| add(add(scale(f(&t[0]), w0), scale(f(&t[1]), w1)), scale(f(&t[2]), w2));
-                    self.pos[i] = mix(&|c| c.q);
-                    self.nrm[i] = norm_or(mix(&|c| c.n), [0.0, 0.0, 1.0]);
+                    self.rest[i] = (mix(&|c| c.rest.0), norm_or(mix(&|c| c.rest.1), [0.0, 0.0, 1.0]));
+                    self.side[i] = (mix(&|c| c.side.0), norm_or(mix(&|c| c.side.1), [0.0, 0.0, 1.0]));
                 }
             }
         }
@@ -979,8 +1139,9 @@ impl SurfaceMap {
 struct Corner {
     at: [f32; 2],
     d: f32,
-    q: V3,
-    n: V3,
+    /// The point and normal on the figure as drawn, and on the side's body.
+    rest: (V3, V3),
+    side: (V3, V3),
 }
 
 /// Below this facing a view's paint counts as a smear, not paint (see
@@ -988,7 +1149,8 @@ struct Corner {
 pub const GRAZING: f32 = 0.35;
 
 /// Projection-first (`docs/projection-first-export-spec.md`): what the
-/// paintings made so far show of the REST body seen from `view`, in exactly
+/// paintings made so far show of the body seen from `view` (as drawn; from
+/// the side, arms hung), in exactly
 /// that view's template frame (`mask` is its silhouette -- the front one for
 /// the back view) at `scale` times its size. Returns `(render, unpainted)`,
 /// both RGBA8:
@@ -1009,6 +1171,7 @@ pub fn project_view(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: u
     let t = mask.grid;
     let g = Grid { w: t.w * s, h: t.h * s, px_per_ft: t.px_per_ft * s as f32, ..t };
     let (w, h) = (g.w, g.h);
+    let bodies = Bodies::new(p);
     let sources: Vec<(Look, Grid, Painting, DepthMap)> = Look::ALL
         .iter()
         .filter_map(|look| {
@@ -1017,10 +1180,10 @@ pub fn project_view(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: u
                 Look::Back => (paintings.front_grid?, paintings.back?),
                 Look::Right | Look::Left => (paintings.side_grid?, paintings.side?),
             };
-            Some((*look, grid, painting, DepthMap::new(p, *look, &grid)))
+            Some((*look, grid, painting, DepthMap::new(bodies.of(*look), *look, &grid)))
         })
         .collect();
-    let surface = SurfaceMap::new(p, view.look(), &g);
+    let surface = SurfaceMap::new(&bodies, view.look(), &g);
     let mut render = vec![0u8; w * h * 4];
     let mut unpainted = vec![0u8; w * h * 4];
     for i in 0..w * h {
@@ -1032,9 +1195,9 @@ pub fn project_view(p: &Puppet, mask: &rig_bake::Mask, view: PaintView, scale: u
         }
         let mut colour = None;
         if surface.z[i].is_finite() {
-            let (point, normal) = (surface.pos[i], surface.nrm[i]);
             let (mut sum, mut weight, mut best) = ([0.0f32; 3], 0.0f32, 0.0f32);
             for (look, grid, painting, depth) in &sources {
+                let (point, normal) = if look.is_side() { surface.side[i] } else { surface.rest[i] };
                 let facing = dot(normal, look.toward());
                 if facing < MIN_FACING {
                     continue;
@@ -1107,6 +1270,32 @@ mod tests {
             }
             assert_eq!(brightest, 255, "{view:?}: the nearest surface is white");
         }
+    }
+
+    /// The normal guide covers the depth guide's body and faces the way the
+    /// body does: across the chest, the middle faces the viewer and the
+    /// flanks turn away to their own sides.
+    #[test]
+    fn a_normal_guide_faces_the_way_the_body_does() {
+        let (p, front, _) = humanoid();
+        let s = 2;
+        let (w, h) = (front.grid.w * s, front.grid.h * s);
+        let rgba = normal_guide(&p, &front, PaintView::Front, s);
+        let depth = depth_guide(&p, &front, PaintView::Front, s);
+        assert_eq!(rgba.len(), w * h * 4);
+        for (n, d) in rgba.chunks_exact(4).zip(depth.chunks_exact(4)) {
+            assert_eq!(n[3] == 255, d[0] > 0, "the normal guide's body is the depth guide's");
+        }
+        let n = |x: usize, y: usize| -> [f32; 3] { [0, 1, 2].map(|k| rgba[(y * w + x) * 4 + k] as f32 / 127.5 - 1.0) };
+        let row = (h as f32 * 0.3) as usize;
+        let inside = |x: usize| rgba[(row * w + x) * 4 + 3] == 255;
+        let mid = w / 2;
+        assert!(inside(mid), "the chest is at the middle of row {row}");
+        let a = (0..mid).rev().find(|&x| !inside(x)).map_or(0, |x| x + 1);
+        let b = (mid..w).find(|&x| !inside(x)).unwrap_or(w) - 1;
+        assert!(n(mid, row)[2] > 0.8, "the chest faces the viewer: {:?}", n(mid, row));
+        assert!(n(a + 2 * s, row)[0] < -0.2, "the screen-left flank faces left: {:?}", n(a + 2 * s, row));
+        assert!(n(b - 2 * s, row)[0] > 0.2, "the screen-right flank faces right: {:?}", n(b - 2 * s, row));
     }
 
     /// The humanoid's side outline draws the arm a sliver off the body: the
@@ -1199,6 +1388,115 @@ mod tests {
         }
         assert!(leaning > painted.len() / 4, "stripes lean the surface: {leaning} of {}", painted.len());
         assert!(off_surface < 0.03, "along the surface only: {off_surface}");
+    }
+
+    /// The A-pose humanoid's side is painted over its arm HANGING: a side
+    /// painting's arm (red, where the hung arm shows) lands on the arm, and
+    /// the thigh and hip the side sees stay the painting's blue. Through the
+    /// raised arm, the red landed on the thigh -- a ghost hand on the side.
+    #[test]
+    fn the_sides_arm_paint_lands_on_the_hanging_arm() {
+        let (p, _, side) = humanoid();
+        let (hung, _) = p.with_arms_hung().expect("the humanoid is drawn in an A-pose");
+        let template = side_silhouette(&p, &side);
+        let g = template.grid;
+        assert!(template.inside.iter().filter(|&&b| b).count() >= side.inside.iter().filter(|&&b| b).count());
+        let arms: std::collections::HashSet<usize> = p.arm_hang.iter().flat_map(|(a, _)| p.subtree(*a)).collect();
+        let arm = DepthMap::of(&hung, Look::Right, &g, &|s| p.segments.iter().position(|q| q.name == s.name).is_some_and(|i| arms.contains(&i)));
+        let body = DepthMap::new(&hung, Look::Right, &g);
+        let paint: Vec<u8> = (0..g.w * g.h)
+            .flat_map(|i| match (template.inside[i], arm.z[i].is_finite() && arm.z[i] <= body.z[i] + 1e-4) {
+                (false, _) => [0; 4],
+                (true, true) => [220, 20, 20, 255],
+                (true, false) => [20, 20, 220, 255],
+            })
+            .collect();
+        let paintings = Paintings { side_grid: Some(g), side: Some(Painting { rgba: &paint, w: g.w, h: g.h }), ..Default::default() };
+        let layout = UvLayout::fit(&p, crate::SHEET_SIDE);
+        // the texels of `keep`'s segments the side sees squarely on `on`,
+        // and how many of them are red
+        let red_among = |sheet: &[u8], on: &Puppet, keep: &dyn Fn(usize, V3) -> bool| -> (usize, usize) {
+            let depth = DepthMap::new(on, Look::Right, &g);
+            let (mut seen, mut red) = (0, 0);
+            for y in 0..layout.h {
+                for x in 0..layout.w {
+                    let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+                    let Some((point, normal)) = rest_point(on, seg, station, theta).filter(|(q, _)| keep(seg, *q)) else { continue };
+                    let (at, d) = Look::Right.project(&g, point);
+                    if dot(normal, Look::Right.toward()) < 0.5 || d > depth.nearest(at) + DEPTH_TOL_FT {
+                        continue;
+                    }
+                    seen += 1;
+                    let px = &sheet[(y * layout.w + x) * 4..][..3];
+                    red += usize::from(px[0] > 120 && px[2] < 120);
+                }
+            }
+            (seen, red)
+        };
+        let legs = |i: usize, _: V3| p.segments[i].part.as_deref().is_some_and(|part| part.ends_with("Leg"));
+        let sheet = prefill(&p, &layout, &paintings);
+        let (seen, red) = red_among(&sheet, &hung, &legs);
+        assert!(seen > 500 && red * 50 < seen, "the legs the side sees are the painting's blue: {red} red of {seen}");
+        let (seen, red) = red_among(&sheet, &hung, &|i, _| arms.contains(&i));
+        assert!(seen > 200 && red * 10 > seen * 8, "the arms the side sees are its red: {red} of {seen}");
+        // Beside the hanging hand -- the hip and thigh, from the hand's tip
+        // up a foot -- the body is blue; through the arm as drawn, raised,
+        // the side's arm fell there: the ghost hand this guards against.
+        let tip = arms.iter().flat_map(|&i| hung.segments[i].stations.iter().map(|s| s.c[1])).fold(f32::INFINITY, f32::min);
+        let beside = |i: usize, q: V3| !arms.contains(&i) && p.segments[i].kind.is_body() && (tip..tip + 1.0).contains(&q[1]);
+        let (seen, red) = red_among(&sheet, &hung, &beside);
+        assert!(seen > 500 && red * 25 < seen, "beside the hanging hand, blue: {red} red of {seen}");
+        let mut raised = p.clone();
+        raised.arm_hang.clear();
+        let (seen, red) = red_among(&prefill(&raised, &layout, &paintings), &p, &beside);
+        assert!(red * 10 > seen, "the ghost hand, through the raised arm: {red} red of {seen}");
+    }
+
+    /// A painting's outermost pixels (green here: where a painter's
+    /// background shows) are what its view sees of a surface it only grazes;
+    /// that surface fills from the paint seen squarely nearby (blue) instead
+    /// of being covered by a few edge pixels stretched across it. (A halo
+    /// wider than that is the cut's to trim: its paint is seen squarely.)
+    #[test]
+    fn a_surface_seen_only_at_a_grazing_angle_takes_the_paint_beside_it() {
+        let (p, front, _) = humanoid();
+        let g = front.grid;
+        let edge = |i: usize| {
+            let (x, y) = ((i % g.w) as isize, (i / g.w) as isize);
+            (-1..=1).any(|dy: isize| (-1..=1).any(|dx: isize| {
+                let (qx, qy) = (x + dx, y + dy);
+                qx < 0 || qy < 0 || qx as usize >= g.w || qy as usize >= g.h || !front.inside[qy as usize * g.w + qx as usize]
+            }))
+        };
+        let paint: Vec<u8> = (0..g.w * g.h)
+            .flat_map(|i| match (front.inside[i], edge(i)) {
+                (false, _) => [0; 4],
+                (true, true) => [20, 220, 20, 255],
+                (true, false) => [20, 20, 220, 255],
+            })
+            .collect();
+        let paintings = Paintings { front_grid: Some(g), front: Some(Painting { rgba: &paint, w: g.w, h: g.h }), ..Default::default() };
+        let layout = UvLayout::fit(&p, crate::SHEET_SIDE);
+        let sheet = prefill(&p, &layout, &paintings);
+        let depth = DepthMap::new(&p, Look::Front, &g);
+        let (mut grazed, mut green) = (0, 0);
+        for y in 0..layout.h {
+            for x in 0..layout.w {
+                let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+                let Some((point, normal)) = rest_point(&p, seg, station, theta) else { continue };
+                let facing = dot(normal, Look::Front.toward());
+                let (at, d) = Look::Front.project(&g, point);
+                if !(MIN_FACING..GRAZING * 0.8).contains(&facing) || d > depth.nearest(at) + DEPTH_TOL_FT {
+                    continue;
+                }
+                grazed += 1;
+                let px = &sheet[(y * layout.w + x) * 4..][..3];
+                green += usize::from(px[1] > 120 && px[2] < 120);
+            }
+        }
+        // without the rule over half of it is the edge's green (56%); with
+        // it the rest comes from the edge paint seen squarely nearby (20%)
+        assert!(grazed > 1000 && green * 3 < grazed, "grazed surface takes the edge's green: {green} of {grazed}");
     }
 
     /// Projection-first: a front painted solid red shows red on whatever of
