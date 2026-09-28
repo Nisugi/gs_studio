@@ -51,6 +51,12 @@
 pub const STAGE_W: f32 = 880.0;
 pub const STAGE_H: f32 = 470.0;
 
+/// Scenery's depth range, world units ([`CreatureField::scenery_depth_range`]):
+/// no nearer than `project_ground` projects, no farther than the ground
+/// plane is still distinguishable from the horizon.
+pub const SCENERY_NEAREST: f32 = 0.4;
+pub const SCENERY_FARTHEST: f32 = 60.0;
+
 /// What the separation rule measures a card's width by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SeparationBasis {
@@ -891,6 +897,26 @@ impl CreatureField {
         } else {
             z_far
         };
+        (sx.clamp(0.0, STAGE_W), z.clamp(z_near, z_far))
+    }
+
+    /// Where scenery may stand, world depth (ADDITION): a prop or a lamp is
+    /// part of the painting, not of the creature floor -- an arch at the end
+    /// of the road, braziers ringing a henge beyond the creatures -- so it
+    /// ranges from under the camera out toward the horizon, whatever the
+    /// floor's rows are. [`CreatureField::depth_range`] stays the floor's.
+    pub fn scenery_depth_range(&self) -> (f32, f32) {
+        (SCENERY_NEAREST, SCENERY_FARTHEST.max(self.depth_range().1))
+    }
+
+    /// [`CreatureField::ground_from_screen`] for scenery (ADDITION): the
+    /// same inverse projection, clamped to [`CreatureField::scenery_depth_range`]
+    /// instead of the floor -- a prop or lamp dragged past the creatures'
+    /// last row goes where the pointer is.
+    pub fn scenery_from_screen(&self, sx: f32, sy: f32) -> (f32, f32) {
+        let (z_near, z_far) = self.scenery_depth_range();
+        let dy = sy - self.params.horizon;
+        let z = if dy > 1e-3 { (self.params.cam_h * self.f_eff()) / dy } else { z_far };
         (sx.clamp(0.0, STAGE_W), z.clamp(z_near, z_far))
     }
 

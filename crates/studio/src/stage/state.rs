@@ -764,10 +764,11 @@ impl StageState {
         };
     }
 
-    /// Move the selected light to the floor point under a stage position.
+    /// Move the selected light to the ground point under a stage position:
+    /// anywhere on the painted ground, not only the creatures' floor.
     pub fn drag_selected_light_to(&mut self, sx: f32, sy: f32) {
         let Some(k) = self.selected_light else { return };
-        let (x, z) = self.field.ground_from_screen(sx, sy);
+        let (x, z) = self.field.scenery_from_screen(sx, sy);
         if let Some(light) = Arc::make_mut(&mut self.scene).lights.get_mut(k) {
             light.x = x;
             light.z = z;
@@ -786,9 +787,12 @@ impl StageState {
         };
     }
 
-    /// Keep prop `k` on the floor: x on the stage, z inside the depth range.
+    /// Keep prop `k` on the ground: x on the stage, z inside scenery's
+    /// depth range (a prop is part of the painting: an arch at the end of
+    /// the road stands far past the creatures' floor, and holding it to the
+    /// floor pulled it forward the moment it was selected).
     pub fn clamp_prop(&mut self, k: usize) {
-        let (z_near, z_far) = self.field.depth_range();
+        let (z_near, z_far) = self.field.scenery_depth_range();
         let Some(prop) = self.scene.props.get(k) else {
             return;
         };
@@ -802,12 +806,13 @@ impl StageState {
     }
 
     /// Drag-to-place: move the selected prop on the ground plane (stage
-    /// point -> ground, through the solver's inverse projection).
+    /// point -> ground, through the solver's inverse projection), anywhere
+    /// on the painted ground.
     pub fn drag_selected_prop_to(&mut self, sx: f32, sy: f32) {
         let Some(k) = self.selected_prop else {
             return;
         };
-        let (x, z) = self.field.ground_from_screen(sx, sy);
+        let (x, z) = self.field.scenery_from_screen(sx, sy);
         if let Some(prop) = Arc::make_mut(&mut self.scene).props.get_mut(k) {
             prop.x = x;
             prop.z = z;
@@ -1291,17 +1296,36 @@ mod tests {
     }
 
     #[test]
-    fn prop_clamping_and_dragging_stay_on_the_floor() {
+    fn prop_clamping_and_dragging_stay_on_the_ground() {
         let mut s = stage();
         s.add_prop("scenery/a.png".into());
         let (z_near, z_far) = s.field.depth_range();
+        // Past the creatures' floor is fine for scenery (an arch at the end
+        // of the road): selecting it must not pull it forward.
+        {
+            let prop = &mut s.scene_mut().props[0];
+            prop.z = z_far + 7.0;
+        }
+        s.clamp_prop(0);
+        assert_eq!(s.scene().props[0].z, z_far + 7.0, "scenery past the floor was pulled onto it");
+        // ... and dragged there it goes where the pointer is, as a lamp does
+        let ((sx, sy), _) = s.field.project_ground(300.0, z_far + 5.0);
+        s.drag_selected_prop_to(sx, sy);
+        assert!((s.scene().props[0].z - (z_far + 5.0)).abs() < 0.05, "{:?}", s.scene().props[0]);
+        s.add_light(gs_field::lighting::LampKind::Campfire);
+        s.drag_selected_light_to(sx, sy);
+        let lamp = &s.scene().lights[0];
+        assert!((lamp.z - (z_far + 5.0)).abs() < 0.05, "the lamp was held to the floor: {lamp:?}");
+        s.selected_prop = Some(0);
+        // Off the stage or past the horizon still clamps.
+        let (_, scenery_far) = s.field.scenery_depth_range();
         {
             let prop = &mut s.scene_mut().props[0];
             prop.x = -40.0;
-            prop.z = z_far + 10.0;
+            prop.z = scenery_far + 10.0;
         }
         s.clamp_prop(0);
-        assert_eq!((s.scene().props[0].x, s.scene().props[0].z), (0.0, z_far));
+        assert_eq!((s.scene().props[0].x, s.scene().props[0].z), (0.0, scenery_far));
 
         // An in-range clamp must not re-point the Arc (no obstacle rebuild).
         s.refresh_obstacles();
