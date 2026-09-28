@@ -464,6 +464,11 @@ pub struct SceneLight {
     pub dusk: Option<LightFields>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub night: Option<LightFields>,
+    /// An aurora over it, 0 = none .. 1 = a strong one (ADDITION): curtains
+    /// of light the v2 pass draws on the sky by night, behind the cloud. The
+    /// Hinterwilds' rooms all name one. None = none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aurora: Option<f32>,
 }
 
 fn one() -> f32 {
@@ -490,6 +495,7 @@ impl Default for SceneLight {
             day: None,
             dusk: None,
             night: None,
+            aurora: None,
         }
     }
 }
@@ -1225,6 +1231,16 @@ key = \"#112233\"
         assert_eq!(light.sun, Some(SunDir { azimuth: 90.0, elevation: 10.0 }));
         assert_eq!(toml::from_str::<SceneLight>(&toml::to_string(&light).unwrap()).unwrap(), light);
         assert_eq!(SceneLight::default().sun, None);
+    }
+
+    /// A scene's aurora reads and writes back, and a scene without one
+    /// writes no key for it.
+    #[test]
+    fn a_scene_may_have_an_aurora() {
+        let light: SceneLight = toml::from_str("outdoor = true\naurora = 0.8").unwrap();
+        assert_eq!(light.aurora, Some(0.8));
+        assert_eq!(toml::from_str::<SceneLight>(&toml::to_string(&light).unwrap()).unwrap(), light);
+        assert!(!toml::to_string(&SceneLight::default()).unwrap().contains("aurora"));
     }
 
     #[test]

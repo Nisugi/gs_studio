@@ -962,3 +962,19 @@ Two more `creature_field.rs` regions (twenty-two in all,
   port's count left the added rows ungridded.
 * `paint_scene_prop` clips to the stage, as the backdrop always was: a
   tall prop (an arch over a road) drew over the panel round the stage.
+
+### 7.32 The sky drawn: cloud and aurora
+
+* The cloud is drawn on the sky, by day and night: the moons' cloud deck
+  (its cover and drift) at the size clouds are seen
+  (`field_gpu.wgsl` `cloud_seen`, `CLOUD_SKY_SCALE`; the shadows keep their
+  16 m `CLOUD_SCALE`), lit like the sky round it, moonlit, flaring with
+  lightning (`cloud_colour`), over the stars and moon discs, which it hides
+  (`sky_cloud` is gone: the stars hide behind the drawn cloud). The cover
+  reaches the pass whatever the hour: `LightState::clouds_now` (**a new
+  method**), and by day `FieldFrame::stars` carries it with no stars.
+* An aurora: `FieldStars::aurora` (**a new field**, packed in `sky_n.w`)
+  from `LightState::aurora_now` (**a new method**; the scene's
+  `SceneLight::aurora`, gs_field PORTING 6.21), drawn by night as the stars
+  are (`aurora_sky`): three curtains hung in the sky the frame shows, green
+  below, violet above, rays along them, behind the cloud.

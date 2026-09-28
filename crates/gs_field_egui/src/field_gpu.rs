@@ -632,6 +632,8 @@ pub struct FieldStars {
     pub drift: [f32; 2],
     /// How far the faint stars have turned with the sky, scene pixels.
     pub turn_px: f32,
+    /// An aurora's strength, 0 (none) .. 1, drawn by night as the stars are.
+    pub aurora: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -770,7 +772,7 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
     let s = &frame.stars;
     let (stars, nebulae) = (&s.stars[..s.stars.len().min(MAX_STARS)], &s.nebulae[..s.nebulae.len().min(MAX_NEBULAE)]);
     u.extend([s.light.clamp(0.0, 1.0), s.clouds.clamp(0.0, 1.0), s.drift[0], s.drift[1]]);
-    u.extend([stars.len() as f32, nebulae.len() as f32, s.turn_px, 0.0]);
+    u.extend([stars.len() as f32, nebulae.len() as f32, s.turn_px, s.aurora.clamp(0.0, 1.0)]);
     for i in 0..MAX_STARS {
         match stars.get(i) {
             Some(st) => {

@@ -14,13 +14,16 @@ impl StageState {
     }
 
     /// The sky at `now` (unix seconds) and `game_hour`, under `clouds`.
+    /// The slider's moon keeps today's date for the stars: they need one to
+    /// know which constellations are up, and went dark with the slider.
     pub fn sky(&self, now: f64, game_hour: f32, clouds: f32) -> Sky {
-        if !self.game_sky {
-            return Sky { moon: self.light_moon, clouds, facing: self.facing, ..Sky::default() };
-        }
         let at = self.sky_instant(now, game_hour);
         let (_, month, day) = if self.lornons_eve { (0, 12, 31) } else { eastern_date(at as i64) };
-        Sky { clouds, facing: self.facing, ..GameSky::default().sky(at, month, day, game_hour) }
+        let game = GameSky::default().sky(at, month, day, game_hour);
+        if !self.game_sky {
+            return Sky { moon: self.light_moon, clouds, facing: self.facing, year: game.year, ..Sky::default() };
+        }
+        Sky { clouds, facing: self.facing, ..game }
     }
 
     /// The game's moons at the instant shown, one line: how lit each is,
@@ -54,7 +57,12 @@ mod tests {
     fn the_game_sky_replaces_the_slider() {
         let mut stage = stage();
         stage.light_moon = 0.3;
-        assert_eq!(stage.sky(0.0, 1.5, 0.2), Sky { moon: 0.3, clouds: 0.2, ..Sky::default() });
+        stage.game_sky = false;
+        stage.facing = None;
+        stage.sky_at = Some(1_790_487_120.0);
+        let slider = stage.sky(0.0, 1.5, 0.2);
+        assert_eq!(slider, Sky { moon: 0.3, clouds: 0.2, year: slider.year, ..Sky::default() });
+        assert!(slider.year.is_some(), "the slider's sky keeps the date: its stars show too");
         stage.game_sky = true;
         stage.sky_at = Some(1_790_487_120.0);
         let sky = stage.sky(0.0, 1.5, 0.2);

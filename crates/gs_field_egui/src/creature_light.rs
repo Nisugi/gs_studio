@@ -459,6 +459,29 @@ impl LightState {
         (shown > 0.0).then(|| StarsNow { light: shown, clouds: sky.clouds.clamp(0.0, 1.0), up: gs_field::stars::constellations_up(hour, year, sky.facing), turn })
     }
 
+    /// How much of the sky the cloud covers now, for the v2 pass to draw by
+    /// day as by night (the moons and stars carry it only while they are
+    /// up): None indoors, in an unlit scene or with lighting off.
+    pub fn clouds_now(&self) -> Option<f32> {
+        let (light, _) = self.scene.as_ref()?;
+        self.clock.game_hour?;
+        if self.clock.strength <= 0.0 || !light.is_outdoor(self.clock.outdoor_guess) {
+            return None;
+        }
+        Some(self.clock.sky.clouds.clamp(0.0, 1.0))
+    }
+
+    /// How strong an aurora the scene has (`[light] aurora`), for the v2
+    /// pass to draw by night: 0 indoors, in an unlit scene or with lighting
+    /// off.
+    pub fn aurora_now(&self) -> f32 {
+        let Some((light, _)) = self.scene.as_ref() else { return 0.0 };
+        if self.clock.strength <= 0.0 || !light.is_outdoor(self.clock.outdoor_guess) {
+            return 0.0;
+        }
+        light.aurora.unwrap_or(0.0).clamp(0.0, 1.0) * self.clock.strength.clamp(0.0, 1.0)
+    }
+
     fn moon_of(&self, lornon: bool) -> Option<MoonNow> {
         let (light, _) = self.scene.as_ref()?;
         let hour = self.clock.game_hour?;
@@ -991,6 +1014,23 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         panic!("no bake arrived");
+    }
+
+    /// The cloud and an aurora reach the v2 pass whatever the hour, for an
+    /// outdoor scene that is lit -- never indoors (the pass draws the cloud
+    /// by day too; the moons and stars carried it only while they were up).
+    #[test]
+    fn cloud_and_aurora_reach_the_pass_outdoors_only() {
+        let mut state = LightState::default();
+        state.set_global(GlobalLighting::default());
+        state.set_clock(LightClock { game_hour: Some(12.0), sky: Sky { clouds: 0.4, ..Sky::default() }, ..Default::default() });
+        state.set_scene(Some(SceneLight { aurora: Some(0.8), ..SceneLight::default() }), Some("scenes/test.png".into()));
+        assert_eq!(state.clouds_now(), Some(0.4), "by day, outdoors");
+        assert!((state.aurora_now() - 0.8).abs() < 1e-6);
+        state.set_scene(Some(SceneLight { outdoor: Some(false), aurora: Some(0.8), ..SceneLight::default() }), Some("scenes/test.png".into()));
+        assert_eq!((state.clouds_now(), state.aurora_now()), (None, 0.0), "indoors: no sky");
+        state.set_scene(None, None);
+        assert_eq!((state.clouds_now(), state.aurora_now()), (None, 0.0), "unlit");
     }
 
     /// A bake finishes between frames and asks for the frame that collects

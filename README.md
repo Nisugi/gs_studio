@@ -615,8 +615,8 @@ colour of their own, and stay open once opened for the rest of the run
   from the sky with soft shadows, a fill from the whole sky and cloud
   shadows drifting with the wind, and elsewhere it lifts the darkness
   evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
-  lift, under *Global time-of-day defaults*). *The game's moons* replaces
-  the Moon slider with Elanthia's own at the hour shown, today
+  lift, under *Global time-of-day defaults*). *The game's moons* (on by
+  default) replaces the Moon slider with Elanthia's own at the hour shown, today
   (`gs_field::sky`, and a line of how lit each is and when it is highest):
   Liabo, the great moon, circles in 7.449 days, full for a twelfth of it
   (the Lich script `astrolabe`); Lornon, the dark moon, in about a month,
@@ -629,14 +629,15 @@ colour of their own, and stay open once opened for the rest of the run
   is highest in the south and sets in the west, lighting the scene from
   where that is round you -- facing west late at night the setting moon
   is ahead, backlighting the creatures. None keeps them on your side of
-  the scene. A moon ahead of you is drawn in the sky (the GPU pass): Liabo
+  the scene; the Studio faces south by default, where the moons ride
+  highest. A moon ahead of you is drawn in the sky (the GPU pass): Liabo
   large and silver-white with small red Tilaok circling it, Lornon smaller
   and grey (crimson by Lornon's Eve), each lit to its phase, dimmed by the
-  drifting cloud, only where the backdrop is sky (its depth map says
-  where) and behind whatever stands in front. The camera looks level, so a
+  drifting cloud, only where the backdrop is sky (what its depth map puts
+  farthest, joined to the top) and behind whatever stands in front. The camera looks level, so a
   disc's height is squeezed into the sky the frame shows; where it is
-  round you, and the light it throws, are true. With the game's moons on,
-  the stars come out too (the GPU pass): the 25 constellations of the
+  round you, and the light it throws, are true. The stars come out too
+  (the GPU pass; with the Moon slider they keep today's date): the 25 constellations of the
   official *Constellations of the Northern Sky*, their stars traced from
   its drawings (`gs_field::stars`, `data/constellations.toml`) -- Krrska's
   eight points, Arachne's red hourglass, the Dragonfly's twin nebulae.
@@ -645,9 +646,16 @@ colour of their own, and stay open once opened for the rest of the run
   the east, highest in the south, down in the west, leaning as the sky
   turns it (upright at its highest); faint stars between them turn with
   the sky. Only by night (a little at dusk and dawn), paled by a bright
-  Liabo, hidden by the drifting cloud and by the painting's own clouds,
-  only on the backdrop's sky. Like the discs, a figure's height is
-  squeezed into the frame's sky; its shape is its own.
+  Liabo, hidden by the cloud and by the painting's own clouds, only on the
+  backdrop's sky. Like the discs, a figure's height is squeezed into the
+  frame's sky; its shape is its own. The cloud is drawn on the sky too,
+  by day and night (the GPU pass): the moons' drifting deck at cloud size,
+  its cover the *Clouds* setting (0 clear .. 1 overcast), lit like the sky
+  round it -- white by day, moonlit grey at night, flaring with lightning --
+  and over the stars and discs it hides. An *Aurora* (the scene's
+  *Scene light*, `[light] aurora` 0..1; the Hinterwilds' scenes have one)
+  hangs curtains of light in the sky by night, green below and violet
+  above, rays shimmering along them, behind the cloud.
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).

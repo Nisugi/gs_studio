@@ -509,6 +509,15 @@ fn light_ui(
             edited.darkness = None;
         }
     });
+    // an aurora over it (the GPU pass draws it on the sky by night)
+    let mut aurora = edited.aurora.unwrap_or(0.0);
+    if ui
+        .add(egui::Slider::new(&mut aurora, 0.0..=1.0).text("Aurora"))
+        .on_hover_text("Curtains of light over the scene by night, behind the cloud: the Hinterwilds' sky. Drawn by the GPU lighting pass (v2), outdoors only; 0 = none")
+        .changed()
+    {
+        edited.aurora = (aurora > 0.0).then_some(aurora);
+    }
     // the side the painting is lit from: puppets lit by the scene take it
     let mut sun = edited.sun.unwrap_or_default();
     let mut moved = false;

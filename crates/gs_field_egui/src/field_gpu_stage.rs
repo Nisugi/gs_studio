@@ -819,6 +819,13 @@ const NEBULA_POWER: f32 = 0.16;
 /// disc is ([`moon_light`]) -- at its highest, its top just under the
 /// frame's -- its figure at its own shape, leaning as the sky turns it;
 /// only what lands on the stage.
+/// The sky with no stars up (by day): only its cloud, cover and drift, for
+/// the pass to draw.
+fn sky_cloud(clouds: f32, wind: f32) -> field_gpu::FieldStars {
+    let drift = (CLOUD_DRIFT + CLOUD_WIND * wind.abs()) * if wind < 0.0 { -1.0 } else { 1.0 };
+    field_gpu::FieldStars { clouds, drift: [drift, 0.2 * drift.abs()], ..Default::default() }
+}
+
 fn star_field(cam: &FieldCamera, now: &crate::creature_light::StarsNow, wind: f32) -> field_gpu::FieldStars {
     let up = cam.up();
     let deeper = [0.0, up[2], -up[1]];
@@ -873,6 +880,7 @@ fn star_field(cam: &FieldCamera, now: &crate::creature_light::StarsNow, wind: f3
         clouds: now.clouds,
         drift: [drift, 0.2 * drift.abs()],
         turn_px: now.turn.to_radians() * cam.f,
+        aurora: 0.0,
     }
 }
 
@@ -1005,7 +1013,15 @@ impl StageGpu {
             weather,
             detail: field_gpu::DETAIL,
             bounce: field_gpu::BOUNCE,
-            stars: cache.light.stars_now().map(|s| star_field(&camera, &s, wind)).unwrap_or_default(),
+            // the stars when they are up; else, by day, the cloud alone,
+            // which the pass draws on the sky whatever the hour
+            stars: field_gpu::FieldStars {
+                aurora: cache.light.aurora_now(),
+                ..match cache.light.stars_now() {
+                    Some(s) => star_field(&camera, &s, wind),
+                    None => cache.light.clouds_now().map(|c| sky_cloud(c, wind)).unwrap_or_default(),
+                }
+            },
         };
         Some(StageGpu { frame: Arc::new(Mutex::new(frame)), place: Placement { origin, scale }, k, plan: Default::default(), ppp: ctx.pixels_per_point(), in_pass, f })
     }

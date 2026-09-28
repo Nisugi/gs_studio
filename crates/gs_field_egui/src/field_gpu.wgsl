@@ -818,22 +818,85 @@ fn disc_at(uv: vec2<f32>, aa: f32, age: f32) -> vec2<f32> {
     return vec2<f32>(inside, smoothstep(-0.06, 0.06, s));
 }
 // ---- the stars (U.sky): the constellations up now, their nebulae and the
-// faint stars between them, on sky pixels only, under the drifting cloud
-// (the moons' own) and not on the painting's clouds.
-// How clear the sky is along `dir`, 0..1: where the ray meets the moons'
-// cloud deck; low near the horizon, the cloud's average.
-fn sky_cloud(dir: vec3<f32>) -> f32 {
+// faint stars between them, on sky pixels only, behind the cloud drawn on
+// the sky (cloud_seen) and not on the painting's clouds.
+// ---- the cloud drawn on the sky: the moons' cloud deck -- its cover and
+// its drift, the deck that shadows the ground -- at the size clouds are
+// seen: CLOUD_SKY_SCALE, not the shadows' CLOUD_SCALE (16 m patches that
+// sweep a stage a few metres across came out as grain 600 m up). A soft
+// edge and a finer octave for its billows. How much of the pixel is cloud,
+// 0..1; toward the horizon the deck's average.
+fn cloud_seen(dir: vec3<f32>) -> f32 {
     let c = U.sky.y;
-    if (c <= 0.001) { return 1.0; }
-    if (c >= 0.999) { return 0.0; }
+    if (c <= 0.001) { return 0.0; }
+    if (c >= 0.999) { return 1.0; }
     let up = U.up.xyz;
     let rise = dot(dir, up);
     let Q = dir * ((CLOUD_H - U.cam.w) / max(rise, 0.02));
     let deeper = vec3<f32>(0.0, up.z, -up.y);
-    let uv = (vec2<f32>(Q.x, dot(Q, deeper)) - U.sky.zw * U.up.w) / CLOUD_SCALE;
+    let uv = (vec2<f32>(Q.x, dot(Q, deeper)) - U.sky.zw * U.up.w) / CLOUD_SKY_SCALE;
     let thr = 0.47 + 0.56 * (c - 0.5);
-    return mix(1.0 - 0.9 * c, smoothstep(thr - 0.05, thr + 0.05, fbm(uv)), smoothstep(0.02, 0.06, rise));
+    let n = fbm(uv) + 0.12 * (fbm(uv * 2.7 + vec2<f32>(7.3, 1.9)) - 0.5);
+    let near = 1.0 - smoothstep(thr - 0.10, thr + 0.10, n);
+    return clamp(mix(0.9 * c, near, smoothstep(0.02, 0.08, rise)), 0.0, 1.0);
 }
+const CLOUD_SKY_SCALE: f32 = 320.0; // metres of the drawn cloud per noise unit
+// ---- an aurora (U.sky_n.w, the scene's `[light] aurora`): curtains of
+// light hanging in the sky, as dark as the stars need (U.sky.x), behind the
+// cloud. Each curtain hangs from a baseline that wanders with the bearing
+// and the hour, its lower edge sharp, fading upward; green below, violet at
+// the top; rays -- fine streaks straight up -- shimmering along it.
+fn aurora_sky(dir: vec3<f32>) -> vec3<f32> {
+    let k = U.sky_n.w * U.sky.x;
+    if (k <= 0.002) { return vec3<f32>(0.0); }
+    let up = U.up.xyz;
+    let el = asin(clamp(dot(dir, up), -1.0, 1.0));
+    if (el < 0.0) { return vec3<f32>(0.0); }
+    let az = atan2(dir.x, dir.z);
+    let t = U.up.w;
+    // placed in the sky the frame shows (as the stars are): the camera looks
+    // level, and a stage shows only some 20 degrees above the horizon
+    let sky = max(atan(U.cam.z / max(U.cam.x, 1.0)), radians(6.0));
+    var o = vec3<f32>(0.0);
+    for (var i = 0; i < 3; i = i + 1) {
+        let fi = f32(i);
+        // its foot, above the horizon, wandering
+        let base = sky * (0.28 + 0.14 * fi)
+            + sky * 0.10 * sin(az * (1.7 + 0.6 * fi) + t * (0.05 + 0.02 * fi) + 1.9 * fi)
+            + sky * 0.05 * sin(az * (4.3 + fi) - t * 0.11 + 0.7 * fi);
+        let v = el - base;
+        let height = sky * (0.38 + 0.12 * fi);
+        let body = select(exp(-v / height), exp(-sq(v / (sky * 0.045))), v < 0.0);
+        // where along the sky it hangs, and its rays
+        let span = smoothstep(0.15, 0.75, 0.5 + 0.5 * sin(az * (0.9 + 0.3 * fi) + t * 0.03 + 2.3 * fi));
+        let rays = 0.45 + 0.9 * fbm(vec2<f32>(az * (38.0 + 9.0 * fi) + t * 0.25, fi * 5.7));
+        let top = smoothstep(0.0, 1.4 * height, v);
+        let col = mix(AURORA_LOW, AURORA_HIGH, top);
+        o = o + col * body * span * rays * (1.0 - 0.25 * fi);
+    }
+    return o * k * AURORA_POWER;
+}
+const AURORA_LOW: vec3<f32> = vec3<f32>(0.10, 0.95, 0.40);  // its foot's green, linear
+const AURORA_HIGH: vec3<f32> = vec3<f32>(0.55, 0.12, 0.75); // its top's violet
+const AURORA_POWER: f32 = 0.09;
+// A cloud's colour against the sky behind it (`sky`, linear, as lit now):
+// what lights the sky lights the cloud, scattered greyer and brighter; the
+// moons up silver it; a lightning flash floods it.
+fn cloud_colour(sky: vec3<f32>) -> vec3<f32> {
+    let l = dot(sky, LUM);
+    var c = mix(vec3<f32>(l), sky, 0.3) * CLOUD_BRIGHT;
+    let n_lights = u32(U.misc.w);
+    for (var li = 0u; li < n_lights; li = li + 1u) {
+        let Lt = U.lights[li];
+        if (Lt.pos.w > 1.5) {
+            c = c + Lt.col.rgb * Lt.col.w * CLOUD_MOONLIT * max(dot(U.up.xyz, Lt.pos.xyz), 0.2);
+        }
+    }
+    return c + U.weather.flash_tint.rgb * U.weather.a.x * 0.3;
+}
+const CLOUD_BRIGHT: f32 = 1.45;  // a cloud against the sky it floats in
+const CLOUD_MOONLIT: f32 = 0.16; // how much a moon lights a cloud (moonlit cloud reads grey at night)
+const CLOUD_OPACITY: f32 = 0.9;  // thickest cloud over the sky
 fn star_sky(px: vec2<f32>, alb: vec3<f32>) -> vec3<f32> {
     let shown = U.sky.x;
     if (shown <= 0.0) { return vec3<f32>(0.0); }
@@ -841,7 +904,7 @@ fn star_sky(px: vec2<f32>, alb: vec3<f32>) -> vec3<f32> {
     let hi = max(max(alb.r, alb.g), alb.b);
     let grey = min(min(alb.r, alb.g), alb.b) / max(hi, 1e-4);
     let painted = smoothstep(0.6, 0.9, grey) * smoothstep(0.12, 0.4, dot(alb, LUM));
-    let k = shown * sky_cloud(normalize(ray(px))) * (1.0 - painted);
+    let k = shown * (1.0 - cloud_seen(normalize(ray(px)))) * (1.0 - painted);
     if (k <= 0.002) { return vec3<f32>(0.0); }
     let t = U.up.w;
     var o = vec3<f32>(0.0);
@@ -980,7 +1043,14 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             col = col + alb_bg * Lt.col.rgb * Lt.col.w * (open + Lt.fall.w);
         }
         if (!light_only) {
-            col = col + star_sky(px, alb_bg) + moon_discs(px);
+            let dir = normalize(ray(px));
+            col = col + star_sky(px, alb_bg) + moon_discs(px) + aurora_sky(dir);
+            // the cloud over them all, drawn (its shadows and the stars it
+            // hides are the same deck)
+            let cover = cloud_seen(dir);
+            if (cover > 0.002) {
+                col = mix(col, cloud_colour(storm_lift(base)), cover * CLOUD_OPACITY);
+            }
         }
     }
     col = mix(col, s2l(bg_a.rgb) * 2.2, bg_l.a);

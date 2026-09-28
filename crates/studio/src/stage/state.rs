@@ -233,10 +233,12 @@ impl StageState {
             light_strength: 1.0,
             light_moon: 1.0,
             light_clouds: 0.0,
-            game_sky: false,
+            // the game's moons, facing south where they ride highest: a
+            // night scene shows its sky without setting anything
+            game_sky: true,
             sky_at: None,
             lornons_eve: false,
-            facing: None,
+            facing: Some(180.0),
             weather_kind: 0,
             weather_intensity: 0.6,
             weather_wind: 0.15,

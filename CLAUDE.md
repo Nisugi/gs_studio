@@ -42,7 +42,7 @@ faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEA
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
-lighting pass for the run, the Preview tab's *Light on the GPU (v2)*, remembered in
+lighting pass for the run (`=0` turns it off), the Preview tab's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
 in the thousands: the night relight bakes on a worker thread first. Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.

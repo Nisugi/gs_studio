@@ -521,3 +521,10 @@ themselves back as the room empties, and the floor is as wide as the view
 at its far edge (`CreatureField::floor_columns`, `rows`, `grows_deep`: **new
 methods**; `columns()` stays the wide growth's). A prop's place and size on
 the painting, and every creature's foot, no longer change with the crowd.
+
+### 6.21 `src/lighting.rs`: a scene's aurora
+
+`SceneLight::aurora` (**a new field**, `[light] aurora = 0..1`, omitted
+when none): an aurora over the scene, which gs_field_egui's v2 pass draws
+on the sky by night (gs_field_egui PORTING 7.32). The Hinterwilds' scenes
+set one; every room there names the aurora overhead.
