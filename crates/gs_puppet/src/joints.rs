@@ -12,10 +12,13 @@
 //! string": one hinge's bend shared out over the flesh round it).
 //!
 //! Along a limb (hip, knee, ankle; shoulder, elbow, wrist, hand) both sides
-//! share. Where a limb leaves the trunk (a thigh at the pelvis, an arm at
-//! its collarbone, the neck), only the limb's rings do: the trunk has several
-//! limbs to follow and follows none. At rest, or wherever the two bones
-//! turn alike, a shared ring is exactly where its own bone puts it.
+//! share. Where a limb leaves the trunk (a thigh at the pelvis, the neck),
+//! only the limb's rings do: the trunk has several limbs to follow and
+//! follows none. A collarbone is the exception: its outer end is the point
+//! of the shoulder, and it shares with the one arm hanging from it (left
+//! behind, it stood as a hard corner over a raised arm). At rest, or
+//! wherever the two bones turn alike, a shared ring is exactly where its own
+//! bone puts it.
 
 use crate::math::{dot, len, mul_mv, norm_or, quat_from_m3, quat_to_m3, slerp, sub, Xf};
 use crate::pose::Posed;
@@ -42,6 +45,11 @@ pub struct Share {
     pub joint: [f32; 3],
 }
 
+/// An arm's first segment: a limb whose part is an arm.
+fn is_arm(s: &crate::Segment) -> bool {
+    s.chain_index == 0 && matches!(s.kind, crate::Kind::Limb) && s.part.as_deref().is_some_and(|p| p.ends_with("Arm"))
+}
+
 /// Every body segment's rings' [`Share`]s, station by station (None: the
 /// ring turns with its own bone alone).
 pub fn shares(p: &Puppet) -> Vec<Vec<Option<Share>>> {
@@ -64,8 +72,11 @@ pub fn shares(p: &Puppet) -> Vec<Vec<Option<Share>>> {
                 [c] => Some(*c),
                 many => many.iter().copied().find(|&c| segs[c].bone == s.bone),
             }
-            // a trunk follows none of the limbs leaving it
-            .filter(|&c| !(matches!(s.kind, crate::Kind::Trunk) && !matches!(segs[c].kind, crate::Kind::Trunk)));
+            // a trunk follows none of the limbs leaving it -- but a
+            // collarbone's outer end is the point of the shoulder, and the
+            // one arm hanging from it takes it along: left behind, it stood
+            // as a hard corner over a raised arm, gaps beside it
+            .filter(|&c| !(matches!(s.kind, crate::Kind::Trunk) && !matches!(segs[c].kind, crate::Kind::Trunk)) || (at_tail.len() == 1 && is_arm(&segs[c])));
             let reach = |joint: [f32; 3]| {
                 let near = s.stations.iter().min_by(|a, b| len(sub(a.c, joint)).total_cmp(&len(sub(b.c, joint))));
                 let r = near.map_or(0.0, |st| st.w.max(st.d));
