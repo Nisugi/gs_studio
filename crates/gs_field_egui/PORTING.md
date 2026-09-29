@@ -1137,3 +1137,6 @@ Two more `creature_field.rs` regions (twenty-two in all,
   `DollState` drawn; the signs a status floats over the doll (stars, Zs,
   bubbles, drops...), a contact shadow in the backdrop and a rim light from
   the sky behind it.
+* `PosedPuppet::head` (**a new field**): the head's box, where the signs
+  float; the doll centres its figure's box in the window, so one lying
+  down stays in it.

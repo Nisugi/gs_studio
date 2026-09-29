@@ -630,6 +630,9 @@ pub struct PosedPuppet {
     lamp_layers: LampLayers,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
+    /// The head's box, as `bounds` (ADDITION: where a doll's signs float);
+    /// None on a form with no `head` part.
+    pub head: Option<[[f32; 3]; 2]>,
     /// The puppet's own standing height in feet (the bake's `height`), which
     /// the drawn pose is measured against.
     pub standing_ft: f32,
@@ -975,6 +978,11 @@ fn pose_puppet_inner(
     // The world box must describe what was DRAWN: `bounds` is the rest-yaw
     // figure, so turn it by the look's yaw before reporting it.
     let bounds = yawed_bounds(&posed, look.yaw);
+    let head = puppet
+        .segments
+        .iter()
+        .any(|s| s.part.as_deref() == Some("head"))
+        .then(|| yawed_bounds_where(&posed, look.yaw, |s| s.part.as_deref() == Some("head")));
     let mut surface = None;
     let mut caster = None;
     // For the GPU skin: the figure as a mesh, and no CPU skin at all.
@@ -1046,6 +1054,7 @@ fn pose_puppet_inner(
         splats,
         lamp_layers: LampLayers::default(),
         bounds,
+        head,
         standing_ft: puppet.height.max(0.01),
         px_per_ft,
     }
@@ -1067,7 +1076,12 @@ fn screen_to_skin(surface: &gs_puppet::SkinSurface, v: [f32; 3]) -> [f32; 3] {
 /// Held props are left out: a creature is placed and sized by its body, so
 /// arming it never moves it in its card.
 fn yawed_bounds(posed: &Posed<'_>, yaw_deg: f32) -> [[f32; 3]; 2] {
-    let b = posed.bounds_where(|s| !s.kind.is_prop());
+    yawed_bounds_where(posed, yaw_deg, |s| !s.kind.is_prop())
+}
+
+/// [`yawed_bounds`] of the segments `keep` accepts.
+fn yawed_bounds_where(posed: &Posed<'_>, yaw_deg: f32, keep: impl Fn(&gs_puppet::Segment) -> bool) -> [[f32; 3]; 2] {
+    let b = posed.bounds_where(keep);
     let (s, c) = yaw_deg.to_radians().sin_cos();
     let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
     // Every corner of the rest box, turned about y.
