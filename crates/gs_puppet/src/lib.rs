@@ -62,6 +62,7 @@ pub mod skin;
 pub mod splat;
 pub mod uv;
 mod wounds;
+pub use wounds::MarksSheet;
 
 pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};
 pub use camera::Camera;
@@ -76,8 +77,8 @@ pub use pose::{flinch_envelope, BonePose, FamilyPoses, Idle, IdleBone, Limit, Po
 pub use prefill::{depth_guide, dressed_silhouette, normal_guide, prefill, project_view, puppet_eyes, side_silhouette, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
-pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinSurface};
-pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, SHEET_SIDE, SHEET_SIDES};
+pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinCorner, SkinMesh, SkinShading, SkinSurface, SKIN_SS};
+pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
 pub use puppet::{plan_shift, side_for_plan, turned_head_up, Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
 
 #[cfg(test)]

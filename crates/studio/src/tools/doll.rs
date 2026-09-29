@@ -59,6 +59,8 @@ pub struct DollWindow {
     /// rank, frame), and the frames drawn so far -- a hit for a screenshot.
     hit: Option<(usize, u8, u32)>,
     frames: u32,
+    /// Draw the skin on the GPU (`skin_gpu`) instead of the CPU.
+    gpu_skin: bool,
 }
 
 impl Default for DollWindow {
@@ -82,6 +84,7 @@ impl Default for DollWindow {
             follow_field: false,
             hit: None,
             frames: 0,
+            gpu_skin: false,
         }
     }
 }
@@ -110,6 +113,7 @@ impl DollWindow {
                 }
             }
         }
+        w.gpu_skin = std::env::var("GS_STUDIO_DOLL_GPU").is_ok_and(|v| v == "1");
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_HIT") {
             let parsed = v.split_once('@').and_then(|(wound, frame)| {
                 let (part, rank) = wound.split_once(':')?;
@@ -180,10 +184,15 @@ impl DollWindow {
                 drag.on_hover_text("Drag to turn it round");
                 let family: Arc<str> = if self.hold.trim().is_empty() { Arc::from(self.family.as_str()) } else { Arc::from(format!("{}@{}", self.family, self.hold.trim())) };
                 let cache = PuppetCache::shared(ctx);
+                let started = std::time::Instant::now();
                 let drawn = {
                     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
-                    gs_field_egui::doll_view::paint(ui, rect, &mut cache, &family, self.key(), &self.sky(ctx), self.breathe.then_some("studio doll"))
+                    gs_field_egui::doll_view::paint(ui, rect, &mut cache, &family, self.key(), &self.sky(ctx), self.breathe.then_some("studio doll"), self.gpu_skin)
                 };
+                // GS_STUDIO_DOLL_TIMES=1: what each frame's doll cost
+                if std::env::var_os("GS_STUDIO_DOLL_TIMES").is_some() {
+                    eprintln!("doll frame {} {:.2} ms", self.frames, started.elapsed().as_secs_f64() * 1000.0);
+                }
                 if !drawn {
                     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("no puppet for '{family}'"), egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
                 }
@@ -221,6 +230,8 @@ impl DollWindow {
             ui.checkbox(&mut self.breathe, "Breathes");
         });
         ui.add(egui::Slider::new(&mut self.turn, -180.0..=180.0).text("turned").suffix(" deg"));
+        ui.checkbox(&mut self.gpu_skin, "GPU skin")
+            .on_hover_text("Draw the skin on the GPU. A figure it does not cover yet (unpainted, webbed or frozen) is drawn on the CPU");
 
         super::group(ui, "Wounds and scars");
         egui::Grid::new("doll_wounds").num_columns(3).show(ui, |ui| {

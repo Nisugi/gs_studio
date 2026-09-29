@@ -30,5 +30,7 @@ bytemuck = "1"
 
 [dev-dependencies]
 tempfile = "3"
+# Validates the WGSL offline (tests): the same naga wgpu builds on.
+naga = { version = "29.0.4", features = ["wgsl-in"] }
 # examples/stage_demo.rs only. Same source, branch and features as the hosts.
 eframe = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }

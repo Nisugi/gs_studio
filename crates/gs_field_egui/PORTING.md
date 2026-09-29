@@ -1070,3 +1070,22 @@ Two more `creature_field.rs` regions (twenty-two in all,
   function**): a rank-3 nerve wound's hand twitch, which
   `posed_live_surface` plays between other motions (the doll's; the
   field's creatures do not twitch).
+
+### 7.38 The skin on the GPU
+
+* `src/skin_gpu.rs` + `src/skin_gpu.wgsl` (**new files**): a puppet's
+  smooth skin from `gs_puppet::Posed::skin_mesh`, drawn by five passes
+  (raster at 2x, resolve, smooth x / y, final: relief, cel bands,
+  contours) straight into a layer's atlas slot -- the albedo, lit base and
+  geo `field_gpu_stage::skin_image` makes on the CPU. A job goes in by
+  image key (`skin_gpu::submit`); an image with no pixels and a job
+  (`LitImage::gpu_only`) is drawn from it, its depth span from the mesh.
+* `field_gpu`: the shared `Gpu` holds the skin's pipelines; `upload_frame`
+  takes the encoder (the skin draws there).
+* `creature_puppet::Bare` (**a new type**) -- scene-lit, surface kept, or
+  mesh -- replaces the private `bare: bool`; `PuppetCache::posed_live`
+  (**a new method**) is `posed_live_surface` in any of them, and
+  `PosedPuppet::mesh` (**a new field**) carries the mesh and its paint.
+* The doll's *GPU skin* toggle (`doll_view::paint`'s `gpu_skin`).
+* dev-dependency `naga` (the version wgpu builds on): `skin_gpu`'s test
+  validates both WGSL files offline.

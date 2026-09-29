@@ -271,6 +271,36 @@ impl UvLayout {
 }
 
 impl UvLayout {
+    /// This layout packed for a shader that does [`UvLayout::locate`]
+    /// itself (the GPU skin): `[patches, px_per_ft]`, then per patch (in
+    /// segment order) 8 floats -- origin x and y, centre x, seam, where its
+    /// rows start, how many, where its arc tables start, 0 -- then every
+    /// patch's rows `(y, circumference)` and arc tables ([`ARC_SAMPLES`]
+    /// + 1 each), at those offsets (in floats, from the start).
+    pub fn packed(&self) -> Vec<f32> {
+        let n = self.patches.len();
+        let mut out = vec![n as f32, self.px_per_ft];
+        out.resize(2 + 8 * n, 0.0);
+        for (i, q) in self.patches.iter().enumerate() {
+            let rows_at = out.len();
+            for (y, circ) in &q.rows {
+                out.extend([*y, *circ]);
+            }
+            let arc_at = out.len();
+            for table in &q.arc {
+                out.extend(table.iter().copied());
+            }
+            let h = 2 + 8 * i;
+            out[h..h + 8].copy_from_slice(&[q.origin[0], q.origin[1], q.centre_x(), q.seam, rows_at as f32, q.rows.len() as f32, arc_at as f32, 0.0]);
+        }
+        out
+    }
+}
+
+/// Samples per arc table in [`UvLayout::packed`].
+pub const PACKED_ARC_SAMPLES: usize = ARC_SAMPLES;
+
+impl UvLayout {
     /// The inverse of [`UvLayout::locate`]: the surface address
     /// `(segment, station, theta)` under a sheet position, or None off
     /// every patch.

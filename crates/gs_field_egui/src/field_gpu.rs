@@ -121,7 +121,13 @@ pub struct LitImage {
 impl LitImage {
     fn check(&self) -> bool {
         let n = (self.w * self.h) as usize;
-        self.w > 0 && self.h > 0 && self.albedo.len() == n * 4 && self.lit.len() == n * 4 && self.geo.len() == n
+        self.w > 0 && self.h > 0 && (self.gpu_only() || (self.albedo.len() == n * 4 && self.lit.len() == n * 4 && self.geo.len() == n))
+    }
+
+    /// An image with no pixels of its own, drawn on the GPU from the job
+    /// registered under its key (ADDITION: `skin_gpu::submit`).
+    pub fn gpu_only(&self) -> bool {
+        self.albedo.is_empty() && self.lit.is_empty() && self.geo.is_empty() && crate::skin_gpu::job(self.key).is_some()
     }
 }
 
@@ -800,6 +806,10 @@ fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_tar
 /// solid pixels (alpha at least half, what a shadow march tests). The
 /// shader marches a layer's shadow only where a ray's depth is within it.
 fn depth_span(img: &LitImage) -> [f32; 2] {
+    // a GPU skin's pixels never come back: its mesh has the same depths
+    if let Some(job) = crate::skin_gpu::job(img.key).filter(|_| img.gpu_only()) {
+        return job.depth_span();
+    }
     let mut span = NO_SPAN;
     for (px, g) in img.albedo.chunks_exact(4).zip(img.geo.iter()) {
         if px[3] >= 128 {
@@ -1130,6 +1140,8 @@ struct Gpu {
     bounce_pipeline: wgpu::RenderPipeline,
     /// Stands in for the bounce textures while the pass draws into them.
     dummy: wgpu::TextureView,
+    /// Draws the GPU skins (`skin_gpu`) into the atlas.
+    skin: crate::skin_gpu::SkinGpu,
     /// How many pieces have taken a draw slot this egui render (all views).
     next_slot: u32,
     /// Each view's own frame on the GPU, by [`paint_view`]'s `view`.
@@ -1192,9 +1204,13 @@ impl View {
         }
     }
 
-    /// `img` into the atlas at `at`: its pixels, its slot, its depth span.
-    fn put(&mut self, queue: &wgpu::Queue, img: &LitImage, at: [u32; 2]) {
-        self.atlas.upload_slot(queue, at, img);
+    /// `img` into the atlas at `at`: its pixels (or its GPU skin, drawn
+    /// there), its slot, its depth span.
+    fn put(&mut self, skin: &crate::skin_gpu::SkinGpu, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, img: &LitImage, at: [u32; 2]) {
+        match crate::skin_gpu::job(img.key).filter(|_| img.gpu_only()) {
+            Some(job) => skin.draw(device, queue, encoder, &job, [&self.atlas.albedo, &self.atlas.lit, &self.atlas.geo], at, ATLAS_PAD),
+            None => self.atlas.upload_slot(queue, at, img),
+        }
         self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
         self.spans.insert(img.key, depth_span(img));
     }
@@ -1421,6 +1437,7 @@ impl Gpu {
         Gpu {
             bounce_pipeline,
             dummy,
+            skin: crate::skin_gpu::SkinGpu::new(device),
             opaque: pipeline(None, "field_gpu opaque"),
             blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
             format: target_format,
@@ -1536,7 +1553,9 @@ impl Offscreen {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2]) -> Offscreen {
         let gpu = Gpu::new(device, Self::FORMAT);
         let mut view_gpu = View::new(device);
-        gpu.upload_frame(&mut view_gpu, device, queue, frame);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("field_gpu offscreen upload") });
+        gpu.upload_frame(&mut view_gpu, device, queue, &mut encoder, frame);
+        queue.submit([encoder.finish()]);
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("field_gpu offscreen"),
             size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -1668,7 +1687,7 @@ impl Gpu {
     }
 
     /// `frame`'s textures and uniforms into `view`.
-    fn upload_frame(&self, view: &mut View, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame) {
+    fn upload_frame(&self, view: &mut View, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &FieldFrame) {
         let bd = &frame.backdrop;
         if !bd.check() {
             return;
@@ -1694,7 +1713,7 @@ impl Gpu {
                     continue;
                 }
                 match view.shelves.place(img.w, img.h) {
-                    Some(at) => view.put(queue, img, at),
+                    Some(at) => view.put(&self.skin, device, queue, encoder, img, at),
                     None => {
                         full = true;
                         break;
@@ -1707,7 +1726,7 @@ impl Gpu {
                 view.slots.clear();
                 view.spans.clear();
                 for (i, at) in placed {
-                    view.put(queue, &layers[i].image, at);
+                    view.put(&self.skin, device, queue, encoder, &layers[i].image, at);
                 }
             }
         }
@@ -1956,7 +1975,7 @@ impl egui_wgpu::CallbackTrait for FieldCallback {
         view.seen = gpu.render;
         if view.frame_id != frame.id {
             view.frame_id = frame.id;
-            gpu.upload_frame(&mut view, device, queue, &frame);
+            gpu.upload_frame(&mut view, device, queue, encoder, &frame);
             gpu.bounce_pass(&view, queue, encoder, &frame);
         }
         let prepared = gpu.prepare_piece(&view, device, queue, encoder, &frame, self.piece, self.place, self.rect, screen.size_in_pixels, screen.pixels_per_point);

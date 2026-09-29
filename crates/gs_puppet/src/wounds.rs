@@ -226,7 +226,8 @@ fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, mi
 /// mark is a blend toward a fixed colour, or a darkening, so their stack is
 /// one of these) -- and the glow. The rasteriser reads it instead of working
 /// every mark out per sample; it does not change with the pose.
-pub(crate) struct MarksSheet {
+#[derive(Debug)]
+pub struct MarksSheet {
     per_ft: f32,
     w: usize,
     h: usize,
@@ -271,6 +272,21 @@ impl MarksSheet {
             }
         });
         MarksSheet { per_ft, w, h, bk, glow }
+    }
+
+    /// Texels per foot of the surface layout, and the sheet's size.
+    pub fn per_ft(&self) -> f32 {
+        self.per_ft
+    }
+
+    pub fn size(&self) -> [usize; 2] {
+        [self.w, self.h]
+    }
+
+    /// Per texel, row-major: the marks' `b` (rgb) and `k` (alpha), 0..255
+    /// -- `colour * k / 255 + b` -- and the glow, 0..255.
+    pub fn texels(&self) -> (&[[u8; 4]], &[u8]) {
+        (&self.bk, &self.glow)
     }
 
     /// `col` with the marks at layout point `at` (feet) on it, and the glow

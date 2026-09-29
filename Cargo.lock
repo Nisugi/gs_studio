@@ -1054,6 +1054,7 @@ dependencies = [
  "gs_field",
  "gs_puppet",
  "image",
+ "naga",
  "tempfile",
  "tracing",
  "vellum_light",

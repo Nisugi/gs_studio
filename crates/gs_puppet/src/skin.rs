@@ -31,6 +31,8 @@
 //! [`SkinSurface::lamp_light`] lights that from any [`Lamp`]s, as often as
 //! they move, without drawing the figure again.
 
+use std::sync::Arc;
+
 use crate::draw::{surfaces, view_basis, Look, BOSS_OUTLINE, BODY_DEAD, DARK_BELOW, DEPTH_SHADE, EYE, LIGHT_ABOVE};
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
@@ -305,6 +307,106 @@ fn raster_threads() -> usize {
             .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()))
             .clamp(1, 16)
     })
+}
+
+/// One corner of a triangle of a skin's mesh, for a host that rasterises
+/// the skin itself (the GPU skin, [`Posed::skin_mesh`]): three per triangle,
+/// in order.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkinCorner {
+    /// Supersampled pixels ([`SKIN_SS`] per pixel) in the skin's frame.
+    pub p: [f32; 2],
+    /// Depth, the projection's (larger = farther).
+    pub z: f32,
+    pub n: V3,
+    /// The surface point, world feet.
+    pub pos: V3,
+    /// Its colour (0..255) with no paint, and a wound's colour and how
+    /// strongly it shows over paint.
+    pub col: [f32; 3],
+    pub wound: [f32; 4],
+    pub seg: u32,
+    /// Where on its segment's surface: station and ring angle, the angle
+    /// unwrapped across the triangle; meaningless unless `addressed`.
+    pub addr: [f32; 2],
+    pub addressed: bool,
+}
+
+/// The skin's shading constants, for a host that shades it itself.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SkinShading {
+    pub light_above: f32,
+    pub dark_below: f32,
+    pub band_soft: f32,
+    pub lit_tone: f32,
+    pub dark_tone: f32,
+    pub lambert: f32,
+    pub relief_gain: f32,
+    pub normal_map_strength: f32,
+    pub depth_shade: f32,
+    pub joined_blend: f32,
+    pub boss_extra_px: f32,
+    pub boss_rgb: [f32; 3],
+}
+
+/// Samples per pixel along each axis the skin is rasterised at.
+pub const SKIN_SS: usize = SS;
+
+/// Everything a host needs to rasterise and shade a skin itself -- the
+/// same figure [`Posed::skin_surface`] draws, on the GPU (ADDITION, for
+/// the doll): the mesh, how its paint and marks are laid out, and how it
+/// is shaded.
+#[derive(Debug, Clone)]
+pub struct SkinMesh {
+    /// Where the skin's top-left corner sits in the projection's pixels,
+    /// and its size, as [`Skin`]'s.
+    pub origin: [f32; 2],
+    pub w: usize,
+    pub h: usize,
+    pub corners: Vec<SkinCorner>,
+    /// Per segment: its posed and turned rotation, as columns (what a
+    /// normal sheet's rest-space deviations go through).
+    pub seg_rot: Vec<[V3; 3]>,
+    /// Per pair of segments (`a * segments + b`): joined, so their seam is
+    /// blended and draws no contour.
+    pub joined: Vec<bool>,
+    pub segments: usize,
+    /// Toward the light and toward the viewer, in the skin's frame.
+    pub light: V3,
+    pub to_cam: V3,
+    /// The contour's colour (0..255) and width, pixels; a boss's gold round it.
+    pub line: [f32; 3],
+    pub outline_px: f32,
+    pub boss: bool,
+    /// The normals' smoothing: radius (pixels) and depth tolerance; the
+    /// inner contour's depth step; depth darkening's near and range.
+    pub smooth_radius: usize,
+    pub blend_tol: f32,
+    pub contour_tol: f32,
+    pub near: f32,
+    pub range: f32,
+    /// The paint's layout, [`UvLayout::packed`].
+    pub paint_layout: Vec<f32>,
+    /// Wound, scar and nerve marks: their sheet, the 1 px-per-foot surface
+    /// layout it is laid on (packed), and which segments carry any.
+    pub marks: Option<(Arc<crate::wounds::MarksSheet>, Vec<f32>, Vec<bool>)>,
+    pub shading: SkinShading,
+    /// Identifies this figure's pixels.
+    pub key: u64,
+}
+
+/// What [`Posed::build_mesh`] makes: the mesh and what it was made with.
+struct Mesh<'t> {
+    texture: Option<&'t Texture>,
+    line: [f32; 3],
+    view: crate::draw::View,
+    height: f32,
+    verts: Vec<Vert>,
+    tris: Vec<[u32; 3]>,
+    surfs: Vec<crate::draw::Surface>,
+    origin: [f32; 2],
+    w: usize,
+    h: usize,
 }
 
 /// A rendered figure.
@@ -815,14 +917,11 @@ impl Posed<'_> {
         (skin, surface.unwrap_or_default())
     }
 
-    fn render(
-        &self,
-        project: &dyn Fn(V3) -> ([f32; 2], f32),
-        look: &Look,
-        texture: Option<&Texture>,
-        effects: Effects,
-        keep_surface: bool,
-    ) -> (Skin, Option<SkinSurface>) {
+    /// The mesh a skin is rasterised from: every visible segment's rings
+    /// as triangles, in supersampled pixels of the skin's own frame (its
+    /// top-left at `origin` in the projection's pixels), and what the rest
+    /// of the render needs of it. None when nothing shows.
+    fn build_mesh<'t>(&self, project: &dyn Fn(V3) -> ([f32; 2], f32), look: &Look, texture: Option<&'t Texture>) -> Option<Mesh<'t>> {
         // A sheet laid out for another puppet would put paint anywhere.
         // Held props come after the body and are never on the sheet.
         let body_segments = self.puppet.segments.iter().take_while(|s| !s.kind.is_prop()).count();
@@ -896,7 +995,7 @@ impl Posed<'_> {
                     let (sp, z) = project(p);
                     let theta = j as f32 / m as f32 * std::f32::consts::TAU;
                     let addr = if addressed { [k as f32, theta] } else { [f32::NAN; 2] };
-                                        verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound });
+                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound });
                 }
             }
             let at = |k: usize, j: usize| base + (k * m + j % m) as u32;
@@ -938,17 +1037,141 @@ impl Posed<'_> {
             }
         }
         if lo[0] > hi[0] {
-            return (Skin::default(), None);
+            return None;
         }
         let origin = [(lo[0] - margin).floor(), (lo[1] - margin).floor()];
         let w = ((hi[0] + margin).ceil() - origin[0]) as usize;
         let h = ((hi[1] + margin).ceil() - origin[1]) as usize;
         if w == 0 || h == 0 || w > MAX_SIDE || h > MAX_SIDE {
-            return (Skin::default(), None);
+            return None;
         }
         for v in &mut verts {
             v.p = [v.p[0] - origin[0] * ss, v.p[1] - origin[1] * ss];
         }
+        Some(Mesh { texture, line, view, height, verts, tris, surfs, origin, w, h })
+    }
+
+    /// This figure as a mesh and what shades it, for a host that
+    /// rasterises the skin itself (the GPU skin): the same figure
+    /// [`Posed::skin_surface`] draws with `texture`. None when nothing
+    /// shows, or for what the host does not draw yet -- an unpainted skin
+    /// (its dotted eyes) and status effects -- which it draws on the CPU.
+    pub fn skin_mesh(&self, project: &dyn Fn(V3) -> ([f32; 2], f32), look: &Look, texture: Option<&Texture>, effects: Effects) -> Option<SkinMesh> {
+        use std::hash::{Hash, Hasher};
+        if effects.any() || texture.is_none() {
+            return None;
+        }
+        let Mesh { texture, line, view, height, verts, tris, surfs, origin, w, h } = self.build_mesh(project, look, texture)?;
+        let texture = texture?;
+        let puppet = self.puppet;
+        let px_per_ft = {
+            let mid = [0.0, height * 0.5, 0.0];
+            let (a, _) = project(mid);
+            let (b, _) = project(add(mid, [0.0, 1.0, 0.0]));
+            (a[0] - b[0]).hypot(a[1] - b[1])
+        };
+        let marks = if look.dead { vec![crate::wounds::Marks::default(); puppet.segments.len()] } else { segment_marks(puppet, &surfs, look) };
+        let marked = marks.iter().any(|m| m.any());
+        let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
+        let marks = marked.then(|| {
+            let layout = UvLayout::new(puppet, 1.0);
+            let sheet = marks_sheet(puppet, &layout, &surfs, &marks, strand_ft * 0.8);
+            (sheet, layout.packed(), marks.iter().map(|m| m.any()).collect())
+        });
+        let mut corners = Vec::with_capacity(tris.len() * 3);
+        for t in &tris {
+            let v = t.map(|i| &verts[i as usize]);
+            if !v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
+                continue;
+            }
+            // as `Band::tri`: angles unwrapped, so a triangle straddling
+            // angle 0 does not sweep the whole ring
+            let addressed = v.iter().all(|c| c.addr[0].is_finite() && c.addr[1].is_finite());
+            let mut theta = [v[0].addr[1], v[1].addr[1], v[2].addr[1]];
+            if addressed {
+                let lo = theta.iter().copied().fold(f32::MAX, f32::min);
+                for t in &mut theta {
+                    if *t - lo > std::f32::consts::PI {
+                        *t -= std::f32::consts::TAU;
+                    }
+                }
+            }
+            for (c, th) in v.iter().zip(theta) {
+                corners.push(SkinCorner {
+                    p: c.p,
+                    z: c.z,
+                    n: c.n,
+                    pos: c.w,
+                    col: c.col,
+                    wound: c.wound,
+                    seg: c.seg,
+                    addr: if addressed { [c.addr[0], th] } else { [0.0; 2] },
+                    addressed,
+                });
+            }
+        }
+        let (near, far) = corners.iter().fold((f32::MAX, f32::MIN), |(n, f), c| (n.min(c.z), f.max(c.z)));
+        let turn = rot_y(look.yaw);
+        let seg_rot = (0..puppet.segments.len()).map(|seg| [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|e| mul_mv(&turn, self.xf[seg].dir(e)))).collect();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (w, h, origin.map(f32::to_bits), corners.len()).hash(&mut hasher);
+        for c in corners.iter().step_by(61) {
+            (c.p.map(f32::to_bits), c.z.to_bits(), c.col.map(f32::to_bits), c.seg).hash(&mut hasher);
+        }
+        (texture.rgba.len(), texture.rgba.as_ptr() as usize, look.outline_px.to_bits(), look.boss_outline).hash(&mut hasher);
+        if let Some((sheet, _, _)) = &marks {
+            (Arc::as_ptr(sheet) as usize).hash(&mut hasher);
+        }
+        Some(SkinMesh {
+            origin,
+            w,
+            h,
+            corners,
+            seg_rot,
+            joined: joined(puppet),
+            segments: puppet.segments.len(),
+            light: view.light,
+            to_cam: view.to_cam,
+            line,
+            outline_px: look.outline_px,
+            boss: look.boss_outline,
+            smooth_radius: (SMOOTH_OF_HEIGHT * height * px_per_ft).round().clamp(0.0, 16.0) as usize,
+            blend_tol: BLEND_DEPTH_OF_HEIGHT * height,
+            contour_tol: CONTOUR_DEPTH_OF_HEIGHT * height,
+            near,
+            range: (far - near).max(2.0),
+            paint_layout: texture.layout.packed(),
+            marks,
+            shading: SkinShading {
+                light_above: LIGHT_ABOVE,
+                dark_below: DARK_BELOW,
+                band_soft: BAND_SOFT,
+                lit_tone: LIT_TONE,
+                dark_tone: DARK_TONE,
+                lambert: LAMBERT,
+                relief_gain: RELIEF_GAIN,
+                normal_map_strength: NORMAL_MAP_STRENGTH,
+                depth_shade: DEPTH_SHADE,
+                joined_blend: JOINED_BLEND,
+                boss_extra_px: BOSS_EXTRA_PX,
+                boss_rgb: BOSS_OUTLINE.map(|c| c as f32),
+            },
+            key: hasher.finish(),
+        })
+    }
+
+    fn render(
+        &self,
+        project: &dyn Fn(V3) -> ([f32; 2], f32),
+        look: &Look,
+        texture: Option<&Texture>,
+        effects: Effects,
+        keep_surface: bool,
+    ) -> (Skin, Option<SkinSurface>) {
+        let Some(Mesh { texture, line, view, height, verts, tris, surfs, origin, w, h }) = self.build_mesh(project, look, texture) else {
+            return (Skin::default(), None);
+        };
+        let puppet = self.puppet;
 
         // ---- rasterise, resolve, smooth
         let px_per_ft = {

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use gs_field::doll_sky::DollSky;
 
-use crate::creature_puppet::{size_step, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use crate::creature_puppet::{size_step, Bare, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
 fn sky_id() -> egui::Id {
@@ -199,7 +199,10 @@ fn nerve_rank(key: &PuppetKey) -> u8 {
 /// breathing cycle, and for the flinch of a wound rank rising and the ease
 /// of a pose changing, as the field's creatures (None: it holds still).
 /// Asks for the repaints those need. False when the puppet does not resolve.
-pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, key: PuppetKey, sky: &DollSky, id: Option<&str>) -> bool {
+/// `gpu_skin` draws its skin on the GPU (`skin_gpu`) when the figure's
+/// mesh covers it, the CPU skin otherwise.
+#[allow(clippy::too_many_arguments)]
+pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, key: PuppetKey, sky: &DollSky, id: Option<&str>, gpu_skin: bool) -> bool {
     let ctx = ui.ctx();
     let now = ctx.input(|i| i.time);
     cache.begin_frame(ctx.cumulative_frame_nr());
@@ -219,7 +222,7 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
     }
     let gpu = field_gpu::available(ctx);
     let (posed, moving) = match (gpu, id) {
-        (true, Some(id)) => match cache.posed_live_surface(family, &key, id, now) {
+        (true, Some(id)) => match cache.posed_live(family, &key, id, now, if gpu_skin { Bare::Mesh } else { Bare::Surface }) {
             Some(p) => p,
             None => return false,
         },
@@ -243,8 +246,19 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
     let foot = egui::pos2(rect.center().x, rect.top() + rect.height() * FEET_AT);
     let place = PuppetPlacement::fit(&posed, foot, standing_px);
     let painter = ui.painter_at(rect);
-    let layer = gpu.then(|| figure(&posed, sky, moving)).flatten();
-    let (Some(image), Some(skin)) = (layer, posed.skin.as_ref()) else {
+    // the layer, and where its image goes: the GPU skin's or the CPU's
+    let layer = if !gpu {
+        None
+    } else if let Some((mesh, texture)) = &posed.mesh {
+        let key = key_of(("doll gpu skin", mesh.key, sky.floor.map(f32::to_bits)));
+        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { mesh: mesh.clone(), texture: texture.clone(), floor: sky.floor, m_per_ft: M_PER_FT }));
+        let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
+        let image = LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
+        Some((Arc::new(image), place.skin_rect(&frame)))
+    } else {
+        figure(&posed, sky, moving).zip(posed.skin.as_ref().map(|s| place.skin_rect(s)))
+    };
+    let Some((image, at)) = layer else {
         // unlit, on a plain ground
         painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 42, 46));
         place.paint_figure(&painter, &posed);
@@ -256,7 +270,6 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
     let f = standing_px * DISTANCE_HEIGHTS;
     let eye = EYE_SHARE * fig_m;
     let camera = FieldCamera { size: [w, h], f, cx: w * 0.5, cy: h * FEET_AT - f * eye / z, pitch: 0.0, height: eye };
-    let at = place.skin_rect(skin);
     let layer = LayerDraw { image, rect: [at.min.x - rect.min.x, at.min.y - rect.min.y, at.width(), at.height()], feet_z: z, tint: 1.0 };
     let lights = sky.lights.iter().map(|l| sky_light(&camera, l.azimuth, l.elevation, l.colour, l.power)).collect();
     let frame = FieldFrame {
