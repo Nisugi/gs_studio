@@ -290,7 +290,7 @@ All five have the same shape; VellumFE keeps them verbatim as thin callers
 |---|---|
 | gs_field (path) | pool + sidecar readers/writers, skins (`DOLL_PARTS`, `DollDotSpec`, `default_doll_anchor`, `resolve_image_path`), data_dirs, bestiary, `Condition`, `UNITS_PER_FOOT` |
 | gs_field_egui (path) | `image_store::load_texture_file` (+ decode) |
-| egui (git `Nisugi/egui`, branch `numpad-support`) | the UI. No features requested. |
+| egui (git `Nisugi/egui`, rev `ed8b2649`, the commit Hydra pins) | the UI. No features requested. |
 | image 0.25 (same codec set as VellumFE) | creature calibrator's `alpha_bbox` (content bounding box); tests |
 | anyhow 1 | `DollEntry::save -> anyhow::Result` |
 | tracing 0.1 | kept `warn!` call sites |

@@ -222,9 +222,19 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
 /// of a pose changing, as the field's creatures (None: it holds still).
 /// Asks for the repaints those need. False when the puppet does not resolve.
 /// `gpu_skin` draws its skin on the GPU (`skin_gpu`) when the figure's
-/// mesh covers it, the CPU skin otherwise.
+/// mesh covers it, the CPU skin otherwise. It is the pass's [`DOLL_VIEW`];
+/// [`paint_in_view`] names another.
 #[allow(clippy::too_many_arguments)]
 pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, key: PuppetKey, sky: &DollSky, id: Option<&str>, gpu_skin: bool) -> bool {
+    paint_in_view(ui, rect, cache, family, key, sky, id, gpu_skin, DOLL_VIEW)
+}
+
+/// [`paint`] as view `view` of the pass (`field_gpu::paint_view`): its own
+/// lights and atlas, so several dolls -- one per character a client shows
+/// -- draw in one egui pass without one's frame overwriting another's.
+/// Any id but a stage's own (`0`) will do; keep it the same frame to frame.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, key: PuppetKey, sky: &DollSky, id: Option<&str>, gpu_skin: bool, view: u64) -> bool {
     let ctx = ui.ctx();
     let now = ctx.input(|i| i.time);
     cache.begin_frame(ctx.cumulative_frame_nr());
@@ -322,7 +332,7 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         bounce: field_gpu::BOUNCE,
         stars: Default::default(),
     };
-    field_gpu::paint_view(&painter, &Arc::new(Mutex::new(frame)), Placement { origin: rect.min, scale: 1.0 }, Piece::Everything, DOLL_VIEW);
+    field_gpu::paint_view(&painter, &Arc::new(Mutex::new(frame)), Placement { origin: rect.min, scale: 1.0 }, Piece::Everything, view);
     signs(ctx, &painter, key.statuses, &posed, foot, standing_px, now);
     true
 }
@@ -347,10 +357,12 @@ pub fn key_for(state: &DollState) -> PuppetKey {
 
 /// [`paint`] the doll as a game state has it ([`key_for`]): what a game
 /// client calls, its [`DollState`] filled from its own state
-/// (`DollState::from_game`).
+/// (`DollState::from_game`), as view `view` of the pass
+/// ([`paint_in_view`]: one id per doll shown at once; [`DOLL_VIEW`] for a
+/// single one).
 #[allow(clippy::too_many_arguments)]
-pub fn paint_state(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, state: &DollState, sky: &DollSky, id: Option<&str>, gpu_skin: bool) -> bool {
-    paint(ui, rect, cache, family, key_for(state), sky, id, gpu_skin)
+pub fn paint_state(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, state: &DollState, sky: &DollSky, id: Option<&str>, gpu_skin: bool, view: u64) -> bool {
+    paint_in_view(ui, rect, cache, family, key_for(state), sky, id, gpu_skin, view)
 }
 
 /// The signs a status floats over the figure (ADDITION), drawn over the

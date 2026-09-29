@@ -171,9 +171,9 @@ switching tabs never loses work. A new tool is a new `ToolId` + entry in
 `TOOLS` (`crates/studio/src/app.rs`) and a module under
 `crates/studio/src/tools/`.
 
-egui/eframe come from the `Nisugi/egui` fork, branch `numpad-support`
-(egui 0.35, wgpu backend) -- the same one the game client uses, so a renderer
-crate can later be shared between them.
+egui/eframe come from the `Nisugi/egui` fork, pinned to commit `ed8b2649`
+(egui 0.35, wgpu backend) -- the commit the game client (Hydra) pins, so the
+renderer crates are shared between them against one egui.
 
 ### Rig editor
 

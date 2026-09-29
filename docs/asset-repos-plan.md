@@ -69,7 +69,7 @@ skins) can stay where they are. See decision 8.
 
 Checked on 2026-09-28:
 
-- [x] **Dependencies:** the egui fork (`Nisugi/egui`, branch `numpad-support`) is public, so a public checkout builds without credentials. There are no other git dependencies.
+- [x] **Dependencies:** the egui fork (`Nisugi/egui`, pinned to rev `ed8b2649`, as Hydra) is public, so a public checkout builds without credentials. There are no other git dependencies.
 - [x] **Secrets:** none found in tracked files. `.cargo/config.toml`, which holds the local pool path, is untracked and stays that way.
 - [x] **Size:** the repo takes 162 MB on GitHub, and 201 commits are all from one author address (`nisugi-gs4@gmail.com`), which becomes public.
 - [ ] **Licence:** every crate says `license = "GPL-3.0-or-later"`, but there's no `LICENSE` file. Add the GPL text.

@@ -286,6 +286,7 @@ fn run_of_blood(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> f32 {
 /// `edge` fades wounds where the part meets another (the ring's wound
 /// tint); `min_half` is the least half width a line may have (a pixel).
 /// Returns the colour and how much it glows (0..1: nerves).
+#[cfg(test)]
 pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, edge: f32, min_half: f32) -> ([f32; 3], f32) {
     marks_at(col, at, seg, m, front, 0.0, edge, min_half)
 }
@@ -337,6 +338,7 @@ pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front:
 
 /// `col` (0..255) with a wound of `rank` and scar of `scar` at surface
 /// point `at` (feet) drawn on, laid out by `seg`; `edge` fades them.
+#[cfg(test)]
 fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32) -> [f32; 3] {
     mark_wet(col, at, seg, rank, scar, edge, min_half).0
 }

@@ -194,9 +194,11 @@ wants it -- no VellumFE compatibility to keep. Log additions and changes in
 gs-studio must never read or write `~/.vellum-fe` unless the user
 explicitly points the pool there.
 
-**egui fork.** egui/eframe come from `Nisugi/egui`, branch `numpad-support`
-(egui 0.35, wgpu). Every crate must use the exact same git source -- contexts
-and textures cross crate boundaries.
+**egui fork.** egui/eframe come from `Nisugi/egui`, pinned to commit
+`ed8b2649` (`rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38"`, egui 0.35, wgpu) -- the same commit Hydra
+pins, so the two build against one egui. Every crate must use the exact same
+git source -- contexts and textures cross crate boundaries. Move the pin only
+together with Hydra's.
 
 ## Folders and the artefact flow
 

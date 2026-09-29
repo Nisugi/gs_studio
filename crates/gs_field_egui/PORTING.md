@@ -244,7 +244,7 @@ says about the crate's seams.)
 | Crate | Why |
 |---|---|
 | gs_field (path) | solver, cards, naming, geometry, skins, scenes, pool, data_dirs, Condition, Creature(Flags) |
-| egui (git `Nisugi/egui`, branch `numpad-support`) | painting, textures. Same source as VellumFE and gs-studio so the types unify. No features requested. |
+| egui (git `Nisugi/egui`, rev `ed8b2649`, the commit Hydra pins) | painting, textures. Same source as Hydra and gs-studio so the types unify. No features requested. |
 | image 0.25 (`default-features = false`, png/jpeg/webp/bmp/gif) | art decoding. Identical to VellumFE's line. |
 | tracing 0.1 | `warn!` call sites kept from the originals |
 | dev: tempfile 3 | tests |
@@ -1142,7 +1142,9 @@ Two more `creature_field.rs` regions (twenty-two in all,
   and breathes as deep as `PuppetKey::breath_pace` (**new**) says;
   `PuppetCache::breath_paced` (**new**) at its pace.
 * `doll_view::key_for` / `paint_state` (**new**): a game client's
-  `DollState` drawn; the signs a status floats over the doll (stars, Zs,
+  `DollState` drawn, as the view the client names (`paint_state`'s `view`;
+  `paint_in_view`, **new**, is `paint` in any view -- one per doll shown at
+  once; `paint` keeps `DOLL_VIEW`); the signs a status floats over the doll (stars, Zs,
   bubbles, drops...), a contact shadow in the backdrop and a rim light from
   the sky behind it.
 * `PosedPuppet::head` (**a new field**): the head's box, where the signs

@@ -15,7 +15,7 @@ gs_field = { path = "../gs_field" }
 gs_puppet = { path = "../gs_puppet" }
 # MUST be the same egui the host apps link (VellumFE, gs-studio): textures,
 # painters and contexts cross the crate boundary.
-egui = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui" }
+egui = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui" }
 # Art decoding. Same version and codec set as VellumFE's Cargo.toml.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 # warn! on unreadable / undecodable art and skipped overlays.
@@ -24,8 +24,8 @@ tracing = "0.1"
 vellum_light = { path = "../vellum_light" }
 # ADDITION (not in VellumFE): the v2 field lighting pass (`field_gpu`),
 # drawn through an egui_wgpu paint callback. MUST be the same source and
-# branch as egui (the host's renderer owns the callback resources).
-egui-wgpu = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "egui-wgpu", default-features = false }
+# rev as egui (the host's renderer owns the callback resources).
+egui-wgpu = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui-wgpu", default-features = false }
 bytemuck = "1"
 
 [dev-dependencies]
@@ -33,4 +33,4 @@ tempfile = "3"
 # Validates the WGSL offline (tests): the same naga wgpu builds on.
 naga = { version = "29.0.4", features = ["wgsl-in"] }
 # examples/stage_demo.rs only. Same source, branch and features as the hosts.
-eframe = { git = "https://github.com/Nisugi/egui.git", branch = "numpad-support", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+eframe = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
