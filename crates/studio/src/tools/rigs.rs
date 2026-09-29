@@ -97,6 +97,11 @@ pub struct RigTool {
     pin_notes: bool,
     pending: Option<(rig_notes::Pin, String)>,
     note_focus: Option<u32>,
+    /// A reply being written: under which note, what so far.
+    note_draft: Option<(u32, String)>,
+    /// The notes list shows only the pose on view; and the done ones too.
+    notes_this_pose: bool,
+    notes_done_shown: bool,
     /// `GS_STUDIO_NOTE`: the note to show once its family is open.
     note_request: Option<(String, u32)>,
 }
@@ -232,6 +237,9 @@ impl RigTool {
             pin_notes: false,
             pending: None,
             note_focus: None,
+            note_draft: None,
+            notes_this_pose: false,
+            notes_done_shown: true,
             note_request: None,
         })
     }
@@ -539,6 +547,48 @@ impl RigTool {
             (r.family.clone(), r.view, r.body_type.clone(), r.axis.clone(), r.ref_ft)
         };
 
+        // The file: save, publish, undo -- first, where the eye starts.
+        ui.horizontal_wrapped(|ui| {
+            let label = if s.editor.is_dirty() { "Save *" } else { "Save" };
+            if ui.button(label).on_hover_text("Write the rig and its baked map + metadata (Ctrl+S)").clicked() {
+                wrote = true;
+                if let Err(e) = s.save() {
+                    s.status = format!("Save failed: {e}");
+                }
+            }
+            let target = target.clone();
+            let button = ui.add_enabled(target.is_ok() && saved, egui::Button::new("Publish"));
+            let button = match &target {
+                Ok(dir) if saved => button.on_hover_text(format!(
+                    "Copy the SAVED bake ({family}.png + .toml), its puppet and the pose sets into {} \
+                     (rigs/, puppets/, poses/) for game clients to embed.\n\
+                     Unsaved edits are not included.",
+                    dir.display()
+                )),
+                Ok(_) => button.on_disabled_hover_text("Nothing to publish yet: save this rig first"),
+                Err(why) => button.on_disabled_hover_text(why),
+            };
+            if button.clicked() {
+                wrote = true;
+                if let Err(e) = s.publish() {
+                    s.status = format!("Publish failed: {e}");
+                }
+            }
+            ui.add_enabled(target.is_ok(), egui::Checkbox::new(&mut s.publish_on_save, "on save"))
+                .on_hover_text("Save also publishes")
+                .on_disabled_hover_text(target.err().unwrap_or_default());
+            ui.separator();
+            if ui.add_enabled(s.editor.can_undo(), egui::Button::new("Undo")).on_hover_text("Ctrl+Z").clicked() {
+                s.editor.undo();
+            }
+            if ui.add_enabled(s.editor.can_redo(), egui::Button::new("Redo")).on_hover_text("Ctrl+Y").clicked() {
+                s.editor.redo();
+            }
+        });
+
+        // What the rig is: the form, its silhouette, its template, its scale
+        // and how the sheet was drawn.
+        super::group(ui, "Form");
         egui::Grid::new("rig_doc").num_columns(2).show(ui, |ui| {
             ui.label("Family");
             let mut open = None;
@@ -556,7 +606,7 @@ impl RigTool {
             }
             ui.end_row();
 
-            ui.label("View");
+            ui.label("Silhouette");
             ui.horizontal(|ui| {
                 for v in [View::Front, View::Side] {
                     let exists = s.outlines.get(&family, v).is_some();
@@ -568,11 +618,51 @@ impl RigTool {
                         s.request(DocAction::NewFromTemplate { template: body_type.clone(), view: v });
                     }
                 }
+            });
+            ui.end_row();
+
+            ui.label("Template");
+            ui.horizontal(|ui| {
+                let mut pick = None;
+                egui::ComboBox::from_id_salt("template").selected_text(&body_type).width(170.0).show_ui(ui, |ui| {
+                    for t in templates() {
+                        let item = ui.selectable_label(t.name == body_type, t.name).on_hover_text(t.blurb);
+                        if item.clicked() && t.name != body_type {
+                            pick = Some(t.name.to_owned());
+                        }
+                    }
+                });
+                if let Some(template) = pick {
+                    s.request(DocAction::NewFromTemplate { template, view });
+                }
+                if ui.button("Start over").on_hover_text("New from template: un-place everything and reset the bones").clicked() {
+                    s.request(DocAction::NewFromTemplate { template: body_type.clone(), view });
+                }
+            });
+            ui.end_row();
+
+            ui.label("Reference");
+            ui.horizontal(|ui| {
+                ui.label(format!("{ref_ft} ft at"));
+                egui::ComboBox::from_id_salt("axis").selected_text(&axis).width(90.0).show_ui(ui, |ui| {
+                    for a in AXES {
+                        if ui.selectable_label(a == axis, a).clicked() {
+                            s.editor.set_axis(a);
+                        }
+                    }
+                });
+            });
+            ui.end_row();
+
+            ui.label("Drawn").on_hover_text("How the sheet was drawn: the builder reads the silhouettes by it");
+            ui.horizontal(|ui| {
                 let mut above = s.editor.rig().from_above;
                 if ui
                     .add_enabled(view == View::Front, egui::Checkbox::new(&mut above, "from above"))
                     .on_hover_text(
-                        "The silhouette is a drawing from ABOVE (a spider, a crab): up in it is the                          creature's front, and the coordinate it cannot show is HEIGHT, read from the side                          silhouette. The 3D puppet lies flat; the bake is unchanged. Set by the multileg template.",
+                        "The silhouette is a drawing from ABOVE (a spider, a crab): up in it is the \
+                         creature's front, and the coordinate it cannot show is HEIGHT, read from the side \
+                         silhouette. The 3D puppet lies flat; the bake is unchanged. Set by the multileg template.",
                     )
                     .changed()
                 {
@@ -582,7 +672,9 @@ impl RigTool {
                 if ui
                     .checkbox(&mut raised, "arms raised")
                     .on_hover_text(
-                        "The sheet holds the arms raised out from the body (an A-pose), so the armpit and inner arm                          are measured, not guessed. The 3D puppet's arms hang before any pose applies: the poses are                          written for a hanging arm.",
+                        "The sheet holds the arms raised out from the body (an A-pose), so the armpit and inner arm \
+                         are measured, not guessed. The 3D puppet's arms hang before any pose applies: the poses are \
+                         written for a hanging arm.",
                     )
                     .changed()
                 {
@@ -590,8 +682,13 @@ impl RigTool {
                 }
             });
             ui.end_row();
+        });
 
-            ui.label("Editing").on_hover_text(
+        // How it is being worked on.
+        super::group(ui, "Edit");
+        let mut show = false;
+        egui::Grid::new("rig_edit").num_columns(2).show(ui, |ui| {
+            ui.label("Joints on").on_hover_text(
                 "PRIMARY: the rig's own silhouette -- place and move joints.\n\
                  DEPTH: the family's OTHER silhouette, each joint at its off-plane coordinate.",
             );
@@ -619,86 +716,17 @@ impl RigTool {
             });
             ui.end_row();
 
-            ui.label("Template");
-            let mut pick = None;
-            egui::ComboBox::from_id_salt("template").selected_text(&body_type).width(170.0).show_ui(ui, |ui| {
-                for t in templates() {
-                    let item = ui.selectable_label(t.name == body_type, t.name).on_hover_text(t.blurb);
-                    if item.clicked() && t.name != body_type {
-                        pick = Some(t.name.to_owned());
-                    }
-                }
-            });
-            if let Some(template) = pick {
-                s.request(DocAction::NewFromTemplate { template, view });
-            }
-            ui.end_row();
-
-            ui.label("Reference");
+            ui.label("Puppet");
             ui.horizontal(|ui| {
-                ui.label(format!("{ref_ft} ft at"));
-                egui::ComboBox::from_id_salt("axis").selected_text(&axis).width(90.0).show_ui(ui, |ui| {
-                    for a in AXES {
-                        if ui.selectable_label(a == axis, a).clicked() {
-                            s.editor.set_axis(a);
-                        }
-                    }
-                });
+                ui.toggle_value(&mut self.puppet_view.show, "3D preview")
+                    .on_hover_text("Show the rig's 3D puppet beside the canvas, rebuilt live as you edit");
+                show = ui
+                    .add_enabled(puppet_saved, egui::Button::new("Show on stage"))
+                    .on_hover_text("Open Preview with this family's puppet spawned (the SAVED puppet, from the pool)")
+                    .on_disabled_hover_text("Save first: saving builds the puppet and puts it in the pool")
+                    .clicked();
             });
             ui.end_row();
-        });
-
-        ui.horizontal(|ui| {
-            let label = if s.editor.is_dirty() { "Save *" } else { "Save" };
-            if ui.button(label).on_hover_text("Write the rig and its baked map + metadata (Ctrl+S)").clicked() {
-                wrote = true;
-                if let Err(e) = s.save() {
-                    s.status = format!("Save failed: {e}");
-                }
-            }
-            if ui.button("New from template").on_hover_text("Un-place everything and reset the bones").clicked() {
-                s.request(DocAction::NewFromTemplate { template: body_type.clone(), view });
-            }
-        });
-        ui.horizontal(|ui| {
-            let target = target.clone();
-            let button = ui.add_enabled(target.is_ok() && saved, egui::Button::new("Publish"));
-            let button = match &target {
-                Ok(dir) if saved => button.on_hover_text(format!(
-                    "Copy the SAVED bake ({family}.png + .toml), its puppet and the pose sets into {} \
-                     (rigs/, puppets/, poses/) for game clients to embed.\n\
-                     Unsaved edits are not included.",
-                    dir.display()
-                )),
-                Ok(_) => button.on_disabled_hover_text("Nothing to publish yet: save this rig first"),
-                Err(why) => button.on_disabled_hover_text(why),
-            };
-            if button.clicked() {
-                wrote = true;
-                if let Err(e) = s.publish() {
-                    s.status = format!("Publish failed: {e}");
-                }
-            }
-            ui.add_enabled(target.is_ok(), egui::Checkbox::new(&mut s.publish_on_save, "publish on save"))
-                .on_hover_text("Save also publishes")
-                .on_disabled_hover_text(target.err().unwrap_or_default());
-        });
-        let mut show = false;
-        ui.horizontal(|ui| {
-            if ui.add_enabled(s.editor.can_undo(), egui::Button::new("Undo")).clicked() {
-                s.editor.undo();
-            }
-            if ui.add_enabled(s.editor.can_redo(), egui::Button::new("Redo")).clicked() {
-                s.editor.redo();
-            }
-            ui.separator();
-            ui.toggle_value(&mut self.puppet_view.show, "3D preview")
-                .on_hover_text("Show the rig's 3D puppet beside the canvas, rebuilt live as you edit");
-            show = ui
-                .add_enabled(puppet_saved, egui::Button::new("Show on stage"))
-                .on_hover_text("Open Preview with this family's puppet spawned (the SAVED puppet, from the pool)")
-                .on_disabled_hover_text("Save first: saving builds the puppet and puts it in the pool")
-                .clicked();
         });
         if show {
             self.show_on_stage = Some(family);
@@ -712,8 +740,9 @@ impl RigTool {
     // --------------------------------------------------------- 3D preview
 
     /// Notes pinned to the puppet (`editor::rig_notes`): Pin notes (a click
-    /// on the figure pins one), the new note's text, and the list -- Show
-    /// (its pose and view), Done, Delete. Every change is written at once.
+    /// on the figure pins one), the new note's text, and the list, This pose
+    /// or All -- Show (its pose and view), Reply, Done, Delete, its replies
+    /// under it. Every change is written at once.
     fn notes_panel(&mut self, ui: &mut egui::Ui, family: &str, data_root: &Path) {
         if self.notes.as_ref().is_none_or(|(f, _)| f != family) {
             self.notes = Some((family.to_owned(), rig_notes::Notes::load(data_root, family)));
@@ -740,63 +769,78 @@ impl RigTool {
         let mut changed = false;
         let mut show: Option<rig_notes::Note> = None;
         let title = if notes.notes.is_empty() { "Notes".to_owned() } else { format!("Notes ({open} open)") };
-        egui::CollapsingHeader::new(title)
-            .id_salt("rig_notes")
-            .open(self.pending.is_some().then_some(true))
-            .show(ui, |ui| {
+        let title = super::section_title(ui, title);
+        let pinning = self.pending.is_some();
+        super::section_with(ui, "rig_notes", title, false, pinning, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.toggle_value(&mut self.pin_notes, "Pin notes").on_hover_text(
+                    "Click the figure to pin a note to the bone there (\"reduce this bulge\", \"the jaw hangs\"), with this pose and view: \
+                     data/notes/<family>.toml, for whoever works on the rig next",
+                );
+                ui.weak(format!("data/notes/{family}.toml"));
+            });
+            let (mut pin_it, mut cancel) = (false, false);
+            if let Some((pin, text)) = self.pending.as_mut() {
                 ui.horizontal_wrapped(|ui| {
-                    ui.toggle_value(&mut self.pin_notes, "Pin notes").on_hover_text(
-                        "Click the figure to pin a note to the bone there (\"reduce this bulge\", \"the jaw hangs\"), with this pose and view: \
-                         data/notes/<family>.toml, for whoever works on the rig next",
-                    );
-                    ui.weak(format!("data/notes/{family}.toml"));
+                    ui.label(format!("New note on {} at {:.0}%:", pin.bone, pin.along * 100.0));
+                    let edit = ui.add(egui::TextEdit::singleline(text).desired_width(260.0).hint_text("what is wrong here"));
+                    edit.request_focus();
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    pin_it = (ui.button("Pin").clicked() || enter) && !text.trim().is_empty();
+                    cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
                 });
-                let (mut pin_it, mut cancel) = (false, false);
-                if let Some((pin, text)) = self.pending.as_mut() {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(format!("New note on {} at {:.0}%:", pin.bone, pin.along * 100.0));
-                        let edit = ui.add(egui::TextEdit::singleline(text).desired_width(260.0).hint_text("what is wrong here"));
-                        edit.request_focus();
-                        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                        pin_it = (ui.button("Pin").clicked() || enter) && !text.trim().is_empty();
-                        cancel = ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
-                    });
-                }
-                if pin_it {
-                    if let Some((pin, text)) = self.pending.take() {
-                        self.note_focus = Some(notes.add(pin, &text, &rig_notes::today()));
-                        changed = true;
-                    }
-                } else if cancel {
-                    self.pending = None;
-                }
-                let mut remove = None;
-                for note in notes.notes.iter_mut() {
-                    ui.horizontal_wrapped(|ui| {
-                        let focused = self.note_focus == Some(note.id);
-                        let label = format!("#{} {}", note.id, note.text);
-                        let text = if note.done { egui::RichText::new(label).weak().strikethrough() } else { egui::RichText::new(label) };
-                        if ui.selectable_label(focused, text).clicked() {
-                            show = Some(note.clone());
-                        }
-                        let pose = if note.pose.is_empty() { "rest" } else { note.pose.as_str() };
-                        ui.weak(format!("{} {:.0}%, {pose}", note.bone, note.along * 100.0)).on_hover_text(format!("pinned {}", note.made));
-                        if ui.small_button("Show").on_hover_text("Its pose, creature and view, the pin ringed").clicked() {
-                            show = Some(note.clone());
-                        }
-                        if ui.checkbox(&mut note.done, "Done").changed() {
-                            changed = true;
-                        }
-                        if ui.small_button("Delete").clicked() {
-                            remove = Some(note.id);
-                        }
-                    });
-                }
-                if let Some(id) = remove {
-                    notes.remove(id);
+            }
+            if pin_it {
+                if let Some((pin, text)) = self.pending.take() {
+                    self.note_focus = Some(notes.add(pin, &text, &crate::notes::author(), &rig_notes::today()));
                     changed = true;
                 }
+            } else if cancel {
+                self.pending = None;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.selectable_value(&mut self.notes_this_pose, false, "All");
+                ui.selectable_value(&mut self.notes_this_pose, true, "This pose").on_hover_text("Only the notes seen in the pose on view");
+                ui.separator();
+                ui.checkbox(&mut self.notes_done_shown, "done too");
             });
+            let on_view = self.puppet_view.pose.clone();
+            let mut remove = None;
+            let mut reply = None;
+            for note in notes.notes.iter_mut() {
+                if (self.notes_this_pose && note.pose != on_view) || (!self.notes_done_shown && note.done) {
+                    continue;
+                }
+                let pose = if note.pose.is_empty() { "rest" } else { note.pose.as_str() };
+                let view = super::NoteView {
+                    id: note.id,
+                    text: &note.text,
+                    by: &note.by,
+                    made: &note.made,
+                    place: format!("{} {:.0}%, {pose}", note.bone, note.along * 100.0),
+                    done: note.done,
+                    replies: &note.replies,
+                    focused: self.note_focus == Some(note.id),
+                };
+                match super::note_ui(ui, view, &mut self.note_draft) {
+                    Some(super::NoteAct::Show) => show = Some(note.clone()),
+                    Some(super::NoteAct::Done(done)) => {
+                        note.done = done;
+                        changed = true;
+                    }
+                    Some(super::NoteAct::Delete) => remove = Some(note.id),
+                    Some(super::NoteAct::Reply(text)) => reply = Some((note.id, text)),
+                    None => {}
+                }
+            }
+            if let Some(id) = remove {
+                notes.remove(id);
+                changed = true;
+            }
+            if let Some((id, text)) = reply {
+                changed |= notes.reply(id, crate::notes::Reply::new(&crate::notes::author(), &text, &rig_notes::today()));
+            }
+        });
         if changed {
             self.session.status = match notes.save(data_root, family) {
                 Ok(path) => format!("Notes saved: {}", path.display()),
@@ -844,7 +888,7 @@ impl RigTool {
         };
         // The pose: which one, edit it, kill it, re-read the files.
         ui.horizontal_wrapped(|ui| {
-            ui.strong("Pose");
+            ui.label(super::group_text(ui, "Pose"));
             let shown = if pv.pose.is_empty() { "rest (as clicked)".to_owned() } else { pv.pose.clone() };
             egui::ComboBox::from_id_salt("puppet_pose")
                 .selected_text(shown)
@@ -879,7 +923,7 @@ impl RigTool {
         }
         // How it is drawn.
         ui.horizontal_wrapped(|ui| {
-            ui.strong("View");
+            ui.label(super::group_text(ui, "View"));
             ui.checkbox(&mut pv.skin, "Smooth skin")
                 .on_hover_text("One continuous surface with a depth test per pixel. Off: the flat shapes the game drew before");
             ui.add_enabled(pv.skin, egui::Checkbox::new(&mut pv.texture, "Texture"))
@@ -903,7 +947,7 @@ impl RigTool {
         if pv.skin && pv.splats {
             let p = &mut pv.splat;
             ui.horizontal_wrapped(|ui| {
-                ui.strong("Splats");
+                ui.label(super::group_text(ui, "Splats"));
                 ui.add(egui::Slider::new(&mut p.spacing, 0.01..=0.12).logarithmic(true).text("spacing ft"))
                     .on_hover_text("Sample step along each ring and between rings: finer = more, smaller splats");
                 ui.add(egui::Slider::new(&mut p.overlap, 0.3..=1.5).text("overlap")).on_hover_text("How far each splat reaches past its step: 0.5 = neighbours just touch");
@@ -926,7 +970,7 @@ impl RigTool {
             }
         };
         ui.horizontal_wrapped(|ui| {
-            ui.strong("Hold").on_hover_text(
+            ui.label(super::group_text(ui, "Hold")).on_hover_text(
                 "Preview a weapon or shield in its hands (data/props/weapons.toml). On the stage a creature holds \
                  the first weapon its bestiary entry attacks with.",
             );
@@ -942,7 +986,7 @@ impl RigTool {
             }
         });
         self.notes_panel(ui, &family, &data_root);
-        egui::CollapsingHeader::new("Texture painting").id_salt("rig_texture_tools").show(ui, |ui| {
+        super::section(ui, "rig_texture_tools", "Texture painting", |ui| {
             ui.horizontal_wrapped(|ui| {
                 export = ui
                     .button("Export templates")
@@ -1433,7 +1477,8 @@ impl RigTool {
         let order = editor.joint_order();
         let placed = order.iter().filter(|j| editor.is_placed(j)).count();
         ui.horizontal(|ui| {
-            ui.strong(format!("Joints  {placed}/{}", order.len()));
+            ui.label(super::section_title(ui, "Joints"));
+            ui.weak(format!("{placed}/{} placed", order.len()));
             let front = editor.rig().view == View::Front;
             ui.add_enabled(front, egui::Checkbox::new(&mut editor.mirror, "Mirror"))
                 .on_hover_text("Placing X_r (or X_l) also places its unplaced twin, reflected across x = 0")
@@ -1488,38 +1533,48 @@ impl RigTool {
         let depth_available = model.available();
         let mut reset = None;
         egui::ScrollArea::vertical().id_salt("joints").auto_shrink([false, false]).show(ui, |ui| {
-            for joint in &order {
-                let is_current = current.as_deref() == Some(joint);
-                let placed = editor.is_placed(joint);
-                let label = if editor.is_unused(joint) { format!("{joint}  (unused)") } else { joint.clone() };
-                let mut text = egui::RichText::new(label);
-                if is_current {
-                    text = text.strong();
-                } else if !placed {
-                    text = text.weak();
+            egui::Grid::new("joint_table").num_columns(3).show(ui, |ui| {
+                // The depth column: a greyed guess, or bold when set by hand
+                // with its reset beside it.
+                if depth_available {
+                    ui.label("");
+                    ui.weak("joint");
+                    ui.weak("depth ft").on_hover_text(
+                        "Each joint's off-plane coordinate, in feet: greyed = the guess, bold = set by hand in DEPTH (x resets it)",
+                    );
+                    ui.end_row();
                 }
-                if selected.as_deref() == Some(joint) {
-                    text = text.underline();
-                }
-                let item = ui
-                    .horizontal(|ui| {
-                        placed_marker(ui, placed);
-                        let item = ui.selectable_label(is_current, text);
-                        if depth_available {
+                for joint in &order {
+                    let is_current = current.as_deref() == Some(joint);
+                    let placed = editor.is_placed(joint);
+                    let label = if editor.is_unused(joint) { format!("{joint}  (unused)") } else { joint.clone() };
+                    let mut text = egui::RichText::new(label);
+                    if is_current {
+                        text = text.strong();
+                    } else if !placed {
+                        text = text.weak();
+                    }
+                    if selected.as_deref() == Some(joint) {
+                        text = text.underline();
+                    }
+                    placed_marker(ui, placed);
+                    let item = ui.selectable_label(is_current, text);
+                    if depth_available {
+                        ui.horizontal(|ui| {
                             if let Some(j) = depth_cell(ui, editor, &model, joint) {
                                 reset = Some(j);
                             }
-                        }
-                        item
-                    })
-                    .inner;
-                if item.clicked() {
-                    editor.set_current(joint);
+                        });
+                    }
+                    ui.end_row();
+                    if item.clicked() {
+                        editor.set_current(joint);
+                    }
+                    if item.secondary_clicked() {
+                        editor.unplace(joint);
+                    }
                 }
-                if item.secondary_clicked() {
-                    editor.unplace(joint);
-                }
-            }
+            });
         });
         if let Some(joint) = reset {
             editor.reset_joint_depth(&joint);
@@ -1532,7 +1587,7 @@ impl RigTool {
     fn bone_list(&mut self, ui: &mut egui::Ui) {
         let mut ask = None;
         ui.horizontal(|ui| {
-            ui.strong("Bones");
+            ui.label(super::section_title(ui, "Bones"));
             let editor = &mut self.session.editor;
             let selected = editor.selected_bone();
             if ui.button("Add").on_hover_text("A new bone, hung off the selected bone (a root if none is)").clicked() {
@@ -1638,8 +1693,8 @@ impl RigTool {
         self.radius_drag = dragging;
     }
 
-    /// The selected bone (the right panel's inspector), in collapsible
-    /// sections: parent and pivot, its thickness overrides, its joint chain.
+    /// The selected bone (the right panel's inspector), in groups: parent
+    /// and pivot, its thickness overrides, its joint chain.
     fn bone_details(&mut self, ui: &mut egui::Ui, index: usize) {
         let (pixels, width_used) = self
             .session
@@ -1669,7 +1724,8 @@ impl RigTool {
             ui.weak(format!("{n} px of the silhouette"));
         }
 
-        egui::CollapsingHeader::new("Parent and pivot").id_salt("bone_sec_hierarchy").default_open(true).show(ui, |ui| {
+        super::group(ui, "Parent and pivot");
+        ui.scope(|ui| {
             egui::Grid::new("rig_bone_details").num_columns(2).show(ui, |ui| {
                 ui.label("Parent").on_hover_text("The bone this one hangs off. Its own children are not offered.");
                 let shown = bone.parent.as_deref().unwrap_or("(root)");
@@ -1703,7 +1759,8 @@ impl RigTool {
         });
 
         let mut drag = DragState::default();
-        egui::CollapsingHeader::new("Thickness").id_salt("bone_sec_thickness").default_open(true).show(ui, |ui| {
+        super::group(ui, "Thickness");
+        ui.scope(|ui| {
             egui::Grid::new("rig_bone_thickness").num_columns(2).show(ui, |ui| {
                 ui.label("Width").on_hover_text(
                     "Half the bone's thickness across this silhouette, in feet (the same as its row in the list above).\n\
@@ -1755,7 +1812,8 @@ impl RigTool {
         let editor = &mut self.session.editor;
 
         let chain_title = format!("Chain ({} joints)", bone.joints.len());
-        egui::CollapsingHeader::new(chain_title).id_salt("bone_sec_chain").default_open(true).show(ui, |ui| {
+        super::group(ui, &chain_title);
+        ui.scope(|ui| {
             egui::Grid::new("rig_bone_chain").num_columns(5).show(ui, |ui| {
                 for (k, joint) in bone.joints.iter().enumerate() {
                     ui.weak(format!("{}.", k + 1));
@@ -1800,8 +1858,8 @@ impl RigTool {
 
     // --------------------------------------------------------------- right
 
-    /// Sections (`super::section`, shut until opened, but for the bone just
-    /// clicked), what needs attention first: warnings (their heading in the
+    /// Sections (`super::section`, shut until first opened, then as they
+    /// were left; the bone's opens as it is clicked), what needs attention first: warnings (their heading in the
     /// warning colour while there are any), the selected bone, part shares,
     /// anchors and eyes, depth, then the map's numbers.
     fn right_panel(&mut self, ui: &mut egui::Ui) {

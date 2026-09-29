@@ -13,9 +13,12 @@ pub mod color;
 pub mod elanthian_time;
 pub mod eval;
 pub mod naming;
+pub mod report;
+pub mod scene_notes;
 pub mod sky;
 pub mod sparse;
 pub mod state;
+pub mod walk;
 
 pub use naming::StudioRoomContext;
 pub use state::{ClassFlag, SceneAction, StageState};

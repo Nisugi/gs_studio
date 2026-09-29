@@ -62,22 +62,6 @@ impl ToolId {
     }
 }
 
-/// The top bar at a given width: everything on one row when it fits, else
-/// the tabs on the first row and the two directory boxes sharing a second.
-/// Returns (two rows?, width of each directory text box).
-pub fn top_bar_layout(available_width: f32) -> (bool, f32) {
-    /// Title + seven tabs + separators, generously measured.
-    const TABS: f32 = 600.0;
-    /// "Data:" + "Open" + "Pool:" + "Set" + "Import from VellumFE..." +
-    /// separators and spacing.
-    const BOX_CHROME: f32 = 400.0;
-    const BOX: f32 = 240.0;
-    if available_width >= TABS + BOX_CHROME + 2.0 * BOX {
-        return (false, BOX);
-    }
-    (true, ((available_width - BOX_CHROME) / 2.0).clamp(100.0, 420.0))
-}
-
 /// What `main` hands the app.
 pub struct Startup {
     pub data: DataRoot,
@@ -107,9 +91,15 @@ pub struct StudioApp {
     publish_edit: String,
     /// The silhouette chart box (applied with "Import").
     chart_edit: String,
-    /// The last folder-strip message (an import, a failed remember).
+    /// The last folder message (an import, a failed remember), shown in
+    /// the Settings window.
     folders_note: Option<String>,
-    /// Filesystem answers the top bar needs every frame (see `fs_cache`).
+    /// The Settings window is open.
+    settings_open: bool,
+    /// The *Your name* box (notes and replies are signed with it).
+    author_edit: String,
+    /// Filesystem answers the Settings window and the banner need every
+    /// frame (see `fs_cache`).
     importable: crate::fs_cache::Background<(), Option<PathBuf>>,
     pool_empty: crate::fs_cache::Background<PathBuf, bool>,
     active: ToolId,
@@ -125,6 +115,8 @@ pub struct StudioApp {
     exit_after_secs: Option<f32>,
     /// `GS_STUDIO_SHOT`: save a frame here, then close.
     shot: Option<Shot>,
+    /// `GS_STUDIO_REPORT`: with the shot, write the scene report here.
+    report: Option<PathBuf>,
     /// "Import from VellumFE...": the open confirmation, and the last
     /// report. See [`Import`].
     import: Import,
@@ -160,6 +152,7 @@ impl StudioApp {
         if let (Ok(tool), Ok(spec)) = (&mut rigs, std::env::var("GS_STUDIO_NOTE")) {
             tool.open_note(&spec);
         }
+        let settings_open = rigs.is_err();
         StudioApp {
             data_edit: data.path.display().to_string(),
             rigs,
@@ -170,6 +163,9 @@ impl StudioApp {
             publish,
             chart_edit: chart.map(|c| c.display().to_string()).unwrap_or_default(),
             folders_note: settings_note,
+            // No rig editor without a data root: say where to set one.
+            settings_open,
+            author_edit: crate::notes::author(),
             importable: Default::default(),
             pool_empty: Default::default(),
             active: tab,
@@ -179,6 +175,7 @@ impl StudioApp {
             started: std::time::Instant::now(),
             exit_after_secs,
             shot: std::env::var_os("GS_STUDIO_SHOT").map(|p| Shot { path: PathBuf::from(p), frames: 0, requested: false }),
+            report: std::env::var_os("GS_STUDIO_REPORT").filter(|p| !p.is_empty()).map(PathBuf::from),
             import: Import::default(),
             closing: CloseSequence::default(),
         }
@@ -211,56 +208,152 @@ impl StudioApp {
         self.rigs = RigTool::open(&self.data.path, self.publish.clone(), Some(self.pool.path.clone()));
     }
 
-    /// The Rigs tab's folder strip: the silhouette chart (Import writes
-    /// `<data>/outlines.json` from it) and where Publish ships.
-    fn folders_strip(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Silhouettes:");
-            ui.add(egui::TextEdit::singleline(&mut self.chart_edit).hint_text("path to scale-chart.html").desired_width(300.0))
-                .on_hover_text("The silhouette chart. Import converts it into outlines.json in the data root.");
-            let dirty = self.dirty();
-            let import = ui
-                .add_enabled(!dirty && !self.chart_edit.trim().is_empty(), egui::Button::new("Import"))
-                .on_hover_text("Read the chart and (re)write <data>/outlines.json, then reopen the rig editor")
-                .on_disabled_hover_text(if dirty { "Save or discard the current rig first" } else { "Type the chart's path first" });
-            if import.clicked() {
-                let chart = PathBuf::from(self.chart_edit.trim());
-                crate::perf_log::log(&format!("begin: import outlines from {}", chart.display()));
-                match data_root::import_outlines(&chart, &self.data.path) {
-                    Ok(summary) => {
-                        eprintln!("gs-studio: {summary}");
-                        let failed = settings::remember(|s| s.chart = Some(chart.clone()));
-                        self.open_rigs();
-                        self.folders_note = Some(failed.unwrap_or(summary));
-                    }
-                    Err(e) => self.folders_note = Some(format!("Import failed: {e}")),
-                }
-            }
-            ui.separator();
-            ui.label("Publish to:");
-            ui.add(egui::TextEdit::singleline(&mut self.publish_edit).desired_width(300.0)).on_hover_text(
-                "Where Publish ships baked rigs, puppets and pose sets for game clients: a folder holding \
-                 rigs/, puppets/, poses/ (the workspace's crates/gs_field/data). Also: --publish or GS_STUDIO_PUBLISH",
-            );
-            if ui.button("Set").clicked() {
-                let text = self.publish_edit.trim();
-                if text.is_empty() {
-                    self.publish_edit = self.publish.display().to_string();
-                } else {
-                    self.publish = crate::editor::resolve_publish_dir(&self.data.path, Some(Path::new(text)));
-                    self.publish_edit = self.publish.display().to_string();
-                    let dir = self.publish.clone();
-                    self.folders_note = settings::remember(|s| s.publish = Some(dir.clone()));
-                    if let Ok(tool) = &mut self.rigs {
-                        tool.set_publish_dir(self.publish.clone());
-                    }
-                }
-            }
+    /// The Settings window: the folders (data root, art pool, where Publish
+    /// ships, the silhouette chart), each applied with its own button and
+    /// remembered in `settings.toml`. Opened from the tab strip's Settings.
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.settings_open;
+        // under its button, top right, clear of the tab it is opened over
+        let corner = ctx.content_rect().right_top() + egui::vec2(-8.0, 30.0);
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(620.0)
+            .pivot(egui::Align2::RIGHT_TOP)
+            .default_pos(corner)
+            .show(ctx, |ui| {
+            crate::tools::group(ui, "Folders");
+            egui::Grid::new("settings_folders").num_columns(3).show(ui, |ui| self.folder_rows(ui));
             if let Some(note) = &self.folders_note {
-                ui.separator();
+                ui.add_space(4.0);
                 ui.weak(note);
             }
+            crate::tools::group(ui, "Notes");
+            ui.horizontal(|ui| {
+                ui.label("Your name");
+                let edit = ui
+                    .add(egui::TextEdit::singleline(&mut self.author_edit).desired_width(200.0).hint_text("signs your notes and replies"))
+                    .on_hover_text("Notes pinned to a rig or a scene, and replies under them, carry it, so a shared note says who asked");
+                if edit.lost_focus() && self.author_edit.trim() != crate::notes::author() {
+                    let name = self.author_edit.trim().to_owned();
+                    self.folders_note = settings::remember(|s| s.author = (!name.is_empty()).then(|| name.clone()));
+                }
+            });
+            ui.add_space(6.0);
+            ui.weak(format!(
+                "Remembered in {} with the view choices (Light on the GPU, which panel sections are open) and your name. \
+                 A --flag or environment variable wins for its run and is never written.",
+                settings::home().join(settings::FILE_NAME).display()
+            ));
         });
+        self.settings_open = open;
+    }
+
+    /// One grid row per folder: its name, its box, and what applies it.
+    fn folder_rows(&mut self, ui: &mut egui::Ui) {
+        const BOX: f32 = 380.0;
+        let dirty = self.dirty();
+
+        ui.label("Data");
+        ui.add_sized([BOX, 20.0], egui::TextEdit::singleline(&mut self.data_edit))
+            .on_hover_text("Data root (holds outlines.json and rigs/). Also: --data <dir> or GS_STUDIO_DATA");
+        let open = ui
+            .add_enabled(!dirty, egui::Button::new("Open"))
+            .on_disabled_hover_text("Save or discard the current rig first");
+        if open.clicked() {
+            self.data = DataRoot { path: PathBuf::from(self.data_edit.trim()), source: "set in the app" };
+            let path = self.data.path.clone();
+            self.folders_note = settings::remember(|s| s.data = Some(path.clone()));
+            self.open_rigs();
+        }
+        ui.end_row();
+
+        ui.label("Pool");
+        ui.add_sized([BOX, 20.0], egui::TextEdit::singleline(&mut self.pool_edit)).on_hover_text(
+            "Art pool: the directory holding global/images/ and global/scenes/. \
+             Left alone it is gs-studio's OWN data home -- this app never reads VellumFE's \
+             ~/.vellum-fe unless you point it there. Also: --pool <dir> or GS_STUDIO_POOL",
+        );
+        ui.horizontal(|ui| {
+            if ui
+                .button("Set")
+                .on_hover_text(
+                    "Use this pool directory: re-scans the cast, reloads all art and re-opens every calibrator \
+                     (unsaved calibration edits are dropped)",
+                )
+                .clicked()
+            {
+                crate::perf_log::log(&format!("begin: set pool to {}", self.pool_edit.trim()));
+                self.set_pool();
+            }
+            self.import_button(ui);
+        });
+        ui.end_row();
+
+        ui.label("Publish to");
+        ui.add_sized([BOX, 20.0], egui::TextEdit::singleline(&mut self.publish_edit)).on_hover_text(
+            "Where Publish ships baked rigs, puppets and pose sets for game clients: a folder holding \
+             rigs/, puppets/, poses/ (the workspace's crates/gs_field/data). Also: --publish or GS_STUDIO_PUBLISH",
+        );
+        if ui.button("Set").clicked() {
+            let text = self.publish_edit.trim();
+            if text.is_empty() {
+                self.publish_edit = self.publish.display().to_string();
+            } else {
+                self.publish = crate::editor::resolve_publish_dir(&self.data.path, Some(Path::new(text)));
+                self.publish_edit = self.publish.display().to_string();
+                let dir = self.publish.clone();
+                self.folders_note = settings::remember(|s| s.publish = Some(dir.clone()));
+                if let Ok(tool) = &mut self.rigs {
+                    tool.set_publish_dir(self.publish.clone());
+                }
+            }
+        }
+        ui.end_row();
+
+        ui.label("Silhouettes");
+        ui.add_sized([BOX, 20.0], egui::TextEdit::singleline(&mut self.chart_edit).hint_text("path to scale-chart.html"))
+            .on_hover_text("The silhouette chart. Import converts it into outlines.json in the data root.");
+        let import = ui
+            .add_enabled(!dirty && !self.chart_edit.trim().is_empty(), egui::Button::new("Import"))
+            .on_hover_text("Read the chart and (re)write <data>/outlines.json, then reopen the rig editor")
+            .on_disabled_hover_text(if dirty { "Save or discard the current rig first" } else { "Type the chart's path first" });
+        if import.clicked() {
+            let chart = PathBuf::from(self.chart_edit.trim());
+            crate::perf_log::log(&format!("begin: import outlines from {}", chart.display()));
+            match data_root::import_outlines(&chart, &self.data.path) {
+                Ok(summary) => {
+                    eprintln!("gs-studio: {summary}");
+                    let failed = settings::remember(|s| s.chart = Some(chart.clone()));
+                    self.open_rigs();
+                    self.folders_note = Some(failed.unwrap_or(summary));
+                }
+                Err(e) => self.folders_note = Some(format!("Import failed: {e}")),
+            }
+        }
+        ui.end_row();
+    }
+
+    /// The scene report (`GS_STUDIO_REPORT`, `--scene-report`): the stage's
+    /// last v2 frame, timed offscreen on this GPU -- whole, without each
+    /// lamp, and each lamp's shadow alone -- then written as Markdown.
+    fn write_report(&self, path: &Path, frame: &eframe::Frame) {
+        let Some(stage) = &self.stage else {
+            eprintln!("gs-studio: no stage to report on (the Scenes or Preview tab never opened)");
+            return;
+        };
+        let render = frame.wgpu_render_state();
+        let pass = gs_field_egui::field_gpu_stage::with_current(|g| g.snapshot()).flatten().map(|snap| {
+            let timings = render.map(|r| gs_field_egui::field_gpu_stage::time_lamps(&r.device, &r.queue, &snap, 150));
+            let gpu = render.map_or("(unknown GPU)".to_owned(), |r| r.adapter.get_info().name);
+            stage.pass_facts(&snap, timings.as_ref(), gpu)
+        });
+        let text = stage.report(pass.as_ref());
+        let written = path.parent().filter(|d| !d.as_os_str().is_empty()).map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(path, &text));
+        match written {
+            Ok(()) => eprintln!("gs-studio: wrote {}", path.display()),
+            Err(e) => eprintln!("gs-studio: could not write {}: {e}", path.display()),
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -281,19 +374,15 @@ impl StudioApp {
         }
     }
 
+    /// The tabs, and Settings (the folders) at the far right.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
-        let (two_rows, box_width) = top_bar_layout(ui.available_width());
-        // Wrapped rows: whatever the fonts measure, nothing clips.
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
             self.tab_strip(ui);
-            if !two_rows {
-                ui.separator();
-                self.directory_boxes(ui, box_width);
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.toggle_value(&mut self.settings_open, "Settings")
+                    .on_hover_text("The folders: data root, art pool, where Publish ships, the silhouette chart");
+            });
         });
-        if two_rows {
-            ui.horizontal_wrapped(|ui| self.directory_boxes(ui, box_width));
-        }
     }
 
     fn tab_strip(&mut self, ui: &mut egui::Ui) {
@@ -305,41 +394,6 @@ impl StudioApp {
                 self.active = tab.id;
             }
         }
-    }
-
-    fn directory_boxes(&mut self, ui: &mut egui::Ui, box_width: f32) {
-        ui.label("Data:");
-        ui.add(egui::TextEdit::singleline(&mut self.data_edit).desired_width(box_width))
-            .on_hover_text("Data root (holds outlines.json and rigs/). Also: --data <dir> or GS_STUDIO_DATA");
-        let dirty = self.dirty();
-        let open = ui
-            .add_enabled(!dirty, egui::Button::new("Open"))
-            .on_disabled_hover_text("Save or discard the current rig first");
-        if open.clicked() {
-            self.data = DataRoot { path: PathBuf::from(self.data_edit.trim()), source: "set in the app" };
-            let path = self.data.path.clone();
-            self.folders_note = settings::remember(|s| s.data = Some(path.clone()));
-            self.open_rigs();
-        }
-        ui.separator();
-        ui.label("Pool:");
-        ui.add(egui::TextEdit::singleline(&mut self.pool_edit).desired_width(box_width)).on_hover_text(
-            "Art pool: the directory holding global/images/ and global/scenes/. \
-             Left alone it is gs-studio's OWN data home -- this app never reads VellumFE's \
-             ~/.vellum-fe unless you point it there. Also: --pool <dir> or GS_STUDIO_POOL",
-        );
-        if ui
-            .button("Set")
-            .on_hover_text(
-                "Use this pool directory: re-scans the cast, reloads all art and re-opens every calibrator \
-                 (unsaved calibration edits are dropped)",
-            )
-            .clicked()
-        {
-            crate::perf_log::log(&format!("begin: set pool to {}", self.pool_edit.trim()));
-            self.set_pool();
-        }
-        self.import_button(ui);
     }
 
     /// "Import from VellumFE...": offers to COPY the game client's art pool
@@ -449,7 +503,7 @@ impl StudioApp {
                 )
             });
             self.import_button(ui);
-            ui.weak("or drop PNGs into global/images/, or point the Pool box at another directory.");
+            ui.weak("or drop PNGs into global/images/, or point the Pool box (Settings) at another directory.");
         });
     }
 
@@ -479,7 +533,7 @@ impl StudioApp {
                         format!(
                             "Nothing pointed gs-studio anywhere, so this is its own data home.\n\
                              It does NOT use VellumFE's data directory ({}).\n\
-                             To use another: --pool <dir>, GS_STUDIO_POOL, or type one in the Pool box.",
+                             To use another: --pool <dir>, GS_STUDIO_POOL, or type one in the Pool box (Settings).",
                             data_home::vellum_fe_dir()
                                 .map(|d| d.display().to_string())
                                 .unwrap_or_else(|| "~/.vellum-fe".to_string())
@@ -516,7 +570,7 @@ impl eframe::App for StudioApp {
 
 impl StudioApp {
     /// One frame of the app (timed by [`eframe::App::ui`]).
-    fn frame(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if let Some(shot) = &mut self.shot {
             shot.frames += 1;
             // GS_STUDIO_SHOT_FRAMES waits longer, for work done off the UI
@@ -538,6 +592,9 @@ impl StudioApp {
                 match crate::editor::texture::write_png(&shot.path, w, h, &rgba) {
                     Ok(()) => eprintln!("gs-studio: wrote {} ({w}x{h})", shot.path.display()),
                     Err(e) => eprintln!("gs-studio: could not write {}: {e}", shot.path.display()),
+                }
+                if let Some(path) = &self.report {
+                    self.write_report(path, frame);
                 }
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -571,10 +628,8 @@ impl StudioApp {
         egui::Panel::bottom("status_line").show(ui, |ui| self.status_bar(ui));
         let ctx = ui.ctx().clone();
         self.import_window(&ctx);
+        self.settings_window(&ctx);
 
-        if self.active == ToolId::Rigs {
-            egui::Panel::top("rig_folders").show(ui, |ui| self.folders_strip(ui));
-        }
 
         match self.active {
             ToolId::Rigs => match &mut self.rigs {
@@ -591,9 +646,9 @@ impl StudioApp {
                         ui.heading("No silhouettes yet");
                         ui.label(format!("Could not open the data root: {e}"));
                         ui.label(
-                            "Put the path of scale-chart.html in the Silhouettes box above and press Import: \
-                             it writes outlines.json into the data root. Or point the Data box at a directory \
-                             that already holds outlines.json and press Open.",
+                            "In Settings (top right), put the path of scale-chart.html in the Silhouettes box and \
+                             press Import: it writes outlines.json into the data root. Or point the Data box at a \
+                             directory that already holds outlines.json and press Open.",
                         );
                     });
                 }
@@ -682,26 +737,6 @@ mod tests {
         for tab in &TOOLS {
             assert_eq!(tab.id.uses_pool(), tab.id != ToolId::Rigs);
         }
-    }
-
-    #[test]
-    fn the_top_bar_goes_to_two_rows_before_anything_clips() {
-        // The chrome allowance grew when "Import from VellumFE..." joined
-        // the boxes, so the one-row threshold moved with it: tabs (600) +
-        // chrome (400) + two boxes (480) = 1480.
-        assert_eq!(top_bar_layout(1480.0), (false, 240.0));
-        assert!(top_bar_layout(1479.0).0, "one pixel short goes to two rows");
-        // The default window is now a two-row window; it must still fit.
-        let (two_rows, box_width) = top_bar_layout(1384.0);
-        assert!(two_rows);
-        assert!(2.0 * box_width + 400.0 <= 1384.0, "{box_width}");
-        // Minimum window (900 px minus the panel margins): two rows, and
-        // the second row's boxes + chrome fit the width.
-        let (two_rows, box_width) = top_bar_layout(884.0);
-        assert!(two_rows);
-        assert!(box_width >= 240.0 && 2.0 * box_width + 400.0 <= 884.0, "{box_width}");
-        // Never degenerate, never absurd.
-        assert_eq!(top_bar_layout(200.0), (true, 100.0));
     }
 
     /// The import is offered only against a directory that exists and has

@@ -1,11 +1,13 @@
-//! Remembered folders, and whether the stage lights on the GPU:
+//! Remembered folders, whether the stage lights on the GPU, and which side
+//! panel sections were left open:
 //! `<gs-studio home>/settings.toml`.
 //!
 //! Each folder resolves `--flag` > environment variable > this file > the
 //! built-in default, so a flag or variable still wins for one run without
 //! rewriting what was remembered. The file is written whenever a folder is
 //! changed IN THE APP (Data Open, Pool Set, Publish Set, an outline import)
-//! or the Preview tab's *Light on the GPU (v2)* is ticked or cleared; a
+//! or the stage's *Light on the GPU (v2)* is ticked or cleared or a panel
+//! section opened or shut; a
 //! folder that came from a flag or variable is never saved.
 //!
 //! It always lives in the gs-studio home (`data_home::default_home_or_local`),
@@ -37,6 +39,13 @@ pub struct Settings {
     /// The stage lights on the GPU (the v2 pass), as last ticked.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gpu_light: Option<bool>,
+    /// The side panel sections left open (`tools::section` ids), so each
+    /// opens as it was left.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub open_sections: Vec<String>,
+    /// The name notes and replies are signed with (`notes::author`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 impl Settings {
@@ -91,6 +100,15 @@ mod tests {
         s.save(dir.path()).unwrap();
         let text = std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
         assert!(!text.contains("data") && !text.contains("publish"), "{text}");
+        assert_eq!(Settings::load(dir.path()).0, s);
+        assert!(!text.contains("open_sections"), "none open, none written: {text}");
+    }
+
+    #[test]
+    fn open_sections_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Settings { gpu_light: Some(true), open_sections: vec!["stage_light".into(), "stage_time".into()], ..Default::default() };
+        s.save(dir.path()).unwrap();
         assert_eq!(Settings::load(dir.path()).0, s);
     }
 

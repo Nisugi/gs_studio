@@ -960,6 +960,84 @@ pub struct StageGpu {
     f: f32,
 }
 
+/// A stage frame of the pass as it was drawn ([`StageGpu::snapshot`]).
+#[derive(Debug, Clone)]
+pub struct PassSnapshot {
+    pub frame: FieldFrame,
+    /// The stage's size on screen, pixels.
+    pub size: [u32; 2],
+    /// Metres per camera unit: a ground point at solver depth z is z * k
+    /// metres away.
+    pub k: f32,
+    /// The focal length, stage pixels.
+    pub f: f32,
+    /// Per scene lamp, whether it got into the pass.
+    pub in_pass: Vec<bool>,
+}
+
+impl PassSnapshot {
+    /// Where scene lamp `lamp`'s light sits in the frame's lights (after
+    /// the moons), when it got in.
+    pub fn light_of(&self, lamp: usize) -> Option<usize> {
+        if !*self.in_pass.get(lamp)? {
+            return None;
+        }
+        let admitted = self.in_pass.iter().filter(|&&a| a).count();
+        let moons = self.frame.lights.len().saturating_sub(admitted);
+        Some(moons + self.in_pass[..lamp].iter().filter(|&&a| a).count())
+    }
+
+    /// The moons' lights at the front of the frame's.
+    pub fn moons(&self) -> usize {
+        self.frame.lights.len().saturating_sub(self.in_pass.iter().filter(|&&a| a).count())
+    }
+
+    /// Whether scene lamp `lamp` casts shadows in this frame: it asks, and
+    /// it is among the first [`field_gpu::MAX_SHADOW_LIGHTS`] lights that ask.
+    pub fn shadow_given(&self, lamp: usize) -> bool {
+        let Some(i) = self.light_of(lamp) else { return false };
+        self.frame.lights[i].shadows && self.frame.lights[..i].iter().filter(|l| l.shadows).count() < field_gpu::MAX_SHADOW_LIGHTS
+    }
+}
+
+/// What the pass costs, milliseconds a frame: the frame whole, and per
+/// scene lamp what taking it out saves and what its shadow alone costs
+/// (None: not in the pass, or casts none).
+#[derive(Debug, Clone, Default)]
+pub struct PassTimings {
+    pub whole_ms: f32,
+    pub lamps: Vec<(Option<f32>, Option<f32>)>,
+}
+
+/// Time a snapshot offscreen on `device` at its size on screen, `repeats`
+/// draws a case: whole, then without each lamp, then with each lamp's
+/// shadow off. The whole frame is timed first and again last and the
+/// faster kept -- a GPU idling at low clocks makes its first case look
+/// slow, and every saving measured against it too big. A saving under the
+/// noise reads as 0.
+pub fn time_lamps(device: &egui_wgpu::wgpu::Device, queue: &egui_wgpu::wgpu::Queue, snap: &PassSnapshot, repeats: u32) -> PassTimings {
+    let ms = |frame: &FieldFrame| field_gpu::time_offscreen(device, queue, frame, snap.size, repeats).as_secs_f32() * 1000.0;
+    // wake the GPU up before anything counts
+    let _ = ms(&snap.frame);
+    let first = ms(&snap.frame);
+    let cases: Vec<(Option<f32>, Option<f32>)> = (0..snap.in_pass.len())
+        .map(|lamp| {
+            let Some(i) = snap.light_of(lamp) else { return (None, None) };
+            let mut without = snap.frame.clone();
+            without.lights.remove(i);
+            let shadowless = snap.frame.lights[i].shadows.then(|| {
+                let mut unshadowed = snap.frame.clone();
+                unshadowed.lights[i].shadows = false;
+                ms(&unshadowed)
+            });
+            (Some(ms(&without)), shadowless)
+        })
+        .collect();
+    let whole_ms = first.min(ms(&snap.frame));
+    let lamps = cases.into_iter().map(|(without, shadowless)| (without.map(|t| (whole_ms - t).max(0.0)), shadowless.map(|t| (whole_ms - t).max(0.0)))).collect();
+    PassTimings { whole_ms, lamps }
+}
+
 /// The pass's lights: the moons first, then the scene's lamps in order (None:
 /// a lamp that gives no light) while [`field_gpu::MAX_LIGHTS`] leaves room --
 /// and, per lamp, whether it got in.
@@ -1069,6 +1147,17 @@ impl StageGpu {
     /// way (`field_lights::set_gpu`), not lost.
     pub fn lamps_in_pass(&self) -> &[bool] {
         &self.in_pass
+    }
+
+    /// The frame as drawn so far, and what a scene report needs to read
+    /// it: the stage's size on screen (pixels), metres per camera unit,
+    /// the focal length (stage pixels) and, per scene lamp, whether it got
+    /// into the pass.
+    pub fn snapshot(&self) -> Option<PassSnapshot> {
+        let frame = self.frame.lock().ok()?.clone();
+        let px = self.place.scale * self.ppp;
+        let size = [(gs_field::solver::STAGE_W * px).round().max(1.0) as u32, (gs_field::solver::STAGE_H * px).round().max(1.0) as u32];
+        Some(PassSnapshot { frame, size, k: self.k, f: self.f, in_pass: self.in_pass.clone() })
     }
 
     /// Draw the backdrop piece (in place of the backdrop image).

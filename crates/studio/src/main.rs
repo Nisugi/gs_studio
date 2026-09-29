@@ -44,6 +44,7 @@ mod cli;
 mod data_home;
 mod data_root;
 mod editor;
+mod notes;
 mod fs_cache;
 mod perf_log;
 mod pool_dir;
@@ -84,6 +85,30 @@ fn seed_from_bundle(data: &data_root::DataRoot, pool: &pool_dir::PoolDir) {
 fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cli = cli::parse_args(&args).unwrap_or_else(|usage| fail(&usage));
+    // --scene-report: the scene on the Scenes tab, lit by the v2 pass (at
+    // 23:00 unless GS_STUDIO_LIGHT_HOUR says), and once the night relight
+    // is in, its report and a screenshot in scene-reports/, then exit.
+    if let Some(scene) = &cli.scene_report {
+        let dir = std::path::Path::new("scene-reports");
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            fail(&format!("gs-studio: --scene-report: {}: {e}", dir.display()));
+        }
+        let unless_set = |key: &str, value: &str| {
+            if std::env::var_os(key).is_none() {
+                std::env::set_var(key, value);
+            }
+        };
+        std::env::set_var("GS_STUDIO_SCENE", scene);
+        std::env::set_var("GS_STUDIO_V2_LIGHT", "1");
+        std::env::set_var(cli::TAB_ENV_VAR, "scenes");
+        unless_set("GS_STUDIO_LIGHT_HOUR", "23");
+        // a crowd on it: a shadow's cost is marching every creature, so an
+        // empty stage would say the lamps cost nothing
+        unless_set("GS_STUDIO_SMOKE", "1");
+        unless_set("GS_STUDIO_SHOT_FRAMES", "2500");
+        std::env::set_var("GS_STUDIO_SHOT", dir.join(format!("{scene}.png")));
+        std::env::set_var("GS_STUDIO_REPORT", dir.join(format!("{scene}.md")));
+    }
     let tab_name = cli.tab.clone().or_else(|| std::env::var(cli::TAB_ENV_VAR).ok().filter(|v| !v.is_empty()));
     let tab = match tab_name {
         Some(name) => app::ToolId::from_name(&name).unwrap_or_else(|e| fail(&format!("{e}\n{}", cli::USAGE))),

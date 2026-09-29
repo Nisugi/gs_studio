@@ -165,6 +165,10 @@ pub struct StageState {
     pub weather_wind: f32,
     /// Tint the backdrop's occluders on the stage (checking the mask).
     pub show_occluders: bool,
+    /// Tint where the walk mask keeps creatures off (checking it), and
+    /// why the backdrop's mask could not be read, if it could not.
+    pub show_walk: bool,
+    pub walk_error: Option<String>,
     /// Puppets hold the weapon their bestiary entry attacks with.
     pub show_props: bool,
     /// Living puppets breathe (their body type's `[idle]` cycle).
@@ -198,6 +202,8 @@ pub struct StageState {
     status: StatusLog,
     /// New-scene naming inputs (manual binding + name, room prefill).
     pub new_scene: NewSceneState,
+    /// The Notes section: the scene's notes, pinning, what is being written.
+    pub notes: crate::stage::scene_notes::NotesDesk,
 }
 
 impl StageState {
@@ -243,6 +249,8 @@ impl StageState {
             weather_intensity: 0.6,
             weather_wind: 0.15,
             show_occluders: false,
+            show_walk: false,
+            walk_error: None,
             show_props: true,
             show_breath: true,
             sun_lit_skins: false,
@@ -257,6 +265,7 @@ impl StageState {
             obstacle_scene: None,
             status: StatusLog::default(),
             new_scene: NewSceneState::new(context),
+            notes: Default::default(),
         };
         stage.mark_scene_saved();
         stage.push_status(format!("Stage ready: {} castable bases", stage.cast.len()));
@@ -640,6 +649,19 @@ impl StageState {
         if scene_changed {
             let obstacles = gs_field::cards::scene_obstacles(Some(&self.scene));
             self.field.set_obstacles(obstacles);
+            // and where on the painting creatures may stand
+            let walk = match self.scene.background.as_deref().map(crate::stage::walk::load) {
+                Some(Ok(mask)) => mask,
+                Some(Err(e)) => {
+                    self.walk_error = Some(e);
+                    None
+                }
+                None => None,
+            };
+            if walk.is_some() || self.scene.background.is_none() {
+                self.walk_error = None;
+            }
+            self.field.set_walk(walk.map(Arc::new));
             self.obstacle_scene = Some(self.scene.clone());
             // A backdrop picked or cleared in the Scenes tab: the floor grows
             // deep over a painting (solver::Growth), as a loaded scene does
@@ -679,6 +701,45 @@ impl StageState {
     /// differs from what was last loaded, saved or cleared.
     pub fn scene_dirty(&self) -> bool {
         (!Arc::ptr_eq(&self.scene, &self.saved.0) && *self.scene != *self.saved.0) || self.field.params != self.saved.1
+    }
+
+    /// The stage at a glance, for the top of the side panel: the hour and
+    /// its part of the day (or "unlit"), then what is on the stage --
+    /// "23:10 night (held), 3 lamps (2 shadowed), 6 props, 4 on stage".
+    pub fn outline(&self, game_hour: f32) -> String {
+        let mut parts = Vec::new();
+        if self.scene.light.is_some() {
+            let h = game_hour.rem_euclid(24.0);
+            let (hh, mm) = (h as u32, ((h - h.floor()) * 60.0) as u32);
+            let phase = vellum_light::phase_keyframes(h, vellum_light::PhaseBoundaries::default())
+                .into_iter()
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or("day", |(p, _)| match p {
+                    vellum_light::Phase::Dawn => "dawn",
+                    vellum_light::Phase::Day => "day",
+                    vellum_light::Phase::Dusk => "dusk",
+                    vellum_light::Phase::Night => "night",
+                });
+            let clock = if self.light_hour.is_some() { " (held)" } else { "" };
+            parts.push(format!("{hh:02}:{mm:02} {phase}{clock}"));
+        } else {
+            parts.push("unlit".to_owned());
+        }
+        let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let lights = &self.scene.lights;
+        if !lights.is_empty() {
+            let shadowed = lights.iter().filter(|l| l.casts_shadows()).count();
+            let mut lamps = count(lights.len(), "lamp", "lamps");
+            if shadowed > 0 {
+                lamps.push_str(&format!(" ({shadowed} shadowed)"));
+            }
+            parts.push(lamps);
+        }
+        if !self.scene.props.is_empty() {
+            parts.push(count(self.scene.props.len(), "prop", "props"));
+        }
+        parts.push(format!("{} on stage", self.creatures.len()));
+        parts.join(", ")
     }
 
     fn mark_scene_saved(&mut self) {
@@ -745,6 +806,57 @@ impl StageState {
     /// Remove prop `k`; the selection follows the prop it pointed at.
     /// A new point light of `kind`, mid-floor at the stage's centre,
     /// selected so a drag places it.
+    /// Where a note clicked at stage point (`sx`, `sy`) goes and what it is
+    /// about: a lamp whose flame is within reach of the click, else a prop
+    /// standing over the spot (the nearest by its foot), else nothing but
+    /// the spot; seen at `hour` (None: the scene is unlit) in `weather`.
+    pub fn note_pin_at(&self, sx: f32, sy: f32, hour: Option<f32>, weather: &str) -> crate::stage::scene_notes::ScenePin {
+        use crate::stage::scene_notes::{lamp_label, ScenePin};
+        /// How near the flame (a little above the lamp's ground point) a
+        /// click counts as on the lamp, stage pixels.
+        const LAMP_REACH: f32 = 36.0;
+        const FLAME_LIFT: f32 = 12.0;
+        let mut pin = ScenePin { at: [sx, sy], hour, weather: weather.to_owned(), ..Default::default() };
+        let near = |d: &(usize, f32), e: &(usize, f32)| d.1.total_cmp(&e.1);
+        let lamp = self
+            .scene
+            .lights
+            .iter()
+            .enumerate()
+            .filter_map(|(k, l)| {
+                let ((x, y), _) = self.field.project_ground(l.x, l.z);
+                let d = ((sx - x).powi(2) + (sy - (y - FLAME_LIFT)).powi(2)).sqrt();
+                (d < LAMP_REACH).then_some((k, d))
+            })
+            .min_by(near);
+        if let Some((k, _)) = lamp {
+            pin.lamp = Some(k);
+            pin.about = format!("{} {}", lamp_label(self.scene.lights[k].kind), k + 1);
+            return pin;
+        }
+        // A prop's drawn size is its art's; a card unit tall and wide
+        // enough, at its depth, is the reach here.
+        let prop = self
+            .scene
+            .props
+            .iter()
+            .enumerate()
+            .filter_map(|(k, p)| {
+                let ((x, y), ppu) = self.field.project_ground(p.x, p.z);
+                let tall = (ppu * p.scale.max(0.1) * 1.5).max(24.0);
+                let half = (tall * 0.6).max(20.0);
+                let over = sy <= y + 10.0 && sy >= y - tall && (sx - x).abs() <= half;
+                over.then_some((k, (sx - x).abs() + (y - sy).abs() * 0.25))
+            })
+            .min_by(near);
+        if let Some((k, _)) = prop {
+            let image = &self.scene.props[k].image;
+            pin.prop = Some(k);
+            pin.about = image.rsplit('/').next().unwrap_or(image).trim_end_matches(".png").to_owned();
+        }
+        pin
+    }
+
     pub fn add_light(&mut self, kind: gs_field::lighting::LampKind) {
         let (z_near, z_far) = self.field.depth_range();
         let light = gs_field::lighting::PointLight::new(kind, 440.0, (z_near + z_far) * 0.5);
@@ -960,6 +1072,46 @@ mod tests {
 
     fn stage() -> StageState {
         StageState::with_cast(StudioRoomContext::default(), Vec::new())
+    }
+
+    /// A note clicked on a lamp's flame is about the lamp; one over a prop
+    /// is about the prop; one in the open is about nothing but its spot.
+    #[test]
+    fn a_note_pin_names_what_it_was_clicked_on() {
+        let mut s = stage();
+        s.add_light(gs_field::lighting::LampKind::Torch);
+        let (lx, lz) = (s.scene().lights[0].x, s.scene().lights[0].z);
+        s.add_prop("scenery/ojandhaart_bench.png".into());
+        let prop = s.scene().props.len() - 1;
+        {
+            let p = &mut s.scene_mut().props[prop];
+            p.x = 150.0;
+            p.z = lz;
+        }
+        let ((fx, fy), _) = s.field.project_ground(lx, lz);
+        let on_lamp = s.note_pin_at(fx, fy - 12.0, Some(23.0), "Rain");
+        assert_eq!((on_lamp.lamp, on_lamp.about.as_str(), on_lamp.hour, on_lamp.weather.as_str()), (Some(0), "Torch 1", Some(23.0), "Rain"));
+        let ((px, py), _) = s.field.project_ground(150.0, lz);
+        let on_prop = s.note_pin_at(px + 3.0, py - 10.0, None, "");
+        assert_eq!((on_prop.prop, on_prop.lamp, on_prop.about.as_str()), (Some(prop), None, "ojandhaart_bench"));
+        let open = s.note_pin_at(800.0, 40.0, None, "");
+        assert_eq!((open.lamp, open.prop, open.about.as_str(), open.at), (None, None, "", [800.0, 40.0]));
+    }
+
+    #[test]
+    fn the_outline_says_the_hour_and_what_is_on_the_stage() {
+        let mut s = stage();
+        s.scene_mut().light = None;
+        assert_eq!(s.outline(23.0), "unlit, 0 on stage");
+        s.scene_mut().light = Some(Default::default());
+        s.light_hour = Some(23.5);
+        s.add_light(gs_field::lighting::LampKind::Torch);
+        s.add_light(gs_field::lighting::LampKind::Glow);
+        s.spawn("kobold", Some("kobold".into()));
+        assert_eq!(s.outline(23.5), "23:30 night (held), 2 lamps (1 shadowed), 1 on stage");
+        s.light_hour = None;
+        assert!(s.outline(12.0).starts_with("12:00 day, "), "{}", s.outline(12.0));
+        assert!(s.outline(19.0).starts_with("19:00 dusk"), "{}", s.outline(19.0));
     }
 
     fn flags<'a>(stage: &'a StageState, id: &str) -> &'a CreatureFlags {

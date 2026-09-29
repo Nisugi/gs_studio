@@ -16,12 +16,18 @@ use gs_puppet::math::V3;
 use gs_puppet::Posed;
 use serde::{Deserialize, Serialize};
 
+pub use crate::notes::today;
+use crate::notes::Reply;
+
 /// One pinned note.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
     /// Its number within the family, shown on its pin; never reused.
     pub id: u32,
     pub text: String,
+    /// Who wrote it (`notes::author`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub by: String,
     /// The bone it is pinned to.
     pub bone: String,
     /// Which of the bone's segments, when the bone is a chain (a tail, a
@@ -45,6 +51,9 @@ pub struct Note {
     /// When it was made, `YYYY-MM-DD`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub made: String,
+    /// The conversation under it.
+    #[serde(default, rename = "reply", skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<Reply>,
 }
 
 fn is_zero(v: &u32) -> bool {
@@ -83,6 +92,7 @@ impl Pin {
         Note {
             id: 0,
             text: String::new(),
+            by: String::new(),
             bone: self.bone.clone(),
             chain: self.chain,
             along: self.along,
@@ -91,6 +101,7 @@ impl Pin {
             view: self.view,
             done: false,
             made: String::new(),
+            replies: Vec::new(),
         }
     }
 }
@@ -118,19 +129,17 @@ impl Notes {
     pub fn save(&self, data_root: &Path, family: &str) -> Result<PathBuf, String> {
         let path = Notes::path(data_root, family);
         let text = format!("{HEADER}{}", toml::to_string_pretty(self).map_err(|e| e.to_string())?);
-        std::fs::create_dir_all(path.parent().expect("notes/")).map_err(|e| format!("{}: {e}", path.display()))?;
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))?;
+        crate::notes::write_atomic(&path, &text)?;
         Ok(path)
     }
 
     /// Pin a new note; its id, one past the highest there has been.
-    pub fn add(&mut self, pin: Pin, text: &str, made: &str) -> u32 {
+    pub fn add(&mut self, pin: Pin, text: &str, by: &str, made: &str) -> u32 {
         let id = self.notes.iter().map(|n| n.id).max().unwrap_or(0) + 1;
         self.notes.push(Note {
             id,
             text: text.trim().to_owned(),
+            by: by.trim().to_owned(),
             bone: pin.bone,
             chain: pin.chain,
             along: pin.along,
@@ -139,16 +148,25 @@ impl Notes {
             view: pin.view,
             done: false,
             made: made.to_owned(),
+            replies: Vec::new(),
         });
         id
     }
 
-    pub fn get(&self, id: u32) -> Option<&Note> {
-        self.notes.iter().find(|n| n.id == id)
+    /// Add a reply under note `id`; false when there is no such note or
+    /// nothing to say.
+    pub fn reply(&mut self, id: u32, reply: Reply) -> bool {
+        match self.notes.iter_mut().find(|n| n.id == id) {
+            Some(note) if !reply.text.is_empty() => {
+                note.replies.push(reply);
+                true
+            }
+            _ => false,
+        }
     }
 
-    pub fn get_mut(&mut self, id: u32) -> Option<&mut Note> {
-        self.notes.iter_mut().find(|n| n.id == id)
+    pub fn get(&self, id: u32) -> Option<&Note> {
+        self.notes.iter().find(|n| n.id == id)
     }
 
     pub fn remove(&mut self, id: u32) -> bool {
@@ -181,22 +199,6 @@ pub fn on_screen(posed: &Posed, note: &Note, yaw: f32, project: &dyn Fn(V3) -> (
     Some(project(gs_puppet::math::mul_mv(&gs_puppet::math::rot_y(yaw), p)).0)
 }
 
-/// Today's date, `YYYY-MM-DD` (UTC), for a new note.
-pub fn today() -> String {
-    let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86_400) as i64;
-    // days since 1970-01-01 to a civil date (H. Hinnant's algorithm)
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,12 +224,14 @@ mod tests {
         assert_eq!((pin.bone.as_str(), pin.chain), ("arm_l", 0));
         let mut notes = Notes::load(&data, "humanoid").expect("no file: none");
         assert!(notes.notes.is_empty());
-        let id = notes.add(pin, "  a bulge on the shoulder  ", "2026-09-28");
+        let id = notes.add(pin, "  a bulge on the shoulder  ", "Nisugi", "2026-09-28");
+        assert!(notes.reply(id, Reply::new("Claude", "trimmed both arms alike", "2026-09-28")));
         assert_eq!(id, 1);
         notes.save(&data, "humanoid").unwrap();
         let back = Notes::load(&data, "humanoid").unwrap();
         assert_eq!(back, notes);
         assert_eq!(back.get(1).unwrap().text, "a bulge on the shoulder");
+        assert_eq!((back.get(1).unwrap().by.as_str(), back.get(1).unwrap().replies.len()), ("Nisugi", 1));
         // the pin follows the bone: raised, the arm's shoulder end moves
         let at_rest = anchor(&rest, back.get(1).unwrap()).unwrap();
         let set = gs_puppet::PoseSet::from_toml(gs_puppet::SHIPPED_POSES.iter().find(|(n, _)| *n == "biped").unwrap().1).unwrap();
@@ -236,19 +240,12 @@ mod tests {
         assert!((0..3).any(|k| (posed_at[k] - at_rest[k]).abs() > 1e-3), "the pin stayed behind: {at_rest:?} {posed_at:?}");
         // ids are never reused, done notes leave the figure but stay listed
         let mut notes = back;
-        let two = notes.add(Pin::at(&rest, arm, 0.9, "stand", "", [0.0, 0.0, 1.0]).unwrap(), "elbow", "2026-09-28");
+        let two = notes.add(Pin::at(&rest, arm, 0.9, "stand", "", [0.0, 0.0, 1.0]).unwrap(), "elbow", "", "2026-09-28");
         assert!(notes.remove(1));
-        let three = notes.add(Pin::at(&rest, arm, 0.5, "", "", [0.0, 0.0, 1.0]).unwrap(), "mid", "2026-09-28");
+        let three = notes.add(Pin::at(&rest, arm, 0.5, "", "", [0.0, 0.0, 1.0]).unwrap(), "mid", "", "2026-09-28");
         assert_eq!((two, three), (2, 3));
-        notes.get_mut(2).unwrap().done = true;
+        notes.notes.iter_mut().find(|n| n.id == 2).unwrap().done = true;
         assert_eq!(notes.open().map(|n| n.id).collect::<Vec<_>>(), vec![3]);
         let _ = std::fs::remove_dir_all(&data);
-    }
-
-    #[test]
-    fn today_is_a_date() {
-        let d = today();
-        assert_eq!(d.len(), 10);
-        assert!(d.starts_with("20") && &d[4..5] == "-" && &d[7..8] == "-", "{d}");
     }
 }

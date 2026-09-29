@@ -23,3 +23,5 @@ data/textures/**/projected/
 data/textures/**/normal.png
 # scratch paintings (zi_trio tries), not a creature's own
 data/textures/*/_*/
+# gs-studio --scene-report output
+/scene-reports/

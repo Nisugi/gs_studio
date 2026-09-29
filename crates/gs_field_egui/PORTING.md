@@ -994,3 +994,13 @@ Two more `creature_field.rs` regions (twenty-two in all,
   the pass, as it does a creature base's, a variant's and the backdrop's:
   without them the pass lost a prop the moment the relight swapped its
   lit twin in.
+
+### 7.34 A stage frame for a scene report
+
+* For a scene report (gs-studio's `--scene-report`): `StageGpu::snapshot`
+  (**a new method**) hands back the frame as drawn, the stage's size on
+  screen, its camera's metres per unit and focal length and which lamps got
+  in (`PassSnapshot`, **a new type**: `light_of`, `moons`, `shadow_given`);
+  `time_lamps` (**a new function**) times it offscreen through
+  `field_gpu::time_offscreen` -- whole, without each lamp, each lamp's
+  shadow off -- into `PassTimings` (**a new type**).

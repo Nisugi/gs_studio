@@ -14,6 +14,9 @@ pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publi
     \x20                (headless: sheet.png (and normal.png) from the paintings in that folder, then exit)\n\
     \x20      gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>] --save <family>[,<family>...]\n\
     \x20                (headless: the Rigs tab's Save for each -- bake, puppet, skins, publish -- then exit)\n\
+    \x20      gs-studio [--pool <dir>] --scene-report <scene>\n\
+    \x20                (the scene lit on the GPU at 23:00: scene-reports/<scene>.md -- each lamp's reach, what it\n\
+    \x20                reaches, its cost on this GPU -- and .png, then exit)\n\
     \x20      gs-studio [--data <dir>] --import-chart <scale-chart.html>\n\
     \x20                (headless: the chart's silhouettes into <data>/outlines.json, then exit)\n\
     \x20      gs-studio [--data <dir>] --export-jobs\n\
@@ -46,6 +49,10 @@ pub struct Cli {
     /// puppet, its skins and outfits into the pool, then Publish) and exit,
     /// no window -- a republish after a builder change.
     pub save: Option<String>,
+    /// `--scene-report <scene>`: open the scene on the Scenes tab, lit by
+    /// the v2 pass, and write its report and a screenshot
+    /// (`stage::report`), then exit.
+    pub scene_report: Option<String>,
     /// `--import-chart <scale-chart.html>`: write `<data>/outlines.json` from
     /// the chart (`data_root::import_outlines`, what the Rigs tab's Import
     /// does) and exit, no window.
@@ -59,7 +66,10 @@ pub struct Cli {
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 12] = ["--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet", "--import-chart", "--save"];
+    const OPTIONS: [&str; 13] = [
+        "--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet", "--import-chart", "--save",
+        "--scene-report",
+    ];
     let mut cli = Cli::default();
     let mut it = args.iter();
     while let Some(arg) = it.next() {
@@ -90,6 +100,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "--project" => cli.project = Some(value),
             "--build-sheet" => cli.build_sheet = Some(value),
             "--save" => cli.save = Some(value),
+            "--scene-report" => cli.scene_report = Some(value),
             "--import-chart" => cli.import_chart = Some(PathBuf::from(value)),
             "--grazing" => {
                 cli.grazing = Some(value.parse().map_err(|_| format!("--grazing needs a number, got '{value}'"))?);
@@ -127,6 +138,7 @@ mod tests {
         assert!(parse_args(&args(&["--export-jobs", "--data", "d"])).unwrap().export_jobs);
         assert_eq!(parse_args(&args(&["--build-sheet", "troll/cave_troll"])).unwrap().build_sheet.as_deref(), Some("troll/cave_troll"));
         assert_eq!(parse_args(&args(&["--save", "humanoid,troll"])).unwrap().save.as_deref(), Some("humanoid,troll"));
+        assert_eq!(parse_args(&args(&["--scene-report=7503305 - Bonfire"])).unwrap().scene_report.as_deref(), Some("7503305 - Bonfire"));
         assert_eq!(parse_args(&args(&["--import-chart", "x/scale-chart.html"])).unwrap().import_chart, Some(PathBuf::from("x/scale-chart.html")));
     }
 

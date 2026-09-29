@@ -64,7 +64,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::dolls::{resolve_doll, DollRef};
+use crate::dolls::DollRef;
 
 static EMBEDDED_PUPPETS: include_dir::Dir<'static> =
     include_dir::include_dir!("$CARGO_MANIFEST_DIR/data/puppets");

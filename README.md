@@ -49,21 +49,25 @@ means form, and the game's family is only a hint.
 
 ## The app
 
-`gs-studio` works out of two directories, both shown (and changeable) in the
-top bar, plus a publish directory set on the Rigs tab:
+`gs-studio` works out of two directories and a publish directory, all set
+in the **Settings** window (the *Settings* button at the right of the tab
+strip), along with the silhouette chart:
 
 | | Holds | Used by | Set with | Default |
 |---|---|---|---|---|
-| **Data** root | `outlines.json`, `rigs/` (rig sources, bakes, puppets), `poses/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, the Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable, else `<gs-studio home>/data` |
-| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...), `global/scenes/*.toml`, and the live `global/rigs/` + `global/puppets/` a rig save installs | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, the Pool box + Set | **gs-studio's own data home** (below) |
-| **Publish** | `rigs/`, `puppets/`, `poses/`: what game clients compile in | Rigs (Publish) | `--publish <dir>`, `GS_STUDIO_PUBLISH`, the *Publish to* box + Set | `<data>/../crates/gs_field/data` |
+| **Data** root | `outlines.json`, `rigs/` (rig sources, bakes, puppets), `poses/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, Settings' Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable, else `<gs-studio home>/data` |
+| **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...), `global/scenes/*.toml`, and the live `global/rigs/` + `global/puppets/` a rig save installs | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, Settings' Pool box + Set | **gs-studio's own data home** (below) |
+| **Publish** | `rigs/`, `puppets/`, `poses/`: what game clients compile in | Rigs (Publish) | `--publish <dir>`, `GS_STUDIO_PUBLISH`, Settings' *Publish to* box + Set | `<data>/../crates/gs_field/data` |
 
 Every folder resolves `--flag` > environment variable > **remembered** >
 default. A folder changed in the app (Data Open, Pool Set, Publish Set, and
 the silhouette chart after a successful Import) is remembered in
-`<gs-studio home>/settings.toml`, as is the Preview tab's *Light on the GPU
-(v2)*; one that came from a flag or variable is used for that run only and
-never written.
+`<gs-studio home>/settings.toml`, as are the stage's *Light on the GPU
+(v2)* and which side panel sections were left open; one that came from a
+flag or variable is used for that run only and never written.
+`GS_STUDIO_OPEN=<section id,...>` (or `all`) opens sections for one run
+without remembering them, for screenshots (ids such as `stage_light`,
+`stage_time`, `rig_notes`: `tools::section` calls).
 
 **Silhouettes.** The Rigs tab has a strip above the editor: the path of
 `scale-chart.html` and *Import*, which converts the chart into
@@ -103,7 +107,7 @@ first run with the pool subtree (`global/images/<category>/`,
 `global/scenes/`, `global/skins/`, `global/puppets/`).
 
 It **never** reads or writes `~/.vellum-fe` unless you say so -- `--pool`,
-`GS_STUDIO_POOL`, or a path typed into the Pool box. The status bar always
+`GS_STUDIO_POOL`, or a path typed into Settings' Pool box. The status bar always
 names the directory in use and whether anything asked for it
 (`pool: <dir> (gs-studio home, the default)` vs `(--pool)`).
 
@@ -113,7 +117,7 @@ gs-studio is a *host*: it installs its default through the `set_base_dir`
 override the crate already provides (`crates/studio/src/data_home.rs`,
 `pool_dir.rs`). Setting `VELLUM_FE_DIR` steers VellumFE, not this app.
 
-**Import from VellumFE...** (top bar, and in the empty-pool banner) offers to
+**Import from VellumFE...** (Settings, beside the Pool box, and in the empty-pool banner) offers to
 **copy** VellumFE's `global/images`, `global/scenes`, `global/skins` and
 `global/puppets` into the pool directory. It shows the file count and size
 per subtree and asks before copying. It only ever copies -- never moves,
@@ -154,13 +158,14 @@ rig fails to build, or a creature whose templates fail, is skipped and
 named on stderr, and the rest are written -- see *Texture painting* under
 the Rigs tab.
 
-The top bar holds the tool tabs, the two directory boxes and *Import from
-VellumFE...*. It is one row when the window is wide enough (1480 px) and
-otherwise two -- tabs above, boxes below, the boxes sized to share the row --
-so nothing clips at the 900 px minimum width. While the pool holds no
-creature art a banner sits under it: which directory is in use, why it is
-empty, and the ways to fill it (Import, drop PNGs in, or point the Pool box
-elsewhere). Three tools sit behind the seven tabs: the rig
+The top bar holds the tool tabs and, at the right, *Settings*: a window
+with the folders -- Data (Open), Pool (Set, *Import from VellumFE...*),
+Publish to (Set) and the silhouette chart (Import) -- one row each; *Your
+name*, which signs notes and replies; and where `settings.toml` is. It opens by itself when there is no data root to open;
+the status bar names the folder in use either way. While the pool holds no
+creature art a banner sits under the tabs: which directory is in use, why it is
+empty, and the ways to fill it (Import, drop PNGs in, or point Settings'
+Pool box elsewhere). Three tools sit behind the seven tabs: the rig
 editor, the stage (Scenes + Preview) and the calibrators (Frames, Dolls,
 Creatures, Scenery). Each is built lazily and kept while the app runs;
 switching tabs never loses work. A new tool is a new `ToolId` + entry in
@@ -178,13 +183,17 @@ joints), each bone carrying one body part and hanging off a parent bone. A
 template only SEEDS a rig: joints, bones, the hierarchy, anchors and eyes are
 all editable afterwards.
 
-- **Left**: family, view (front/side), **Editing** (PRIMARY / DEPTH, below),
-  template, what `ref_ft` measures;
-  Save / New from template / Publish (+ *publish on save*) / Undo / Redo.
+- **Left**: a toolbar row -- Save, Publish (+ *on save*: publish on
+  save), Undo, Redo; then **Form**: Family, Silhouette (front/side),
+  Template (+ *Start over*: new from the template), Reference (what
+  `ref_ft` measures), *Drawn* (*from above*, *arms raised*, below); then
+  **Edit**: *Joints on* (PRIMARY / DEPTH, below) and *Puppet* (*3D
+  preview*, *Show on stage*).
   Below that the joint list and the bone list share the remaining height,
   each in its own scroll area, with a draggable divider between them.
   - **Joints** are in click-through order (filled dot = placed, hollow = not
-    yet, bold = the joint the next click places), with Mirror. *Add*,
+    yet, bold = the joint the next click places), with Mirror; a *depth ft*
+    column (below) once the other silhouette gives depth. *Add*,
     *Rename*, *Delete*, *Up*, *Down* act on the current joint. A **depth**
     column shows each placed joint's off-plane coordinate -- weak = a guess,
     bold with an *x* to reset = set by hand.
@@ -199,11 +208,12 @@ all editable afterwards.
   child's, eye-disc outlines; the selected bone is highlighted and its pivot
   boxed.
 - **Right**: collapsible sections, what needs attention first, shut until
-  opened (the bone's open as it is clicked).
+  first opened, then open or shut as they were left, run to run (the bone's
+  opens as it is clicked).
   **Warnings** (orange when there are any); **Bone: <name>** when a bone is
-  selected -- its pixel count, *Parent and pivot*, **Thickness** (below) and
-  its joint **Chain** (Up / Down / Remove per joint, *Append joint...*, *Pick
-  on canvas*); **Parts** (legend with per-part pixel share); **Anchors and
+  selected -- its pixel count, then its groups: *Parent and pivot*,
+  **Thickness** (below) and its joint **Chain** (Up / Down / Remove per
+  joint, *Append joint...*, *Pick on canvas*); **Parts** (legend with per-part pixel share); **Anchors and
   eyes** (which joint is head / mouth / saddle / left eye / right eye, and
   the eye radius: Auto or a value); **Depth** (below); **Map** (size /
   aspect / span, orphan count).
@@ -230,7 +240,7 @@ and a renamed or deleted bone takes its overrides with it.
 | Ctrl+Z, Ctrl+Y / Ctrl+Shift+Z | undo, redo (every rig edit; one gesture = one step) |
 | Ctrl+S | save |
 
-**3D preview** (the toggle beside Undo / Redo) opens a panel with the rig's
+**3D preview** (the toggle in the left panel's Edit group) opens a panel with the rig's
 puppet, rebuilt live from the rig as it stands -- unsaved edits, depth
 overrides and all -- so a joint drag shows its effect on the 3D body at once.
 Its controls are three rows: **Pose** (the pose list, *Edit pose*, *Play
@@ -246,7 +256,8 @@ splats, then sharp when it stops. A family with a FITTED cloud,
 from that instead: each Gaussian bound to the puppet's nearest segment
 and moved by the pose, `gs_puppet::splat::BoundCloud`; the status line
 says "fitted cloud") and **Hold** (a weapon or shield for each hand, from the props file -- see
-*Held props* below), then a collapsed **Texture painting** section.
+*Held props* below), each row led by its label in small capitals, then the
+**Notes** and **Texture painting** sections.
 Drag turns it, the wheel zooms; the pose list comes from
 `<data>/poses/<body_type>.toml` (else the built-in copy) with the family's
 own overrides applied, and *Reload poses* re-reads the file after an edit
@@ -342,10 +353,12 @@ another.
 with *Pin notes* on, a click on the figure picks the bone there and how far
 along it, a line takes the note ("reduce this bulge", "the jaw hangs"), and
 *Pin* writes it to `<data>/notes/<family>.toml` with the pose, creature and
-view it was seen in (`editor::rig_notes`). Each open note is a numbered pin
-on the figure, following its bone in any pose; the list has *Show* (its
-pose, creature and view, its pin ringed), *Done* (kept in the list, off the
-figure) and *Delete*. The file is plain TOML beside the rig, for whoever
+view it was seen in (`editor::rig_notes`), signed with Settings' *Your
+name*. Each open note is a numbered pin on the figure, following its bone
+in any pose; the list (*All* or *This pose*, *done too*) has *Show* (its
+pose, creature and view, its pin ringed), *Reply* (a reply under it, signed
+and dated: the conversation stays with the note), *Done* (kept in the list,
+off the figure) and *Delete*. The file is plain TOML beside the rig, for whoever
 works on the rig next: it names the bone and the view where a screenshot
 names only pixels. `GS_STUDIO_NOTE=<family>#<id>` opens the preview on a
 note, for a screenshot of what it points at.
@@ -414,15 +427,17 @@ twin reflected across x = 0 -- but only if the twin is not placed yet.
 **Depth.** A rig is clicked onto ONE silhouette, so every joint is missing
 its third coordinate: `z` (front-back, + = the creature's front) for a front
 rig, `x` (left-right, + = the creature's left) for a side rig. `gs_puppet`
-guesses every one of them off the family's OTHER silhouette; the **Editing**
-toggle switches the canvas to a DEPTH pass where those guesses are corrected.
+guesses every one of them off the family's OTHER silhouette; *Joints on*
+DEPTH (the left panel's Edit group) switches the canvas to a DEPTH pass where
+those guesses are corrected. The joint list's *depth ft* column shows each:
+greyed while it is the guess, bold with an *x* (back to the guess) once set.
 
 - The canvas draws the other silhouette as it is, with each placed joint at
   **(its depth, the height it was authored at)** -- the off-plane axis
   across, y up -- and the bone chains between them. Dragging moves a joint
   along the off-plane axis ONLY; y belongs to the primary view and never
   changes here.
-- **Drawn from above** (the *from above* checkbox beside the view; the
+- **Drawn from above** (the *from above* checkbox on the *Drawn* row; the
   multileg template sets it): the primary silhouette is a plan, so up in it
   is the creature's front and what it cannot show is HEIGHT. The DEPTH
   canvas then shows the side silhouette turned a quarter turn, head up, so
@@ -436,7 +451,7 @@ toggle switches the canvas to a DEPTH pass where those guesses are corrected.
   (`Puppet::from_above`); the bake is 2D and unchanged. The plan is traced
   at the side view's scale by BODY length (image-gen's `trace.json`
   `front_view: "top"`), not at its height.
-- **Arms raised** (the *arms raised* checkbox beside it): the sheet holds
+- **Arms raised** (the *arms raised* checkbox on the same row): the sheet holds
   the arms out from the body -- an A-pose, some 30-45 degrees out -- so
   the front view shows the armpit and the inner arm, which a hanging arm
   hides against the body and the builder would otherwise guess. The side
@@ -541,12 +556,12 @@ sheet is gone) and says so; the pool install does the same. It copies what is SA
 puppet `puppets/<family>.puppet.toml`, and every pose set in `<data>/poses/`
 into `poses/` -- never the `.rig.toml` source, into the publish directory:
 the folder whose contents game clients embed. Default
-`<data>/../crates/gs_field/data`; `--publish`, `GS_STUDIO_PUBLISH` or the
-*Publish to* box override it (a path naming a `rigs` directory, the old
+`<data>/../crates/gs_field/data`; `--publish`, `GS_STUDIO_PUBLISH` or
+Settings' *Publish to* box override it (a path naming a `rigs` directory, the old
 meaning, is taken as its parent). A pose set, `props/weapons.toml` or
 outfit file that does not parse stops Publish before anything is copied,
 and the error names it; the published copies stay as they were. With
-*publish on save* ticked (the
+*on save* (publish on save) ticked (the
 default) Save publishes too. The directory is created if its parent exists;
 if not even the parent exists, the button and the checkbox are disabled and
 their hover text says why -- Save still works.
@@ -563,17 +578,27 @@ input.
 VellumFE's Studio "Stage", ported: a sandbox room drawn by the production
 renderer (`gs_field_egui::render_creature_field_content`). The two tabs are
 ONE tool sharing one stage -- roster, scene, camera and selection all carry
-across -- and differ only in the right-hand panel. Its sections (Scene,
-Props, Lamps, Occluders, Scene light, Weather, Camera, Solver on Scenes;
-Scene light, Weather, Puppets, Cast, Roster on Preview) start shut, their headings in a
-colour of their own, and stay open once opened for the rest of the run
-(`tools::section`; the Rigs tab's right panel is the same):
+across -- and differ only in the right-hand panel. Scenes holds what the
+scene file keeps; Preview the moment it is seen in and who is there. The
+panel opens with the scene's name ("* unsaved" when it is), a line of the
+stage at a glance -- "23:00 night (held), 2 lamps (2 shadowed), 1 prop, 7 on
+stage" (`StageState::outline`) -- and *Light on the GPU (v2)*. Under them the
+sections: Scene, Props, Lamps, Masks, Light, Notes, Time and weather, Camera,
+Solver (testing), Every scene on Scenes; Time and weather, Display, Puppets,
+Cast, Roster on Preview. *Time and weather* is the same section on both, open
+or shut as one. Sections start shut, their headings in a colour of their
+own, and open as they were left, run to run (`tools::section`; the Rigs
+tab's panels are the same). Inside a section, groups are led by a label in
+small capitals (Niffy's LEGS, PELVIS), and a setting that falls back to a
+default shows it greyed, with "auto" or "default" beside it until set, and
+an *x* to put it back:
 
 - **Scenes**: the scene being edited and Save; *New scene...* (bind by Room
   uid / Room title / Location / Default, with the filename stem previewed and
   an existing file flagged before anything is written); the load list with a
   filter; backdrop image and colour; props from the `scenery` pool (Add,
-  select, remove, x / z / scale / contact shadow); Camera (focal, cam_h, z0,
+  select, remove, x / z / scale / contact shadow: one row per placed prop,
+  its place below when selected); Camera (focal, cam_h, z0,
   dz, horizon, cell_w, ranged by the loader's own limits) with *Reset camera
   (built-in)* and, for a named non-default scene, *Reset camera (inherited)*;
   and the Solver tunables (*Solver (testing)*). Over a backdrop the camera
@@ -587,26 +612,31 @@ colour of their own, and stay open once opened for the rest of the run
   scene...*). With an unsaved rig too, closing asks about the rig first,
   then the scene, whichever tab is showing; Cancel on either keeps the
   window open.
-- **Scene light** (Scenes, after Occluders): *Light this scene* adds the
+- **Light** (Scenes, after Masks): *Light this scene* adds the
   scene file's `[light]` table (Niffy's creature-field lighting,
-  `gs_field::lighting` + `vellum_light`). Key, Ambient and Ground swatches and
+  `gs_field::lighting` + `vellum_light`); *Outdoor* beside it (time of day
+  and the sky apply). *Colour*: Key, Ambient and Ground swatches and
   Saturation show the values read from the backdrop ("auto") and can each be
-  overridden or reset; Intensity; Outdoor (time of day applies); Darkness
+  overridden or reset. *Levels*: Intensity; Darkness
   (`darkness`, 0..1: how black the dark is beyond the lamps -- outdoors at
   the darkest of night, half of it at dusk and dawn, indoors always, so a
   torch-lit cave is dark at noon; 1 = pitch black but for the lamps; unset =
   the global default, 0.7 outdoors and 0.88 indoors, `[darkness]` in
-  `global/lighting.toml`, under *Global time-of-day defaults*); *Sun from*
-  and *Sun height* (`sun = { azimuth, elevation }`, degrees: the side the
+  `global/lighting.toml`, under *Every scene*); strength, ground bounce,
+  exposure, haze. *Sun*: *From* and *Height* (`sun = { azimuth, elevation }`, degrees: the side the
   painting is lit from, which puppets lit by the scene take -- 0 = from
   behind you, -90 the left, 90 the right, 180 backlit; unset = high to the
-  front left, -45 and 44); *More*
-  (strength, ground bounce, exposure, haze); *Time of day* (Dawn / Day / Dusk
-  / Night rows over `global/lighting.toml`, "Use default" per row); *Global
-  time-of-day defaults* edits `global/lighting.toml` itself (live, then Save;
-  *Restore shipped defaults*). *Preview*
+  front left, -45 and 44). *Sky*: *Aurora* (below). *Time of day*: a table,
+  a column each for Dawn / Day / Dusk / Night over `global/lighting.toml`,
+  ticked *Own* to give that part of the day this scene's own key, ambient
+  and intensity. **Every scene** (last on Scenes) edits
+  `global/lighting.toml` itself -- darkness, moon, and a table of the
+  parts of the day, the settings as rows (live, then Save; *Restore
+  shipped defaults*).
+- **Time and weather** (Scenes and Preview alike; none of it is saved with
+  the scene, the game sets it from its clock and the room). *Clock*
   picks the hour: the live Elanthian clock, the Dawn / Day / Dusk / Night
-  buttons or the slider, plus the player's Lighting strength, and the sky:
+  buttons or the slider, plus the player's Lighting strength. *Sky*:
   *Moon* (how full, 0 = new .. 1 = full) and *Clouds* (how much of the sky
   is covered; rain, snow and fog bring their own). Outdoors a full moon
   rises at 18:00 low on the left, is highest at midnight and sets at 06:00
@@ -615,7 +645,7 @@ colour of their own, and stay open once opened for the rest of the run
   from the sky with soft shadows, a fill from the whole sky and cloud
   shadows drifting with the wind, and elsewhere it lifts the darkness
   evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
-  lift, under *Global time-of-day defaults*). *The game's moons* (on by
+  lift, under *Every scene*). *The game's moons* (on by
   default) replaces the Moon slider with Elanthia's own at the hour shown, today
   (`gs_field::sky`, and a line of how lit each is and when it is highest):
   Liabo, the great moon, circles in 7.449 days, full for a twelfth of it
@@ -653,17 +683,45 @@ colour of their own, and stay open once opened for the rest of the run
   its cover the *Clouds* setting (0 clear .. 1 overcast), lit like the sky
   round it -- white by day, moonlit grey at night, flaring with lightning --
   and over the stars and discs it hides. An *Aurora* (the scene's
-  *Scene light*, `[light] aurora` 0..1; the Hinterwilds' scenes have one)
+  *Light*, `[light] aurora` 0..1; the Hinterwilds' scenes have one)
   hangs curtains of light in the sky by night, green below and violet
   above, rays shimmering along them, behind the cloud.
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
   in when ready (`gs_field_egui::creature_light`).
+- **Notes** (Scenes and Preview alike, after Time and weather): notes
+  pinned to the scene, as the Rigs tab pins them to a puppet
+  (`stage::scene_notes`). With *Pin notes* on, a click on the stage pins a
+  note on that spot -- about the lamp whose flame is under the click, else
+  the prop standing there -- at the hour and weather on view, signed with
+  Settings' *Your name*; the stage shows each open note as a numbered pin
+  (hover for its text, click to show it). The list has *Show* (that hour and
+  weather, the lamp or prop selected, the pin ringed), *Reply*, *Done* and
+  *Delete*; *hide done*. They are kept in `global/scenes/notes/<scene>.toml`
+  beside the scene, so they travel with it; an unsaved scene has none.
+- **Scene report**: `gs-studio [--pool <dir>] --scene-report "<scene>"`
+  opens the scene on the Scenes tab at 23:00 (`GS_STUDIO_LIGHT_HOUR` moves
+  it) with the smoke run's crowd, lit by the v2 pass, and once the night
+  relight is in writes `scene-reports/<scene>.md` and `.png`, then exits
+  (`stage::report`). Per lamp: where it stands and how far its light
+  reaches, in metres from the pass's own camera; whether it got into the
+  pass and one of its shadow slots; what it reaches (props and creatures,
+  nearest first); and what it costs on this GPU -- the pass's last frame
+  timed offscreen whole, without the lamp, and with its shadow off
+  (`field_gpu_stage::time_lamps`). Then what no lamp reaches, with the
+  nearest lamp, and the scene's open notes. The numbers to decide a fill
+  light or a shadow on: a shadow's cost is marching every creature, so
+  the crowd is on the stage for it. `GS_STUDIO_REPORT=<path.md>` writes the
+  report with any `GS_STUDIO_SHOT`, and `GS_STUDIO_SCENE=<name>` puts a
+  saved scene on the stage for a run.
 - **Lamps** (Scenes, after Props): *+ Campfire*, *+ Torch*, *+ Glow*,
   *+ Lantern* (a shuttered lantern hung on a post, made with its beam),
   *+ Wisp* (a will-o'-the-wisp: no flame, a ball of light that floats,
-  drifts and bobs on its own); select one to set its kind, colour, reach,
-  brightness and flicker, or drag it on the stage. *Beam* makes it shine one
+  drifts and bobs on its own). Each lamp is a row: its name (click to
+  select), its colour, *shadows* (below) and *x* to remove it, with a
+  warning when more lamps ask for shadows than the GPU pass gives them
+  (`field_gpu::MAX_SHADOW_LIGHTS`, 8). Select one to set its kind, place,
+  reach, brightness and flicker, or drag it on the stage. *Beam* makes it shine one
   way (a lit window, a lantern): Width and Aim (degrees across the floor:
   0 = right, 90 = away, 180 = left, 270 = toward the viewer; `spread` and
   `aim`), and only what lies within the beam is lit -- its ground pool is a
@@ -678,7 +736,7 @@ colour of their own, and stay open once opened for the rest of the run
   away from each lamp -- only what is lower than the flame reaches the
   floor, so a low campfire throws long leg shadows -- as dark as the light
   it blocks (`gs_puppet::ShadowCaster`).
-  *Light on the GPU (v2)* (under Lamps, where the wgpu renderer runs; off
+  *Light on the GPU (v2)* (at the top of the stage panel, where the wgpu renderer runs; off
   until ticked, then remembered; `GS_STUDIO_V2_LIGHT=1` turns it on for one
   run) swaps that look for Niffy's v2 model (`lights-and-weather.md`):
   every lamp lights the backdrop and every creature from where it is, with
@@ -740,7 +798,8 @@ colour of their own, and stay open once opened for the rest of the run
   bounce, in screen space: the frame's direct light at a quarter of its
   size, gathered on a disc 1.5 m wide round each pixel by how the two
   surfaces face each other (about 20-35% on the pass's cost).
-- **Occluders** (Scenes, when the scene has a backdrop): what the PAINTING
+- **Masks** (Scenes, when the scene has a backdrop): two masks painted over
+  the backdrop. *In front* (the occluders): what the PAINTING
   holds in front of creatures. Paint white over a rock, cactus or tree trunk
   in `scenes/<backdrop name>.occluders.png` beside the backdrop (*Create
   mask* writes a transparent one the backdrop's size, to paint as a layer
@@ -749,7 +808,16 @@ colour of their own, and stay open once opened for the rest of the run
   hidden by it (their names and bars stay on top), nearer ones stand in
   front, lamps too. *Reload mask* after
   painting; *Show* tints them red (`gs_field_egui::field_occluders`).
-- **Weather** (Preview, and Scenes under Light): Clear, Rain, Storm, Snow,
+  *Walkable*: where a creature may stand. Paint black over the walls, the
+  river and the roofs in `scenes/<backdrop name>.walk.png` (*Create mask*
+  writes a white one, all walkable, the backdrop's size; any size works,
+  read in the backdrop's frame); white is ground. The solver refuses a
+  spot whose foot falls on the dark (`gs_field::walk`,
+  `CreatureField::set_walk`), at every relaxation notch, like a prop's
+  exclusion; props and lamps are not held to it (a boat on the river, a
+  torch on a wall). Creatures arriving after *Reload mask* keep to it;
+  *Show* tints the dark red over the stage. No mask: anywhere on the floor.
+- **Weather** (the *Weather* group of Time and weather): Clear, Rain, Storm, Snow,
   Sleet, Blood rain, Fog or Sand, with Amount and Wind -- a preview of what
   the game sets from the room (`gs_field_egui::field_weather`), which also
   brings its cloud over the moon. Painted over the stage, or, where the
@@ -775,7 +843,7 @@ colour of their own, and stay open once opened for the rest of the run
   cycle its body type's poses file authors (`[idle]`, below), each creature
   starting at its own point in it, drawn in 16 cached steps and fading in
   with a pose change (`creature_puppet::PuppetCache::breath`; the *Breathing*
-  checkbox under **Puppets** turns it off). Hit, it flinches: a wound rank
+  checkbox under **Display** turns it off). Hit, it flinches: a wound rank
   seen to RISE (the simulator's wound ranks do it) snaps the body type's
   `[flinch.<region>]` offsets for that part on and springs them back over
   0.55 s (`PuppetCache::flinch`, drawn fresh each frame); a creature killed
@@ -796,8 +864,9 @@ colour of their own, and stay open once opened for the rest of the run
 The Cast list is built *from* the art pool, so its entries mostly draw as
 their sprites -- all but those with a skin of their own.
 
-The **Puppets** list at the top of the Preview panel (with the *Held
-weapons*, *Breathing*, *Lit by the scene* and *Splats* checkboxes; *Lit by
+The **Puppets** list on the Preview panel (the **Display** section above
+it holds the *Held weapons*, *Breathing*, *Lit by the scene* and *Splats*
+checkboxes; *Lit by
 the scene* shades every skin by the scene's sun and sky instead of its own
 fixed cel light -- the paint flat, a warm sun where the scene's *Sun from*
 puts it (high to the front left unless the painting is lit from elsewhere)

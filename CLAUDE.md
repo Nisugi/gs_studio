@@ -42,7 +42,7 @@ faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEA
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
-lighting pass for the run (`=0` turns it off), the Preview tab's *Light on the GPU (v2)*, remembered in
+lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
 in the thousands: the night relight bakes on a worker thread first. Other env: `GS_STUDIO_DATA`,
 `GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
@@ -53,12 +53,28 @@ Headless texture-generator commands: `--project <family>[/<creature>]:front|side
 the republish after a builder change: rebuild the painted sheets with `--build-sheet` first), `--import-chart <scale-chart.html>` (the Rigs tab's Import: chart -> `<data>/outlines.json`) and `--export-jobs` (every template + `textures/jobs.json`),
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
-closes (read the PNG); `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs
+closes (read the PNG; `GS_STUDIO_REPORT=<path.md>` writes the scene report
+with it, `GS_STUDIO_SCENE=<name>` puts that saved scene on the stage);
+`gs-studio [--pool <dir>] --scene-report "<scene>"` is the lighting check in
+one: the scene at 23:00 with the smoke crowd, lit by the v2 pass, then
+`scene-reports/<scene>.md` + `.png` -- per lamp its place and reach in
+metres, whether it got a shadow slot, what it reaches, and what leaving it
+out / its shadow saves in ms on this GPU (`stage/report.rs`,
+`field_gpu_stage::time_lamps`), plus the scene's open notes: read it before
+placing or answering a note about a light; `GS_STUDIO_POSE_EDIT=[<family>/]<pose>[:<bone>]` opens the Rigs
 tab's 3D preview with the pose editor (`editor/pose_edit.rs`) on that pose;
+`GS_STUDIO_OPEN=<section id,...>` (or `all`) opens side panel sections for the
+run without remembering them (`stage_light`, `stage_time`, `stage_every_scene`,
+`rig_notes`...: the `tools::section` ids; sections otherwise open as the user
+left them, `open_sections` in `settings.toml`);
 `GS_STUDIO_NOTE=<family>#<id>` opens it on a note pinned to the puppet
 (`<data>/notes/<family>.toml`, `editor/rig_notes.rs`: the bone, how far along it,
 the pose and view the user saw a problem in -- read these before guessing from
-a screenshot).
+a screenshot). A scene's notes are `<pool>/global/scenes/notes/<scene>.toml`
+(`stage/scene_notes.rs`): each at a stage point `at` = [x, y] on the 880x470
+stage, `about` the lamp or prop there, seen at `hour` in `weather`. Answer a
+note with a `[[note.reply]]` (`by`, `text`, `made`) under it, and set
+`done = true` once it is dealt with.
 
 Crate examples (`cargo run -p <crate> --example <name>`) are the visual test
 harnesses: `gs_puppet` `puppet_demo`, `audit` (every rig: stale bakes and

@@ -178,6 +178,7 @@ pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
 /// family names the rig (directly or through `FAMILY_ALIASES`), one with NO
 /// art in the pool (so it needs no forcing anywhere), then by name, so the
 /// pick is stable. Err says why none will do.
+#[cfg(test)]
 pub fn puppet_showcase_in(
     db: &gs_field::bestiary::BestiaryDb,
     family: &str,
