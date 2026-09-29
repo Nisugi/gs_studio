@@ -49,6 +49,10 @@ pub struct Fall {
     springs: BTreeMap<String, (f32, f32, f32)>,
     /// Pose keys that give way no faster than the body goes down.
     held: std::collections::BTreeSet<String>,
+    /// It was lying already: nothing to fall into, so its limbs settle
+    /// into their dead angles without the spring's overshoot or the
+    /// impact's whip, which flung a lying body's arms up through the air.
+    lying: bool,
     /// The body's long axis at rest (its tallest extent: up for a biped,
     /// nose to tail for a quadruped).
     long: V3,
@@ -162,7 +166,8 @@ impl Fall {
                 springs.insert(key, (delay, omega, kick));
             }
         }
-        Fall { from: from.clone(), to: to.clone(), springs, held, long }
+        let lying = !upright && h0 < puppet.height.max(0.1) * LYING_SHARE;
+        Fall { from: from.clone(), to: to.clone(), springs, held, lying, long }
     }
 
     /// Done falling: from here on the dead pose itself is drawn.
@@ -197,8 +202,11 @@ impl Fall {
             let mut p = spring(t - delay, omega, 0.32);
             // The impact whips everything once more.
             let tau = t - IMPACT_SECS;
-            if tau > 0.0 {
+            if tau > 0.0 && !self.lying {
                 p += kick * (-6.0 * tau).exp() * (15.0 * tau).sin();
+            }
+            if self.lying {
+                p = p.clamp(0.0, 1.0);
             }
             // Nothing hangs back much once the body is down.
             let p = p.max(root_p * 0.6);
@@ -211,6 +219,9 @@ impl Fall {
         Pose { root: turn_low(self.from.root, self.to.root, self.long, root_p), bones }
     }
 }
+
+/// Under this share of its standing height, a body not upright is lying.
+const LYING_SHARE: f32 = 0.45;
 
 /// The shortest rotation taking unit `from` onto unit `to`.
 fn swing(from: V3, to: V3) -> M3 {
