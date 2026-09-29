@@ -1004,3 +1004,18 @@ Two more `creature_field.rs` regions (twenty-two in all,
   `time_lamps` (**a new function**) times it offscreen through
   `field_gpu::time_offscreen` -- whole, without each lamp, each lamp's
   shadow off -- into `PassTimings` (**a new type**).
+
+### 7.36 Views: more than one lit frame in an egui pass
+
+* `field_gpu::paint_view` (**a new function**): `paint` with a `view` id.
+  Each view keeps its own frame on the GPU (`View`: uniforms, backdrop,
+  atlas, bounce targets, bind groups); the pipelines, samplers and draw
+  slots stay shared. Before, the one `Gpu` held one frame: egui prepares
+  every callback before painting any, so a second frame in the same pass
+  (a doll window lit its own way beside the field) overwrote the first's
+  uniforms, atlas and draw slots, and both drew with the last one's.
+  `paint` is `paint_view(.., 0)`, so the stage is unchanged.
+* Draw slots now start over once per egui render (`finish_prepare` marks
+  the render done), not whenever the frame id changes.
+* A view unseen for `VIEW_RENDERS_KEPT` (300) renders is dropped. Each view
+  has its own 2048x2048 atlas, about 64 MB of textures.

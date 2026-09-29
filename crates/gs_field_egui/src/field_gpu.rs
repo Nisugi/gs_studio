@@ -1108,7 +1108,6 @@ struct Gpu {
     /// Creature layers: premultiplied over what is drawn already.
     blended: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
-    uniform: wgpu::Buffer,
     draws: wgpu::Buffer,
     draw_bind: wgpu::BindGroup,
     s_lin: wgpu::Sampler,
@@ -1129,10 +1128,30 @@ struct Gpu {
     /// surface reflects; its normal and depth) at [`BOUNCE_DOWN`] scene
     /// pixels a texel, drawn once a frame before its pieces.
     bounce_pipeline: wgpu::RenderPipeline,
-    /// (size, direct light, surfaces)
-    bounce: Option<([u32; 2], wgpu::TextureView, wgpu::TextureView)>,
     /// Stands in for the bounce textures while the pass draws into them.
     dummy: wgpu::TextureView,
+    /// How many pieces have taken a draw slot this egui render (all views).
+    next_slot: u32,
+    /// Each view's own frame on the GPU, by [`paint_view`]'s `view`.
+    views: HashMap<u64, View>,
+    /// egui renders so far, counted at the first `prepare` of each.
+    render: u64,
+    /// The last render's callbacks are all prepared: the next `prepare`
+    /// starts a new render (draw slots from 0).
+    render_done: bool,
+}
+
+/// A view unseen for this many egui renders gives its textures back.
+const VIEW_RENDERS_KEPT: u64 = 300;
+
+/// One view's frame on the GPU (ADDITION: the field and a doll window, say,
+/// each lit by its own frame in one egui pass): its uniforms, its backdrop,
+/// its atlas of layers and its bounce targets. The pipelines and the draw
+/// slots are the [`Gpu`]'s, shared by every view.
+struct View {
+    uniform: wgpu::Buffer,
+    /// (size, direct light, surfaces)
+    bounce: Option<([u32; 2], wgpu::TextureView, wgpu::TextureView)>,
     /// The frame's bindings for the bounce pass itself (the dummy in the
     /// bounce slots).
     bind_bounce: Option<wgpu::BindGroup>,
@@ -1145,10 +1164,40 @@ struct Gpu {
     /// Image key -> its figure's depth span ([`depth_span`]).
     spans: HashMap<u64, [f32; 2]>,
     bind: Option<wgpu::BindGroup>,
-    /// The frame whose textures and uniforms are uploaded, and how many of
-    /// its pieces have taken a draw slot.
+    /// The frame whose textures and uniforms are uploaded.
     frame_id: u64,
-    next_slot: u32,
+    /// The render it last drew in.
+    seen: u64,
+}
+
+impl View {
+    fn new(device: &wgpu::Device) -> View {
+        View {
+            uniform: device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("field_gpu frame"),
+                size: (UNIFORM_FLOATS * 4) as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }),
+            bounce: None,
+            bind_bounce: None,
+            backdrop: None,
+            atlas: Textures::new(device, ATLAS_SIDE, ATLAS_SIDE, "atlas"),
+            shelves: Shelves::default(),
+            slots: HashMap::new(),
+            spans: HashMap::new(),
+            bind: None,
+            frame_id: 0,
+            seen: 0,
+        }
+    }
+
+    /// `img` into the atlas at `at`: its pixels, its slot, its depth span.
+    fn put(&mut self, queue: &wgpu::Queue, img: &LitImage, at: [u32; 2]) {
+        self.atlas.upload_slot(queue, at, img);
+        self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
+        self.spans.insert(img.key, depth_span(img));
+    }
 }
 
 /// Set the pass up on the host's wgpu renderer (once; eframe's
@@ -1250,12 +1299,6 @@ impl Gpu {
                 cache: None,
             })
         };
-        let uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("field_gpu frame"),
-            size: (UNIFORM_FLOATS * 4) as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let draws = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("field_gpu pieces"),
             size: (DRAW_SLOTS * DRAW_STRIDE) as u64,
@@ -1377,9 +1420,7 @@ impl Gpu {
             .create_view(&wgpu::TextureViewDescriptor::default());
         Gpu {
             bounce_pipeline,
-            bounce: None,
             dummy,
-            bind_bounce: None,
             opaque: pipeline(None, "field_gpu opaque"),
             blended: pipeline(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), "field_gpu blended"),
             format: target_format,
@@ -1389,20 +1430,15 @@ impl Gpu {
             blits,
             scratch: Vec::new(),
             layout,
-            uniform,
             draws,
             draw_bind,
             s_lin: make_sampler(wgpu::FilterMode::Linear),
             s_near: make_sampler(wgpu::FilterMode::Nearest),
             srgb_target: target_format.is_srgb(),
-            backdrop: None,
-            atlas: Textures::new(device, ATLAS_SIDE, ATLAS_SIDE, "atlas"),
-            shelves: Shelves::default(),
-            slots: HashMap::new(),
-            spans: HashMap::new(),
-            bind: None,
-            frame_id: 0,
             next_slot: 0,
+            views: HashMap::new(),
+            render: 0,
+            render_done: true,
         }
     }
 }
@@ -1446,8 +1482,19 @@ pub enum Piece {
 /// Add one piece of `frame` to `painter` (clipped to its clip rect). The
 /// frame's textures and uniforms upload with its first piece, after the UI
 /// pass; draw every piece of one frame with the same [`SharedFrame`].
-/// Needs [`init`].
+/// Needs [`init`]. The stage's view; another view drawn in the same egui
+/// pass takes [`paint_view`].
 pub fn paint(painter: &egui::Painter, frame: &SharedFrame, place: Placement, piece: Piece) {
+    paint_view(painter, frame, place, piece, 0);
+}
+
+/// [`paint`] for `view` (ADDITION): every view keeps its own frame on the
+/// GPU -- uniforms, backdrop, atlas, bounce -- so two frames drawn in one
+/// egui pass (the field, and a doll window lit its own way) do not
+/// overwrite each other. `view` is any id stable from frame to frame, the
+/// same for every piece of one view; 0 is [`paint`]'s. A view unseen for
+/// [`VIEW_RENDERS_KEPT`] renders gives its textures back.
+pub fn paint_view(painter: &egui::Painter, frame: &SharedFrame, place: Placement, piece: Piece, view: u64) {
     let rect = {
         let Ok(f) = frame.lock() else { return };
         let size = f.camera.size;
@@ -1462,7 +1509,7 @@ pub fn paint(painter: &egui::Painter, frame: &SharedFrame, place: Placement, pie
     if !rect.intersects(painter.clip_rect()) {
         return;
     }
-    let cb = FieldCallback { frame: frame.clone(), place, piece, rect, slot: std::sync::atomic::AtomicU32::new(u32::MAX) };
+    let cb = FieldCallback { frame: frame.clone(), place, piece, rect, view, slot: std::sync::atomic::AtomicU32::new(u32::MAX) };
     painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
 }
 
@@ -1477,6 +1524,7 @@ pub fn layer_index(frame: &FieldFrame, key: u64) -> Option<usize> {
 /// small first when the frame's `detail` says so).
 struct Offscreen {
     gpu: Gpu,
+    view_gpu: View,
     target: wgpu::Texture,
     view: wgpu::TextureView,
     size: [u32; 2],
@@ -1486,8 +1534,9 @@ impl Offscreen {
     const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame, size: [u32; 2]) -> Offscreen {
-        let mut gpu = Gpu::new(device, Self::FORMAT);
-        gpu.upload_frame(device, queue, frame);
+        let gpu = Gpu::new(device, Self::FORMAT);
+        let mut view_gpu = View::new(device);
+        gpu.upload_frame(&mut view_gpu, device, queue, frame);
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("field_gpu offscreen"),
             size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -1499,7 +1548,7 @@ impl Offscreen {
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        Offscreen { gpu, target, view, size }
+        Offscreen { gpu, view_gpu, target, view, size }
     }
 
     /// Record one draw of `frame` on `encoder`.
@@ -1507,8 +1556,8 @@ impl Offscreen {
         let place = Placement { origin: egui::Pos2::ZERO, scale: self.size[0] as f32 / frame.camera.size[0] };
         let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.size[0] as f32, self.size[1] as f32));
         self.gpu.next_slot = 0;
-        self.gpu.bounce_pass(queue, encoder, frame);
-        let prepared = self.gpu.prepare_piece(device, queue, encoder, frame, Piece::Everything, place, rect, self.size, 1.0);
+        self.gpu.bounce_pass(&self.view_gpu, queue, encoder, frame);
+        let prepared = self.gpu.prepare_piece(&self.view_gpu, device, queue, encoder, frame, Piece::Everything, place, rect, self.size, 1.0);
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("field_gpu offscreen"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1520,7 +1569,7 @@ impl Offscreen {
             ..Default::default()
         });
         if let Some(p) = prepared {
-            self.gpu.paint_piece(&mut pass, p, Piece::Everything);
+            self.gpu.paint_piece(&self.view_gpu, &mut pass, p, Piece::Everything);
         }
     }
 }
@@ -1583,19 +1632,21 @@ struct FieldCallback {
     place: Placement,
     piece: Piece,
     rect: egui::Rect,
+    /// Whose frame on the GPU it draws ([`paint_view`]).
+    view: u64,
     /// The draw slot `prepare` gave it, for `paint`.
     slot: std::sync::atomic::AtomicU32,
 }
 
 impl Gpu {
     /// The frame's direct light, for bounce ([`FieldFrame::bounce`]): drawn
-    /// once a frame, before its pieces, into the bounce targets (a draw slot
-    /// of its own). Nothing when the frame has no bounce.
-    fn bounce_pass(&mut self, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &FieldFrame) {
+    /// once a frame, before its pieces, into the view's bounce targets (a
+    /// draw slot of its own). Nothing when the frame has no bounce.
+    fn bounce_pass(&mut self, view: &View, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, frame: &FieldFrame) {
         if frame.bounce <= 0.0 || self.next_slot >= DRAW_SLOTS {
             return;
         }
-        let (Some(bind), Some((_, rad, geo))) = (&self.bind_bounce, &self.bounce) else { return };
+        let (Some(bind), Some((_, rad, geo))) = (&view.bind_bounce, &view.bounce) else { return };
         let slot = self.next_slot;
         self.next_slot += 1;
         // the whole target; a texel's scene pixel is its own times BOUNCE_DOWN
@@ -1616,40 +1667,34 @@ impl Gpu {
         pass.draw(0..6, 0..1);
     }
 
-    /// `img` into the atlas at `at`: its pixels, its slot, its depth span.
-    fn put(&mut self, queue: &wgpu::Queue, img: &LitImage, at: [u32; 2]) {
-        self.atlas.upload_slot(queue, at, img);
-        self.slots.insert(img.key, [at[0], at[1], img.w, img.h]);
-        self.spans.insert(img.key, depth_span(img));
-    }
-
-    fn upload_frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame) {
+    /// `frame`'s textures and uniforms into `view`.
+    fn upload_frame(&self, view: &mut View, device: &wgpu::Device, queue: &wgpu::Queue, frame: &FieldFrame) {
         let bd = &frame.backdrop;
         if !bd.check() {
             return;
         }
-        if self.backdrop.as_ref().is_none_or(|(k, _, _)| *k != bd.key) {
-            let tex = match self.backdrop.take() {
+        if view.backdrop.as_ref().is_none_or(|(k, _, _)| *k != bd.key) {
+            let tex = match view.backdrop.take() {
                 Some((_, size, tex)) if size == [bd.w, bd.h] => tex,
                 _ => Textures::new(device, bd.w, bd.h, "backdrop"),
             };
             tex.upload(queue, [0, 0], bd);
-            self.backdrop = Some((bd.key, [bd.w, bd.h], tex));
-            self.bind = None;
+            view.backdrop = Some((bd.key, [bd.w, bd.h], tex));
+            view.bind = None;
         }
         // creature layers: a slot each, in the room left while it lasts;
         // when it runs out, this frame's images packed afresh in the order
         // the host admitted them (`AtlasPlan`), so all of them fit
         let layers = drawn_layers(frame);
-        if layers.iter().any(|l| l.image.check() && !self.slots.contains_key(&l.image.key)) {
+        if layers.iter().any(|l| l.image.check() && !view.slots.contains_key(&l.image.key)) {
             let mut full = false;
             for l in layers {
                 let img = &l.image;
-                if self.slots.contains_key(&img.key) || !img.check() {
+                if view.slots.contains_key(&img.key) || !img.check() {
                     continue;
                 }
-                match self.shelves.place(img.w, img.h) {
-                    Some(at) => self.put(queue, img, at),
+                match view.shelves.place(img.w, img.h) {
+                    Some(at) => view.put(queue, img, at),
                     None => {
                         full = true;
                         break;
@@ -1658,18 +1703,18 @@ impl Gpu {
             }
             if full {
                 let (shelves, placed) = pack_afresh(layers);
-                self.shelves = shelves;
-                self.slots.clear();
-                self.spans.clear();
+                view.shelves = shelves;
+                view.slots.clear();
+                view.spans.clear();
                 for (i, at) in placed {
-                    self.put(queue, &layers[i].image, at);
+                    view.put(queue, &layers[i].image, at);
                 }
             }
         }
         let side = ATLAS_SIDE as f32;
         let uv: Vec<[f32; 4]> = layers
             .iter()
-            .map(|l| match self.slots.get(&l.image.key) {
+            .map(|l| match view.slots.get(&l.image.key) {
                 Some(s) => [s[0] as f32 / side, s[1] as f32 / side, s[2] as f32 / side, s[3] as f32 / side],
                 // no slot (too big): an empty corner, so it draws nothing
                 None => [0.0, 0.0, 0.0, 0.0],
@@ -1677,7 +1722,7 @@ impl Gpu {
             .collect();
         // the bounce's targets, for this frame's size
         let want = [(frame.camera.size[0] / BOUNCE_DOWN).ceil().max(1.0) as u32, (frame.camera.size[1] / BOUNCE_DOWN).ceil().max(1.0) as u32];
-        if self.bounce.as_ref().is_none_or(|(size, _, _)| *size != want) {
+        if view.bounce.as_ref().is_none_or(|(size, _, _)| *size != want) {
             let make = |what: &str| {
                 device
                     .create_texture(&wgpu::TextureDescriptor {
@@ -1692,16 +1737,16 @@ impl Gpu {
                     })
                     .create_view(&wgpu::TextureViewDescriptor::default())
             };
-            self.bounce = Some((want, make("light"), make("surfaces")));
-            self.bind = None;
+            view.bounce = Some((want, make("light"), make("surfaces")));
+            view.bind = None;
         }
-        if self.bind.is_none() {
-            let (Some((_, _, bdt)), Some((_, rad, geo))) = (&self.backdrop, &self.bounce) else { return };
-            let view = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
-            let views = [view(&bdt.albedo), view(&bdt.lit), view(&bdt.geo), view(&self.atlas.albedo), view(&self.atlas.lit), view(&self.atlas.geo)];
+        if view.bind.is_none() {
+            let (Some((_, _, bdt)), Some((_, rad, geo))) = (&view.backdrop, &view.bounce) else { return };
+            let tv = |t: &wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+            let views = [tv(&bdt.albedo), tv(&bdt.lit), tv(&bdt.geo), tv(&view.atlas.albedo), tv(&view.atlas.lit), tv(&view.atlas.geo)];
             let group = |bounce: [&wgpu::TextureView; 2], label: &str| {
                 let mut entries = vec![
-                    wgpu::BindGroupEntry { binding: 0, resource: self.uniform.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 0, resource: view.uniform.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.s_lin) },
                     wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.s_near) },
                 ];
@@ -1710,12 +1755,12 @@ impl Gpu {
                 }
                 device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(label), layout: &self.layout, entries: &entries })
             };
-            self.bind = Some(group([rad, geo], "field_gpu frame"));
-            self.bind_bounce = Some(group([&self.dummy, &self.dummy], "field_gpu frame, bounce pass"));
+            view.bind = Some(group([rad, geo], "field_gpu frame"));
+            view.bind_bounce = Some(group([&self.dummy, &self.dummy], "field_gpu frame, bounce pass"));
         }
-        let spans: Vec<[f32; 2]> = layers.iter().map(|l| self.spans.get(&l.image.key).copied().unwrap_or(NO_SPAN)).collect();
+        let spans: Vec<[f32; 2]> = layers.iter().map(|l| view.spans.get(&l.image.key).copied().unwrap_or(NO_SPAN)).collect();
         let u = uniforms(frame, &uv, &spans, self.srgb_target);
-        queue.write_buffer(&self.uniform, 0, bytemuck::cast_slice(&u));
+        queue.write_buffer(&view.uniform, 0, bytemuck::cast_slice(&u));
     }
 }
 
@@ -1743,6 +1788,7 @@ impl Gpu {
     #[allow(clippy::too_many_arguments)]
     fn prepare_piece(
         &mut self,
+        view: &View,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
@@ -1759,7 +1805,7 @@ impl Gpu {
         let slot = self.next_slot;
         self.next_slot += 1;
         let at = (slot * DRAW_STRIDE) as u64;
-        let small = self.bind.is_some().then(|| shading_size(frame, piece, place, rect, screen_px, ppp)).flatten();
+        let small = view.bind.is_some().then(|| shading_size(frame, piece, place, rect, screen_px, ppp)).flatten();
         let Some(([x0, y0, x1, y1], [sw, sh])) = small else {
             let u = draw_uniforms(rect, place, piece, screen_px, ppp);
             queue.write_buffer(&self.draws, at, bytemuck::cast_slice(&u));
@@ -1807,7 +1853,7 @@ impl Gpu {
             (shf - 0.5) / th,
         ];
         queue.write_buffer(&self.blits, at, bytemuck::cast_slice(&stretch));
-        let (Some(bind), Some(Some(scratch))) = (&self.bind, self.scratch.get(slot as usize)) else { return None };
+        let (Some(bind), Some(Some(scratch))) = (&view.bind, self.scratch.get(slot as usize)) else { return None };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("field_gpu piece, shaded small"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1869,14 +1915,14 @@ impl Gpu {
     }
 
     /// Draw a prepared piece: its quad, or its small shading stretched.
-    fn paint_piece(&self, pass: &mut wgpu::RenderPass<'_>, p: Prepared, piece: Piece) {
+    fn paint_piece(&self, view: &View, pass: &mut wgpu::RenderPass<'_>, p: Prepared, piece: Piece) {
         let layer = matches!(piece, Piece::Layer(_));
         if p.small {
             let Some(Some(s)) = self.scratch.get(p.slot as usize) else { return };
             pass.set_pipeline(if layer { &self.blit_blended } else { &self.blit_opaque });
             pass.set_bind_group(0, &s.bind, &[]);
         } else {
-            let Some(bind) = &self.bind else { return };
+            let Some(bind) = &view.bind else { return };
             pass.set_pipeline(if layer { &self.blended } else { &self.opaque });
             pass.set_bind_group(0, bind, &[]);
             pass.set_bind_group(1, &self.draw_bind, &[p.slot * DRAW_STRIDE]);
@@ -1896,24 +1942,50 @@ impl egui_wgpu::CallbackTrait for FieldCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(gpu) = resources.get_mut::<Gpu>() else { return Vec::new() };
         let Ok(frame) = self.frame.lock() else { return Vec::new() };
-        if gpu.frame_id != frame.id {
-            gpu.frame_id = frame.id;
+        // Draw slots are shared by every view: they start over once a
+        // render, not once a frame.
+        if gpu.render_done {
+            gpu.render_done = false;
+            gpu.render += 1;
             gpu.next_slot = 0;
-            gpu.upload_frame(device, queue, &frame);
-            gpu.bounce_pass(queue, encoder, &frame);
+            let now = gpu.render;
+            gpu.views.retain(|_, v| v.seen + VIEW_RENDERS_KEPT >= now);
         }
-        let prepared = gpu.prepare_piece(device, queue, encoder, &frame, self.piece, self.place, self.rect, screen.size_in_pixels, screen.pixels_per_point);
+        // Out of the map while it is used, so the shared parts stay free.
+        let mut view = gpu.views.remove(&self.view).unwrap_or_else(|| View::new(device));
+        view.seen = gpu.render;
+        if view.frame_id != frame.id {
+            view.frame_id = frame.id;
+            gpu.upload_frame(&mut view, device, queue, &frame);
+            gpu.bounce_pass(&view, queue, encoder, &frame);
+        }
+        let prepared = gpu.prepare_piece(&view, device, queue, encoder, &frame, self.piece, self.place, self.rect, screen.size_in_pixels, screen.pixels_per_point);
+        gpu.views.insert(self.view, view);
         self.slot.store(prepared.map_or(u32::MAX, Prepared::pack), std::sync::atomic::Ordering::Relaxed);
+        Vec::new()
+    }
+
+    fn finish_prepare(
+        &self,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+        _encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(gpu) = resources.get_mut::<Gpu>() {
+            gpu.render_done = true;
+        }
         Vec::new()
     }
 
     fn paint(&self, info: egui::PaintCallbackInfo, pass: &mut wgpu::RenderPass<'static>, resources: &egui_wgpu::CallbackResources) {
         let Some(gpu) = resources.get::<Gpu>() else { return };
+        let Some(view) = gpu.views.get(&self.view) else { return };
         let Some(prepared) = Prepared::unpack(self.slot.load(std::sync::atomic::Ordering::Relaxed)) else { return };
         // The quad carries its own place on the screen: undo egui's viewport
         // (the callback rect, clamped to the screen) so it maps 1:1.
         pass.set_viewport(0.0, 0.0, info.screen_size_px[0] as f32, info.screen_size_px[1] as f32, 0.0, 1.0);
-        gpu.paint_piece(pass, prepared, self.piece);
+        gpu.paint_piece(view, pass, prepared, self.piece);
     }
 }
 

@@ -16,6 +16,10 @@
 //! prototype's weather at its defaults;
 //! `TORCHLIGHT_PIECES=1` draws the backdrop and each layer as separate
 //! callbacks, the stage's way, instead of in one;
+//! `TORCHLIGHT_TWO=1` draws the scene twice side by side, as two views
+//! (`field_gpu::paint_view`) with their pieces interleaved in one egui
+//! pass: the left lit by the torch alone, the right by the mote alone;
+//! `=same` puts both on one view, the way a second frame drew before views;
 //! `TORCHLIGHT_SHOT=<png>` saves the scene at the prototype's 1264x848 and
 //! quits (with `TORCHLIGHT_T`, comparable with the prototype frozen at that
 //! time, weather off);
@@ -276,11 +280,22 @@ struct App {
     shadows: bool,
     /// Backdrop and layers as separate callbacks, the stage's way.
     pieces: bool,
+    /// Two views side by side (`TORCHLIGHT_TWO`).
+    two: bool,
+    two_same: bool,
     torch: bool,
     mote: bool,
     shot: Option<PathBuf>,
     frames: u32,
     field_rect: egui::Rect,
+}
+
+impl App {
+    /// The view id of half `v`: its own, or 0 for both with `TORCHLIGHT_TWO=same`
+    /// (one frame on the GPU, as before views: the second overwrites the first).
+    fn view_id(&self, v: usize) -> u64 {
+        if self.two_same { 0 } else { v as u64 }
+    }
 }
 
 impl eframe::App for App {
@@ -310,7 +325,29 @@ impl eframe::App for App {
             let scale = (avail.width() / SIZE[0]).min(avail.height() / SIZE[1]);
             let rect = egui::Rect::from_center_size(avail.center(), egui::vec2(SIZE[0], SIZE[1]) * scale);
             self.field_rect = rect;
-            if field_gpu::available(&ctx) {
+            if field_gpu::available(&ctx) && self.two {
+                // two views, each its own frame, their pieces interleaved:
+                // left lit by the torch alone, right by the mote alone
+                let half = scale / 2.0;
+                let size = egui::vec2(SIZE[0], SIZE[1]) * half;
+                let frames: [field_gpu::SharedFrame; 2] = [
+                    Arc::new(std::sync::Mutex::new(self.scene.frame(self.t, self.view, self.shadows, true, false))),
+                    Arc::new(std::sync::Mutex::new(self.scene.frame(self.t, self.view, self.shadows, false, true))),
+                ];
+                let places = [
+                    field_gpu::Placement { origin: egui::pos2(rect.min.x, rect.center().y - size.y / 2.0), scale: half },
+                    field_gpu::Placement { origin: egui::pos2(rect.center().x, rect.center().y - size.y / 2.0), scale: half },
+                ];
+                for v in 0..2 {
+                    field_gpu::paint_view(ui.painter(), &frames[v], places[v], field_gpu::Piece::Backdrop, self.view_id(v));
+                }
+                let n = frames[0].lock().map_or(0, |f| f.layers.len().min(field_gpu::MAX_LAYERS));
+                for i in 0..n {
+                    for v in 0..2 {
+                        field_gpu::paint_view(ui.painter(), &frames[v], places[v], field_gpu::Piece::Layer(i), self.view_id(v));
+                    }
+                }
+            } else if field_gpu::available(&ctx) {
                 let frame: field_gpu::SharedFrame = Arc::new(std::sync::Mutex::new(self.scene.frame(self.t, self.view, self.shadows, self.torch, self.mote)));
                 let place = field_gpu::Placement { origin: rect.min, scale };
                 if self.pieces {
@@ -544,6 +581,8 @@ fn main() -> eframe::Result {
                 view,
                 shadows: true,
                 pieces: std::env::var_os("TORCHLIGHT_PIECES").is_some(),
+                two: std::env::var_os("TORCHLIGHT_TWO").is_some(),
+                two_same: std::env::var("TORCHLIGHT_TWO").is_ok_and(|v| v == "same"),
                 torch: true,
                 mote: true,
                 shot,
