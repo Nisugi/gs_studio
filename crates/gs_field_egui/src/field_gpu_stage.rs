@@ -1347,7 +1347,10 @@ pub(crate) fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::
         let shown = skin.rgba[i * 4 + 3];
         if let Some((pos, nrm, alb, _)) = surface.texel(i) {
             albedo[i * 4..i * 4 + 3].copy_from_slice(&alb);
-            geo[i] = [dot(nrm, right), dot(nrm, down), dot(nrm, fwd), dot(pos, fwd) * m_per_ft];
+            // wet blood rides in the normal's length (field_gpu::wet_normal)
+            let wet = surface.wet().get(i).map_or(0.0, |w| *w as f32 / 255.0);
+            let [nx, ny, nz] = crate::field_gpu::wet_normal([dot(nrm, right), dot(nrm, down), dot(nrm, fwd)], wet);
+            geo[i] = [nx, ny, nz, dot(pos, fwd) * m_per_ft];
             surfaced[i] = true;
         }
         albedo[i * 4 + 3] = shown;

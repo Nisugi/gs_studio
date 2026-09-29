@@ -57,6 +57,9 @@ const TAU: f32 = 6.2831853;
 const ARC: u32 = 48u;
 // no surface here (f16 targets: under their 65504)
 const FAR: f32 = 60000.0;
+// field_gpu::WET_DRY_LEN, WET_SPAN
+const WET_DRY_LEN: f32 = 0.88;
+const WET_SPAN: f32 = 0.3;
 
 fn is_joined(a: u32, b: u32) -> bool {
     let n = u32(u.boss.w);
@@ -166,7 +169,8 @@ fn sample_dev(at: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(v / a, 1.0);
 }
 
-// MarksSheet::apply: colour * k + b, and the glow, bilinear.
+// MarksSheet::apply: colour * k + b, and the glow (or, negative, how wet:
+// the two share a channel -- a glowing nerve is not bleeding), bilinear.
 fn apply_marks(col: vec3<f32>, feet: vec2<f32>) -> vec4<f32> {
     let per_ft = u.flags.w;
     let wh = vec2<f32>(u.sheet.z, u.sheet.w);
@@ -176,9 +180,9 @@ fn apply_marks(col: vec3<f32>, feet: vec2<f32>) -> vec4<f32> {
     let t = f - floor(f);
     let bk = mix(mix(textureLoad(marks_bk, p0, 0), textureLoad(marks_bk, vec2<i32>(p1.x, p0.y), 0), t.x),
                  mix(textureLoad(marks_bk, vec2<i32>(p0.x, p1.y), 0), textureLoad(marks_bk, p1, 0), t.x), t.y);
-    let g = mix(mix(textureLoad(marks_glow, p0, 0).r, textureLoad(marks_glow, vec2<i32>(p1.x, p0.y), 0).r, t.x),
-                mix(textureLoad(marks_glow, vec2<i32>(p0.x, p1.y), 0).r, textureLoad(marks_glow, p1, 0).r, t.x), t.y);
-    return vec4<f32>(col * bk.a + bk.rgb, g);
+    let gw = mix(mix(textureLoad(marks_glow, p0, 0).rg, textureLoad(marks_glow, vec2<i32>(p1.x, p0.y), 0).rg, t.x),
+                 mix(textureLoad(marks_glow, vec2<i32>(p0.x, p1.y), 0).rg, textureLoad(marks_glow, p1, 0).rg, t.x), t.y);
+    return vec4<f32>(col * bk.a + bk.rgb, select(-gw.y, gw.x, gw.x >= gw.y));
 }
 
 // ---- gs_puppet's hash, and the web and frost measured on the surface
@@ -605,7 +609,7 @@ struct Layer {
     let down = cross(fwd, right);
     o.albedo = vec4<f32>(albedo, a);
     // the doll's lit base: its colours dimmed to the sky's floor
-    o.lit = vec4<f32>(l2s(s2l(c) * u.floor.rgb), colg.a);
+    o.lit = vec4<f32>(l2s(s2l(c) * u.floor.rgb), max(colg.a, 0.0));
     o.rgba = vec4<f32>(c, a);
     if (u.sun.w > 0.5 && cov > 0.0) {
         // SkinSurface::scene_lit: the paint, flat, under the sun and the sky
@@ -618,7 +622,10 @@ struct Layer {
         o.rgba = vec4<f32>(lit * cov + c * (1.0 - cov), a);
     }
     if (cov > 0.0) {
-        o.geo = vec4<f32>(dot(nrm, right), dot(nrm, down), dot(nrm, fwd), dot(p.xyz, fwd) * u.more.w);
+        // wet blood rides in the normal's length (field_gpu::wet_normal)
+        let wet = clamp(-colg.a, 0.0, 1.0);
+        let k = select(1.0, WET_DRY_LEN - WET_SPAN * wet, wet > 1.0 / 255.0);
+        o.geo = vec4<f32>(vec3<f32>(dot(nrm, right), dot(nrm, down), dot(nrm, fwd)) * k, dot(p.xyz, fwd) * u.more.w);
     } else {
         // an outline pixel: the depth of the nearest surface pixel
         var best = FAR;

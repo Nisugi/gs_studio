@@ -338,7 +338,7 @@ pub const DOLL_BODY: [u8; 3] = [150, 140, 130];
 /// and statuses -- the pose they ask for, what they draw on the body, how
 /// it holds itself and breathes -- turned [`DOLL_TURN_DEG`].
 pub fn key_for(state: &DollState) -> PuppetKey {
-    let s = state.statuses;
+    let s = state.statuses.resolved();
     PuppetKey::new(PoseChoice::of_statuses(s), &state.wounds, s.has(Status::Dead), false, DOLL_BODY, false, 300.0)
         .with_facing(DOLL_TURN_DEG)
         .with_scars(&state.scars)

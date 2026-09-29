@@ -10,6 +10,11 @@ listed below. "Mechanical" in the tables means: path rewrites only
 VellumFE source paths are relative to `C:\Gemstone\VellumFE\src\`; new paths
 are relative to `crates/gs_field/src/`.
 
+> **Status, 2026-09-29.** VellumFE is retiring; the client these crates feed
+> is Hydra (working name Cena). There is no VellumFE compatibility to keep:
+> the port record below is history, and the additions since (the last
+> section) are the running record of what this crate is now.
+
 ## 1. File map
 
 | VellumFE source (@60c84a79) | New path | Lines | Differences |

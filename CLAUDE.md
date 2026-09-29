@@ -184,12 +184,15 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
 logic and its tests in the egui-free module.
 
 **Ported code.** `gs_field`, `gs_field_egui`, `gs_calibrators` were copied
-from VellumFE at a pinned commit; each crate's `PORTING.md` records every
-deliberate difference. VellumFE is adopting these crates, so keep public
-names/behaviour compatible, and log any new divergence or addition in
-`PORTING.md`. Notably `gs_field::data_dirs` keeps its `~/.vellum-fe` default
-for VellumFE; gs-studio overrides it via `set_base_dir` and must never read
-or write `~/.vellum-fe` unless the user explicitly points the pool there.
+from VellumFE at a pinned commit; each crate's `PORTING.md` records that
+port and everything added since. VellumFE is retiring: the client these
+crates feed is **Hydra** (working name Cena, `G:\dev\Cena`), which takes
+whatever they need, so change public names and behaviour where the design
+wants it -- no VellumFE compatibility to keep. Log additions and changes in
+`PORTING.md` as the running record. `gs_field::data_dirs` still defaults to
+`~/.vellum-fe` (a host sets its own via `set_base_dir`, as gs-studio does);
+gs-studio must never read or write `~/.vellum-fe` unless the user
+explicitly points the pool there.
 
 **egui fork.** egui/eframe come from `Nisugi/egui`, branch `numpad-support`
 (egui 0.35, wgpu). Every crate must use the exact same git source -- contexts

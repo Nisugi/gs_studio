@@ -471,6 +471,7 @@ impl PuppetKey {
     /// cut throat is a neck wound. The pose is the caller's
     /// ([`PoseChoice::of_statuses`]).
     pub fn with_statuses(mut self, statuses: Statuses) -> Self {
+        let statuses = statuses.resolved();
         self.statuses = statuses;
         self.effects = Self::effects_of_statuses(statuses);
         if statuses.has(Status::Cutthroat) {
@@ -557,6 +558,20 @@ impl PuppetKey {
     pub fn with_effects(mut self, effects: gs_puppet::Effects) -> Self {
         self.effects = effects;
         self
+    }
+
+    /// A creature's flags as the doll's statuses (ADDITION): every status
+    /// whose id it carries, and the feed's own spellings (`immobilized`,
+    /// `disoriented`). What they draw is [`with_statuses`](Self::with_statuses).
+    pub fn statuses_of(has: &dyn Fn(&str) -> bool) -> Statuses {
+        let mut out: Statuses = Status::ALL.into_iter().filter(|s| *s != Status::Dead && has(s.id())).collect();
+        if has("immobilized") {
+            out.insert(Status::Immobile);
+        }
+        if has("disoriented") {
+            out.insert(Status::Confused);
+        }
+        out
     }
 
     /// The body effects a creature's statuses ask for: `webbed`, `rooted`,
@@ -2439,6 +2454,20 @@ mod tests {
         assert!(!is_forced_puppet(&ctx, "124"));
         set_forced_puppets(&ctx, []);
         assert!(!is_forced_puppet(&ctx, "123"), "a new set replaces the old");
+    }
+
+    /// A creature's flags become the doll's statuses: the feed's own
+    /// spellings too, and a creature that is held fast does not breathe.
+    #[test]
+    fn a_creature_s_flags_are_its_statuses() {
+        let has = |names: &'static [&'static str]| move |n: &str| names.contains(&n);
+        let s = PuppetKey::statuses_of(&has(&["immobilized", "calmed", "webbed", "hostile"]));
+        assert!(s.has(Status::Immobile) && s.has(Status::Calmed) && s.has(Status::Webbed));
+        assert_eq!(s.iter().count(), 3);
+        let key = PuppetKey::new(PoseChoice::Standing, &[], false, false, [1, 2, 3], false, 100.0).with_statuses(s);
+        assert!(key.effects.webbed);
+        assert_eq!(key.breath_pace(), None);
+        assert!(PuppetKey::statuses_of(&has(&["disoriented"])).has(Status::Confused));
     }
 
     #[test]

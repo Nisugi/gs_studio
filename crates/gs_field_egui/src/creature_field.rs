@@ -1416,11 +1416,13 @@ fn paint_creature_puppet(
         Some(deg) => key.with_facing(deg),
         None => key,
     };
-    let key = key.with_effects(PuppetKey::effects_of(&has)).with_splats(crate::creature_puppet::puppet_splats(ctx), crate::creature_puppet::puppet_splat_params(ctx));
+    // its statuses, as the doll's: how it holds itself, sways and breathes,
+    // and what they draw on it
+    let key = key.with_statuses(PuppetKey::statuses_of(&has)).with_splats(crate::creature_puppet::puppet_splats(ctx), crate::creature_puppet::puppet_splat_params(ctx));
     // Alive, it breathes: the key steps round its family's idle cycle, and
     // the next frame is asked for when the step changes (not every frame).
     let breath = if crate::creature_puppet::puppet_breath(ctx) {
-        puppets.breath(&family, &creature.id, pose, now_ms / 1000.0)
+        key.breath_pace().and_then(|(pace, _)| puppets.breath_paced(&family, &creature.id, pose, now_ms / 1000.0, pace))
     } else {
         None
     };

@@ -21,6 +21,11 @@ path rewrites only, nothing else.
 VellumFE source paths are relative to `C:\Gemstone\VellumFE\src\`; new paths
 are relative to `crates/gs_field_egui/src/`.
 
+> **Status, 2026-09-29.** VellumFE is retiring; the client these crates feed
+> is Hydra (working name Cena). There is no VellumFE compatibility to keep:
+> the port record below is history, and the additions since (the last
+> section) are the running record of what this crate is now.
+
 ## 1. File map
 
 | VellumFE source (@60c84a79) | New path | Lines (src -> new) | Differences |
@@ -155,6 +160,9 @@ clean with them.
 passed (unchanged).
 
 ## 4. What VellumFE must change to adopt this crate
+
+(History: VellumFE is retiring and will not adopt it. Kept for what it
+says about the crate's seams.)
 
 1. **Dependency** (gui feature only):
    `gs_field_egui = { path/git …, optional = true }`, added to the `gui`
@@ -1140,3 +1148,27 @@ Two more `creature_field.rs` regions (twenty-two in all,
 * `PosedPuppet::head` (**a new field**): the head's box, where the signs
   float; the doll centres its figure's box in the window, so one lying
   down stays in it.
+* `gs_field::doll_state::Statuses::resolved`: where two statuses fight
+  over one look, one wins (staggered over calmed); `with_statuses` and
+  `key_for` draw the resolved set.
+* The field's creatures take their statuses too, inside the marked puppet
+  region of `creature_field.rs`: `PuppetKey::statuses_of` (**new**: a
+  creature's flags, the feed's `immobilized` and `disoriented` included)
+  and `with_statuses`, breathing by `breath_pace` -- a calmed one stands
+  at ease, a disoriented one sways, one held fast does not breathe.
+
+### 7.41 Wet blood shines
+
+* Fresh blood is wet (`gs_puppet::wounds`: a rank-3 wound's pool, a
+  bleeding part's run, a hurt back's run, a cut's blood less so), kept on
+  the marks sheet beside the glow (`MarksSheet::wet`) and per pixel on the
+  skin surface (`SkinSurface::wet`).
+* A layer's geo normal carries it in its length
+  (`field_gpu::wet_normal`, `WET_DRY_LEN`, `WET_SPAN`, **new**): shorter
+  than 0.9 is wet, a unit normal -- every other layer's -- dry. The pass
+  renormalises before lighting and adds `WET_SHEEN` of sheen, toward a
+  `WET_SHINE` highlight, from every light, lamp and moon alike.
+* `field_gpu_stage::skin_image` (the CPU skin's layer) and the GPU skin's
+  final pass write it; in the GPU skin glow and wetness share the colour
+  target's alpha, signed (a glowing nerve is not bleeding), and the sheet's
+  glow texture is `Rg8Unorm`, glow and wet.

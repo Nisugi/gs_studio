@@ -409,7 +409,9 @@ impl SkinGpu {
                 let (bk, glow) = sheet.texels();
                 let bytes: Vec<u8> = bk.iter().flatten().copied().collect();
                 let bk = upload_rgba(device, queue, sw as u32, sh as u32, wgpu::TextureFormat::Rgba8Unorm, &bytes, 4, "skin_gpu marks");
-                let glow = upload_rgba(device, queue, sw as u32, sh as u32, wgpu::TextureFormat::R8Unorm, glow, 1, "skin_gpu glow");
+                // glow and wetness, side by side
+                let gw: Vec<u8> = glow.iter().zip(sheet.wet()).flat_map(|(g, w)| [*g, *w]).collect();
+                let glow = upload_rgba(device, queue, sw as u32, sh as u32, wgpu::TextureFormat::Rg8Unorm, &gw, 2, "skin_gpu glow");
                 sheets.marks = Some((key, bk, glow));
             }
         }

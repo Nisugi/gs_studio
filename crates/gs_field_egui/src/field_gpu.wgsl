@@ -197,6 +197,18 @@ fn normal_of(g: vec3<f32>) -> vec3<f32> {
     let l = length(g);
     return select(vec3<f32>(0.0, 0.0, -1.0), g / max(l, 1e-6), l > 0.5);
 }
+// How wet a layer's surface is: a normal stored shorter than WET_DRY_LEN
+// (field_gpu::wet_normal); a unit one is dry. Wet shines: WET_SHEEN more
+// sheen, toward WET_SHINE's tight highlight.
+const WET_DRY_LEN: f32 = 0.88;
+const WET_SPAN: f32 = 0.3;
+const WET_SHEEN: f32 = 1.6;
+const WET_SHINE: f32 = 70.0;
+fn wet_of(g: vec3<f32>) -> f32 {
+    let l = length(g);
+    if (l <= 0.5 || l >= 0.9) { return 0.0; }
+    return clamp((WET_DRY_LEN - l) / WET_SPAN, 0.0, 1.0);
+}
 
 // ---- the shadow one layer casts: march toward the light inside its rectangle
 fn layer_shadow(i: u32, P: vec3<f32>, LP: vec3<f32>, start_dist: f32, light_r: f32) -> f32 {
@@ -1110,6 +1122,7 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
     let g4 = textureSampleLevel(at_geo, s_near, auv, 0.0);
     let l4 = textureSampleLevel(at_lit, s_lin, auv, 0.0);
     let n = normal_of(g4.xyz);
+    let wet = wet_of(g4.xyz);
     let z = Ly.z.x + g4.w;
     let P = ray(px) * z;
     var alb = s2l(a4.rgb) * Ly.z.y;
@@ -1129,14 +1142,17 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
     for (var li = 0u; li < n_lights; li = li + 1u) {
         let Lt = U.lights[li];
         if (Lt.flags.z < 0.5) { continue; }
+        // fresh blood shines more, and tighter
+        let sheen = Lt.surf.z * sheen_k + WET_SHEEN * wet;
+        let shin = mix(Lt.shine.x, WET_SHINE, wet);
         if (Lt.pos.w > 1.5) {
-            c = c + moon_term(P, n, alb, Lt, Lt.surf.x, Lt.surf.z * sheen_k, Lt.shine.x, 0.15);
+            c = c + moon_term(P, n, alb, Lt, Lt.surf.x, sheen, shin, 0.15);
             continue;
         }
         let gain = beam_gain(P, Lt);
         if (gain <= 0.0) { continue; }
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z, Lt.flags.x > 0.5);
+                           Lt.surf.x, Lt.fall.w, sheen, shin, 0.15, Lt.fall.z, Lt.flags.x > 0.5);
     }
     c = c + alb * bounce_at(P, n, px);
     if (W.a.x > 0.0 && !light_only) {

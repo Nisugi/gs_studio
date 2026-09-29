@@ -24,6 +24,11 @@
 //! blood, and the whole body's shadow (hidden), pallor (invisible) or dark
 //! cast (possessed) -- baked on the same sheet, so the CPU skin and the
 //! GPU's draw them alike.
+//!
+//! Fresh blood is WET: the pooled blood of a rank-3 wound, the blood running
+//! from a bleeding part or down from a hurt back, and a cut's own blood
+//! less so. The sheet keeps how wet each texel is, and a lit host shines
+//! its lights off it (`SkinSurface::wet`).
 
 use crate::skin::smoothstep;
 
@@ -167,7 +172,7 @@ fn veins(at: [f32; 2], seg: u32, salt: u32, min_half: f32) -> f32 {
 }
 
 /// Under the wounds: poison, disease, roots, possession.
-fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, min_half: f32) -> [f32; 3] {
+fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, up: f32, min_half: f32) -> [f32; 3] {
     let mut c = col;
     if bits & status::POISON != 0 {
         c = mix(c, POISON_TINT_RGB, 0.3);
@@ -195,15 +200,18 @@ fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, min_half: f32) ->
     }
     if bits & status::ROOTS != 0 {
         let seed = seg.wrapping_mul(389) ^ 0x2007;
-        c = mix(c, MOSS_RGB, 0.35);
+        // thick at the ground, thinning out by the knee
+        let grip = 1.0 - smoothstep(0.14, 0.42, up + 0.06 * (noise([at[0] / 0.3, 1.7], seed) - 0.5));
+        c = mix(c, MOSS_RGB, 0.45 * grip);
         // two families winding round the leg opposite ways, and twigs
-        let half = 0.045f32.max(min_half);
-        let (up, um) = lines_at(at, 0.55, seed, 0.3, 0.8, half, 2.0);
-        let (down, dm) = lines_at(at, -0.55, seed ^ 0x2B, 0.34, 0.7, half * 0.85, 2.0);
+        // thicker the nearer the ground
+        let half = (0.03 + 0.04 * (1.0 - smoothstep(0.0, 0.3, up))).max(min_half);
+        let (rise, um) = lines_at(at, 0.55, seed, 0.24, 0.9, half, 2.0);
+        let (fall, dm) = lines_at(at, -0.55, seed ^ 0x2B, 0.28, 0.85, half * 0.85, 2.0);
         let (twig, _) = lines_at(at, 1.2, seed ^ 0x1F, 0.22, 0.4, (half * 0.35).max(min_half), 0.16);
-        let cover = up.max(down);
-        c = mix(c, ROOT_RGB, cover.max(twig * 0.9) * 0.97);
-        c = mix(c, ROOT_CORE_RGB, (up * smoothstep(0.3, 0.8, um)).max(down * smoothstep(0.3, 0.8, dm)) * 0.85);
+        let cover = rise.max(fall) * grip;
+        c = mix(c, ROOT_RGB, cover.max(twig * 0.9 * grip) * 0.97);
+        c = mix(c, ROOT_CORE_RGB, (rise * smoothstep(0.3, 0.8, um)).max(fall * smoothstep(0.3, 0.8, dm)) * grip * 0.85);
     }
     c
 }
@@ -279,21 +287,39 @@ fn run_of_blood(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> f32 {
 /// tint); `min_half` is the least half width a line may have (a pixel).
 /// Returns the colour and how much it glows (0..1: nerves).
 pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, edge: f32, min_half: f32) -> ([f32; 3], f32) {
+    marks_at(col, at, seg, m, front, 0.0, edge, min_half)
+}
+
+/// [`marks`] at a point `up` the standing figure (0 the ground, 1 its top):
+/// roots climb from the ground.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn marks_at(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, up: f32, edge: f32, min_half: f32) -> ([f32; 3], f32) {
+    let (c, glow, _) = marks_wet(col, at, seg, m, front, up, edge, min_half);
+    (c, glow)
+}
+
+/// [`marks_at`], and how wet it is there (0..1: fresh blood).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, up: f32, edge: f32, min_half: f32) -> ([f32; 3], f32, f32) {
     let fore = if m.split { smoothstep(-0.25, 0.25, front) } else { 1.0 };
-    let c = if m.status != 0 { afflicted(col, at, seg, m.status, min_half) } else { col };
-    let mut c = mark(c, at, seg, m.rank, m.scar, edge * fore, min_half);
+    let c = if m.status != 0 { afflicted(col, at, seg, m.status, up, min_half) } else { col };
+    let (mut c, mut wet) = mark_wet(c, at, seg, m.rank, m.scar, edge * fore, min_half);
     if m.split && (m.back > 0 || m.back_scar > 0) {
-        c = mark(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half);
+        let (cb, wb) = mark_wet(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half);
+        c = cb;
+        wet = wet.max(wb);
     }
     if m.run > 0 {
         let side = if m.leg { 1.0 - smoothstep(-0.3, 0.3, front) } else { 1.0 - smoothstep(0.35, 0.75, front) };
         let a = run_of_blood(at, seg, m.run, min_half) * side;
         c = mix(c, if m.run >= 3 { WET_BLOOD_RGB } else { BLOOD_RGB }, a * 0.9);
+        wet = wet.max(a * if m.run >= 3 { 0.9 } else { 0.5 });
     }
     if m.bleed > 0 {
         // bleeding: blood runs from the wound, all round the part
         let a = run_of_blood(at, seg ^ 0xB1ED, m.bleed.max(2), min_half) * edge;
         c = mix(c, WET_BLOOD_RGB, a * 0.9);
+        wet = wet.max(a);
     }
     let mut glow = 0.0;
     if m.nerve > 0 {
@@ -303,17 +329,23 @@ pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32
         glow = a * [0.35, 0.6, 0.9][m.nerve.min(3) as usize - 1];
     }
     if m.status & (status::BOUND | status::SHADOW | status::GHOST) != 0 {
-        return over_all(c, glow, at, seg, m.status, min_half);
+        let (c, glow) = over_all(c, glow, at, seg, m.status, min_half);
+        return (c, glow, wet);
     }
-    (c, glow)
+    (c, glow, wet)
 }
 
 /// `col` (0..255) with a wound of `rank` and scar of `scar` at surface
 /// point `at` (feet) drawn on, laid out by `seg`; `edge` fades them.
 fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32) -> [f32; 3] {
+    mark_wet(col, at, seg, rank, scar, edge, min_half).0
+}
+
+/// [`mark`], and how wet its blood is there.
+fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32) -> ([f32; 3], f32) {
     let edge = edge.clamp(0.0, 1.0);
     if edge <= 0.0 {
-        return col;
+        return (col, 0.0);
     }
     let mut c = col;
     if scar > 0 {
@@ -326,8 +358,9 @@ fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, mi
         c = mix(c, SCAR_RGB, cover * smoothstep(0.2, 0.6, mid) * 0.9 * edge);
     }
     if rank == 0 {
-        return c;
+        return (c, 0.0);
     }
+    let mut wet = 0.0f32;
     let r = rank.min(3) as usize - 1;
     let seed = seg.wrapping_mul(7717) ^ 0xB10D;
     // bruising: soft blotches, more and redder with rank
@@ -343,13 +376,15 @@ fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, mi
         c = mix(c, BLOOD_RGB, halo * 0.35 * edge);
         c = mix(c, BLOOD_RGB, cover * edge);
         c = mix(c, CUT_CORE_RGB, cover * smoothstep(0.35, 0.8, mid) * edge);
+        wet = wet.max(cover * edge * [0.0, 0.35, 0.6][r]);
     }
     if rank >= 3 {
         // wet blood pooled over the worst of it
         let pool = smoothstep(0.62, 0.74, fbm([at[0] / 0.22 + 3.3, at[1] / 0.22], seed ^ 0xB100)) * edge;
         c = mix(c, WET_BLOOD_RGB, pool * 0.8);
+        wet = wet.max(pool);
     }
-    c
+    (c, wet)
 }
 
 /// A body's marks drawn once onto its surface layout (feet, the 1
@@ -366,44 +401,49 @@ pub struct MarksSheet {
     /// b (rgb) and k, 0..255.
     bk: Vec<[u8; 4]>,
     glow: Vec<u8>,
+    /// How wet, 0..255.
+    wet: Vec<u8>,
 }
 
 impl MarksSheet {
     /// Bake: `address` turns a layout point (feet) into its segment, the
-    /// facing there and the edge fade (None off the body); `marks` are per
+    /// facing there, how far up the standing figure and the edge fade (None
+    /// off the body); `marks` are per
     /// segment. Rows are baked on `threads` threads.
     pub(crate) fn bake(
         layout_w: usize,
         layout_h: usize,
         per_ft: f32,
         marks: &[Marks],
-        address: &(dyn Fn([f32; 2]) -> Option<(usize, f32, f32)> + Sync),
+        address: &(dyn Fn([f32; 2]) -> Option<(usize, f32, f32, f32)> + Sync),
         min_half: f32,
         threads: usize,
     ) -> MarksSheet {
         let (w, h) = (((layout_w as f32 * per_ft).ceil() as usize).max(1), ((layout_h as f32 * per_ft).ceil() as usize).max(1));
         let mut bk = vec![[0u8, 0, 0, 255]; w * h];
         let mut glow = vec![0u8; w * h];
+        let mut wet = vec![0u8; w * h];
         let rows = h.div_ceil(threads.max(1)).max(1);
         std::thread::scope(|scope| {
-            for (band, (bk, glow)) in bk.chunks_mut(rows * w).zip(glow.chunks_mut(rows * w)).enumerate() {
+            for (band, ((bk, glow), wet)) in bk.chunks_mut(rows * w).zip(glow.chunks_mut(rows * w)).zip(wet.chunks_mut(rows * w)).enumerate() {
                 scope.spawn(move || {
-                    for (i, (t, g)) in bk.iter_mut().zip(glow.iter_mut()).enumerate() {
+                    for (i, ((t, g), wt)) in bk.iter_mut().zip(glow.iter_mut()).zip(wet.iter_mut()).enumerate() {
                         let (x, y) = (i % w, band * rows + i / w);
                         let at = [(x as f32 + 0.5) / per_ft, (y as f32 + 0.5) / per_ft];
-                        let Some((seg, front, edge)) = address(at) else { continue };
+                        let Some((seg, front, up, edge)) = address(at) else { continue };
                         let Some(m) = marks.get(seg).filter(|m| m.any()) else { continue };
-                        let (b, g0) = self::marks([0.0; 3], at, seg as u32, m, front, edge, min_half);
-                        let (top, _) = self::marks([255.0; 3], at, seg as u32, m, front, edge, min_half);
+                        let (b, g0, w0) = marks_wet([0.0; 3], at, seg as u32, m, front, up, edge, min_half);
+                        let (top, _) = marks_at([255.0; 3], at, seg as u32, m, front, up, edge, min_half);
                         let k = (0..3).map(|c| (top[c] - b[c]) / 255.0).sum::<f32>() / 3.0;
                         let q = |v: f32| v.round().clamp(0.0, 255.0) as u8;
                         *t = [q(b[0]), q(b[1]), q(b[2]), q(k * 255.0)];
                         *g = q(g0 * 255.0);
+                        *wt = q(w0 * 255.0);
                     }
                 });
             }
         });
-        MarksSheet { per_ft, w, h, bk, glow }
+        MarksSheet { per_ft, w, h, bk, glow, wet }
     }
 
     /// Texels per foot of the surface layout, and the sheet's size.
@@ -421,24 +461,30 @@ impl MarksSheet {
         (&self.bk, &self.glow)
     }
 
-    /// `col` with the marks at layout point `at` (feet) on it, and the glow
-    /// there: bilinear between texels.
-    pub(crate) fn apply(&self, col: [f32; 3], at: [f32; 2]) -> ([f32; 3], f32) {
+    /// Per texel, row-major: how wet, 0..255.
+    pub fn wet(&self) -> &[u8] {
+        &self.wet
+    }
+
+    /// `col` with the marks at layout point `at` (feet) on it, the glow
+    /// there and how wet: bilinear between texels.
+    pub(crate) fn apply(&self, col: [f32; 3], at: [f32; 2]) -> ([f32; 3], f32, f32) {
         let fx = (at[0] * self.per_ft - 0.5).clamp(0.0, (self.w - 1) as f32);
         let fy = (at[1] * self.per_ft - 0.5).clamp(0.0, (self.h - 1) as f32);
         let (x0, y0) = (fx as usize, fy as usize);
         let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
         let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
-        let mut acc = [0.0f32; 5];
+        let mut acc = [0.0f32; 6];
         for (i, wgt) in [(y0 * self.w + x0, (1.0 - tx) * (1.0 - ty)), (y0 * self.w + x1, tx * (1.0 - ty)), (y1 * self.w + x0, (1.0 - tx) * ty), (y1 * self.w + x1, tx * ty)] {
             let t = self.bk[i];
             for c in 0..4 {
                 acc[c] += t[c] as f32 * wgt;
             }
             acc[4] += self.glow[i] as f32 * wgt;
+            acc[5] += self.wet[i] as f32 * wgt;
         }
         let k = acc[3] / 255.0;
-        ([0, 1, 2].map(|c| col[c] * k + acc[c]), acc[4] / 255.0)
+        ([0, 1, 2].map(|c| col[c] * k + acc[c]), acc[4] / 255.0, acc[5] / 255.0)
     }
 }
 
@@ -517,6 +563,18 @@ mod tests {
         assert!(changed(-1.0, &run) > 100, "blood runs down its back: {}", changed(-1.0, &run));
     }
 
+    /// Fresh blood is wet -- a rank-3 wound's pool most, a bleeding part's
+    /// run -- and bruises, scars and nerves are dry.
+    #[test]
+    fn fresh_blood_is_wet() {
+        let skin = [200.0, 170.0, 150.0];
+        let wet = |m: Marks| (0..3600).map(|i| marks_wet(skin, [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04], 4, &m, 1.0, 0.0, 1.0, 0.01).2).sum::<f32>();
+        assert_eq!(wet(Marks { rank: 1, scar: 3, nerve: 3, ..Marks::default() }), 0.0);
+        let (w2, w3) = (wet(Marks { rank: 2, ..Marks::default() }), wet(Marks { rank: 3, ..Marks::default() }));
+        assert!(w2 > 1.0 && w3 > w2 * 1.5, "{w2} {w3}");
+        assert!(wet(Marks { rank: 1, bleed: 1, ..Marks::default() }) > 10.0);
+    }
+
     /// Nerves glow, more with rank, and nothing else does.
     #[test]
     fn nerves_glow_and_wounds_do_not() {
@@ -532,7 +590,7 @@ mod tests {
     #[test]
     fn the_baked_sheet_matches_the_marks() {
         let m = [Marks { rank: 3, scar: 2, nerve: 2, ..Marks::default() }];
-        let address = |at: [f32; 2]| (at[0] < 3.0 && at[1] < 3.0).then_some((0usize, 0.2f32, 1.0f32));
+        let address = |at: [f32; 2]| (at[0] < 3.0 && at[1] < 3.0).then_some((0usize, 0.2f32, 0.0f32, 1.0f32));
         let sheet = MarksSheet::bake(4, 4, 60.0, &m, &address, 0.01, 3);
         let mut worst = 0.0f32;
         for col in [[200.0, 170.0, 150.0], [40.0, 60.0, 90.0]] {
@@ -540,7 +598,7 @@ mod tests {
                 // texel centres, where no blending between texels happens
                 let at = [((i % 20) as f32 * 7.0 + 0.5) / 60.0, ((i / 20) as f32 * 7.0 + 0.5) / 60.0];
                 let (want, _) = marks(col, at, 0, &m[0], 0.2, 1.0, 0.01);
-                let (got, _) = sheet.apply(col, at);
+                let (got, _, _) = sheet.apply(col, at);
                 worst = worst.max((0..3).map(|c| (want[c] - got[c]).abs()).fold(0.0, f32::max));
             }
         }
@@ -567,6 +625,9 @@ mod tests {
         for (i, a) in seen.iter().enumerate() {
             assert!(seen[i + 1..].iter().all(|b| b != a), "each looks its own");
         }
+        let rooted = Marks { status: status::ROOTS, ..Marks::default() };
+        let high: usize = (0..3600).filter(|i| marks_at(skin, [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04], 4, &rooted, 1.0, 0.6, 1.0, 0.01).0 != skin).count();
+        assert_eq!(high, 0, "no roots above the knee");
         let (bled, _) = look(Marks { rank: 2, bleed: 2, ..Marks::default() });
         let (cut, _) = look(Marks { rank: 2, ..Marks::default() });
         assert!(bled > cut, "bleeding runs blood: {bled} vs {cut}");

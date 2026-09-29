@@ -191,6 +191,10 @@ impl Status {
     }
 }
 
+/// `(winner, loser)`: when both are on, the loser is not drawn
+/// ([`Statuses::resolved`]).
+pub const PRECEDENCE: [(Status, Status); 1] = [(Status::Staggered, Status::Calmed)];
+
 /// A set of [`Status`]es: small, `Copy`, hashable (a puppet key holds it).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Statuses(u64);
@@ -234,6 +238,19 @@ impl Statuses {
         for n in names {
             if let Some(s) = Status::from_name(n) {
                 out.insert(s);
+            }
+        }
+        out
+    }
+
+    /// The set as the doll draws it: where two statuses would fight over
+    /// the same look, the one that wins, the other dropped -- staggered
+    /// over calmed (off balance is not at ease).
+    pub fn resolved(self) -> Self {
+        let mut out = self;
+        for (winner, loser) in PRECEDENCE {
+            if out.has(winner) {
+                out.set(loser, false);
             }
         }
         out
@@ -327,6 +344,14 @@ mod tests {
         let mut set = set;
         set.set(Status::Webbed, false);
         assert_eq!(set.iter().collect::<Vec<_>>(), vec![Status::Calmed]);
+    }
+
+    #[test]
+    fn staggered_wins_over_calmed() {
+        let both = Statuses::NONE.with(Status::Staggered).with(Status::Calmed);
+        assert_eq!(both.resolved(), Statuses::NONE.with(Status::Staggered));
+        let calm = Statuses::NONE.with(Status::Calmed);
+        assert_eq!(calm.resolved(), calm);
     }
 
     #[test]

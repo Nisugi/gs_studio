@@ -29,6 +29,24 @@ use egui_wgpu::wgpu;
 pub const MAX_LAYERS: usize = 32;
 /// Local lights one pass adds.
 pub const MAX_LIGHTS: usize = 32;
+
+/// A layer's geo normal stored SHORTER than [`WET_DRY_LEN`] carries how wet
+/// the surface is (ADDITION: fresh blood on a puppet's skin): length
+/// `WET_DRY_LEN - WET_SPAN * wet`. A unit normal -- every other layer's,
+/// near enough -- is dry; the pass renormalises before it lights, so the
+/// shape is untouched, and shines its lights off the wet (`WET_SHEEN`,
+/// `WET_SHINE` in the shader).
+pub const WET_DRY_LEN: f32 = 0.88;
+pub const WET_SPAN: f32 = 0.3;
+
+/// `n` (unit) as a layer's geo normal for a surface `wet` (0..1) wet.
+pub fn wet_normal(n: [f32; 3], wet: f32) -> [f32; 3] {
+    if wet <= 1.0 / 255.0 {
+        return n;
+    }
+    let k = WET_DRY_LEN - WET_SPAN * wet.min(1.0);
+    n.map(|c| c * k)
+}
 /// Of those, how many cast shadows: the frame's first that ask
 /// ([`FieldLight::shadows`]); the rest light without. A shadow is most of a
 /// light's cost -- every creature layer is marched for it -- so this, not
@@ -2027,6 +2045,28 @@ pub fn unpack_normal(rgb: [u8; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Wetness in a normal's length reads back as the shader reads it
+    /// (`wet_of`: dry at 0.9 and over, and under 0.5 no normal at all), and
+    /// the direction is kept.
+    #[test]
+    fn a_wet_normal_carries_its_wetness() {
+        let wet_of = |g: [f32; 3]| {
+            let l = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            if l <= 0.5 || l >= 0.9 { 0.0 } else { ((WET_DRY_LEN - l) / WET_SPAN).clamp(0.0, 1.0) }
+        };
+        let n = [0.6, 0.0, -0.8];
+        assert_eq!(wet_normal(n, 0.0), n);
+        assert_eq!(wet_of(n), 0.0);
+        // a byte-packed normal, a little short, is still dry
+        assert_eq!(wet_of(n.map(|c| c * 0.985)), 0.0);
+        for w in [0.1f32, 0.5, 1.0] {
+            let g = wet_normal(n, w);
+            assert!((wet_of(g) - w).abs() < 1e-4, "{w}: {}", wet_of(g));
+            let l = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            assert!((g[0] / l - 0.6).abs() < 1e-6 && (g[2] / l + 0.8).abs() < 1e-6);
+        }
+    }
 
     fn swamp() -> FieldCamera {
         FieldCamera { size: [1264.0, 848.0], f: 1164.93, cx: 632.0, cy: 424.0, pitch: 0.13818, height: 2.2 }

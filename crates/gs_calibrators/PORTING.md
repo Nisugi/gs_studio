@@ -8,6 +8,11 @@ formats and save semantics are unchanged; imports were re-pointed, the
 split into a body + a thin window wrapper (2.1), and `doll_calibration.rs`
 was restructured (2.2). "Mechanical" means: path rewrites only, nothing else.
 
+> **Status, 2026-09-29.** VellumFE is retiring; the client these crates feed
+> is Hydra (working name Cena). There is no VellumFE compatibility to keep:
+> the port record below is history, and the additions since (the last
+> section) are the running record of what this crate is now.
+
 | Old path | New path |
 |---|---|
 | `crate::config::pool` | `gs_field::pool` |

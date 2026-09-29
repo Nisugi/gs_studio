@@ -302,7 +302,10 @@ fn marks_sheet(
             let (sn, cs) = theta.sin_cos();
             let rest = add(scale(s.axis_w, cs * w), scale(s.axis_d, sn * d));
             let front = if len(rest) > 1e-5 { rest[2] / len(rest) } else { 0.0 };
-            Some((seg, front, edge))
+            // how far up the standing figure (0 = the ground, 1 = its top)
+            let c = at_station(&|k| s.stations[k.min(n - 1)].c[1], n);
+            let up = ((c + rest[1]) / puppet.height.max(1e-3)).clamp(0.0, 1.0);
+            Some((seg, front, up, edge))
         };
         let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
         crate::wounds::MarksSheet::bake(layout.w, layout.h, per_ft, marks, &address, half, threads)
@@ -538,6 +541,8 @@ struct Samples {
     dev: Vec<V3>,
     /// How much it glows (nerve marks), 0..1.
     glow: Vec<f32>,
+    /// How wet (fresh blood), 0..1.
+    wet: Vec<f32>,
 }
 
 impl Samples {
@@ -553,6 +558,7 @@ impl Samples {
             pos: if keep_pos { vec![[0.0; 3]; n] } else { Vec::new() },
             dev: vec![[0.0; 3]; n],
             glow: vec![0.0; n],
+            wet: vec![0.0; n],
         }
     }
 
@@ -573,8 +579,9 @@ impl Samples {
             .zip(self.seg.chunks_mut(chunk))
             .zip(self.dev.chunks_mut(chunk))
             .zip(self.glow.chunks_mut(chunk))
+            .zip(self.wet.chunks_mut(chunk))
             .enumerate()
-            .map(|(k, (((((z, n), col), seg), dev), glow))| Band {
+            .map(|(k, ((((((z, n), col), seg), dev), glow), wet))| Band {
                 y0: k * rows,
                 w,
                 z,
@@ -584,6 +591,7 @@ impl Samples {
                 pos: if keep_pos { pos.next().unwrap_or_default() } else { &mut [] },
                 dev,
                 glow,
+                wet,
             })
             .collect();
         let run = |mut band: Band| {
@@ -617,6 +625,7 @@ struct Band<'a> {
     pos: &'a mut [V3],
     dev: &'a mut [V3],
     glow: &'a mut [f32],
+    wet: &'a mut [f32],
 }
 
 impl Band<'_> {
@@ -693,13 +702,14 @@ impl Band<'_> {
                     None => [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]),
                 };
                 let feet = surface.and_then(|l| l.locate(seg, station, angle));
-                let mut glow = 0.0;
+                let (mut glow, mut wet) = (0.0, 0.0);
                 if let (Some(at), Some(sheet), Some(m)) = (feet, paint.marks_sheet, paint.marks.get(seg)) {
                     if m.any() {
-                        (col, glow) = sheet.apply(col, at);
+                        (col, glow, wet) = sheet.apply(col, at);
                     }
                 }
                 self.glow[i] = glow;
+                self.wet[i] = wet;
                 if paint.effects.frozen {
                     col = [0, 1, 2].map(|k| col[k] + (FROST_RGB[k] - col[k]) * 0.62);
                     if feet.is_some_and(frost_glint) {
@@ -737,19 +747,21 @@ struct Pixels {
     dev: Vec<V3>,
     /// How much it glows, averaged over the samples.
     glow: Vec<f32>,
+    /// How wet, averaged over the samples.
+    wet: Vec<f32>,
 }
 
 impl Pixels {
     fn resolve(s: &Samples, w: usize, h: usize) -> Pixels {
-        /// One pixel's resolve: cov, z, seg, n, col, pos, dev, glow.
-        type Px = (f32, f32, u32, V3, [f32; 3], V3, V3, f32);
-        let empty: Px = (0.0, f32::INFINITY, u32::MAX, [0.0; 3], [0.0; 3], [0.0; 3], [0.0; 3], 0.0);
+        /// One pixel's resolve: cov, z, seg, n, col, pos, dev, glow, wet.
+        type Px = (f32, f32, u32, V3, [f32; 3], V3, V3, f32, f32);
+        let empty: Px = (0.0, f32::INFINITY, u32::MAX, [0.0; 3], [0.0; 3], [0.0; 3], [0.0; 3], 0.0, 0.0);
         let mut px: Vec<Px> = vec![empty; w * h];
         let keep_pos = !s.pos.is_empty();
         par_rows(&mut px, w, &|y, row| {
             for (x, out) in row.iter_mut().enumerate() {
                 let mut hits = 0;
-                let (mut n, mut col, mut dev, mut glow) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3], 0.0f32);
+                let (mut n, mut col, mut dev, mut glow, mut wet) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3], 0.0f32, 0.0f32);
                 for sy in 0..SS {
                     for sx in 0..SS {
                         let j = (y * SS + sy) * s.w + x * SS + sx;
@@ -760,6 +772,7 @@ impl Pixels {
                         n = add(n, norm_or(s.n[j], [0.0, 0.0, 1.0]));
                         dev = add(dev, s.dev[j]);
                         glow += s.glow[j];
+                        wet += s.wet[j];
                         for k in 0..3 {
                             col[k] += s.col[j][k];
                         }
@@ -778,6 +791,7 @@ impl Pixels {
                     out.4 = col.map(|c| c / hits as f32);
                     out.6 = scale(dev, 1.0 / hits as f32);
                     out.7 = glow / hits as f32;
+                    out.8 = wet / hits as f32;
                 }
             }
         });
@@ -792,6 +806,7 @@ impl Pixels {
             pos: if keep_pos { px.iter().map(|p| p.5).collect() } else { Vec::new() },
             dev: px.iter().map(|p| p.6).collect(),
             glow: px.iter().map(|p| p.7).collect(),
+            wet: px.iter().map(|p| p.8).collect(),
         }
     }
 
@@ -1406,7 +1421,7 @@ impl Posed<'_> {
                 if let Some(s) = kept.as_mut() {
                     // Its own colour, unshaded: what a lamp's light shows.
                     let albedo = [0, 1, 2].map(|k| px.col[i][k] + (line[k] - px.col[i][k]) * inner[i]);
-                    s.set(i, px.pos[i], px.n[i], albedo, px.cov[i], px.glow[i]);
+                    s.set(i, px.pos[i], px.n[i], albedo, px.cov[i], px.glow[i], px.wet[i]);
                 }
             }
             let (c, a) = over(top, under);
@@ -1570,12 +1585,14 @@ pub struct SkinSurface {
     cov: Vec<u8>,
     /// How much each pixel glows (nerve marks), 0..255.
     glow: Vec<u8>,
+    /// How wet each pixel is (fresh blood), 0..255.
+    wet: Vec<u8>,
 }
 
 impl SkinSurface {
     fn blank(w: usize, h: usize, to_cam: V3) -> SkinSurface {
         let n = w * h;
-        SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n], glow: vec![0; n] }
+        SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n], glow: vec![0; n], wet: vec![0; n] }
     }
 
     /// The unit normal at pixel `i` (row-major), or None where the body
@@ -1604,8 +1621,16 @@ impl SkinSurface {
         &self.glow
     }
 
-    fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32, glow: f32) {
+    /// How wet each pixel is, 0..255 (row-major): fresh blood, which a lit
+    /// host's lights shine off.
+    pub fn wet(&self) -> &[u8] {
+        &self.wet
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32, glow: f32, wet: f32) {
         self.glow[i] = (glow * 255.0).round().clamp(0.0, 255.0) as u8;
+        self.wet[i] = (wet * 255.0).round().clamp(0.0, 255.0) as u8;
         self.pos[i] = pos;
         self.normal[i] = n.map(|v| (v.clamp(-1.0, 1.0) * 127.0).round() as i8);
         self.albedo[i] = albedo.map(|v| v.round().clamp(0.0, 255.0) as u8);

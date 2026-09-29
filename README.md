@@ -1,8 +1,8 @@
 # gs_studio
 
-Standalone art-authoring app for GemStone IV clients, plus the shared crate
-those clients draw with. Not part of VellumFE; VellumFE and other clients
-consume what this produces.
+Standalone art-authoring app for GemStone IV clients, plus the shared crates
+those clients draw with. The client they feed is Hydra (working name Cena);
+the crates were first ported from VellumFE, which is retiring.
 
 Built: the creature-doll rig editor; the scene builder; a preview stage where
 creatures and props are placed and given wounds, statuses and class flags --
@@ -111,10 +111,9 @@ It **never** reads or writes `~/.vellum-fe` unless you say so -- `--pool`,
 names the directory in use and whether anything asked for it
 (`pool: <dir> (gs-studio home, the default)` vs `(--pool)`).
 
-`gs_field::data_dirs`' own default is unchanged -- `VELLUM_FE_DIR`, else
-`~/.vellum-fe` -- because VellumFE is adopting that crate and depends on it.
-gs-studio is a *host*: it installs its default through the `set_base_dir`
-override the crate already provides (`crates/studio/src/data_home.rs`,
+`gs_field::data_dirs`' own default is still VellumFE's -- `VELLUM_FE_DIR`,
+else `~/.vellum-fe` -- from the port. gs-studio is a *host*: it installs its
+default through the `set_base_dir` override the crate provides (`crates/studio/src/data_home.rs`,
 `pool_dir.rs`). Setting `VELLUM_FE_DIR` steers VellumFE, not this app.
 
 **Import from VellumFE...** (Settings, beside the Pool box, and in the empty-pool banner) offers to
@@ -917,8 +916,14 @@ an *x* to put it back:
   The game's names fold into these (`Status::from_name`: `thorned` and
   *Major Poison* are poisoned, *Sheer Fear* and *Horrify* terrified, *Mind
   Rot* diseased...); combat bookkeeping (roundtime, a parry, pressed) has
-  no look. It stands in a soft contact shadow, and the sky behind rims its
-  edges.
+  no look. Where two would fight over one look, one wins
+  (`Statuses::resolved`: staggered over calmed). The field's creatures take
+  theirs from their flags the same way (`PuppetKey::statuses_of`): a calmed
+  one at ease, a disoriented one swaying, one held fast not breathing.
+  Roots are thick at the ground and thin out by the knee. Fresh blood is
+  wet and shines under every light (the v2 pass: a layer's normal stored
+  short carries how wet it is, `field_gpu::wet_normal`). It stands in a
+  soft contact shadow, and the sky behind rims its edges.
   Drag across it to turn it by hand. *GPU skin* draws its skin on the GPU
   (`gs_field_egui::skin_gpu`): the mesh `gs_puppet::Posed::skin_mesh` hands
   over, rasterised, resolved, smoothed and shaded pass by pass as the CPU
