@@ -755,12 +755,22 @@ impl CreatureArtStore {
                 };
                 cache.occluders.insert(bg.clone(), occ);
             }
-            // ADDITION (not in VellumFE): the backdrop's depth map.
+            // ADDITION (not in VellumFE): the backdrop's depth map, and its authored sky.
             if !cache.backdrop_depths.contains_key(bg) {
                 let abs = skins::resolve_image_path(&cache.root, &crate::field_gpu_stage::depth_path(bg));
                 let depth = abs.is_file().then(|| std::fs::read(&abs).map_err(|e| e.to_string()).and_then(|b| crate::field_gpu_stage::RelDepth::from_png(&b)));
                 let depth = match depth {
-                    Some(Ok(d)) => Some(std::sync::Arc::new(d)),
+                    Some(Ok(mut d)) => {
+                        // and its authored sky, when it has one
+                        let sky = skins::resolve_image_path(&cache.root, &crate::field_gpu_stage::sky_path(bg));
+                        if sky.is_file() {
+                            match std::fs::read(&sky).map_err(|e| e.to_string()).and_then(|b| crate::field_gpu_stage::SkyMask::from_png(&b)) {
+                                Ok(m) => d.sky = Some(m),
+                                Err(e) => tracing::warn!("backdrop sky {}: {e}", sky.display()),
+                            }
+                        }
+                        Some(std::sync::Arc::new(d))
+                    }
                     Some(Err(e)) => {
                         tracing::warn!("backdrop depth {}: {e}", abs.display());
                         None

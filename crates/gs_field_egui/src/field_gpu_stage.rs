@@ -253,12 +253,40 @@ pub fn ground_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4]) -> V
 
 /// A backdrop's relative depth (`<stem>.depth.png`, [`depth_path`]; made by
 /// `tools/depth_maps.py`): per pixel how near, 0..1, from a monocular model
-/// -- inverse depth up to an unknown scale and shift.
+/// -- inverse depth up to an unknown scale and shift -- and, when the
+/// backdrop has one, its authored sky.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RelDepth {
     pub w: usize,
     pub h: usize,
     pub near: Vec<f32>,
+    /// `<stem>.sky.png` ([`sky_path`]; white = sky, image-gen's sky_clean /
+    /// sets/set_sky), when there is one: the sky, instead of the depth's own
+    /// guess (what is farthest and joined to the top edge) -- so sky seen
+    /// through an arch or between roofs walled in by a lintel counts.
+    pub sky: Option<SkyMask>,
+}
+
+/// An authored sky mask: 8 bit, white = sky.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkyMask {
+    pub w: usize,
+    pub h: usize,
+    pub v: Vec<u8>,
+}
+
+impl SkyMask {
+    pub fn from_png(bytes: &[u8]) -> Result<SkyMask, String> {
+        let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?.to_luma8();
+        Ok(SkyMask { w: img.width() as usize, h: img.height() as usize, v: img.into_raw() })
+    }
+
+    /// Sky at `u`, `v` across it (0..1)? The nearest pixel, at least half white.
+    fn at(&self, u: f32, v: f32) -> bool {
+        let x = ((u * self.w as f32) as usize).min(self.w.saturating_sub(1));
+        let y = ((v * self.h as f32) as usize).min(self.h.saturating_sub(1));
+        self.v.get(y * self.w + x).is_some_and(|&p| p >= 128)
+    }
 }
 
 impl RelDepth {
@@ -267,7 +295,7 @@ impl RelDepth {
         let img = image::load_from_memory(bytes).map_err(|e| e.to_string())?.to_rgb8();
         let (w, h) = (img.width() as usize, img.height() as usize);
         let near = img.pixels().map(|p| (p.0[0] as f32 * 256.0 + p.0[1] as f32) / 65535.0).collect();
-        Ok(RelDepth { w, h, near })
+        Ok(RelDepth { w, h, near, sky: None })
     }
 
     /// Bilinear, at `u`, `v` across it (0..1).
@@ -338,15 +366,22 @@ pub fn depth_path(background: &str) -> String {
     format!("{stem}.depth.png")
 }
 
+/// Where a backdrop's authored sky lives: `<stem>.sky.png` beside it.
+pub fn sky_path(background: &str) -> String {
+    let stem = background.rsplit_once('.').map_or(background, |(s, _)| s);
+    format!("{stem}.sky.png")
+}
+
 /// A backdrop's geometry from its relative depth, in metres: the model's
 /// nearness `n` is `a / z + b` for true depth `z`; `a` and `b` are fitted
 /// on the painting's lower part against the flat ground this camera sees
 /// there (rows [`FIT_NEAREST_M`]..[`FIT_FARTHEST_M`] away), twice more
 /// without the pixels that disagree most (a rock, a trunk: not ground).
-/// Then every pixel has its depth. The sky is what the model put at about
-/// no nearness, joined to the top edge ([`SKY_NEAR`]), whatever the fit
-/// makes of it; everything else stands no farther than [`FAR_M`], so far
-/// scenery is never sky. Normals from the surface in 3D.
+/// Then every pixel has its depth. The sky is the backdrop's authored sky
+/// ([`RelDepth::sky`]) when it has one, else what the model put at about no
+/// nearness, joined to the top edge ([`SKY_NEAR`]), whatever the fit makes
+/// of it; everything else stands no farther than [`FAR_M`], so far scenery
+/// is never sky. Normals from the surface in 3D.
 /// None when the fit fails (too little ground, or nearness that does not
 /// grow toward the camera): the flat ground stands in.
 pub fn backdrop_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4], rel: &RelDepth) -> Option<Vec<[f32; 4]>> {
@@ -354,7 +389,10 @@ pub fn backdrop_geo(camera: &FieldCamera, w: usize, h: usize, rect: [f32; 4], re
         return None;
     }
     let raw: Vec<f32> = (0..h).flat_map(|j| (0..w).map(move |i| (i, j))).map(|(i, j)| rel.at((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32)).collect();
-    let open_sky = sky_of(&raw, w, h);
+    let open_sky = match &rel.sky {
+        Some(m) => (0..h).flat_map(|j| (0..w).map(move |i| (i, j))).map(|(i, j)| m.at((i as f32 + 0.5) / w as f32, (j as f32 + 0.5) / h as f32)).collect(),
+        None => sky_of(&raw, w, h),
+    };
     // A monocular model works at about 518 px and its depth is scaled up:
     // a ripple every few pixels, which slopes turn into streaks under a
     // grazing lamp. Smoothed away first (a 1-4-6-4-1 kernel, twice, each way).
@@ -1306,7 +1344,7 @@ mod tests {
                 }
             })
             .collect();
-        let rel = RelDepth { w, h, near };
+        let rel = RelDepth { w, h, near, sky: None };
         let geo = backdrop_geo(&cam, w, h, rect, &rel).expect("a fit");
         for (k, g) in geo.iter().enumerate() {
             let (i, j) = (k % w, k / w);
@@ -1327,7 +1365,7 @@ mod tests {
                 }
             }
         }
-        let flat_near = RelDepth { w, h, near: vec![0.5; w * h] };
+        let flat_near = RelDepth { w, h, near: vec![0.5; w * h], sky: None };
         assert_eq!(backdrop_geo(&cam, w, h, rect, &flat_near), None, "nearness that does not grow toward the camera");
         assert_eq!(depth_path("scenes/forest.png"), "scenes/forest.depth.png");
     }
@@ -1358,11 +1396,22 @@ mod tests {
                 }
             })
             .collect();
-        let geo = backdrop_geo(&cam, w, h, rect, &RelDepth { w, h, near }).expect("a fit");
+        let geo = backdrop_geo(&cam, w, h, rect, &RelDepth { w, h, near: near.clone(), sky: None }).expect("a fit");
         let at = |i: usize, j: usize| geo[j * w + i][3];
         assert!(at(20, 2) > SKY_M && at(160, 5) > SKY_M, "the sky is sky: {} {}", at(20, 2), at(160, 5));
         assert!(at(80, 15) <= FAR_M, "a far peak is far ground: {}", at(80, 15));
         assert!(at(145, 42) <= FAR_M, "a far window walled in is not sky: {}", at(145, 42));
+
+        // An authored sky mask says what is sky: the same walled-in opening
+        // is sky when the mask marks it (seen through an arch), and the peak
+        // stays ground.
+        let v: Vec<u8> = (0..w * h).map(|k| if (flat[k][3] >= 100.0 && !peak(k % w, k / w)) || window(k % w, k / w) { 255 } else { 0 }).collect();
+        let sky = Some(SkyMask { w, h, v });
+        let geo = backdrop_geo(&cam, w, h, rect, &RelDepth { w, h, near, sky }).expect("a fit");
+        let at = |i: usize, j: usize| geo[j * w + i][3];
+        assert!(at(145, 42) > SKY_M, "sky seen through an opening, as authored: {}", at(145, 42));
+        assert!(at(20, 2) > SKY_M && at(80, 15) <= FAR_M, "the open sky still sky, the peak still ground");
+        assert_eq!(sky_path("scenes/forest.png"), "scenes/forest.sky.png");
     }
 
     #[test]
