@@ -13,6 +13,10 @@
 //! theirs on the front. From the front it shows by the blood it runs: down
 //! the sides and the backs of the legs (rank 2 and 3), and by the guarding
 //! posture the pose files give it (`[guard.back]`).
+//!
+//! A nerve wound (the doll's `nsys`) is on the whole body: faint violet
+//! lines branching along every part, more and brighter by rank, that GLOW
+//! -- a lit host (the v2 pass) keeps them showing in the dark.
 
 use crate::skin::smoothstep;
 
@@ -51,13 +55,20 @@ const BLOOD_RGB: [f32; 3] = [132.0, 18.0, 20.0];
 const WET_BLOOD_RGB: [f32; 3] = [96.0, 8.0, 10.0];
 const CUT_CORE_RGB: [f32; 3] = [58.0, 6.0, 8.0];
 const SCAR_RGB: [f32; 3] = [236.0, 196.0, 190.0];
+pub(crate) const NERVE_RGB: [f32; 3] = [132.0, 96.0, 255.0];
+const NERVE_CORE_RGB: [f32; 3] = [214.0, 200.0, 255.0];
 
 /// A family of wavering line marks (cuts, or scars): how much of one covers
 /// `at`, 0..1, and how near its middle (1 = on the line). `spacing` feet
 /// between lines, `keep` the share of lines drawn, `half` a line's half
 /// width, `length` how long a run of line is before a gap, all in feet.
 fn lines(at: [f32; 2], seed: u32, spacing: f32, keep: f32, half: f32, length: f32) -> (f32, f32) {
-    let angle = hash(seed as i32, 3) * std::f32::consts::PI;
+    lines_at(at, hash(seed as i32, 3) * std::f32::consts::PI, seed, spacing, keep, half, length)
+}
+
+/// [`lines`] at a given `angle` (0: lines along the layout's y, which runs
+/// along a segment).
+fn lines_at(at: [f32; 2], angle: f32, seed: u32, spacing: f32, keep: f32, half: f32, length: f32) -> (f32, f32) {
     let (s, c) = angle.sin_cos();
     let across = (at[0] * c + at[1] * s) / spacing;
     let along = -at[0] * s + at[1] * c;
@@ -93,12 +104,34 @@ pub(crate) struct Marks {
     /// `leg`: down its back, else down its sides and back.
     pub run: u8,
     pub leg: bool,
+    /// The nerve wound's rank (the whole body's).
+    pub nerve: u8,
 }
 
 impl Marks {
     pub fn any(&self) -> bool {
-        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0
+        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0 || self.nerve > 0
     }
+}
+
+/// How much of a nerve wound of `rank` shows at `at` (feet), and how near
+/// a line's middle: long lines along the segment, branches off them at a
+/// slant, each in a soft halo.
+fn nerve_lines(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> (f32, f32) {
+    let r = rank.min(3) as usize - 1;
+    let seed = seg.wrapping_mul(4099) ^ 0x2E5;
+    let lean = (hash(seg as i32, 41) - 0.5) * 0.3;
+    let family = |half: f32| {
+        let half = half.max(min_half);
+        let (trunk, tm) = lines_at(at, lean, seed, [0.55, 0.4, 0.3][r], [0.45, 0.6, 0.75][r], half, [0.8, 1.0, 1.3][r]);
+        let (left, lm) = lines_at(at, lean + 0.65, seed ^ 0x1B, [0.5, 0.38, 0.28][r], [0.3, 0.4, 0.5][r], half * 0.8, [0.2, 0.25, 0.3][r]);
+        let (right, rm) = lines_at(at, lean - 0.65, seed ^ 0x2C, [0.5, 0.38, 0.28][r], [0.3, 0.4, 0.5][r], half * 0.8, [0.2, 0.25, 0.3][r]);
+        (trunk.max(left * 0.85).max(right * 0.85), tm.max(lm).max(rm))
+    };
+    let half = [0.014, 0.019, 0.025][r];
+    let (line, mid) = family(half);
+    let (halo, _) = family(half * 3.2);
+    (line.max(halo * 0.35), mid)
 }
 
 /// Blood run down a surface from a back wound of `rank`: streaks along the
@@ -121,7 +154,8 @@ fn run_of_blood(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> f32 {
 /// facing `front` (-1 straight back .. 1 straight forward, rest space).
 /// `edge` fades wounds where the part meets another (the ring's wound
 /// tint); `min_half` is the least half width a line may have (a pixel).
-pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, edge: f32, min_half: f32) -> [f32; 3] {
+/// Returns the colour and how much it glows (0..1: nerves).
+pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, edge: f32, min_half: f32) -> ([f32; 3], f32) {
     let fore = if m.split { smoothstep(-0.25, 0.25, front) } else { 1.0 };
     let mut c = mark(col, at, seg, m.rank, m.scar, edge * fore, min_half);
     if m.split && (m.back > 0 || m.back_scar > 0) {
@@ -132,7 +166,14 @@ pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32
         let a = run_of_blood(at, seg, m.run, min_half) * side;
         c = mix(c, if m.run >= 3 { WET_BLOOD_RGB } else { BLOOD_RGB }, a * 0.9);
     }
-    c
+    let mut glow = 0.0;
+    if m.nerve > 0 {
+        let (a, mid) = nerve_lines(at, seg, m.nerve, min_half);
+        c = mix(c, NERVE_RGB, a);
+        c = mix(c, NERVE_CORE_RGB, smoothstep(0.4, 0.9, mid) * a);
+        glow = a * [0.35, 0.6, 0.9][m.nerve.min(3) as usize - 1];
+    }
+    (c, glow)
 }
 
 /// `col` (0..255) with a wound of `rank` and scar of `scar` at surface
@@ -224,13 +265,23 @@ mod tests {
         let skin = [200.0, 170.0, 150.0];
         let m = Marks { split: true, back: 3, ..Marks::default() };
         let changed = |front: f32, m: &Marks| {
-            (0..3600).filter(|i| marks(skin, [(i % 60) as f32 * 0.05, (i / 60) as f32 * 0.05], 4, m, front, 1.0, 0.01) != skin).count()
+            (0..3600).filter(|i| marks(skin, [(i % 60) as f32 * 0.05, (i / 60) as f32 * 0.05], 4, m, front, 1.0, 0.01).0 != skin).count()
         };
         assert_eq!(changed(1.0, &m), 0, "the chest's front is clean");
         assert!(changed(-1.0, &m) > 200, "the back is wounded");
         let run = Marks { run: 3, leg: true, ..Marks::default() };
         assert_eq!(changed(1.0, &run), 0, "the front of the leg is clean");
         assert!(changed(-1.0, &run) > 100, "blood runs down its back: {}", changed(-1.0, &run));
+    }
+
+    /// Nerves glow, more with rank, and nothing else does.
+    #[test]
+    fn nerves_glow_and_wounds_do_not() {
+        let skin = [200.0, 170.0, 150.0];
+        let glow = |m: Marks| (0..3600).map(|i| marks(skin, [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04], 4, &m, 1.0, 1.0, 0.01).1).sum::<f32>();
+        assert_eq!(glow(Marks { rank: 3, scar: 3, ..Marks::default() }), 0.0);
+        let (g1, g3) = (glow(Marks { nerve: 1, ..Marks::default() }), glow(Marks { nerve: 3, ..Marks::default() }));
+        assert!(g1 > 1.0 && g3 > g1 * 2.0, "{g1} {g3}");
     }
 
     #[test]

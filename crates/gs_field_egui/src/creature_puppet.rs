@@ -1101,6 +1101,22 @@ fn ease(x: f32) -> f32 {
 /// `pose` at breath step `step` of the set's idle cycle (0, or no cycle:
 /// the pose itself), the offsets scaled by `weight`. A step is drawn at
 /// its middle.
+/// Every so often a rank-3 nerve wound jerks a hand: which hand (doll
+/// label) and how far into the flinch, now; None between twitches.
+pub fn nerve_twitch(key: &PuppetKey, id: &str, now_s: f64) -> Option<(u8, f32)> {
+    let nerve = gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1]);
+    if nerve < 3 || key.dead {
+        return None;
+    }
+    let cycle = (now_s + breath_phase(id) as f64 * NERVE_TWITCH_SECS) / NERVE_TWITCH_SECS;
+    let t = (cycle.rem_euclid(1.0) * NERVE_TWITCH_SECS) as f32;
+    let hand = if cycle.floor() as i64 % 2 == 0 { "rightHand" } else { "leftHand" };
+    (t < gs_puppet::FLINCH_SECS).then(|| gs_field::dolls::part_label(hand).map(|l| (l, t))).flatten()
+}
+
+/// Seconds between a rank-3 nerve wound's twitches.
+pub const NERVE_TWITCH_SECS: f64 = 3.7;
+
 /// `pose` as `key`'s figure holds it: guarding a hurt back (`[guard.back]`,
 /// by the wound's rank) while it is up -- standing, sitting, kneeling, dazed
 /// -- not lying down or dead.
@@ -1876,7 +1892,7 @@ impl PuppetCache {
                 Some((self.posed_falling_as(family, &key, true, from, t, died_in, true)?, true))
             }
             Motion::Changing { from, u } => Some((self.posed_changing_as(family, &key, true, from, u, flinch, true)?, true)),
-            Motion::Still => match flinch {
+            Motion::Still => match flinch.or_else(|| nerve_twitch(&key, id, now_s)) {
                 Some(f) => Some((self.posed_flinching_as(family, &key, true, f, true)?, true)),
                 None => Some((self.posed_surface(family, &key)?, false)),
             },
@@ -2743,6 +2759,22 @@ mod tests {
             let (a, b) = (p.span().unwrap(), still.span().unwrap());
             assert!((a - b).abs() / b < 0.05, "{a} vs {b}");
         }
+    }
+
+    /// A rank-3 nerve wound twitches a hand now and then, alternating;
+    /// less, or a dead figure, never.
+    #[test]
+    fn a_bad_nerve_wound_twitches_the_hands_now_and_then() {
+        let hurt = |rank: u8| key(PoseChoice::Standing, &[("nsys", rank)]);
+        let seen: Vec<Option<(u8, f32)>> = (0..400).map(|i| nerve_twitch(&hurt(3), "a", i as f64 * 0.05)).collect();
+        let twitching = seen.iter().filter(|s| s.is_some()).count();
+        assert!(twitching > 10 && twitching < 150, "{twitching} of 400");
+        let hands: std::collections::BTreeSet<u8> = seen.iter().flatten().map(|(l, _)| *l).collect();
+        assert_eq!(hands.len(), 2, "both hands, in turn: {hands:?}");
+        assert!((0..400).all(|i| nerve_twitch(&hurt(2), "a", i as f64 * 0.05).is_none()));
+        let mut dead = hurt(3);
+        dead.dead = true;
+        assert!((0..400).all(|i| nerve_twitch(&dead, "a", i as f64 * 0.05).is_none()));
     }
 
     /// Cost of one pose + draw-list build, and of parsing a baked puppet.

@@ -190,6 +190,10 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
     Some(if moving { Arc::new(make()) } else { cached(key, make) })
 }
 
+fn nerve_rank(key: &PuppetKey) -> u8 {
+    gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
+}
+
 /// Paint the doll into `rect`: `family`'s puppet as `key` says (its height
 /// is set here, to the window's), under `sky`. `id` names it for its
 /// breathing cycle, and for the flinch of a wound rank rising and the ease
@@ -229,6 +233,10 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         },
     };
     let moving = moving || turning.is_some();
+    // a rank-3 nerve wound twitches every few seconds: look again soon
+    if id.is_some() && nerve_rank(&key) >= 3 {
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+    }
     if moving {
         ctx.request_repaint();
     }

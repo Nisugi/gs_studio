@@ -873,7 +873,12 @@ an *x* to put it back:
   with no `back` part of its own (a biped) takes a back wound on the REAR
   of its chest and abdomen, which keep theirs on the front; from the front
   it shows by the blood it runs (rank 2 and 3: down the sides and the
-  backs of the legs) and by the `[guard.back]` stoop.
+  backs of the legs) and by the `[guard.back]` stoop. A nerve wound
+  (`nsys`) is on the whole body: violet lines branching along every part,
+  more and brighter by rank, that GLOW -- the v2 pass keeps them showing
+  where no light reaches (`SkinSurface::glow`, the layer's glow channel) --
+  and at rank 3 a hand twitches every few seconds (`nerve_twitch`; the
+  doll's).
 - **Doll** (the toggle beside *Settings*, over any tab): the injury doll --
   one puppet in a window of its own, lit by the v2 pass as its own view
   (`gs_field_egui::doll_view`, `field_gpu::paint_view`) under the sky round

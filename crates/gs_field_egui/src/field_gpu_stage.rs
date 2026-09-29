@@ -1338,7 +1338,10 @@ pub(crate) fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::
             }
         }
     }
-    LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(with_glow(&skin.rgba, None)), geo: Arc::new(geo) }
+    // what glows (nerve marks) keeps showing where no light reaches
+    let glow = surface.glow();
+    let glow = (glow.len() == n && glow.iter().any(|g| *g > 0)).then_some(glow);
+    LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(with_glow(&skin.rgba, glow)), geo: Arc::new(geo) }
 }
 
 #[cfg(test)]

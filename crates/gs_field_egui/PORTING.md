@@ -1064,3 +1064,9 @@ Two more `creature_field.rs` regions (twenty-two in all,
   holds in every pose the cache builds for it while it is up (`held`);
   `PuppetCache::last_hit` (**a new method**) is the last hit's part and
   time, which turns the doll round to show a hit on its back.
+* Nerve marks glow: `skin_image` hands the skin surface's glow
+  (`gs_puppet::SkinSurface::glow`) to the layer's glow channel, on the
+  stage as on the doll. `creature_puppet::nerve_twitch` (**a new
+  function**): a rank-3 nerve wound's hand twitch, which
+  `posed_live_surface` plays between other motions (the doll's; the
+  field's creatures do not twitch).

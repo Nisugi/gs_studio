@@ -194,6 +194,7 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
     let has_back = puppet.segments.iter().any(|s| s.part.as_deref() == Some("back"));
     let rank_of = |list: &[(&str, u8)]| list.iter().filter(|(p, _)| *p == "back").map(|(_, r)| (*r).min(3)).max().unwrap_or(0);
     let (back, back_scar) = if has_back { (0, 0) } else { (rank_of(look.wounds), rank_of(look.scars)) };
+    let nerve = look.wounds.iter().filter(|(p, _)| *p == "nsys").map(|(_, r)| (*r).min(3)).max().unwrap_or(0);
     for surf in surfs {
         let Some(m) = marks.get_mut(surf.index) else { continue };
         let part = puppet.segments[surf.index].part.as_deref().unwrap_or("");
@@ -207,6 +208,7 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
             back_scar: if split { back_scar } else { 0 },
             run: if back >= 2 && (split || leg) { back } else { 0 },
             leg,
+            nerve: if puppet.segments[surf.index].kind.is_prop() { 0 } else { nerve },
         };
     }
     marks
@@ -271,6 +273,8 @@ struct Samples {
     pos: Vec<V3>,
     /// The normal sheet's deviation here, posed (zero without one).
     dev: Vec<V3>,
+    /// How much it glows (nerve marks), 0..1.
+    glow: Vec<f32>,
 }
 
 impl Samples {
@@ -285,6 +289,7 @@ impl Samples {
             seg: vec![u32::MAX; n],
             pos: if keep_pos { vec![[0.0; 3]; n] } else { Vec::new() },
             dev: vec![[0.0; 3]; n],
+            glow: vec![0.0; n],
         }
     }
 
@@ -359,11 +364,13 @@ impl Samples {
                     None => [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]),
                 };
                 let feet = surface.and_then(|l| l.locate(seg, station, angle));
+                let mut glow = 0.0;
                 if let (Some(at), Some(m)) = (feet, paint.marks.get(seg)) {
                     if m.any() {
-                        col = crate::wounds::marks(col, at, seg as u32, m, lerp(|c| c.front), lerp(|c| c.edge), paint.strand_ft * 0.8);
+                        (col, glow) = crate::wounds::marks(col, at, seg as u32, m, lerp(|c| c.front), lerp(|c| c.edge), paint.strand_ft * 0.8);
                     }
                 }
+                self.glow[i] = glow;
                 if paint.effects.frozen {
                     col = [0, 1, 2].map(|k| col[k] + (FROST_RGB[k] - col[k]) * 0.62);
                     if feet.is_some_and(frost_glint) {
@@ -399,6 +406,8 @@ struct Pixels {
     pos: Vec<V3>,
     /// The normal sheet's deviation, averaged over the samples.
     dev: Vec<V3>,
+    /// How much it glows, averaged over the samples.
+    glow: Vec<f32>,
 }
 
 impl Pixels {
@@ -414,12 +423,13 @@ impl Pixels {
             col: vec![[0.0; 3]; len],
             pos: if s.pos.is_empty() { Vec::new() } else { vec![[0.0; 3]; len] },
             dev: vec![[0.0; 3]; len],
+            glow: vec![0.0; len],
         };
         for y in 0..h {
             for x in 0..w {
                 let i = y * w + x;
                 let mut hits = 0;
-                let (mut n, mut col, mut dev) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3]);
+                let (mut n, mut col, mut dev, mut glow) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3], 0.0f32);
                 for sy in 0..SS {
                     for sx in 0..SS {
                         let j = (y * SS + sy) * s.w + x * SS + sx;
@@ -429,6 +439,7 @@ impl Pixels {
                         hits += 1;
                         n = add(n, norm_or(s.n[j], [0.0, 0.0, 1.0]));
                         dev = add(dev, s.dev[j]);
+                        glow += s.glow[j];
                         for k in 0..3 {
                             col[k] += s.col[j][k];
                         }
@@ -446,6 +457,7 @@ impl Pixels {
                     out.n[i] = norm_or(n, [0.0, 0.0, 1.0]);
                     out.col[i] = col.map(|c| c / hits as f32);
                     out.dev[i] = scale(dev, 1.0 / hits as f32);
+                    out.glow[i] = glow / hits as f32;
                 }
             }
         }
@@ -879,6 +891,10 @@ impl Posed<'_> {
                 let tone = (1.0 + (LIT_TONE - 1.0) * lit - (1.0 - DARK_TONE) * dark) * (1.0 + LAMBERT * gb) * (1.0 + RELIEF_GAIN * dg);
                 let dim = 1.0 - DEPTH_SHADE * ((px.z[i] - near) / range).clamp(0.0, 1.0);
                 let mut c = px.col[i].map(|v| (v * tone * dim).clamp(0.0, 255.0));
+                if px.glow[i] > 0.0 {
+                    // a glow is its own light: the bands do not darken it
+                    c = [0, 1, 2].map(|k| c[k] + (px.col[i][k].max(c[k]) - c[k]) * px.glow[i]);
+                }
                 if inner[i] > 0.0 {
                     c = [0, 1, 2].map(|k| c[k] + (line[k] - c[k]) * inner[i]);
                 }
@@ -886,7 +902,7 @@ impl Posed<'_> {
                 if let Some(s) = kept.as_mut() {
                     // Its own colour, unshaded: what a lamp's light shows.
                     let albedo = [0, 1, 2].map(|k| px.col[i][k] + (line[k] - px.col[i][k]) * inner[i]);
-                    s.set(i, px.pos[i], px.n[i], albedo, px.cov[i]);
+                    s.set(i, px.pos[i], px.n[i], albedo, px.cov[i], px.glow[i]);
                 }
             }
             let (c, a) = over(top, under);
@@ -1048,12 +1064,14 @@ pub struct SkinSurface {
     normal: Vec<[i8; 3]>,
     albedo: Vec<[u8; 3]>,
     cov: Vec<u8>,
+    /// How much each pixel glows (nerve marks), 0..255.
+    glow: Vec<u8>,
 }
 
 impl SkinSurface {
     fn blank(w: usize, h: usize, to_cam: V3) -> SkinSurface {
         let n = w * h;
-        SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n] }
+        SkinSurface { w, h, to_cam, pos: vec![[0.0; 3]; n], normal: vec![[0; 3]; n], albedo: vec![[0; 3]; n], cov: vec![0; n], glow: vec![0; n] }
     }
 
     /// The unit normal at pixel `i` (row-major), or None where the body
@@ -1076,7 +1094,14 @@ impl SkinSurface {
         (cov > 0).then(|| (self.pos[i], self.normal[i].map(|v| v as f32 / 127.0), self.albedo[i], cov))
     }
 
-    fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32) {
+    /// How much each pixel glows, 0..255 (row-major): what a lit host
+    /// keeps showing where no light reaches -- nerve marks.
+    pub fn glow(&self) -> &[u8] {
+        &self.glow
+    }
+
+    fn set(&mut self, i: usize, pos: V3, n: V3, albedo: [f32; 3], cov: f32, glow: f32) {
+        self.glow[i] = (glow * 255.0).round().clamp(0.0, 255.0) as u8;
         self.pos[i] = pos;
         self.normal[i] = n.map(|v| (v.clamp(-1.0, 1.0) * 127.0).round() as i8);
         self.albedo[i] = albedo.map(|v| v.round().clamp(0.0, 255.0) as u8);
