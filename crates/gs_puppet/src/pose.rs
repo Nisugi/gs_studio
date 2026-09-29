@@ -130,6 +130,14 @@
 //! ([`PoseSet::guarded`]), on top of whatever upright pose it is in. It is
 //! what shows a wound the viewer cannot see.
 //!
+//! # Postures
+//!
+//! `[posture.<name>]` (same form, any name) is how a figure holds itself
+//! under a status -- `cower`, `slump`, `limp`, `stagger` -- held at a share
+//! ([`PoseSet::postured`]); `sway` and `tremble` are offsets a host swings
+//! back and forth on the breathing cycle. A body type without one does not
+//! show it that way.
+//!
 //! The override lives HERE, in the body type's file, and not in the
 //! family's `.rig.toml`, because a `.rig.toml` is studio source that is
 //! never published: a game client is shipped `<family>.puppet.toml` (baked
@@ -485,6 +493,9 @@ struct PoseFile {
     /// `[guard.<region>]`: how the figure holds a wound there.
     #[serde(default)]
     guard: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[posture.<name>]`: how the figure holds itself under a status.
+    #[serde(default)]
+    posture: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
 
 /// The hit regions a `[flinch]` table may name.
@@ -587,6 +598,8 @@ pub struct PoseSet {
     /// Region -> how the figure holds itself with a wound there, fully
     /// (rank 3). See the module docs, "Guarding".
     pub guard: BTreeMap<String, Pose>,
+    /// Name -> a status's posture, fully. See the module docs, "Postures".
+    pub posture: BTreeMap<String, Pose>,
 }
 
 /// How much of a `[guard]` a wound of rank 1, 2, 3 holds.
@@ -673,7 +686,7 @@ impl PoseSet {
         let offsets = |what: &str, tables: BTreeMap<String, BTreeMap<String, toml::Value>>| -> Result<BTreeMap<String, Pose>, String> {
             let mut out = BTreeMap::new();
             for (region, entries) in tables {
-                if !FLINCH_REGIONS.contains(&region.as_str()) {
+                if what != "posture" && !FLINCH_REGIONS.contains(&region.as_str()) {
                     return Err(format!("{what}.{region}: not a hit region ({})", FLINCH_REGIONS.join(", ")));
                 }
                 let mut pose = Pose::default();
@@ -690,7 +703,18 @@ impl PoseSet {
         };
         let flinch = offsets("flinch", file.flinch)?;
         let guard = offsets("guard", file.guard)?;
-        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle, flinch, guard })
+        let posture = offsets("posture", file.posture)?;
+        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle, flinch, guard, posture })
+    }
+
+    /// `pose` held in the `[posture.<name>]` a status asks for, `share` of
+    /// it (1 = fully; negative swings it the other way, as `sway` does). As
+    /// it is when the body type has no such posture.
+    pub fn postured(&self, pose: &Pose, name: &str, share: f32) -> Pose {
+        match self.posture.get(name) {
+            Some(offsets) => pose.flinched(offsets, share, false),
+            None => pose.clone(),
+        }
     }
 
     /// `pose` held as a figure with a wound of `rank` (1..=3) in `region`

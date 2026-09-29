@@ -34,6 +34,7 @@ pub mod condition;
 pub mod creature;
 pub mod data_dirs;
 pub mod doll_sky;
+pub mod doll_state;
 pub mod dolls;
 pub mod field_config;
 pub mod geometry;

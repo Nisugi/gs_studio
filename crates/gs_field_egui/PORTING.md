@@ -1068,8 +1068,10 @@ Two more `creature_field.rs` regions (twenty-two in all,
   (`gs_puppet::SkinSurface::glow`) to the layer's glow channel, on the
   stage as on the doll. `creature_puppet::nerve_twitch` (**a new
   function**): a rank-3 nerve wound's hand twitch, which
-  `posed_live_surface` plays between other motions (the doll's; the
-  field's creatures do not twitch).
+  `posed_live_surface` plays between other motions -- and the field's
+  creatures too, inside the marked puppet region of `creature_field.rs`
+  (`nerve_rank`, **new**). A dead body keeps its wound marks (its nerves
+  stop glowing).
 
 ### 7.38 The skin on the GPU
 
@@ -1115,3 +1117,23 @@ Two more `creature_field.rs` regions (twenty-two in all,
   mesh and texture, `PosedPuppet::splats` (**a new field**) carries the
   frame, and `StageGpu::paint_mesh` is `paint_figure`. On the GPU a splat
   puppet is a v2 layer, lit by the lamps; on the CPU it never was.
+
+### 7.40 The doll's statuses
+
+* `PuppetKey::statuses` (**a new field**, `gs_field::doll_state::Statuses`)
+  and `with_statuses`: the posture, sway, tremble and breath they ask for,
+  and `effects_of_statuses` (**new**) what they draw on the body --
+  `gs_puppet::Effects` grows poisoned, diseased, bleeding, rooted, bound,
+  hidden, invisible and possessed, drawn as marks baked with the wounds
+  (`gs_puppet::wounds::status`), so the CPU and GPU skins agree with no
+  shader change. `effects_of` (a creature's flags) adds `rooted`.
+* `PoseChoice::of_statuses` (**new**): the doll's pose from them.
+* `held` holds a status's `[posture.<name>]` (`gs_puppet::PoseSet::postured`,
+  **new**; cower, slump, limp, stagger in `biped.toml`); `breathe` sways
+  and trembles on the breath's cycle (`[posture.sway]`, `[posture.tremble]`)
+  and breathes as deep as `PuppetKey::breath_pace` (**new**) says;
+  `PuppetCache::breath_paced` (**new**) at its pace.
+* `doll_view::key_for` / `paint_state` (**new**): a game client's
+  `DollState` drawn; the signs a status floats over the doll (stars, Zs,
+  bubbles, drops...), a contact shadow in the backdrop and a rim light from
+  the sky behind it.

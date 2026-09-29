@@ -124,11 +124,32 @@ pub struct Effects {
     pub webbed: bool,
     /// Iced over: a cold tint with glints.
     pub frozen: bool,
+    /// Green veins and a sickly tint (poison, thorn poison).
+    pub poisoned: bool,
+    /// Mottled pallor and sores (disease, mind rot).
+    pub diseased: bool,
+    /// Blood running from every wound.
+    pub bleeding: bool,
+    /// Roots climbing the legs.
+    pub rooted: bool,
+    /// Glowing bands of force round trunk and arms (Bind).
+    pub bound: bool,
+    /// In shadow (hidden, shrouded).
+    pub hidden: bool,
+    /// Pale as a ghost, shimmering.
+    pub invisible: bool,
+    /// A dark cast and dark veins.
+    pub possessed: bool,
 }
 
 impl Effects {
     pub fn any(&self) -> bool {
-        self.webbed || self.frozen
+        self.webbed || self.frozen || self.marks_any()
+    }
+
+    /// The effects drawn as marks (`wounds::status`), not by the shader.
+    pub fn marks_any(&self) -> bool {
+        self.poisoned || self.diseased || self.bleeding || self.rooted || self.bound || self.hidden || self.invisible || self.possessed
     }
 }
 
@@ -193,7 +214,8 @@ struct Paint<'a> {
 /// with no `back` part, its chest and abdomen split front from back, the
 /// back's wound on their rear, and the back's blood (rank 2 and up) run down
 /// their sides and the backs of the legs.
-fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look) -> Vec<crate::wounds::Marks> {
+fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look, effects: Effects) -> Vec<crate::wounds::Marks> {
+    use crate::wounds::status;
     let mut marks = vec![crate::wounds::Marks::default(); puppet.segments.len()];
     let has_back = puppet.segments.iter().any(|s| s.part.as_deref() == Some("back"));
     let rank_of = |list: &[(&str, u8)]| list.iter().filter(|(p, _)| *p == "back").map(|(_, r)| (*r).min(3)).max().unwrap_or(0);
@@ -204,6 +226,24 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
         let part = puppet.segments[surf.index].part.as_deref().unwrap_or("");
         let split = !has_back && matches!(part, "chest" | "abdomen");
         let leg = part.ends_with("Leg");
+        let prop = puppet.segments[surf.index].kind.is_prop();
+        let mut bits = 0u16;
+        let mut on = |b: bool, bit: u16| {
+            if b {
+                bits |= bit;
+            }
+        };
+        // shadow and pallor are over everything it has; the rest are on
+        // the body alone
+        on(effects.hidden, status::SHADOW);
+        on(effects.invisible, status::GHOST);
+        if !prop {
+            on(effects.poisoned, status::POISON);
+            on(effects.diseased, status::DISEASE);
+            on(effects.possessed, status::POSSESSED);
+            on(effects.rooted && (leg || part.ends_with("Foot")), status::ROOTS);
+            on(effects.bound && (matches!(part, "chest" | "abdomen" | "back") || part.ends_with("Arm")), status::BOUND);
+        }
         *m = crate::wounds::Marks {
             rank: surf.rank,
             scar: surf.scar,
@@ -212,7 +252,10 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
             back_scar: if split { back_scar } else { 0 },
             run: if back >= 2 && (split || leg) { back } else { 0 },
             leg,
-            nerve: if puppet.segments[surf.index].kind.is_prop() { 0 } else { nerve },
+            // a dead body keeps its wounds, but its nerves no longer glow
+            nerve: if look.dead || prop { 0 } else { nerve },
+            bleed: if effects.bleeding && !look.dead { surf.rank } else { 0 },
+            status: bits,
         };
     }
     marks
@@ -1096,7 +1139,7 @@ impl Posed<'_> {
             let (b, _) = project(add(mid, [0.0, 1.0, 0.0]));
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
-        let marks = if look.dead { vec![crate::wounds::Marks::default(); puppet.segments.len()] } else { segment_marks(puppet, &surfs, look) };
+        let marks = segment_marks(puppet, &surfs, look, effects);
         let marked = marks.iter().any(|m| m.any());
         let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
         let layout = (marked || effects.any()).then(|| UvLayout::new(puppet, 1.0));
@@ -1268,7 +1311,7 @@ impl Posed<'_> {
             let (b, _) = project(add(mid, [0.0, 1.0, 0.0]));
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
-        let marks = if look.dead { vec![crate::wounds::Marks::default(); puppet.segments.len()] } else { segment_marks(puppet, &surfs, look) };
+        let marks = segment_marks(puppet, &surfs, look, effects);
         let marked = marks.iter().any(|m| m.any());
         let surface = (effects.any() || marked).then(|| UvLayout::new(puppet, 1.0));
         let turn = rot_y(look.yaw);

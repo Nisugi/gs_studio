@@ -579,3 +579,16 @@ it reads at a new moon's midnight. `sun_arc` places the sun as
 `moon_sky_arc` places a moon: due east at sunrise (`Sky::sun`, 6-18 with
 none), due south at midday, due west at sunset. Egui-free; the doll's
 drawing is `gs_field_egui::doll_view`.
+
+### 6.25 `src/doll_state.rs`: what the doll shows of a character
+
+A new module. `Status` is every status the doll draws (33), and
+`Status::from_name` folds the game's names into them -- indicator ids
+(`IconPOISONED`), the text-only statuses (`thorned`, `cutthroat`...),
+creature flags (`immobile`) and Debuffs effect names (*Major Bleed*,
+*Sheer Fear*, *Disoriented (status)*); a name with no look is None.
+`Statuses` is a `Copy` bit set of them. `DollState { wounds, scars,
+statuses }` is what a client hands the doll; `DollState::from_game` builds
+it from the game's per-part ranks (feet fold into legs through
+`cards::canonical_part`, the worse rank kept) and the names of whatever is
+active. Egui-free.

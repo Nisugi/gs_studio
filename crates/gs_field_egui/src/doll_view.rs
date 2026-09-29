@@ -13,8 +13,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use gs_field::doll_sky::DollSky;
+use gs_field::doll_state::{DollState, Status, Statuses};
 
-use crate::creature_puppet::{size_step, Bare, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use crate::creature_puppet::{size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
 fn sky_id() -> egui::Id {
@@ -48,6 +49,16 @@ const M_PER_FT: f32 = 0.3048;
 /// The backdrop is made at this share of the window's size: it is only a
 /// gradient.
 const BACKDROP_SHARE: f32 = 0.5;
+/// The contact shadow under the doll: its half width and half depth as
+/// shares of the standing height, and how dark at its middle.
+const CONTACT_WIDTH: f32 = 0.16;
+const CONTACT_DEPTH: f32 = 0.035;
+const CONTACT_DARK: f32 = 0.55;
+/// The rim: the sky behind the doll lighting its edges -- this high,
+/// this strong outdoors (by the sky's horizon colour) and indoors.
+const RIM_ELEVATION: f32 = 28.0;
+const RIM_POWER: f32 = 0.55;
+const RIM_POWER_INDOOR: f32 = 0.25;
 /// A hit on the back turns the doll to show it: this long in all, the turn
 /// round and back each taking [`TURN_SECS`].
 const SHOW_BACK_SECS: f64 = 2.4;
@@ -135,18 +146,24 @@ fn sky_light(cam: &FieldCamera, azimuth: f32, elevation: f32, colour: [f32; 3], 
 }
 
 /// The background: the sky from its top to the horizon (a wall indoors),
-/// the ground below, as a backdrop the pass lights like any other.
-fn backdrop(sky: &DollSky, cam: &FieldCamera) -> Arc<LitImage> {
+/// the ground below, as a backdrop the pass lights like any other. Where
+/// the doll stands the ground is darkened a little (`contact`: its feet at
+/// that point, its standing height): the sky's own shadow under it, which
+/// no one light casts, so it stands on the ground and not in front of it.
+fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32)) -> Arc<LitImage> {
     let [sw, sh] = cam.size;
     let (w, h) = (((sw * BACKDROP_SHARE).round() as usize).max(8), ((sh * BACKDROP_SHARE).round() as usize).max(8));
     let bits = |c: [f32; 3]| c.map(f32::to_bits);
-    let key = key_of(("doll backdrop", w, h, cam.cy.to_bits(), cam.f.to_bits(), bits(sky.sky_top), bits(sky.sky_horizon), bits(sky.ground), bits(sky.floor)));
+    let (feet, tall) = contact;
+    let key = key_of(("doll backdrop", w, h, cam.cy.to_bits(), cam.f.to_bits(), bits(sky.sky_top), bits(sky.sky_horizon), bits(sky.ground), bits(sky.floor), feet.x.to_bits(), feet.y.to_bits(), tall.to_bits()));
     cached(key, || {
         let mut albedo = Vec::with_capacity(w * h * 4);
         let mut lit = Vec::with_capacity(w * h * 4);
+        let (rx, ry) = ((tall * CONTACT_WIDTH).max(1.0), (tall * CONTACT_DEPTH).max(1.0));
         for j in 0..h {
             let sy = (j as f32 + 0.5) * sh / h as f32;
-            let (a, l) = if sy < cam.cy {
+            let ground = sy >= cam.cy;
+            let (a, l) = if !ground {
                 let t = (sy / cam.cy.max(1.0)).clamp(0.0, 1.0).powf(1.6);
                 let c = [0, 1, 2].map(|i| sky.sky_top[i] + (sky.sky_horizon[i] - sky.sky_top[i]) * t);
                 (c, c)
@@ -157,8 +174,15 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera) -> Arc<LitImage> {
                 let c = sky.ground.map(|g| g * (1.0 - 0.35 * t));
                 (c, [0, 1, 2].map(|i| c[i] * sky.floor[i]))
             };
-            let (a, l) = (srgb(a), srgb(l));
-            for _ in 0..w {
+            for i in 0..w {
+                let k = if ground {
+                    let sx = (i as f32 + 0.5) * sw / w as f32;
+                    let d = ((sx - feet.x) / rx).powi(2) + ((sy - feet.y) / ry).powi(2);
+                    1.0 - CONTACT_DARK * (-1.6 * d).exp()
+                } else {
+                    1.0
+                };
+                let (a, l) = (srgb(a.map(|c| c * k)), srgb(l.map(|c| c * k)));
                 albedo.extend_from_slice(&[a[0], a[1], a[2], 255]);
                 lit.extend_from_slice(&[l[0], l[1], l[2], 0]);
             }
@@ -190,10 +214,6 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
     Some(if moving { Arc::new(make()) } else { cached(key, make) })
 }
 
-fn nerve_rank(key: &PuppetKey) -> u8 {
-    gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
-}
-
 /// Paint the doll into `rect`: `family`'s puppet as `key` says (its height
 /// is set here, to the window's), under `sky`. `id` names it for its
 /// breathing cycle, and for the flinch of a wound rank rising and the ease
@@ -216,7 +236,9 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         key = key.with_facing(key.yaw() + turn);
         ctx.request_repaint();
     }
-    if let Some((step, until)) = id.and_then(|id| cache.breath(family, id, key.pose, now)) {
+    // at the pace its statuses set (held still: none)
+    let pace = key.breath_pace();
+    if let Some((step, until)) = pace.and_then(|(pace, _)| id.and_then(|id| cache.breath_paced(family, id, key.pose, now, pace))) {
         key = key.with_breath(step);
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(until));
     }
@@ -237,7 +259,7 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
     };
     let moving = moving || turning.is_some();
     // a rank-3 nerve wound twitches every few seconds: look again soon
-    if id.is_some() && nerve_rank(&key) >= 3 {
+    if id.is_some() && crate::creature_puppet::nerve_rank(&key) >= 3 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
     if moving {
@@ -262,6 +284,7 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         // unlit, on a plain ground
         painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 42, 46));
         place.paint_figure(&painter, &posed);
+        signs(ctx, &painter, key.statuses, &posed, foot, standing_px, now);
         return true;
     };
     let (w, h) = (rect.width().max(1.0), rect.height().max(1.0));
@@ -271,11 +294,15 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
     let eye = EYE_SHARE * fig_m;
     let camera = FieldCamera { size: [w, h], f, cx: w * 0.5, cy: h * FEET_AT - f * eye / z, pitch: 0.0, height: eye };
     let layer = LayerDraw { image, rect: [at.min.x - rect.min.x, at.min.y - rect.min.y, at.width(), at.height()], feet_z: z, tint: 1.0 };
-    let lights = sky.lights.iter().map(|l| sky_light(&camera, l.azimuth, l.elevation, l.colour, l.power)).collect();
+    let mut lights: Vec<FieldLight> = sky.lights.iter().map(|l| sky_light(&camera, l.azimuth, l.elevation, l.colour, l.power)).collect();
+    // the sky behind it rims its edges: last, so the sun and moons keep
+    // the shadow slots
+    let rim = if sky.indoor { RIM_POWER_INDOOR } else { RIM_POWER };
+    lights.push(sky_light(&camera, 180.0, RIM_ELEVATION, sky.sky_horizon, rim));
     let frame = FieldFrame {
         id: FieldFrame::next_id(),
         camera,
-        backdrop: backdrop(sky, &camera),
+        backdrop: backdrop(sky, &camera, (foot - rect.min.to_vec2(), standing_px)),
         backdrop_rect: [0.0, 0.0, w, h],
         layers: vec![layer],
         lights,
@@ -290,12 +317,180 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         stars: Default::default(),
     };
     field_gpu::paint_view(&painter, &Arc::new(Mutex::new(frame)), Placement { origin: rect.min, scale: 1.0 }, Piece::Everything, DOLL_VIEW);
+    signs(ctx, &painter, key.statuses, &posed, foot, standing_px, now);
     true
+}
+
+/// How far the doll is turned from facing the viewer when the host does
+/// not say: a little, so it reads as a figure and not a cut-out.
+pub const DOLL_TURN_DEG: f32 = 20.0;
+
+/// The body colour of a figure the host gives none.
+pub const DOLL_BODY: [u8; 3] = [150, 140, 130];
+
+/// The key a game state draws the doll with (ADDITION): its wounds, scars
+/// and statuses -- the pose they ask for, what they draw on the body, how
+/// it holds itself and breathes -- turned [`DOLL_TURN_DEG`].
+pub fn key_for(state: &DollState) -> PuppetKey {
+    let s = state.statuses;
+    PuppetKey::new(PoseChoice::of_statuses(s), &state.wounds, s.has(Status::Dead), false, DOLL_BODY, false, 300.0)
+        .with_facing(DOLL_TURN_DEG)
+        .with_scars(&state.scars)
+        .with_statuses(s)
+}
+
+/// [`paint`] the doll as a game state has it ([`key_for`]): what a game
+/// client calls, its [`DollState`] filled from its own state
+/// (`DollState::from_game`).
+#[allow(clippy::too_many_arguments)]
+pub fn paint_state(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &Arc<str>, state: &DollState, sky: &DollSky, id: Option<&str>, gpu_skin: bool) -> bool {
+    paint(ui, rect, cache, family, key_for(state), sky, id, gpu_skin)
+}
+
+/// The signs a status floats over the figure (ADDITION), drawn over the
+/// lit doll: stars circling a stunned or dazed head, a sleeper's Zs, a
+/// confused one's question marks, a bleeder's falling drops, a poisoned
+/// one's rising bubbles, a haze over blinded eyes, a hush by a silenced
+/// mouth, a red ring round the feet of the vulnerable, pale motes round
+/// the calmed. Asks for the next frame while any shows.
+#[allow(clippy::too_many_arguments)]
+fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &PosedPuppet, foot: egui::Pos2, standing_px: f32, now: f64) {
+    use egui::{pos2, vec2, Color32, Shape, Stroke};
+    if s.is_empty() || s.has(Status::Dead) {
+        return;
+    }
+    let u = standing_px.max(8.0);
+    let px_ft = u / posed.standing_ft.max(0.1);
+    let [lo, hi] = posed.bounds;
+    let top = foot.y - hi[1] * px_ft;
+    let mid_x = foot.x + (lo[0] + hi[0]) * 0.5 * px_ft;
+    let half_w = ((hi[0] - lo[0]) * 0.5 * px_ft).max(u * 0.08);
+    let head = pos2(mid_x, top + u * 0.06);
+    let t = now as f32;
+    let tau = std::f32::consts::TAU;
+    let fract = |v: f32| v - v.floor();
+    let rgba = |r: u8, g: u8, b: u8, a: f32| Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0) as u8);
+    let mut shown = false;
+
+    if s.has(Status::Stunned) || s.has(Status::Dazed) {
+        shown = true;
+        for k in 0..3 {
+            let a = t * 2.4 + k as f32 * tau / 3.0;
+            let c = pos2(head.x + a.cos() * u * 0.1, top - u * 0.02 + a.sin() * u * 0.025);
+            let near = 0.5 + 0.5 * a.sin();
+            let r = u * (0.018 + 0.01 * near);
+            let pts: Vec<egui::Pos2> = (0..10)
+                .map(|i| {
+                    let ang = -tau / 4.0 + i as f32 * tau / 10.0 + t * 1.5;
+                    let rr = if i % 2 == 0 { r } else { r * 0.45 };
+                    pos2(c.x + ang.cos() * rr, c.y + ang.sin() * rr)
+                })
+                .collect();
+            painter.add(Shape::convex_polygon(pts.clone(), rgba(255, 226, 90, 0.55 + 0.45 * near), Stroke::NONE));
+            painter.add(Shape::closed_line(pts, Stroke::new(1.0, rgba(120, 80, 10, 0.6 + 0.4 * near))));
+        }
+    }
+    if s.has(Status::Sleeping) {
+        shown = true;
+        for k in 0..3 {
+            let p = fract(t / 2.6 + k as f32 / 3.0);
+            let at = pos2(head.x + u * (0.06 + 0.1 * p) + (p * tau).sin() * u * 0.015, top - u * 0.02 - p * u * 0.2);
+            let size = u * (0.04 + 0.05 * p);
+            painter.text(at, egui::Align2::CENTER_CENTER, "z", egui::FontId::proportional(size), rgba(220, 230, 255, (1.0 - p) * 1.4));
+        }
+    }
+    if s.has(Status::Confused) {
+        shown = true;
+        for k in 0..2 {
+            let a = t * 1.3 + k as f32 * std::f32::consts::PI;
+            let at = pos2(head.x + a.cos() * u * 0.11, top - u * 0.05 + (t * 3.0 + k as f32).sin() * u * 0.02);
+            painter.text(at, egui::Align2::CENTER_CENTER, "?", egui::FontId::proportional(u * 0.07), rgba(214, 190, 255, 0.6 + 0.3 * a.sin()));
+        }
+    }
+    if s.has(Status::Bleeding) {
+        shown = true;
+        for k in 0..5 {
+            let seed = k as f32 * 0.618;
+            let p = fract(t / 1.4 + seed);
+            let x = mid_x + (fract(seed * 7.3) - 0.5) * half_w * 0.9;
+            let from = foot.y - u * (0.35 + 0.25 * fract(seed * 3.1));
+            let y = from + (foot.y - from) * p * p;
+            let r = u * 0.009;
+            let red = rgba(150, 12, 16, if p > 0.92 { (1.0 - p) * 12.0 } else { 0.95 });
+            painter.circle_filled(pos2(x, y), r, red);
+            painter.add(Shape::convex_polygon(vec![pos2(x - r * 0.8, y - r * 0.3), pos2(x + r * 0.8, y - r * 0.3), pos2(x, y - r * 2.4)], red, Stroke::NONE));
+        }
+        // a pool gathering under it
+        painter.add(Shape::ellipse_filled(foot, vec2(u * 0.07, u * 0.012), rgba(110, 8, 12, 0.7)));
+    }
+    if s.has(Status::Poisoned) {
+        shown = true;
+        for k in 0..6 {
+            let seed = k as f32 * 0.37;
+            let p = fract(t / 2.8 + seed);
+            let x = mid_x + (fract(seed * 5.7) - 0.5) * half_w * 1.4 + (p * tau * 1.5 + k as f32).sin() * u * 0.012;
+            let y = foot.y - u * (0.35 + 0.8 * p);
+            let r = u * (0.008 + 0.01 * fract(seed * 9.1)) * (0.6 + 0.6 * p);
+            let a = (1.0 - p) * 0.9;
+            painter.circle(pos2(x, y), r, rgba(120, 200, 70, a * 0.35), Stroke::new(1.0, rgba(150, 230, 90, a)));
+        }
+    }
+    if s.has(Status::Blinded) {
+        shown = true;
+        let eyes = pos2(head.x, head.y + u * 0.005);
+        painter.add(Shape::ellipse_filled(eyes, vec2(u * 0.075, u * 0.022), rgba(18, 16, 22, 0.78)));
+        for k in 0..4 {
+            let p = fract(t / 3.0 + k as f32 * 0.25);
+            let c = pos2(eyes.x + (k as f32 - 1.5) * u * 0.035 + p * u * 0.03, eyes.y - p * u * 0.04);
+            painter.circle_filled(c, u * (0.015 + 0.015 * p), rgba(30, 28, 36, (1.0 - p) * 0.5));
+        }
+    }
+    if s.has(Status::Silenced) || s.has(Status::Cutthroat) {
+        // a hush by the mouth: a small circle, struck through
+        let c = pos2(head.x + u * 0.1, head.y + u * 0.03);
+        let r = u * 0.022;
+        let grey = rgba(200, 200, 210, 0.85);
+        painter.circle_stroke(c, r, Stroke::new(1.5, grey));
+        painter.line_segment([pos2(c.x - r * 0.7, c.y + r * 0.7), pos2(c.x + r * 0.7, c.y - r * 0.7)], Stroke::new(1.5, grey));
+    }
+    if s.has(Status::Vulnerable) {
+        shown = true;
+        let pulse = 0.5 + 0.5 * (t * 3.2).sin();
+        painter.add(Shape::ellipse_stroke(foot, vec2(half_w * 1.4 + u * 0.02 * pulse, u * 0.03 + u * 0.006 * pulse), Stroke::new(2.0, rgba(230, 50, 40, 0.45 + 0.4 * pulse))));
+    }
+    if s.has(Status::Calmed) {
+        shown = true;
+        for k in 0..4 {
+            let a = t * 0.6 + k as f32 * tau / 4.0;
+            let c = pos2(mid_x + a.cos() * half_w * 1.3, top + u * (0.25 + 0.12 * (a * 1.7).sin()));
+            painter.circle_filled(c, u * 0.008, rgba(170, 210, 255, 0.35 + 0.25 * (a * 2.0).sin()));
+        }
+    }
+    if shown {
+        ctx.request_repaint();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_game_state_keys_its_pose_marks_and_breath() {
+        let state = DollState::from_game([("chest", 2), ("nerves", 3)], [("rightArm", 1)], ["IconKNEELING", "Major Bleed", "cutthroat", "Staggered"]);
+        let key = key_for(&state);
+        assert_eq!(key.pose, PoseChoice::Kneeling);
+        assert!(key.effects.bleeding && !key.effects.webbed);
+        let label = |p: &str| gs_field::dolls::part_label(p).unwrap() as usize - 1;
+        assert_eq!(key.ranks[label("chest")], 2);
+        assert_eq!(key.ranks[label("neck")], 2, "a cut throat is a neck wound");
+        assert_eq!(key.scars[label("rightArm")], 1);
+        assert_eq!(key.breath_pace(), Some((1.0, 1.0)));
+        let held = key_for(&DollState { statuses: Statuses::NONE.with(Status::Bound), ..DollState::default() });
+        assert_eq!(held.breath_pace(), None, "bound fast, it does not breathe");
+        let dead = key_for(&DollState { statuses: Statuses::NONE.with(Status::Dead).with(Status::Stunned), ..DollState::default() });
+        assert!(dead.dead && matches!(dead.pose, PoseChoice::Dead { .. }));
+    }
 
     #[test]
     fn a_back_hit_turns_the_doll_round_and_back() {

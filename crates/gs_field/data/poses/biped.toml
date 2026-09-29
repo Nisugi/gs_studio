@@ -244,6 +244,56 @@ neck = { rot = [-9.0, 0.0, 0.0] }
 skull = { rot = [-7.0, 0.0, 0.0] }
 arm_r = { rot = [24.0, 55.0, 2.0], bend = [-85.0] }
 
+# Held postures a status asks for (the doll's; `[posture.<name>]`, on top
+# of an upright pose): terrified, cowering -- crouched, head
+# tucked, forearms up before the face.
+[posture.cower]
+torso_upper = { rot = [18.0, 0.0, 0.0] }
+torso_lower = { rot = [10.0, 0.0, 0.0] }
+neck = { rot = [12.0, 0.0, 0.0] }
+skull = { rot = [8.0, 0.0, 0.0] }
+arm = { rot = [-70.0, 0.0, -12.0], bend = [-118.0] }
+leg = { rot = [-24.0, 0.0, 3.0], bend = [42.0, -18.0] }
+
+# Demoralized (feeble, less): slumped, head hung, arms dead weight.
+[posture.slump]
+torso_upper = { rot = [16.0, 0.0, 0.0] }
+torso_lower = { rot = [4.0, 0.0, 0.0] }
+neck = { rot = [18.0, 0.0, 0.0] }
+skull = { rot = [12.0, 0.0, 0.0] }
+arm = { rot = [-6.0, 0.0, -3.0], bend = [-5.0] }
+leg = { bend = [8.0, -4.0] }
+
+# Crippled: the right leg favoured, weight thrown on the left.
+[posture.limp]
+leg_r = { rot = [-18.0, 0.0, 8.0], bend = [44.0, -16.0] }
+torso_lower = { rot = [0.0, 0.0, -9.0] }
+torso_upper = { rot = [9.0, 0.0, 11.0] }
+neck = { rot = [0.0, 0.0, -6.0] }
+arm_r = { rot = [0.0, 0.0, -14.0], bend = [-12.0] }
+
+# Staggered: thrown off balance, leaning back and aside, arms out to catch it.
+[posture.stagger]
+torso_upper = { rot = [-12.0, 0.0, -16.0] }
+torso_lower = { rot = [-6.0, 0.0, -8.0] }
+neck = { rot = [8.0, 0.0, 12.0] }
+arm_l = { rot = [-24.0, 0.0, 55.0], bend = [-26.0] }
+arm_r = { rot = [-16.0, 0.0, -14.0], bend = [-30.0] }
+leg_l = { rot = [-14.0, 0.0, 16.0], bend = [14.0, -4.0] }
+
+# Swaying (dazed, confused, staggered): side to side once round a breath.
+[posture.sway]
+torso_lower = { rot = [0.0, 0.0, 4.0] }
+torso_upper = { rot = [3.0, 0.0, 5.0] }
+neck = { rot = [0.0, 0.0, 6.0] }
+skull = { rot = [0.0, 0.0, 5.0] }
+
+# Trembling (terrified): small and quick, four times a breath.
+[posture.tremble]
+torso_upper = { rot = [1.5, 0.0, 1.0] }
+neck = { rot = [2.0, 0.0, -1.5] }
+arm = { rot = [2.5, 0.0, 1.5], bend = [-4.0] }
+
 # The arm jerks back and out, the shoulder turns away, the near leg steps.
 [flinch.arm]
 arm_r = { rot = [-18.0, 0.0, 16.0], bend = [-20.0] }

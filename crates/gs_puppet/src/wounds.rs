@@ -17,6 +17,13 @@
 //! A nerve wound (the doll's `nsys`) is on the whole body: faint violet
 //! lines branching along every part, more and brighter by rank, that GLOW
 //! -- a lit host (the v2 pass) keeps them showing in the dark.
+//!
+//! Statuses that show on the skin are marks too ([`status`] bits, per
+//! segment, from `Effects`): poison's green veins, disease's mottling,
+//! roots up the legs, bound's glowing bands, a bleeding part's running
+//! blood, and the whole body's shadow (hidden), pallor (invisible) or dark
+//! cast (possessed) -- baked on the same sheet, so the CPU skin and the
+//! GPU's draw them alike.
 
 use crate::skin::smoothstep;
 
@@ -57,6 +64,35 @@ const CUT_CORE_RGB: [f32; 3] = [58.0, 6.0, 8.0];
 const SCAR_RGB: [f32; 3] = [236.0, 196.0, 190.0];
 pub(crate) const NERVE_RGB: [f32; 3] = [132.0, 96.0, 255.0];
 const NERVE_CORE_RGB: [f32; 3] = [214.0, 200.0, 255.0];
+const POISON_TINT_RGB: [f32; 3] = [118.0, 168.0, 84.0];
+const POISON_VEIN_RGB: [f32; 3] = [40.0, 92.0, 26.0];
+const DISEASE_PALE_RGB: [f32; 3] = [188.0, 184.0, 158.0];
+const DISEASE_BLOT_RGB: [f32; 3] = [138.0, 92.0, 78.0];
+const DISEASE_SORE_RGB: [f32; 3] = [168.0, 56.0, 46.0];
+const DISEASE_RIM_RGB: [f32; 3] = [226.0, 206.0, 150.0];
+const MOSS_RGB: [f32; 3] = [86.0, 78.0, 48.0];
+const ROOT_RGB: [f32; 3] = [88.0, 60.0, 36.0];
+const ROOT_CORE_RGB: [f32; 3] = [46.0, 30.0, 18.0];
+const BOUND_RGB: [f32; 3] = [255.0, 230.0, 160.0];
+const SHADOW_RGB: [f32; 3] = [20.0, 22.0, 32.0];
+const GHOST_RGB: [f32; 3] = [172.0, 200.0, 236.0];
+const POSSESSED_RGB: [f32; 3] = [58.0, 40.0, 72.0];
+const POSSESSED_VEIN_RGB: [f32; 3] = [18.0, 4.0, 30.0];
+
+/// The statuses a segment's skin shows, as bits of [`Marks::status`].
+pub mod status {
+    pub const POISON: u16 = 1;
+    pub const DISEASE: u16 = 1 << 1;
+    /// Roots climbing it: legs and feet.
+    pub const ROOTS: u16 = 1 << 2;
+    /// Bands of force round it: trunk and arms.
+    pub const BOUND: u16 = 1 << 3;
+    /// In shadow (hidden).
+    pub const SHADOW: u16 = 1 << 4;
+    /// Pale as a ghost (invisible).
+    pub const GHOST: u16 = 1 << 5;
+    pub const POSSESSED: u16 = 1 << 6;
+}
 
 /// A family of wavering line marks (cuts, or scars): how much of one covers
 /// `at`, 0..1, and how near its middle (1 = on the line). `spacing` feet
@@ -106,12 +142,99 @@ pub(crate) struct Marks {
     pub leg: bool,
     /// The nerve wound's rank (the whole body's).
     pub nerve: u8,
+    /// Bleeding: its own wound's rank, whose blood runs down it (0 = none).
+    pub bleed: u8,
+    /// The statuses its skin shows ([`status`] bits).
+    pub status: u16,
 }
 
 impl Marks {
     pub fn any(&self) -> bool {
-        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0 || self.nerve > 0
+        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0 || self.nerve > 0 || self.bleed > 0 || self.status != 0
     }
+}
+
+/// Veins: lines branching along the segment, like the nerves' but dark and
+/// unlit. How much of one covers `at`.
+fn veins(at: [f32; 2], seg: u32, salt: u32, min_half: f32) -> f32 {
+    let seed = seg.wrapping_mul(2657) ^ salt;
+    let lean = (hash(seg as i32, salt) - 0.5) * 0.4;
+    let half = 0.018f32.max(min_half);
+    let (trunk, _) = lines_at(at, lean, seed, 0.42, 0.7, half, 0.7);
+    let (left, _) = lines_at(at, lean + 0.7, seed ^ 0x3D, 0.36, 0.45, half * 0.75, 0.22);
+    let (right, _) = lines_at(at, lean - 0.7, seed ^ 0x4E, 0.36, 0.45, half * 0.75, 0.22);
+    trunk.max(left * 0.85).max(right * 0.85)
+}
+
+/// Under the wounds: poison, disease, roots, possession.
+fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, min_half: f32) -> [f32; 3] {
+    let mut c = col;
+    if bits & status::POISON != 0 {
+        c = mix(c, POISON_TINT_RGB, 0.3);
+        c = mix(c, POISON_VEIN_RGB, veins(at, seg, 0x9015, min_half) * 0.95);
+    }
+    if bits & status::DISEASE != 0 {
+        let seed = seg.wrapping_mul(613) ^ 0xD15E;
+        c = mix(c, DISEASE_PALE_RGB, 0.34);
+        c = mix(c, DISEASE_BLOT_RGB, smoothstep(0.62, 0.74, fbm([at[0] / 0.14, at[1] / 0.14], seed)) * 0.5);
+        // sores: a few small raised spots, pale round a raw middle
+        let cell = 0.11;
+        let (cx, cy) = ((at[0] / cell).floor(), (at[1] / cell).floor());
+        let id = (cx as i32).wrapping_mul(7919) ^ (cy as i32).wrapping_mul(104_729) ^ seed as i32;
+        if hash(id, 5) > 0.9 {
+            let (ox, oy) = (0.3 + 0.4 * hash(id, 6), 0.3 + 0.4 * hash(id, 7));
+            let d = (at[0] / cell - cx - ox).hypot(at[1] / cell - cy - oy) * cell;
+            let r = (0.02 + 0.016 * hash(id, 8)).max(min_half);
+            c = mix(c, DISEASE_RIM_RGB, (1.0 - smoothstep(r, r * 1.5, d)) * 0.7);
+            c = mix(c, DISEASE_SORE_RGB, (1.0 - smoothstep(r * 0.55, r, d)) * 0.95);
+        }
+    }
+    if bits & status::POSSESSED != 0 {
+        c = mix(c, POSSESSED_RGB, 0.5);
+        c = mix(c, POSSESSED_VEIN_RGB, veins(at, seg, 0x9055, min_half) * 0.9);
+    }
+    if bits & status::ROOTS != 0 {
+        let seed = seg.wrapping_mul(389) ^ 0x2007;
+        c = mix(c, MOSS_RGB, 0.35);
+        // two families winding round the leg opposite ways, and twigs
+        let half = 0.045f32.max(min_half);
+        let (up, um) = lines_at(at, 0.55, seed, 0.3, 0.8, half, 2.0);
+        let (down, dm) = lines_at(at, -0.55, seed ^ 0x2B, 0.34, 0.7, half * 0.85, 2.0);
+        let (twig, _) = lines_at(at, 1.2, seed ^ 0x1F, 0.22, 0.4, (half * 0.35).max(min_half), 0.16);
+        let cover = up.max(down);
+        c = mix(c, ROOT_RGB, cover.max(twig * 0.9) * 0.97);
+        c = mix(c, ROOT_CORE_RGB, (up * smoothstep(0.3, 0.8, um)).max(down * smoothstep(0.3, 0.8, dm)) * 0.85);
+    }
+    c
+}
+
+/// Over the wounds: bound's bands (and their glow), then shadow or pallor
+/// over it all.
+fn over_all(col: [f32; 3], glow: f32, at: [f32; 2], seg: u32, bits: u16, min_half: f32) -> ([f32; 3], f32) {
+    let (mut c, mut glow) = (col, glow);
+    if bits & status::BOUND != 0 {
+        // rings round the part, a hand apart, gently wavering
+        let s = 0.6;
+        let v = at[1] / s + 0.1 * (at[0] * 4.0 + hash(seg as i32, 91) * std::f32::consts::TAU).sin();
+        let d = (v - v.floor() - 0.5).abs() * s;
+        let half = 0.03f32.max(min_half);
+        let band = 1.0 - smoothstep(half * 0.5, half, d);
+        let halo = 1.0 - smoothstep(half, half * 3.5, d);
+        c = mix(c, BOUND_RGB, band * 0.9 + halo * 0.25);
+        glow = glow.max(band * 0.85 + halo * 0.2);
+    }
+    if bits & status::SHADOW != 0 {
+        c = mix(c, SHADOW_RGB, 0.6);
+        glow *= 0.5;
+    }
+    if bits & status::GHOST != 0 {
+        c = mix(c, GHOST_RGB, 0.62);
+        // a faint shimmer across it
+        let (sh, _) = lines_at(at, 0.8, seg ^ 0x6057, 0.3, 0.6, 0.02f32.max(min_half), 0.5);
+        c = mix(c, [240.0, 248.0, 255.0], sh * 0.5);
+        glow = glow.max(sh * 0.25);
+    }
+    (c, glow)
 }
 
 /// How much of a nerve wound of `rank` shows at `at` (feet), and how near
@@ -157,7 +280,8 @@ fn run_of_blood(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> f32 {
 /// Returns the colour and how much it glows (0..1: nerves).
 pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, edge: f32, min_half: f32) -> ([f32; 3], f32) {
     let fore = if m.split { smoothstep(-0.25, 0.25, front) } else { 1.0 };
-    let mut c = mark(col, at, seg, m.rank, m.scar, edge * fore, min_half);
+    let c = if m.status != 0 { afflicted(col, at, seg, m.status, min_half) } else { col };
+    let mut c = mark(c, at, seg, m.rank, m.scar, edge * fore, min_half);
     if m.split && (m.back > 0 || m.back_scar > 0) {
         c = mark(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half);
     }
@@ -166,12 +290,20 @@ pub(crate) fn marks(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32
         let a = run_of_blood(at, seg, m.run, min_half) * side;
         c = mix(c, if m.run >= 3 { WET_BLOOD_RGB } else { BLOOD_RGB }, a * 0.9);
     }
+    if m.bleed > 0 {
+        // bleeding: blood runs from the wound, all round the part
+        let a = run_of_blood(at, seg ^ 0xB1ED, m.bleed.max(2), min_half) * edge;
+        c = mix(c, WET_BLOOD_RGB, a * 0.9);
+    }
     let mut glow = 0.0;
     if m.nerve > 0 {
         let (a, mid) = nerve_lines(at, seg, m.nerve, min_half);
         c = mix(c, NERVE_RGB, a);
         c = mix(c, NERVE_CORE_RGB, smoothstep(0.4, 0.9, mid) * a);
         glow = a * [0.35, 0.6, 0.9][m.nerve.min(3) as usize - 1];
+    }
+    if m.status & (status::BOUND | status::SHADOW | status::GHOST) != 0 {
+        return over_all(c, glow, at, seg, m.status, min_half);
     }
     (c, glow)
 }
@@ -415,6 +547,29 @@ mod tests {
         assert!(worst < 3.0, "worst {worst}");
         // off the body: nothing
         assert_eq!(sheet.apply([10.0, 20.0, 30.0], [3.6, 3.6]).0, [10.0, 20.0, 30.0]);
+    }
+
+    /// Every status marks the skin, each its own way; bound's bands glow.
+    #[test]
+    fn statuses_mark_the_skin() {
+        let skin = [200.0, 170.0, 150.0];
+        let look = |m: Marks| -> (usize, f32) {
+            let out: Vec<([f32; 3], f32)> = (0..3600).map(|i| marks(skin, [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04], 4, &m, 1.0, 1.0, 0.01)).collect();
+            (out.iter().filter(|(c, _)| (0..3).map(|k| (c[k] - skin[k]).abs()).sum::<f32>() > 30.0).count(), out.iter().map(|(_, g)| g).sum())
+        };
+        let mut seen = Vec::new();
+        for bit in [status::POISON, status::DISEASE, status::ROOTS, status::BOUND, status::SHADOW, status::GHOST, status::POSSESSED] {
+            let (changed, glow) = look(Marks { status: bit, ..Marks::default() });
+            assert!(changed > 100, "{bit}: {changed}");
+            assert_eq!(glow > 1.0, bit == status::BOUND || bit == status::GHOST, "{bit}: glow {glow}");
+            seen.push(marks(skin, [0.5, 0.5], 4, &Marks { status: bit, ..Marks::default() }, 1.0, 1.0, 0.01).0);
+        }
+        for (i, a) in seen.iter().enumerate() {
+            assert!(seen[i + 1..].iter().all(|b| b != a), "each looks its own");
+        }
+        let (bled, _) = look(Marks { rank: 2, bleed: 2, ..Marks::default() });
+        let (cut, _) = look(Marks { rank: 2, ..Marks::default() });
+        assert!(bled > cut, "bleeding runs blood: {bled} vs {cut}");
     }
 
     #[test]

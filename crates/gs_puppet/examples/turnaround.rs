@@ -15,7 +15,8 @@
 //! (`data/outfits/kit.toml`).
 //! `TURNAROUND_WOUNDS=chest:2,leftArm:3` wounds it, `TURNAROUND_SCARS=` (the
 //! same) scars it: the marks the skin draws for them, and a hurt back's
-//! guarding posture (`[guard.back]`).
+//! guarding posture (`[guard.back]`); `TURNAROUND_POSTURE=cower[,limp]`
+//! holds a status's posture (`[posture.<name>]`).
 
 use std::path::Path;
 
@@ -82,7 +83,12 @@ fn main() {
     let pose = if pose_name == "rest" { Pose::default() } else { set.get(pose_name).expect("no such pose").clone() };
     // a wound it guards (a hurt back) shows in how it stands
     let back = wounds.iter().filter(|(p, _)| *p == "back").map(|(_, r)| *r).max().unwrap_or(0);
-    let pose = set.clamp(&set.guarded(&pose, "back", back));
+    let mut pose = set.guarded(&pose, "back", back);
+    // TURNAROUND_POSTURE=cower[,limp...]: a status's posture ([posture.<name>])
+    for name in std::env::var("TURNAROUND_POSTURE").unwrap_or_default().split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        pose = set.postured(&pose, name, 1.0);
+    }
+    let pose = set.clamp(&pose);
     let posed = puppet.pose(&pose);
 
     // Frame the pose: its height, or its reach round the turning axis.

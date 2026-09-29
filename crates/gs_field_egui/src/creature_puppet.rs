@@ -36,6 +36,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use gs_field::doll_state::{Status, Statuses};
 use gs_field::puppets::PuppetRigs;
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
 
@@ -301,6 +302,20 @@ impl PoseChoice {
         }
     }
 
+    /// The doll's pose from its statuses (ADDITION): as [`of`](Self::of)
+    /// picks a creature's, unconscious lying on its side, dazed or confused
+    /// reeling.
+    pub fn of_statuses(statuses: Statuses) -> PoseChoice {
+        if statuses.has(Status::Unconscious) && !statuses.has(Status::Dead) {
+            return PoseChoice::Prone { on_side: true };
+        }
+        let has = |name: &str| match name {
+            "disoriented" => statuses.has(Status::Confused) || statuses.has(Status::Dazed),
+            other => statuses.has_name(other),
+        };
+        PoseChoice::of(statuses.has(Status::Dead), &has, false, 0)
+    }
+
     /// Pose names to try, best first. Every chain ends at "stand", which
     /// `PoseSet::from_toml` guarantees exists, so a pose set that is missing
     /// a pose degrades instead of failing.
@@ -386,6 +401,10 @@ pub struct PuppetKey {
     pub splats: bool,
     /// The cloud's shape when `splats` is set (see [`set_puppet_splat_params`]).
     pub splat: SplatKey,
+    /// The statuses it is under (ADDITION, the doll's: `gs_field::doll_state`):
+    /// how it holds itself, sways, trembles and breathes. What they draw on
+    /// the body is in `effects` ([`with_statuses`](Self::with_statuses) sets both).
+    pub statuses: Statuses,
 }
 
 /// A breathing cycle is drawn in this many steps; at rest the figure moves
@@ -442,6 +461,60 @@ impl PuppetKey {
             breath: 0,
             splats: false,
             splat: SplatKey::default(),
+            statuses: Statuses::NONE,
+        }
+    }
+
+    /// The same key under `statuses` (ADDITION): the posture, sway, tremble
+    /// and breath they ask for, and what they draw on the body -- web, frost
+    /// and the rest ([`effects_of_statuses`](Self::effects_of_statuses)); a
+    /// cut throat is a neck wound. The pose is the caller's
+    /// ([`PoseChoice::of_statuses`]).
+    pub fn with_statuses(mut self, statuses: Statuses) -> Self {
+        self.statuses = statuses;
+        self.effects = Self::effects_of_statuses(statuses);
+        if statuses.has(Status::Cutthroat) {
+            if let Some(l) = gs_field::dolls::part_label("neck") {
+                let r = &mut self.ranks[l as usize - 1];
+                *r = (*r).max(2);
+            }
+        }
+        self
+    }
+
+    /// What `statuses` draw on the body.
+    pub fn effects_of_statuses(statuses: Statuses) -> gs_puppet::Effects {
+        let has = |s: Status| statuses.has(s);
+        gs_puppet::Effects {
+            webbed: has(Status::Webbed),
+            frozen: has(Status::Frozen),
+            poisoned: has(Status::Poisoned),
+            diseased: has(Status::Diseased),
+            bleeding: has(Status::Bleeding),
+            rooted: has(Status::Rooted),
+            bound: has(Status::Bound),
+            hidden: has(Status::Hidden),
+            invisible: has(Status::Invisible),
+            possessed: has(Status::Possessed),
+        }
+    }
+
+    /// How fast it breathes, as a share of its body type's own pace, and
+    /// how deep: None = holding still (held fast, or bound where it stands).
+    pub fn breath_pace(&self) -> Option<(f64, f32)> {
+        let has = |s: Status| self.statuses.has(s);
+        if [Status::Immobile, Status::Bound, Status::Rooted, Status::Frozen, Status::Unconscious].into_iter().any(has) {
+            None
+        } else if has(Status::Overexerted) {
+            Some((2.6, 1.9))
+        } else if has(Status::Frenzied) {
+            Some((2.2, 1.5))
+        } else if has(Status::Slowed) {
+            Some((0.45, 1.0))
+        } else if has(Status::Terrified) {
+            Some((1.8, 1.2))
+        } else {
+            Some((1.0, 1.0))
         }
     }
 
@@ -486,11 +559,11 @@ impl PuppetKey {
         self
     }
 
-    /// The body effects a creature's statuses ask for: `webbed`, and
-    /// `frozen` (not a crtrStatus the table knows, but the feed's open
+    /// The body effects a creature's statuses ask for: `webbed`, `rooted`,
+    /// and `frozen` (not a crtrStatus the table knows, but the feed's open
     /// vocabulary passes any flag through).
     pub fn effects_of(has: &dyn Fn(&str) -> bool) -> gs_puppet::Effects {
-        gs_puppet::Effects { webbed: has("webbed"), frozen: has("frozen") }
+        gs_puppet::Effects { webbed: has("webbed"), frozen: has("frozen"), rooted: has("rooted"), ..Default::default() }
     }
 
     /// The same key turned to `deg` (0 = facing the viewer, 90 = its front
@@ -1156,8 +1229,7 @@ fn ease(x: f32) -> f32 {
 /// Every so often a rank-3 nerve wound jerks a hand: which hand (doll
 /// label) and how far into the flinch, now; None between twitches.
 pub fn nerve_twitch(key: &PuppetKey, id: &str, now_s: f64) -> Option<(u8, f32)> {
-    let nerve = gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1]);
-    if nerve < 3 || key.dead {
+    if nerve_rank(key) < 3 || key.dead {
         return None;
     }
     let cycle = (now_s + breath_phase(id) as f64 * NERVE_TWITCH_SECS) / NERVE_TWITCH_SECS;
@@ -1166,27 +1238,69 @@ pub fn nerve_twitch(key: &PuppetKey, id: &str, now_s: f64) -> Option<(u8, f32)> 
     (t < gs_puppet::FLINCH_SECS).then(|| gs_field::dolls::part_label(hand).map(|l| (l, t))).flatten()
 }
 
+/// `key`'s nerve wound rank (the `nsys` part), 0 = none.
+pub fn nerve_rank(key: &PuppetKey) -> u8 {
+    gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
+}
+
 /// Seconds between a rank-3 nerve wound's twitches.
 pub const NERVE_TWITCH_SECS: f64 = 3.7;
 
 /// `pose` as `key`'s figure holds it: guarding a hurt back (`[guard.back]`,
 /// by the wound's rank) while it is up -- standing, sitting, kneeling, dazed
 /// -- not lying down or dead.
+///
+/// And as its statuses have it hold itself (ADDITION, `[posture.<name>]`):
+/// cowering in terror, slumped when demoralized or feeble (less), limping
+/// when crippled, off balance when staggered.
 fn held(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey) -> gs_puppet::Pose {
     let up = !key.dead && !matches!(key.pose, PoseChoice::Dead { .. } | PoseChoice::Prone { .. } | PoseChoice::Sleeping);
-    let back = gs_field::dolls::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
-    if up && back > 0 {
-        set.guarded(pose, "back", back)
-    } else {
-        pose.clone()
+    if !up {
+        return pose.clone();
     }
+    let back = gs_field::dolls::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
+    let mut pose = if back > 0 { set.guarded(pose, "back", back) } else { pose.clone() };
+    let s = key.statuses;
+    if s.has(Status::Terrified) {
+        pose = set.postured(&pose, "cower", 1.0);
+    } else if s.has(Status::Demoralized) {
+        pose = set.postured(&pose, "slump", 1.0);
+    } else if s.has(Status::Feeble) {
+        pose = set.postured(&pose, "slump", 0.7);
+    }
+    if s.has(Status::Crippled) {
+        pose = set.postured(&pose, "limp", 1.0);
+    }
+    if s.has(Status::Staggered) {
+        pose = set.postured(&pose, "stagger", 1.0);
+    }
+    pose
 }
 
-fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, step: u8, weight: f32) -> gs_puppet::Pose {
-    match (&set.idle, step) {
-        (Some(idle), 1..) => pose.breathe(idle, (step as f32 - 0.5) / BREATH_STEPS as f32, weight),
-        _ => pose.clone(),
+/// `pose` at `key`'s step of its breath, `weight` of it (as deep as its
+/// statuses say), and swaying (dazed, confused, staggered) or trembling
+/// (terrified) on the same cycle: `[posture.sway]` once round it,
+/// `[posture.tremble]` four times.
+fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey, weight: f32) -> gs_puppet::Pose {
+    let step = key.breath;
+    if step == 0 {
+        return pose.clone();
     }
+    let u = (step as f32 - 0.5) / BREATH_STEPS as f32;
+    let depth = key.breath_pace().map_or(1.0, |(_, d)| d);
+    let mut out = match &set.idle {
+        Some(idle) => pose.breathe(idle, u, weight * depth),
+        None => pose.clone(),
+    };
+    let s = key.statuses;
+    let tau = std::f32::consts::TAU;
+    if [Status::Dazed, Status::Confused, Status::Staggered].into_iter().any(|x| s.has(x)) {
+        out = set.postured(&out, "sway", (tau * u).sin() * weight);
+    }
+    if s.has(Status::Terrified) {
+        out = set.postured(&out, "tremble", (tau * 4.0 * u).sin() * weight);
+    }
+    out
 }
 
 /// `pose` flinching from a hit on doll part `label`, `t` seconds in (None,
@@ -1707,7 +1821,7 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let pose = held(&set, &breathe(&set, pose, key.breath, 1.0), key);
+        let pose = held(&set, &breathe(&set, pose, key, 1.0), key);
         // Inside the body type's joint limits, whatever the file says.
         let pose = &set.clamp(&pose);
         let texture = if skin { self.texture(family) } else { None };
@@ -1765,10 +1879,16 @@ impl PuppetCache {
     /// its cycle at its own point, from its id, so a crowd never breathes
     /// in step.
     pub fn breath(&mut self, family: &Arc<str>, id: &str, choice: PoseChoice, now_s: f64) -> Option<(u8, f64)> {
+        self.breath_paced(family, id, choice, now_s, 1.0)
+    }
+
+    /// [`breath`](Self::breath) at `pace` times its body type's own rate
+    /// (ADDITION: [`PuppetKey::breath_pace`]).
+    pub fn breath_paced(&mut self, family: &Arc<str>, id: &str, choice: PoseChoice, now_s: f64, pace: f64) -> Option<(u8, f64)> {
         if matches!(choice, PoseChoice::Dead { .. }) {
             return None;
         }
-        let period = self.pose_set(family)?.idle.as_ref()?.period.max(0.05) as f64;
+        let period = self.pose_set(family)?.idle.as_ref()?.period.max(0.05) as f64 / pace.clamp(0.1, 10.0);
         let steps = BREATH_STEPS as f64;
         let cycles = now_s / period + breath_phase(id) as f64;
         let u = cycles.rem_euclid(1.0);
@@ -1877,7 +1997,7 @@ impl PuppetCache {
         let (_, to) = key.pose.resolve(&set, variant(key.pose))?;
         let (_, start) = from.resolve(&set, variant(from))?;
         // The new pose's breath comes in with the change, so it never jumps.
-        let to = held(&set, &breathe(&set, to, key.breath, u), key);
+        let to = held(&set, &breathe(&set, to, key, u), key);
         let pose = set.clamp(&flinched(&set, &start.blend(&to, u), flinch));
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
@@ -1901,7 +2021,7 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let pose = set.clamp(&flinched(&set, &held(&set, &breathe(&set, pose, key.breath, 1.0), key), Some(flinch)));
+        let pose = set.clamp(&flinched(&set, &held(&set, &breathe(&set, pose, key, 1.0), key), Some(flinch)));
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;

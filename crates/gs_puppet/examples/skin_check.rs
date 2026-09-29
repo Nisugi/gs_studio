@@ -66,7 +66,18 @@ fn main() {
     std::fs::create_dir_all(&out).expect("out dir");
     let tile: usize = std::env::var("SKIN_CHECK_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(260);
     let wanted = std::env::var("SKIN_CHECK_EFFECTS").unwrap_or_default();
-    let effects = Effects { webbed: wanted.contains("web"), frozen: wanted.contains("froz") };
+    let effects = Effects {
+        webbed: wanted.contains("web"),
+        frozen: wanted.contains("froz"),
+        poisoned: wanted.contains("poison"),
+        diseased: wanted.contains("disease"),
+        bleeding: wanted.contains("bleed"),
+        rooted: wanted.contains("root"),
+        bound: wanted.contains("bound"),
+        hidden: wanted.contains("hidden"),
+        invisible: wanted.contains("invisible"),
+        possessed: wanted.contains("possess"),
+    };
     let data = data_dir();
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");
     let mut families: Vec<String> = args[1..].to_vec();

@@ -1,13 +1,16 @@
 //! The injury doll window: one puppet lit by the sky round the player
 //! (`gs_field_egui::doll_view`), with what the game would send it -- wounds
-//! per part, a status pose, web and frost, a held weapon -- and the sky it
-//! stands under (the hour, the way the player faces, the moon, indoors), to
-//! try it beside the field in the same frame. Drawing and input only.
+//! and scars per part, every status the doll draws (`gs_field::doll_state`),
+//! a held weapon -- and the sky it stands under (the hour, the way the
+//! player faces, the moon, indoors), to try it beside the field in the same
+//! frame. It draws through `doll_view::key_for`, as a game client does.
+//! Drawing and input only.
 
 use std::sync::Arc;
 
+use gs_field::doll_state::{DollState, Status, Statuses};
 use gs_field::lighting::Sky;
-use gs_field_egui::creature_puppet::{PoseChoice, PuppetCache, PuppetKey};
+use gs_field_egui::creature_puppet::{PuppetCache, PuppetKey};
 
 /// The compass points a player walks (`GameSky::walked`), and none.
 const FACINGS: [(&str, Option<f32>); 9] = [
@@ -22,15 +25,16 @@ const FACINGS: [(&str, Option<f32>); 9] = [
     ("nw", Some(315.0)),
 ];
 
-const POSES: [(&str, PoseChoice); 8] = [
-    ("standing", PoseChoice::Standing),
-    ("kneeling", PoseChoice::Kneeling),
-    ("sitting", PoseChoice::Sitting),
-    ("prone", PoseChoice::Prone { on_side: false }),
-    ("stunned", PoseChoice::Stunned),
-    ("sleeping", PoseChoice::Sleeping),
-    ("webbed", PoseChoice::Webbed),
-    ("dead", PoseChoice::Dead { variant: 0 }),
+/// The statuses, grouped as the checklist shows them.
+const STATUS_GROUPS: [(&str, &[Status]); 5] = [
+    ("Pose", &[Status::Kneeling, Status::Sitting, Status::Prone, Status::Stunned, Status::Sleeping, Status::Unconscious, Status::Webbed, Status::Dead]),
+    (
+        "On the body",
+        &[Status::Frozen, Status::Immobile, Status::Poisoned, Status::Diseased, Status::Bleeding, Status::Rooted, Status::Bound, Status::Hidden, Status::Invisible, Status::Possessed, Status::Blinded, Status::Cutthroat, Status::Silenced],
+    ),
+    ("Holds itself", &[Status::Calmed, Status::Terrified, Status::Demoralized, Status::Feeble, Status::Crippled, Status::Staggered, Status::Dazed, Status::Confused]),
+    ("Breath", &[Status::Frenzied, Status::Overexerted, Status::Slowed]),
+    ("Else", &[Status::Vulnerable]),
 ];
 
 pub struct DollWindow {
@@ -41,9 +45,7 @@ pub struct DollWindow {
     /// Wound and scar rank per doll part, in `DOLL_PARTS` order.
     ranks: Vec<u8>,
     scars: Vec<u8>,
-    pose: usize,
-    webbed: bool,
-    frozen: bool,
+    statuses: Statuses,
     /// Turned from facing the viewer, degrees.
     turn: f32,
     breathe: bool,
@@ -71,9 +73,7 @@ impl Default for DollWindow {
             hold: String::new(),
             ranks: vec![0; gs_field::skins::DOLL_PARTS.len()],
             scars: vec![0; gs_field::skins::DOLL_PARTS.len()],
-            pose: 0,
-            webbed: false,
-            frozen: false,
+            statuses: Statuses::NONE,
             turn: 20.0,
             breathe: true,
             hour: 12.0,
@@ -115,13 +115,13 @@ impl DollWindow {
         }
         // on by default; GS_STUDIO_DOLL_GPU=0 draws the CPU skin
         w.gpu_skin = std::env::var("GS_STUDIO_DOLL_GPU").map_or(true, |v| v.trim() != "0");
-        // GS_STUDIO_DOLL_FIGURE=<form>, GS_STUDIO_DOLL_FX=webbed,frozen
+        // GS_STUDIO_DOLL_FIGURE=<form>, GS_STUDIO_DOLL_FX=webbed,poisoned,...
+        // (any status or effect name the game uses)
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_FIGURE") {
             w.family = v.trim().to_owned();
         }
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_FX") {
-            w.webbed = v.contains("webbed");
-            w.frozen = v.contains("frozen");
+            w.statuses = Statuses::from_names(v.split(','));
         }
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_HIT") {
             let parsed = v.split_once('@').and_then(|(wound, frame)| {
@@ -155,7 +155,8 @@ impl DollWindow {
         gs_field::doll_sky::doll_sky(Some(self.hour), &sky, !self.indoor)
     }
 
-    fn key(&self) -> PuppetKey {
+    /// What a game client would hand the doll.
+    fn state(&self) -> DollState {
         let listed = |ranks: &[u8]| -> Vec<(String, u8)> {
             gs_field::skins::DOLL_PARTS
                 .iter()
@@ -164,12 +165,11 @@ impl DollWindow {
                 .map(|((part, _, _), r)| (part.to_string(), *r))
                 .collect()
         };
-        let injuries = listed(&self.ranks);
-        let pose = POSES[self.pose].1;
-        PuppetKey::new(pose, &injuries, matches!(pose, PoseChoice::Dead { .. }), false, [150, 140, 130], false, 300.0)
-            .with_facing(self.turn)
-            .with_scars(&listed(&self.scars))
-            .with_effects(gs_puppet::Effects { webbed: self.webbed, frozen: self.frozen })
+        DollState { wounds: listed(&self.ranks), scars: listed(&self.scars), statuses: self.statuses }
+    }
+
+    fn key(&self) -> PuppetKey {
+        gs_field_egui::doll_view::key_for(&self.state()).with_facing(self.turn)
     }
 
     /// The window, over whatever tab is showing.
@@ -228,19 +228,26 @@ impl DollWindow {
             ui.add(egui::TextEdit::singleline(&mut self.hold).desired_width(120.0).hint_text("weapon[+shield]"))
                 .on_hover_text("A weapon from props/weapons.toml, and a shield after a +");
         });
-        egui::ComboBox::from_id_salt("doll_pose").selected_text(POSES[self.pose].0).show_ui(ui, |ui| {
-            for (i, (name, _)) in POSES.iter().enumerate() {
-                ui.selectable_value(&mut self.pose, i, *name);
-            }
-        });
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.webbed, "Webbed");
-            ui.checkbox(&mut self.frozen, "Frozen");
-            ui.checkbox(&mut self.breathe, "Breathes");
-        });
+        ui.checkbox(&mut self.breathe, "Breathes");
         ui.add(egui::Slider::new(&mut self.turn, -180.0..=180.0).text("turned").suffix(" deg"));
         ui.checkbox(&mut self.gpu_skin, "GPU skin")
             .on_hover_text("Draw the skin on the GPU (off: the CPU skin, the same figure, slower to move)");
+
+        super::group(ui, "Statuses");
+        for (group, list) in STATUS_GROUPS {
+            ui.weak(group);
+            ui.horizontal_wrapped(|ui| {
+                for &st in list {
+                    let mut on = self.statuses.has(st);
+                    if ui.checkbox(&mut on, st.id()).changed() {
+                        self.statuses.set(st, on);
+                    }
+                }
+            });
+        }
+        if ui.button("None").clicked() {
+            self.statuses = Statuses::NONE;
+        }
 
         super::group(ui, "Wounds and scars");
         egui::Grid::new("doll_wounds").num_columns(3).show(ui, |ui| {

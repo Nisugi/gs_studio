@@ -887,8 +887,9 @@ an *x* to put it back:
   (`nsys`) is on the whole body: violet lines branching along every part,
   more and brighter by rank, that GLOW -- the v2 pass keeps them showing
   where no light reaches (`SkinSurface::glow`, the layer's glow channel) --
-  and at rank 3 a hand twitches every few seconds (`nerve_twitch`; the
-  doll's).
+  and at rank 3 a hand twitches every few seconds (`nerve_twitch`, on the
+  doll and the field's creatures alike). A dead body keeps its wounds; its
+  nerves stop glowing.
 - **Doll** (the toggle beside *Settings*, over any tab): the injury doll --
   one puppet in a window of its own, lit by the v2 pass as its own view
   (`gs_field_egui::doll_view`, `field_gpu::paint_view`) under the sky round
@@ -897,9 +898,27 @@ an *x* to put it back:
   indoors, and a floor of light so it reads at a new moon's midnight; that
   sky and the ground behind it, its shadow on the ground. Wound and scar
   per part (*Heal* turns every wound into a scar of its rank, as herbs
-  do), a status pose, web and frost, what it holds (`weapon[+shield]`),
+  do), every status it can be under, what it holds (`weapon[+shield]`),
   breathing; it flinches and eases between poses as the field's creatures
   do, and a hit on its back turns it round to show the wound for a moment.
+  It draws what a game client hands it (`gs_field::doll_state::DollState`,
+  `DollState::from_game` over the game's wounds, scars and the names of
+  every status icon, text status and debuff; `doll_view::paint_state`),
+  and the window's checklist is that state. Each status has a look:
+
+  | How | Statuses |
+  |---|---|
+  | its own pose | kneeling, sitting, prone, stunned, sleeping, unconscious (lying on its side), webbed, dead; dazed and confused reel (`disoriented`), calmed stands at ease (`calm`) |
+  | on the skin (marks, baked with the wounds, `gs_puppet::wounds::status`) | poisoned (green veins, sickly tint), diseased (pallor, lesions, sores), bleeding (blood running from every wound), rooted (roots winding up the legs), bound (glowing bands round trunk and arms), hidden (in shadow), invisible (ghost-pale, shimmering), possessed (a dark cast, dark veins); frozen keeps its frost, webbed its web; a cut throat is a neck wound |
+  | how it holds itself (`[posture.<name>]` in the pose files) | terrified cowers and trembles, demoralized slumps (feeble, less), crippled limps, staggered is off balance; dazed, confused and staggered sway |
+  | how it breathes | frenzied and overexerted fast and deep, terrified quick, slowed slow; immobile, bound, rooted, frozen and unconscious hold still |
+  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed |
+
+  The game's names fold into these (`Status::from_name`: `thorned` and
+  *Major Poison* are poisoned, *Sheer Fear* and *Horrify* terrified, *Mind
+  Rot* diseased...); combat bookkeeping (roundtime, a parry, pressed) has
+  no look. It stands in a soft contact shadow, and the sky behind rims its
+  edges.
   Drag across it to turn it by hand. *GPU skin* draws its skin on the GPU
   (`gs_field_egui::skin_gpu`): the mesh `gs_puppet::Posed::skin_mesh` hands
   over, rasterised, resolved, smoothed and shaded pass by pass as the CPU

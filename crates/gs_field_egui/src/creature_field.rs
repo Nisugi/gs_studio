@@ -1460,7 +1460,15 @@ fn paint_creature_puppet(
             ctx.request_repaint();
             puppets.posed_changing_as(&family, &key, skin, from, u, flinch, bare)?
         }
-        crate::creature_puppet::Motion::Still => match flinch {
+        // A rank-3 nerve wound twitches every few seconds (as the doll's):
+        // look again soon, and draw the twitch fresh while it lasts.
+        crate::creature_puppet::Motion::Still => match flinch.or_else(|| {
+            let twitch = crate::creature_puppet::nerve_twitch(&key, &creature.id, now_ms / 1000.0);
+            if !key.dead && crate::creature_puppet::nerve_rank(&key) >= 3 {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+            twitch
+        }) {
             Some(f) => {
                 *animated = true;
                 ctx.request_repaint();
