@@ -860,8 +860,10 @@ mod tests {
         // backdrop over the image, and its lit body in place of the
         // sprite's image -- and the floor grid drawn over the floor's own
         // rows and columns (deep growth adds rows), and scenery props
-        // clipped to the stage like the backdrop.
-        assert_eq!(regions, 22, "exactly the twenty-two documented additions");
+        // clipped to the stage like the backdrop -- and a scenery prop's lit
+        // body from the v2 pass in place of its image, contact shadow and
+        // firelight.
+        assert_eq!(regions, 23, "exactly the twenty-three documented additions");
         let mut h: u64 = 0xcbf29ce484222325;
         for b in stripped.bytes() {
             h ^= b as u64;

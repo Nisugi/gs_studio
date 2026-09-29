@@ -479,6 +479,15 @@ fn paint_scene_prop(
         egui::pos2(foot.x - art.feet[0] * draw_w, foot.y - art.feet[1] * draw_h),
         egui::vec2(draw_w, draw_h),
     );
+// >>>doll
+    // The v2 pass lights the prop itself, as it does a creature: lamps and
+    // the moon on it from where they are, the shadows it casts and takes.
+    // Else (pass off, frame full, pixels not kept yet) the old way below.
+    let gpu_drawn = art_cache
+        .and_then(|cache| crate::field_gpu_stage::with_current(|g| g.paint_sprite(painter, cache, &art.texture, art, dest, prop.z.max(0.4), false)))
+        .unwrap_or(false);
+    if !gpu_drawn {
+// <<<doll
     // Contact shadow only when the prop opts in (scene `shadow = true`
     // — scenery defaults shadowless, most of it paints its own
     // grounding). Sized by the sidecar footprint when authored, the
@@ -517,6 +526,7 @@ fn paint_scene_prop(
     // Firelight on the prop, as on a creature.
     if let Some(cache) = art_cache {
         crate::field_lights::paint_prop_glow(painter, cache, field, prop, &art.texture, dest);
+    }
     }
 // <<<doll
 }

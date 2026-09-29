@@ -978,3 +978,19 @@ Two more `creature_field.rs` regions (twenty-two in all,
   `SceneLight::aurora`, gs_field PORTING 6.21), drawn by night as the stars
   are (`aurora_sky`): three curtains hung in the sky the frame shows, green
   below, violet above, rays along them, behind the cloud.
+
+### 7.33 Scenery props in the v2 pass
+
+* `paint_scene_prop` hands a prop to the v2 pass first, as the sprite
+  branch does a creature (`StageGpu::paint_sprite`, at the prop's own
+  depth): lamps and the moon light it from where they are, and it casts
+  and takes their shadows. The port's drawing -- the opt-in contact
+  shadow, the image, the firelight laid over it -- is the fallback, when
+  the pass is off or refuses the layer (the twenty-third
+  `creature_field.rs` region). Props had been painted flat over the lit
+  frame: a campfire lit the ground and the creatures round a bonfire but
+  not the bonfire or the benches beside it.
+* `creature_light` keeps the lit pixels of a scenery prop's lit twin for
+  the pass, as it does a creature base's, a variant's and the backdrop's:
+  without them the pass lost a prop the moment the relight swapped its
+  lit twin in.

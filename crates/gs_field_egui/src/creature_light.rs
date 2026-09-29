@@ -666,7 +666,7 @@ impl LightState {
                                 slot => {
                                     if let Some(layer) = self.layers.get(&slot) {
                                         self.by_lit.insert(tex.id(), layer.original.clone());
-                                        if self.keep_pixels && matches!(slot, Slot::Base(_) | Slot::Variant(_) | Slot::Backdrop(_)) {
+                                        if self.keep_pixels && matches!(slot, Slot::Base(_) | Slot::Variant(_) | Slot::Backdrop(_) | Slot::Scenery(_)) {
                                             let albedo = scene.unwrap_or_else(|| layer.px.rgba.clone());
                                             let px = LitPixels { w, h, albedo: Arc::new(albedo), lit: Arc::new(rgba) };
                                             if let Some(old) = self.pixels_of.insert(slot.clone(), tex.id()) {
