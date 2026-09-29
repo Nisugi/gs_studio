@@ -24,7 +24,7 @@ body_type = "biped"
 arm = { rot = [0.0, 0.0, 152.0], bend = [-14.0] }
 
 [pose.kneel]
-leg = { bend = [92.0, 62.0] }
+leg = { bend = [87.0, 62.0] }
 arm = { rot = [-6.0, 0.0, 0.0], bend = [-16.0] }
 
 [pose.sit]
@@ -69,9 +69,13 @@ leg = { rot = [-16.0, 0.0, 2.0], bend = [30.0, -12.0] }
 [pose.sleep]
 root = [0.0, 0.0, 90.0]
 torso_upper = { rot = [22.0, 0.0, 0.0] }
-neck = { rot = [22.0, 0.0, 0.0] }
-leg = { rot = [-78.0, 0.0, 0.0], bend = [104.0] }
-arm = { rot = [-62.0, 0.0, 0.0], bend = [-96.0] }
+neck = { rot = [20.0, -10.0, 8.0] }
+arm_l = { rot = [-65.0, -65.0, -30.0], bend = [-97.0] }
+arm_r = { rot = [-80.0, 5.0, 15.0], bend = [-127.0] }
+hand_l = { rot = [-45.0, 0.0, 0.0] }
+hand_r = { rot = [-40.0, 0.0, 0.0] }
+leg_l = { rot = [-120.0, 20.0, -23.0], bend = [125.0, 0.0] }
+leg_r = { rot = [-120.0, 0.0, -8.0], bend = [125.0, 0.0] }
 
 # Webbed: arms pinned to the body, legs bound together, head straining up.
 [pose.webbed]
