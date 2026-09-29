@@ -1176,3 +1176,22 @@ Two more `creature_field.rs` regions (twenty-two in all,
   final pass write it; in the GPU skin glow and wetness share the colour
   target's alpha, signed (a glowing nerve is not bleeding), and the sheet's
   glow texture is `Rg8Unorm`, glow and wet.
+* A wound glints faintly (`WET_GLINT` 0.25): the doll is matte otherwise --
+  its sky lights have no sheen on it (`sky_light`), its rim is weaker, and
+  its backdrop is dimmed (`SKY_GAIN`, `GROUND_GAIN`) and vignetted, so
+  wounds and statuses read against it; its signs are larger and
+  dark-edged.
+
+### 7.42 Wound and scar ranks, eyes
+
+* `gs_puppet::wounds` shifts every rank up a level: rank 1 is bruising and
+  cuts, rank 2 deep gashes in pooled blood, rank 3 severs an arm, hand
+  (**new**: `draw::is_severable`, now public) or leg, and on a part that
+  cannot be lost is a new, worse level (torn open). Scars and nerve lines
+  shift the same way; a rank-3 scar on a limb severs it too, its stump
+  closed skin, not raw. A back wound's blood runs from rank 1.
+* Eyes: `leftEye` / `rightEye` wounds and scars are marked round the eye
+  on the head (`wounds::EyeMark`); a rank-3 eye is lost and its dot not
+  drawn (`draw::eye_lost`).
+* Every status draws over the wounds (poison, disease, possession and
+  roots used to go under them).

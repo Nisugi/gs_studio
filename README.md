@@ -865,14 +865,20 @@ an *x* to put it back:
   mid-flinch falls from that shape (`death_flinch`).
   On the smooth skin a wound is marks on the part, laid out on the body's
   own surface so they keep to it in any pose (`gs_puppet::wounds`): rank 1
-  bruising, rank 2 cuts with blood run round them, rank 3 gashes in wet
-  blood (rank 3 on a limb severs it, as before). A scar -- a hero's healed
-  wound, `PuppetKey::scars` -- is a pale ridged line. The flat shape list
+  bruising and cuts with blood round them, rank 2 larger, deeper gashes in
+  wet blood, rank 3 takes an arm, hand or leg off (a raw stump); on a part
+  that cannot be lost (head, neck, trunk) rank 3 is worse again -- torn
+  open, the gashes wide and many, the blood pooled. A scar -- a hero's
+  healed wound, `PuppetKey::scars` -- is a pale ridged line, wider and more
+  with rank; a rank-3 scar on a limb is the limb healed off (a closed
+  stump). An eye's wound marks round it on the head: bruised and
+  bloodshot, gashed across, gone (a bloody socket); its scars cross it, and
+  at rank 3 it is healed shut -- a lost eye's dot is not drawn. The flat shape list
   small cards fall back to keeps a wound-coloured tint per part. A form
   with no `back` part of its own (a biped) takes a back wound on the REAR
   of its chest and abdomen, which keep theirs on the front; from the front
-  it shows by the blood it runs (rank 2 and 3: down the sides and the
-  backs of the legs) and by the `[guard.back]` stoop. *GPU skins* (under
+  it shows by the blood it runs (down the sides and the backs of the legs,
+  heavier from rank 2) and by the `[guard.back]` stoop. *GPU skins* (under
   **Display**, on by default; `GS_STUDIO_GPU_SKINS=0` turns it off) draws the stage's puppet skins on the
   GPU too (`gs_field_egui::skin_gpu`), relit there by the scene and the time
   of day as the CPU relights them (`relight_gpu`: vellum_light's kernel,
@@ -891,7 +897,11 @@ an *x* to put it back:
   nerves stop glowing.
 - **Doll** (the toggle beside *Settings*, over any tab): the injury doll --
   one puppet in a window of its own, lit by the v2 pass as its own view
-  (`gs_field_egui::doll_view`, `field_gpu::paint_view`) under the sky round
+  (`gs_field_egui::doll_view`, `field_gpu::paint_view`). *Light* > *Display*
+  (the default, `gs_field::doll_sky::display`) lights it as a display: a
+  steady white key from the front left, a soft fill, a floor of light, on a
+  plain dark backdrop -- every wound and status reads the same at any hour.
+  *The sky* stands it under the sky round
   the player (`gs_field::doll_sky`): the sun by day, the moons by night,
   from where they are round the way the player faces, a room light
   indoors, and a floor of light so it reads at a new moon's midnight; that

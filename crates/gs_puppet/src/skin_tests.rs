@@ -77,7 +77,9 @@ fn a_near_arm_hides_the_trunk_and_a_far_one_is_hidden_by_it() {
     };
     // Yaw 90 turns the figure's right side (-x) toward the camera.
     assert!(marked(90.0) > 20, "near arm shows its wound: {}", marked(90.0));
-    assert_eq!(marked(-90.0), 0, "far arm is behind the trunk");
+    // (a rank-2 wound's blood reaches the arm's edge, which peeks past the
+    // trunk by a pixel or two)
+    assert!(marked(-90.0) <= 4, "far arm is behind the trunk: {}", marked(-90.0));
 }
 
 #[test]
@@ -391,8 +393,9 @@ fn a_skin_on_many_threads_is_the_skin_on_one() {
     assert!(glow_one == glow_many, "the glow differs");
 }
 
-/// Fresh blood reaches the kept surface as wetness -- a rank-3 wound's
-/// pooled blood, a bleeding part's run -- and a bruise alone stays dry.
+/// Fresh blood reaches the kept surface as wetness -- a wound's cuts, a
+/// rank-2 wound's pooled blood more, a bleeding part's run -- and a scar
+/// alone stays dry.
 #[test]
 fn wet_blood_reaches_the_surface() {
     let p = humanoid();
@@ -404,9 +407,12 @@ fn wet_blood_reaches_the_surface() {
         let (_, surface) = posed.skin_surface(&project, &look, None, effects);
         surface.wet().iter().filter(|w| **w > 8).count()
     };
-    assert_eq!(wet(&[("chest", 1)], crate::Effects::default()), 0, "a bruise is dry");
-    let pooled = wet(&[("chest", 3), ("abdomen", 3)], crate::Effects::default());
-    assert!(pooled > 20, "a rank-3 wound's pool is wet: {pooled}");
-    let bleeding = wet(&[("chest", 3), ("abdomen", 3)], crate::Effects { bleeding: true, ..Default::default() });
+    let look = Look { scars: &[("chest", 3)], ..Look::default() };
+    let (_, scarred) = posed.skin_surface(&project, &look, None, crate::Effects::default());
+    assert_eq!(scarred.wet().iter().filter(|w| **w > 8).count(), 0, "a scar is dry");
+    let cut = wet(&[("chest", 1), ("abdomen", 1)], crate::Effects::default());
+    let pooled = wet(&[("chest", 2), ("abdomen", 2)], crate::Effects::default());
+    assert!(cut > 0 && pooled > cut, "cuts are wet, a rank-2 wound's pool more: {cut} {pooled}");
+    let bleeding = wet(&[("chest", 2), ("abdomen", 2)], crate::Effects { bleeding: true, ..Default::default() });
     assert!(bleeding > pooled, "bleeding runs wet: {bleeding} vs {pooled}");
 }

@@ -597,3 +597,7 @@ statuses }` is what a client hands the doll; `DollState::from_game` builds
 it from the game's per-part ranks (feet fold into legs through
 `cards::canonical_part`, the worse rank kept) and the names of whatever is
 active. Egui-free.
+
+`doll_sky::display()` (**new**) is the doll lit as a display -- a key light
+from the front left, a fill, a floor, a dark backdrop, no hour -- which a
+client uses by default, and `doll_sky` when it wants the room's own light.

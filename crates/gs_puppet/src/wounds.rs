@@ -2,9 +2,13 @@
 //! on the body's own surface (in feet, from a 1 px-per-foot `UvLayout`, as
 //! web and frost are), so they keep to the body through any pose and turn.
 //!
-//! Rank 1 is bruising; rank 2 bruising and cuts, blood round them; rank 3
-//! deep gashes in wet blood. A scar is a healed cut: a pale, slightly raised
-//! line, wider with its rank. Every mark is fixed by its segment, so a
+//! Rank 1 is bruising and cuts, blood round them; rank 2 larger, deeper
+//! gashes in wet blood; rank 3 takes a limb off (`draw::severed`) -- and on
+//! a part that cannot be lost (head, neck, trunk) it is worse again: torn
+//! open, gashes wide and many, the blood pooled. The stump of a lost limb
+//! wears rank 3's marks. A scar is a healed cut: a pale, slightly raised
+//! line, wider and more with its rank; a rank-3 scar on a limb is the
+//! limb healed off. Every mark is fixed by its segment, so a
 //! wound does not crawl from frame to frame, and each part's marks differ.
 //! The flat shape list (small cards) keeps the part tint instead.
 //!
@@ -18,12 +22,18 @@
 //! lines branching along every part, more and brighter by rank, that GLOW
 //! -- a lit host (the v2 pass) keeps them showing in the dark.
 //!
+//! An eye's wound or scar (`leftEye`, `rightEye`) is marked round the eye
+//! on the head: bruised and bloodshot (rank 1), a gash across it (2),
+//! gone -- a dark, bloody socket (3); scarred across (1, 2), healed shut
+//! (3). A lost eye is not drawn (`draw::eye_lost`).
+//!
 //! Statuses that show on the skin are marks too ([`status`] bits, per
 //! segment, from `Effects`): poison's green veins, disease's mottling,
 //! roots up the legs, bound's glowing bands, a bleeding part's running
 //! blood, and the whole body's shadow (hidden), pallor (invisible) or dark
 //! cast (possessed) -- baked on the same sheet, so the CPU skin and the
-//! GPU's draw them alike.
+//! GPU's draw them alike. Every status draws OVER the wounds, as web and
+//! frost do.
 //!
 //! Fresh blood is WET: the pooled blood of a rank-3 wound, the blood running
 //! from a bleeding part or down from a hurt back, and a cut's own blood
@@ -151,11 +161,106 @@ pub(crate) struct Marks {
     pub bleed: u8,
     /// The statuses its skin shows ([`status`] bits).
     pub status: u16,
+    /// Its eyes' wounds and scars (a head's; none elsewhere).
+    pub eyes: [EyeMark; 2],
+}
+
+/// One eye's wound and scar, and where it is: on its segment's surface
+/// (`station`, ring angle `theta`, as `UvLayout::locate` takes them) and,
+/// once laid out, on the surface layout (`at`, feet); its radius, feet.
+/// All fixed-point (x 1024), so a set of marks hashes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(crate) struct EyeMark {
+    pub wound: u8,
+    pub scar: u8,
+    pub station: i32,
+    pub theta: i32,
+    pub r: i32,
+    pub at: [i32; 2],
+}
+
+/// Fixed point for [`EyeMark`].
+pub(crate) const EYE_Q: f32 = 1024.0;
+
+impl EyeMark {
+    fn any(&self) -> bool {
+        self.wound > 0 || self.scar > 0
+    }
+}
+
+const BLACK_EYE_RGB: [f32; 3] = [96.0, 36.0, 64.0];
+const BLOODSHOT_RGB: [f32; 3] = [196.0, 48.0, 44.0];
+const SOCKET_RGB: [f32; 3] = [30.0, 6.0, 8.0];
+
+/// How much of a line through `c` along `dir` (unit), `half_len` each way
+/// and `half_w` wide, covers `at`; and how near its middle.
+fn stroke(at: [f32; 2], c: [f32; 2], dir: [f32; 2], half_len: f32, half_w: f32) -> (f32, f32) {
+    let (px, py) = (at[0] - c[0], at[1] - c[1]);
+    let along = px * dir[0] + py * dir[1];
+    let across = (-px * dir[1] + py * dir[0]).abs();
+    // tapering to points at its ends
+    let taper = (1.0 - (along.abs() / half_len.max(1e-4)).powi(2)).max(0.0).sqrt();
+    let w = half_w * taper;
+    if w <= 0.0 {
+        return (0.0, 0.0);
+    }
+    (1.0 - smoothstep(w * 0.55, w, across), (1.0 - across / w).clamp(0.0, 1.0))
+}
+
+/// `col` with an eye's wound and scar drawn round it; how wet.
+fn eye_marks(col: [f32; 3], at: [f32; 2], e: &EyeMark, min_half: f32) -> ([f32; 3], f32) {
+    let c0 = [e.at[0] as f32 / EYE_Q, e.at[1] as f32 / EYE_Q];
+    let r = (e.r as f32 / EYE_Q).max(min_half * 2.0);
+    let d = (at[0] - c0[0]).hypot(at[1] - c0[1]);
+    if d > r * 7.0 {
+        return (col, 0.0);
+    }
+    let (mut c, mut wet) = (col, 0.0f32);
+    if e.scar > 0 {
+        if e.scar >= 3 {
+            // healed shut: a pale lid, a dark seam across it
+            c = mix(c, SCAR_RGB, (1.0 - smoothstep(r * 0.9, r * 1.3, d)) * 0.7);
+            let (seam, _) = stroke(at, c0, [1.0, 0.0], r * 1.4, (r * 0.18).max(min_half));
+            c = mix(c, c.map(|v| v * 0.45), seam);
+        }
+        // pale scars across it, brow to cheek
+        let long = [2.6, 4.2, 4.2][e.scar.min(3) as usize - 1];
+        let (a, mid) = stroke(at, c0, [0.45, 0.89], r * long, (r * 0.3).max(min_half));
+        c = mix(c, c.map(|v| v * 0.62), a * (1.0 - mid) * 0.8);
+        c = mix(c, SCAR_RGB, a * smoothstep(0.2, 0.6, mid) * 0.9);
+        if e.scar >= 2 {
+            let (b, bm) = stroke(at, [c0[0] + r * 0.6, c0[1] - r * 0.4], [0.93, -0.37], r * 1.8, (r * 0.24).max(min_half));
+            c = mix(c, SCAR_RGB, b * smoothstep(0.2, 0.6, bm) * 0.85);
+        }
+    }
+    if e.wound > 0 {
+        // swollen and bruised round it, bloodshot in it
+        c = mix(c, BLACK_EYE_RGB, (1.0 - smoothstep(r * 1.2, r * 3.2, d)) * 0.75);
+        c = mix(c, BLOODSHOT_RGB, (1.0 - smoothstep(r * 0.7, r * 1.05, d)) * 0.6);
+        if e.wound >= 2 {
+            // a gash across it, the eye filled with blood
+            let (g, gm) = stroke(at, c0, [0.8, 0.6], r * 3.4, (r * 0.38).max(min_half));
+            c = mix(c, BLOOD_RGB, g);
+            c = mix(c, CUT_CORE_RGB, g * smoothstep(0.35, 0.8, gm));
+            let full = 1.0 - smoothstep(r * 0.8, r * 1.1, d);
+            c = mix(c, WET_BLOOD_RGB, full * 0.85);
+            wet = wet.max(g * 0.8).max(full);
+        }
+        if e.wound >= 3 {
+            // gone: a dark socket in pooled blood
+            let pool = 1.0 - smoothstep(r * 1.4, r * 2.4, d);
+            c = mix(c, WET_BLOOD_RGB, pool * 0.85);
+            let socket = 1.0 - smoothstep(r * 0.9, r * 1.3, d);
+            c = mix(c, SOCKET_RGB, socket * 0.95);
+            wet = wet.max(pool);
+        }
+    }
+    (c, wet)
 }
 
 impl Marks {
     pub fn any(&self) -> bool {
-        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0 || self.nerve > 0 || self.bleed > 0 || self.status != 0
+        self.rank > 0 || self.scar > 0 || self.back > 0 || self.back_scar > 0 || self.run > 0 || self.nerve > 0 || self.bleed > 0 || self.status != 0 || self.eyes.iter().any(EyeMark::any)
     }
 }
 
@@ -164,24 +269,24 @@ impl Marks {
 fn veins(at: [f32; 2], seg: u32, salt: u32, min_half: f32) -> f32 {
     let seed = seg.wrapping_mul(2657) ^ salt;
     let lean = (hash(seg as i32, salt) - 0.5) * 0.4;
-    let half = 0.018f32.max(min_half);
+    let half = 0.024f32.max(min_half);
     let (trunk, _) = lines_at(at, lean, seed, 0.42, 0.7, half, 0.7);
     let (left, _) = lines_at(at, lean + 0.7, seed ^ 0x3D, 0.36, 0.45, half * 0.75, 0.22);
     let (right, _) = lines_at(at, lean - 0.7, seed ^ 0x4E, 0.36, 0.45, half * 0.75, 0.22);
     trunk.max(left * 0.85).max(right * 0.85)
 }
 
-/// Under the wounds: poison, disease, roots, possession.
+/// Over the wounds: poison, disease, roots, possession.
 fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, up: f32, min_half: f32) -> [f32; 3] {
     let mut c = col;
     if bits & status::POISON != 0 {
-        c = mix(c, POISON_TINT_RGB, 0.3);
-        c = mix(c, POISON_VEIN_RGB, veins(at, seg, 0x9015, min_half) * 0.95);
+        c = mix(c, POISON_TINT_RGB, 0.38);
+        c = mix(c, POISON_VEIN_RGB, veins(at, seg, 0x9015, min_half));
     }
     if bits & status::DISEASE != 0 {
         let seed = seg.wrapping_mul(613) ^ 0xD15E;
-        c = mix(c, DISEASE_PALE_RGB, 0.34);
-        c = mix(c, DISEASE_BLOT_RGB, smoothstep(0.62, 0.74, fbm([at[0] / 0.14, at[1] / 0.14], seed)) * 0.5);
+        c = mix(c, DISEASE_PALE_RGB, 0.4);
+        c = mix(c, DISEASE_BLOT_RGB, smoothstep(0.58, 0.7, fbm([at[0] / 0.14, at[1] / 0.14], seed)) * 0.7);
         // sores: a few small raised spots, pale round a raw middle
         let cell = 0.11;
         let (cx, cy) = ((at[0] / cell).floor(), (at[1] / cell).floor());
@@ -195,8 +300,8 @@ fn afflicted(col: [f32; 3], at: [f32; 2], seg: u32, bits: u16, up: f32, min_half
         }
     }
     if bits & status::POSSESSED != 0 {
-        c = mix(c, POSSESSED_RGB, 0.5);
-        c = mix(c, POSSESSED_VEIN_RGB, veins(at, seg, 0x9055, min_half) * 0.9);
+        c = mix(c, POSSESSED_RGB, 0.6);
+        c = mix(c, POSSESSED_VEIN_RGB, veins(at, seg, 0x9055, min_half));
     }
     if bits & status::ROOTS != 0 {
         let seed = seg.wrapping_mul(389) ^ 0x2007;
@@ -225,7 +330,7 @@ fn over_all(col: [f32; 3], glow: f32, at: [f32; 2], seg: u32, bits: u16, min_hal
         let s = 0.6;
         let v = at[1] / s + 0.1 * (at[0] * 4.0 + hash(seg as i32, 91) * std::f32::consts::TAU).sin();
         let d = (v - v.floor() - 0.5).abs() * s;
-        let half = 0.03f32.max(min_half);
+        let half = 0.04f32.max(min_half);
         let band = 1.0 - smoothstep(half * 0.5, half, d);
         let halo = 1.0 - smoothstep(half, half * 3.5, d);
         c = mix(c, BOUND_RGB, band * 0.9 + halo * 0.25);
@@ -254,12 +359,12 @@ fn nerve_lines(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> (f32, f32) {
     let lean = (hash(seg as i32, 41) - 0.5) * 0.3;
     let family = |half: f32| {
         let half = half.max(min_half);
-        let (trunk, tm) = lines_at(at, lean, seed, [0.55, 0.4, 0.3][r], [0.45, 0.6, 0.75][r], half, [0.8, 1.0, 1.3][r]);
-        let (left, lm) = lines_at(at, lean + 0.65, seed ^ 0x1B, [0.5, 0.38, 0.28][r], [0.3, 0.4, 0.5][r], half * 0.8, [0.2, 0.25, 0.3][r]);
-        let (right, rm) = lines_at(at, lean - 0.65, seed ^ 0x2C, [0.5, 0.38, 0.28][r], [0.3, 0.4, 0.5][r], half * 0.8, [0.2, 0.25, 0.3][r]);
+        let (trunk, tm) = lines_at(at, lean, seed, [0.4, 0.3, 0.24][r], [0.6, 0.75, 0.88][r], half, [1.0, 1.3, 1.6][r]);
+        let (left, lm) = lines_at(at, lean + 0.65, seed ^ 0x1B, [0.38, 0.28, 0.22][r], [0.4, 0.5, 0.62][r], half * 0.8, [0.25, 0.3, 0.36][r]);
+        let (right, rm) = lines_at(at, lean - 0.65, seed ^ 0x2C, [0.38, 0.28, 0.22][r], [0.4, 0.5, 0.62][r], half * 0.8, [0.25, 0.3, 0.36][r]);
         (trunk.max(left * 0.85).max(right * 0.85), tm.max(lm).max(rm))
     };
-    let half = [0.014, 0.019, 0.025][r];
+    let half = [0.019, 0.025, 0.032][r];
     let (line, mid) = family(half);
     let (halo, _) = family(half * 3.2);
     (line.max(halo * 0.35), mid)
@@ -271,13 +376,14 @@ fn run_of_blood(at: [f32; 2], seg: u32, rank: u8, min_half: f32) -> f32 {
     let lane = 0.16;
     let cell = (at[0] / lane).floor();
     let id = cell as i32 ^ (seg as i32).wrapping_mul(131);
-    if hash(id, 21) > if rank >= 3 { 0.6 } else { 0.35 } {
+    let heavy = rank >= 2;
+    if hash(id, 21) > if heavy { 0.6 } else { 0.35 } {
         return 0.0;
     }
     let wobble = 0.2 * (at[1] * 2.7 + hash(id, 23) * 6.0).sin();
     let d = (at[0] / lane - cell - 0.5 - wobble).abs() * lane;
-    let half = (if rank >= 3 { 0.022 } else { 0.014 } as f32).max(min_half) * (0.6 + 0.8 * hash(id, 25));
-    let reach = noise([at[1] / if rank >= 3 { 1.4 } else { 0.8 }, cell * 0.61], seg ^ 0x2B1);
+    let half = (if heavy { 0.022 } else { 0.016 } as f32).max(min_half) * (0.6 + 0.8 * hash(id, 25));
+    let reach = noise([at[1] / if heavy { 1.4 } else { 0.8 }, cell * 0.61], seg ^ 0x2B1);
     (1.0 - smoothstep(half * 0.5, half, d)) * smoothstep(0.42, 0.5, reach)
 }
 
@@ -303,8 +409,8 @@ pub(crate) fn marks_at(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, up: f32, edge: f32, min_half: f32) -> ([f32; 3], f32, f32) {
     let fore = if m.split { smoothstep(-0.25, 0.25, front) } else { 1.0 };
-    let c = if m.status != 0 { afflicted(col, at, seg, m.status, up, min_half) } else { col };
-    let (mut c, mut wet) = mark_wet(c, at, seg, m.rank, m.scar, edge * fore, min_half);
+    // the wounds first; the statuses go over them (below)
+    let (mut c, mut wet) = mark_wet(col, at, seg, m.rank, m.scar, edge * fore, min_half);
     if m.split && (m.back > 0 || m.back_scar > 0) {
         let (cb, wb) = mark_wet(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half);
         c = cb;
@@ -313,8 +419,8 @@ pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front:
     if m.run > 0 {
         let side = if m.leg { 1.0 - smoothstep(-0.3, 0.3, front) } else { 1.0 - smoothstep(0.35, 0.75, front) };
         let a = run_of_blood(at, seg, m.run, min_half) * side;
-        c = mix(c, if m.run >= 3 { WET_BLOOD_RGB } else { BLOOD_RGB }, a * 0.9);
-        wet = wet.max(a * if m.run >= 3 { 0.9 } else { 0.5 });
+        c = mix(c, if m.run >= 2 { WET_BLOOD_RGB } else { BLOOD_RGB }, a * 0.9);
+        wet = wet.max(a * if m.run >= 2 { 0.9 } else { 0.5 });
     }
     if m.bleed > 0 {
         // bleeding: blood runs from the wound, all round the part
@@ -322,12 +428,21 @@ pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front:
         c = mix(c, WET_BLOOD_RGB, a * 0.9);
         wet = wet.max(a);
     }
+    for e in m.eyes.iter().filter(|e| e.any()) {
+        let (ce, we) = eye_marks(c, at, e, min_half);
+        c = ce;
+        wet = wet.max(we);
+    }
     let mut glow = 0.0;
     if m.nerve > 0 {
         let (a, mid) = nerve_lines(at, seg, m.nerve, min_half);
         c = mix(c, NERVE_RGB, a);
         c = mix(c, NERVE_CORE_RGB, smoothstep(0.4, 0.9, mid) * a);
-        glow = a * [0.35, 0.6, 0.9][m.nerve.min(3) as usize - 1];
+        glow = a * [0.6, 0.9, 1.0][m.nerve.min(3) as usize - 1];
+    }
+    // statuses over the wounds: poison's veins, disease, possession, roots
+    if m.status != 0 {
+        c = afflicted(c, at, seg, m.status, up, min_half);
     }
     if m.status & (status::BOUND | status::SHADOW | status::GHOST) != 0 {
         let (c, glow) = over_all(c, glow, at, seg, m.status, min_half);
@@ -353,8 +468,8 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
     if scar > 0 {
         let r = scar.min(3) as usize - 1;
         let seed = seg.wrapping_mul(977) ^ 0x5CA2;
-        let half = ([0.018, 0.028, 0.045][r] as f32).max(min_half);
-        let (cover, mid) = lines(at, seed, [0.55, 0.5, 0.42][r], [0.55, 0.65, 0.7][r], half, [0.45, 0.6, 0.8][r]);
+        let half = ([0.03, 0.048, 0.068][r] as f32).max(min_half);
+        let (cover, mid) = lines(at, seed, [0.5, 0.42, 0.34][r], [0.65, 0.72, 0.82][r], half, [0.6, 0.8, 1.05][r]);
         // pale in the middle, a faint darker seam at its edges
         c = mix(c, c.map(|v| v * 0.62), cover * (1.0 - mid) * 0.8 * edge);
         c = mix(c, SCAR_RGB, cover * smoothstep(0.2, 0.6, mid) * 0.9 * edge);
@@ -367,24 +482,31 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
     let seed = seg.wrapping_mul(7717) ^ 0xB10D;
     // bruising: soft blotches, more and redder with rank
     let blot = fbm([at[0] / 0.32, at[1] / 0.32], seed);
-    let bruise = smoothstep([0.6, 0.52, 0.46][r], [0.78, 0.72, 0.66][r], blot) * edge;
-    let tone = mix(BRUISE_RGB, FRESH_BRUISE_RGB, r as f32 * 0.5);
-    c = mix(c, tone, bruise * [0.45, 0.5, 0.55][r]);
+    let bruise = smoothstep([0.52, 0.47, 0.47][r], [0.7, 0.65, 0.65][r], blot) * edge;
+    let tone = mix(BRUISE_RGB, FRESH_BRUISE_RGB, [0.5, 1.0, 1.0][r]);
+    c = mix(c, tone, bruise * [0.66, 0.74, 0.82][r]);
+    // cuts, with blood run into the skin round them: longer, wider and
+    // more with rank
+    let half = ([0.034, 0.058, 0.08][r] as f32).max(min_half);
+    let (spacing, keep, length) = ([0.5, 0.4, 0.32][r], [0.58, 0.78, 0.9][r], [0.5, 0.7, 0.95][r]);
+    let (cover, mid) = lines(at, seed ^ 0xC07, spacing, keep, half, length);
+    // the blood round a cut: no wider than a third of the gap between cuts
+    let (halo, _) = lines(at, seed ^ 0xC07, spacing, keep, (half * 3.5).min(spacing * 0.3), length);
+    c = mix(c, BLOOD_RGB, halo * 0.5 * edge);
+    c = mix(c, BLOOD_RGB, cover * edge);
+    c = mix(c, CUT_CORE_RGB, cover * smoothstep(0.35, 0.8, mid) * edge);
+    wet = wet.max(cover * edge * [0.4, 0.65, 0.85][r]);
     if rank >= 2 {
-        // cuts, with blood run into the skin round them
-        let half = ([0.0, 0.03, 0.05][r] as f32).max(min_half);
-        let (cover, mid) = lines(at, seed ^ 0xC07, [0.0, 0.5, 0.38][r], [0.0, 0.55, 0.75][r], half, [0.0, 0.45, 0.6][r]);
-        let (halo, _) = lines(at, seed ^ 0xC07, [0.0, 0.5, 0.38][r], [0.0, 0.55, 0.75][r], half * 3.5, [0.0, 0.45, 0.6][r]);
-        c = mix(c, BLOOD_RGB, halo * 0.35 * edge);
-        c = mix(c, BLOOD_RGB, cover * edge);
-        c = mix(c, CUT_CORE_RGB, cover * smoothstep(0.35, 0.8, mid) * edge);
-        wet = wet.max(cover * edge * [0.0, 0.35, 0.6][r]);
+        // wet blood pooled over the worst of it
+        let pool = smoothstep([0.0, 0.62, 0.52][r], [0.0, 0.74, 0.66][r], fbm([at[0] / 0.22 + 3.3, at[1] / 0.22], seed ^ 0xB100)) * edge;
+        c = mix(c, WET_BLOOD_RGB, pool * [0.0, 0.8, 0.9][r]);
+        wet = wet.max(pool);
     }
     if rank >= 3 {
-        // wet blood pooled over the worst of it
-        let pool = smoothstep(0.62, 0.74, fbm([at[0] / 0.22 + 3.3, at[1] / 0.22], seed ^ 0xB100)) * edge;
-        c = mix(c, WET_BLOOD_RGB, pool * 0.8);
-        wet = wet.max(pool);
+        // torn open: raw flesh in the deepest of it
+        let torn = smoothstep(0.64, 0.76, fbm([at[0] / 0.16 - 2.1, at[1] / 0.16 + 4.7], seed ^ 0x7042)) * edge;
+        c = mix(c, CUT_CORE_RGB, torn * 0.85);
+        wet = wet.max(torn);
     }
     (c, wet)
 }
@@ -537,9 +659,9 @@ mod tests {
         let (a1, r1) = over(1, 0);
         let (a2, r2) = over(2, 0);
         let (a3, r3) = over(3, 0);
-        assert!(a1 > 0.03 && a1 < a2 && a2 < a3, "{a1} {a2} {a3}");
-        assert!(r1 < 0.01 && r2 > r1 && r3 > r2, "{r1} {r2} {r3}");
-        assert!(a3 < 0.8, "a wound is marks on the skin, not a wash: {a3}");
+        assert!(a1 > 0.1 && a1 < a2 && a2 < a3, "{a1} {a2} {a3}");
+        assert!(r1 > 0.02 && r2 > r1 * 1.3 && r3 > r2, "rank 1 already cuts and bleeds: {r1} {r2} {r3}");
+        assert!(a3 < 0.9, "a wound is marks on the skin, not a wash: {a3}");
     }
 
     #[test]
@@ -565,15 +687,15 @@ mod tests {
         assert!(changed(-1.0, &run) > 100, "blood runs down its back: {}", changed(-1.0, &run));
     }
 
-    /// Fresh blood is wet -- a rank-3 wound's pool most, a bleeding part's
-    /// run -- and bruises, scars and nerves are dry.
+    /// Fresh blood is wet -- a wound's cuts, a worse wound's pool more, a
+    /// bleeding part's run -- and scars and nerves are dry.
     #[test]
     fn fresh_blood_is_wet() {
         let skin = [200.0, 170.0, 150.0];
         let wet = |m: Marks| (0..3600).map(|i| marks_wet(skin, [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04], 4, &m, 1.0, 0.0, 1.0, 0.01).2).sum::<f32>();
-        assert_eq!(wet(Marks { rank: 1, scar: 3, nerve: 3, ..Marks::default() }), 0.0);
-        let (w2, w3) = (wet(Marks { rank: 2, ..Marks::default() }), wet(Marks { rank: 3, ..Marks::default() }));
-        assert!(w2 > 1.0 && w3 > w2 * 1.5, "{w2} {w3}");
+        assert_eq!(wet(Marks { scar: 3, nerve: 3, ..Marks::default() }), 0.0);
+        let (w1, w2) = (wet(Marks { rank: 1, ..Marks::default() }), wet(Marks { rank: 2, ..Marks::default() }));
+        assert!(w1 > 1.0 && w2 > w1 * 1.5, "{w1} {w2}");
         assert!(wet(Marks { rank: 1, bleed: 1, ..Marks::default() }) > 10.0);
     }
 
@@ -609,6 +731,25 @@ mod tests {
         assert_eq!(sheet.apply([10.0, 20.0, 30.0], [3.6, 3.6]).0, [10.0, 20.0, 30.0]);
     }
 
+    /// A status draws over a wound: poisoned, a wound's blood is tinted
+    /// and veined like the rest of the skin.
+    #[test]
+    fn statuses_draw_over_wounds() {
+        let skin = [200.0, 170.0, 150.0];
+        let at = |i: u32| [(i % 60) as f32 * 0.04, (i / 60) as f32 * 0.04];
+        let wounded = Marks { rank: 2, ..Marks::default() };
+        let both = Marks { rank: 2, status: status::POISON, ..Marks::default() };
+        // where the wound is, the poison still changes it
+        let over = (0..3600)
+            .filter(|&i| {
+                let w = marks(skin, at(i), 4, &wounded, 1.0, 1.0, 0.01).0;
+                w != skin && marks(skin, at(i), 4, &both, 1.0, 1.0, 0.01).0 != w
+            })
+            .count();
+        let under = (0..3600).filter(|&i| marks(skin, at(i), 4, &wounded, 1.0, 1.0, 0.01).0 != skin).count();
+        assert!(over as f32 > under as f32 * 0.9, "{over} of {under}");
+    }
+
     /// Every status marks the skin, each its own way; bound's bands glow.
     #[test]
     fn statuses_mark_the_skin() {
@@ -633,6 +774,25 @@ mod tests {
         let (bled, _) = look(Marks { rank: 2, bleed: 2, ..Marks::default() });
         let (cut, _) = look(Marks { rank: 2, ..Marks::default() });
         assert!(bled > cut, "bleeding runs blood: {bled} vs {cut}");
+    }
+
+    /// An eye's wound marks round it, more with rank, a lost one wet and
+    /// dark in its middle; a scar marks it dry; far off, nothing.
+    #[test]
+    fn eyes_are_marked() {
+        let skin = [200.0, 170.0, 150.0];
+        let eye = |wound: u8, scar: u8| Marks {
+            eyes: [EyeMark { wound, scar, at: [(1.0 * EYE_Q) as i32; 2], r: (0.06 * EYE_Q) as i32, ..EyeMark::default() }, EyeMark::default()],
+            ..Marks::default()
+        };
+        let changed = |m: &Marks| (0..3600).filter(|i| marks(skin, [0.4 + (i % 60) as f32 * 0.02, 0.4 + (i / 60) as f32 * 0.02], 4, m, 1.0, 1.0, 0.005).0 != skin).count();
+        let (w1, w2, w3) = (changed(&eye(1, 0)), changed(&eye(2, 0)), changed(&eye(3, 0)));
+        assert!(w1 > 50 && w2 >= w1 && w3 >= w2, "{w1} {w2} {w3}");
+        let middle = |m: &Marks| marks_wet(skin, [1.0, 1.0], 4, m, 1.0, 0.0, 1.0, 0.005);
+        let (lost, _, wet) = middle(&eye(3, 0));
+        assert!(lost.iter().all(|v| *v < 60.0) && wet > 0.5, "a lost eye is a dark, wet socket: {lost:?} {wet}");
+        assert!(changed(&eye(0, 2)) > 20 && middle(&eye(0, 3)).2 == 0.0, "a scar marks it, dry");
+        assert_eq!(marks(skin, [3.0, 3.0], 4, &eye(3, 3), 1.0, 1.0, 0.005).0, skin, "far off, nothing");
     }
 
     #[test]

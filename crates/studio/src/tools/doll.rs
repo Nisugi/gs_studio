@@ -57,6 +57,9 @@ pub struct DollWindow {
     /// Stand under the field's own sky (the stage's scene, clock and
     /// facing) when it has one, not these sliders.
     follow_field: bool,
+    /// Lit as a display (`doll_sky::display`: a steady key and fill on a
+    /// dark backdrop, the default) or by the sky round the player.
+    display: bool,
     /// `GS_STUDIO_DOLL_HIT`: a wound rank to raise at a frame (part index,
     /// rank, frame), and the frames drawn so far -- a hit for a screenshot.
     hit: Option<(usize, u8, u32)>,
@@ -82,6 +85,7 @@ impl Default for DollWindow {
             clouds: 0.0,
             indoor: false,
             follow_field: false,
+            display: true,
             hit: None,
             frames: 0,
             gpu_skin: true,
@@ -90,8 +94,10 @@ impl Default for DollWindow {
 }
 
 impl DollWindow {
-    /// `GS_STUDIO_DOLL=<hour>[,<facing>][,indoor][,new]` opens it for the run
-    /// (`new`: a new moon; `field`: under the stage's sky).
+    /// `GS_STUDIO_DOLL=[<hour>][,<facing>][,indoor][,new][,sky][,field]` opens
+    /// it for the run, lit as a display unless `sky` (the hour, facing,
+    /// indoors and `new` moon are the sky's) or `field` (under the stage's
+    /// sky).
     /// `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at that frame.
     /// (screenshots): `GS_STUDIO_DOLL=23,s`. `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3`
     /// sets its wounds.
@@ -102,8 +108,11 @@ impl DollWindow {
             for (i, part) in v.split(',').map(str::trim).enumerate() {
                 if part == "indoor" {
                     w.indoor = true;
+                } else if part == "sky" {
+                    w.display = false;
                 } else if part == "field" {
                     w.follow_field = true;
+                    w.display = false;
                 } else if part == "new" {
                     w.moon = 0.0;
                 } else if i == 0 {
@@ -144,6 +153,9 @@ impl DollWindow {
     }
 
     fn sky(&self, ctx: &egui::Context) -> gs_field::doll_sky::DollSky {
+        if self.display {
+            return gs_field::doll_sky::display();
+        }
         if let Some(sky) = self.follow_field.then(|| gs_field_egui::doll_view::field_sky(ctx)).flatten() {
             return sky;
         }
@@ -274,7 +286,16 @@ impl DollWindow {
             }
         });
 
-        super::group(ui, "Sky");
+        super::group(ui, "Light");
+        ui.horizontal(|ui| {
+            ui.radio_value(&mut self.display, true, "Display")
+                .on_hover_text("A steady light on a dark backdrop: wounds and statuses read the same at any hour");
+            ui.radio_value(&mut self.display, false, "The sky")
+                .on_hover_text("The sun or moons round the player, from the way they face, over that sky");
+        });
+        if self.display {
+            return;
+        }
         let field = gs_field_egui::doll_view::field_sky(ui.ctx()).is_some();
         ui.checkbox(&mut self.follow_field, "The field's sky")
             .on_hover_text(if field {

@@ -51,7 +51,8 @@ pub struct Prim {
 pub struct Look<'a> {
     /// Body colour (the game supplies a muted per-noun colour).
     pub body: [u8; 3],
-    /// `(part, rank 1..=3)`. Rank 3 on an arm / leg part severs it.
+    /// `(part, rank 1..=3)`. Rank 3 on an arm, hand or leg part severs it
+    /// (as does a rank-3 scar, healed).
     pub wounds: &'a [(&'a str, u8)],
     /// `(part, rank 1..=3)`: healed wounds' scars (a hero's, healed with
     /// herbs). Drawn on the smooth skin only.
@@ -100,18 +101,35 @@ fn rank_in(list: &[(&str, u8)], part: Option<&str>) -> u8 {
     list.iter().filter(|(p, _)| *p == part).map(|(_, r)| (*r).min(3)).max().unwrap_or(0)
 }
 
-fn is_severable(part: &str) -> bool {
-    part.ends_with("Arm") || part.ends_with("Leg")
+/// The doll part an eye is: the creature's right eye is on its -x side.
+pub(crate) fn eye_part(eye: &crate::puppet::Eye) -> &'static str {
+    if eye.pos[0] < 0.0 {
+        "rightEye"
+    } else {
+        "leftEye"
+    }
 }
 
-/// Severed limbs: `(hidden, stump)` per segment. The first segment of a
-/// rank-3 arm / leg part becomes a stump; the rest of its subtree (forearm,
-/// hand, shin, foot) is hidden. So is anything a garment covers.
+/// An eye a rank-3 wound or scar has taken: not drawn.
+pub(crate) fn eye_lost(look: &Look, eye: &crate::puppet::Eye) -> bool {
+    let part = Some(eye_part(eye));
+    look.rank(part) >= 3 || look.scar(part) >= 3
+}
+
+/// A part a rank-3 wound (or scar) takes off: an arm, a hand, a leg.
+pub fn is_severable(part: &str) -> bool {
+    part.ends_with("Arm") || part.ends_with("Leg") || part.ends_with("Hand")
+}
+
+/// Severed limbs: `(hidden, stump)` per segment. The first segment of an
+/// arm, hand or leg part with a rank-3 wound -- or a rank-3 scar, the limb
+/// healed off -- becomes a stump; the rest of its subtree (forearm, hand,
+/// shin, foot) is hidden. So is anything a garment covers.
 pub fn severed(posed: &Posed, look: &Look) -> (Vec<bool>, Vec<bool>) {
     let p = posed.puppet;
     let mut hidden: Vec<bool> = p.segments.iter().map(|s| s.hidden).collect();
     let mut stump = vec![false; p.segments.len()];
-    for (part, rank) in look.wounds {
+    for (part, rank) in look.wounds.iter().chain(look.scars) {
         if *rank < 3 || !is_severable(part) {
             continue;
         }
@@ -334,12 +352,14 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
                 let a = norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0]);
                 let reach = end.w.min(end.d) * 0.8;
                 // A raw end: a red collar, then a red dome, real volume,
-                // so it shows from any angle.
-                stations.push((Station { c: add(end.c, scale(a, reach * 0.12)), w: end.w * 1.04, d: end.d * 1.04 }, true));
+                // so it shows from any angle. Healed (a rank-3 scar and no
+                // wound), the dome is closed skin.
+                let raw = look.rank(s.part.as_deref()) >= 3;
+                stations.push((Station { c: add(end.c, scale(a, reach * 0.12)), w: end.w * 1.04, d: end.d * 1.04 }, raw));
                 for k in 1..=3 {
                     let phi = k as f32 / 3.0 * std::f32::consts::FRAC_PI_2 * 0.94;
                     let c = add(end.c, scale(a, reach * (0.12 + phi.sin())));
-                    stations.push((Station { c, w: end.w * phi.cos(), d: end.d * phi.cos() }, true));
+                    stations.push((Station { c, w: end.w * phi.cos(), d: end.d * phi.cos() }, raw));
                 }
             }
         }
@@ -551,7 +571,7 @@ impl Posed<'_> {
 
             if !look.dead {
                 let x = &self.xf[i];
-                for eye in puppet.eyes.iter().filter(|e| e.segment == i) {
+                for eye in puppet.eyes.iter().filter(|e| e.segment == i && !eye_lost(look, e)) {
                     let pos = mul_mv(&turn, x.point(eye.pos));
                     let normal = mul_mv(&turn, x.dir(eye.normal));
                     if dot(normal, view.to_cam) > 0.25 {

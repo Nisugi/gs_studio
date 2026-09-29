@@ -112,6 +112,30 @@ pub fn sun_arc(hour: f32, (rise, set): (f32, f32), facing: Option<f32>) -> Optio
     Some((azimuth, elevation))
 }
 
+/// The doll as a display (ADDITION, its default): a steady white key light
+/// from the front left, high, a soft cool fill from the right, a floor of
+/// light so nothing drops to black, and a plain dark backdrop -- no sky,
+/// no hour. It shows wounds and statuses as they are, the same at noon and
+/// at midnight; [`doll_sky`] stands it in the room's own light instead.
+pub fn display() -> DollSky {
+    DollSky {
+        lights: vec![
+            DollSkyLight { azimuth: -30.0, elevation: 38.0, colour: [1.0, 0.98, 0.95], power: DISPLAY_KEY },
+            DollSkyLight { azimuth: 55.0, elevation: 12.0, colour: [0.82, 0.9, 1.0], power: DISPLAY_FILL },
+        ],
+        floor: [DISPLAY_FLOOR; 3],
+        sky_top: [0.020, 0.022, 0.028],
+        sky_horizon: [0.10, 0.105, 0.12],
+        ground: [0.075, 0.075, 0.08],
+        indoor: true,
+    }
+}
+
+/// [`display`]'s key and fill light, and its floor.
+const DISPLAY_KEY: f32 = 1.0;
+const DISPLAY_FILL: f32 = 0.35;
+const DISPLAY_FLOOR: f32 = 0.42;
+
 /// The doll's light at `hour` under `sky` (its moons, cloud, day and the
 /// player's facing), outdoors or not. No hour: a steady day, the sun high
 /// and to the front left.
@@ -173,6 +197,17 @@ pub fn doll_sky(hour: Option<f32>, sky: &Sky, outdoor: bool) -> DollSky {
 
 #[cfg(test)]
 mod tests {
+    /// The display: lit from the front (the key toward the viewer's side
+    /// of the doll), a fill, a floor well above the sky's, a dark backdrop.
+    #[test]
+    fn the_display_lights_the_doll_from_the_front_on_dark() {
+        let d = super::display();
+        assert_eq!(d.lights.len(), 2);
+        assert!(d.lights[0].azimuth.abs() < 90.0 && d.lights[0].power > d.lights[1].power);
+        assert!(d.floor[0] > super::DAY_FLOOR);
+        assert!(d.sky_horizon.iter().chain(&d.ground).all(|c| *c < 0.15), "a dark backdrop");
+    }
+
     use super::*;
 
     fn sky_at(facing: Option<f32>) -> Sky {

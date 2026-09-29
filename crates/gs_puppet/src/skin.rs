@@ -157,6 +157,9 @@ const WEB_RGB: [f32; 3] = [236.0, 236.0, 226.0];
 const FROST_RGB: [f32; 3] = [138.0, 190.0, 240.0];
 /// Strand spacing on the surface, feet.
 const WEB_SPACING_FT: f32 = 0.42;
+/// The thinnest a wound, scar or status line is drawn, in web strands (a
+/// strand is about a pixel): thick enough to read on a small figure.
+const MARKS_MIN_STRANDS: f32 = 1.4;
 /// Threads bridging limb to body on a webbed figure.
 const BIND_THREADS: u32 = 7;
 
@@ -250,15 +253,53 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
             split,
             back: if split { back } else { 0 },
             back_scar: if split { back_scar } else { 0 },
-            run: if back >= 2 && (split || leg) { back } else { 0 },
+            run: if back >= 1 && (split || leg) { back } else { 0 },
             leg,
             // a dead body keeps its wounds, but its nerves no longer glow
             nerve: if look.dead || prop { 0 } else { nerve },
             bleed: if effects.bleeding && !look.dead { surf.rank } else { 0 },
             status: bits,
+            eyes: eye_marks(puppet, surf.index, look),
         };
     }
     marks
+}
+
+/// The wounds and scars of segment `seg`'s eyes (up to two), where they
+/// sit on its surface; laid out by [`marks_sheet`].
+fn eye_marks(puppet: &crate::puppet::Puppet, seg: usize, look: &Look) -> [crate::wounds::EyeMark; 2] {
+    use crate::wounds::{EyeMark, EYE_Q};
+    let mut out = [EyeMark::default(); 2];
+    let s = &puppet.segments[seg];
+    for (slot, eye) in puppet.eyes.iter().filter(|e| e.segment == seg).take(2).enumerate() {
+        let part = crate::draw::eye_part(eye);
+        let rank = |list: &[(&str, u8)]| list.iter().filter(|(p, _)| *p == part).map(|(_, r)| (*r).min(3)).max().unwrap_or(0);
+        let (wound, scar) = (rank(look.wounds), rank(look.scars));
+        if (wound == 0 && scar == 0) || s.stations.is_empty() {
+            continue;
+        }
+        // its station along the segment, and its angle round the ring
+        let axis = norm_or(sub(s.tail, s.head), [0.0, 1.0, 0.0]);
+        let t = dot(sub(eye.pos, s.head), axis);
+        let ts: Vec<f32> = s.stations.iter().map(|st| dot(sub(st.c, s.head), axis)).collect();
+        let mut station = 0.0;
+        for k in 0..ts.len().saturating_sub(1) {
+            let (a, b) = (ts[k], ts[k + 1]);
+            if (t - a) * (t - b) <= 0.0 {
+                station = k as f32 + if (b - a).abs() > 1e-6 { (t - a) / (b - a) } else { 0.0 };
+                break;
+            }
+            if t > b {
+                station = (k + 1) as f32;
+            }
+        }
+        let k = (station.floor() as usize).min(s.stations.len() - 1);
+        let st = s.stations[k];
+        let rel = sub(eye.pos, st.c);
+        let theta = (dot(rel, s.axis_d) / st.d.max(1e-4)).atan2(dot(rel, s.axis_w) / st.w.max(1e-4));
+        out[slot] = EyeMark { wound, scar, station: (station * EYE_Q) as i32, theta: (theta * EYE_Q) as i32, r: (eye.radius * EYE_Q) as i32, at: [0; 2] };
+    }
+    out
 }
 
 /// `marks` baked onto `layout` (the 1 px-per-foot surface layout), at a
@@ -278,6 +319,24 @@ fn marks_sheet(
     let mut h = std::collections::hash_map::DefaultHasher::new();
     (&puppet.family, puppet.segments.len(), puppet.height.to_bits(), layout.w, layout.h, marks, per_ft.to_bits(), half.to_bits()).hash(&mut h);
     let key = h.finish();
+    // the eyes, laid out
+    let marks: Vec<crate::wounds::Marks> = marks
+        .iter()
+        .enumerate()
+        .map(|(seg, m)| {
+            let mut m = *m;
+            for e in m.eyes.iter_mut().filter(|e| e.wound > 0 || e.scar > 0) {
+                let q = crate::wounds::EYE_Q;
+                if let Some(at) = layout.locate(seg, e.station as f32 / q, e.theta as f32 / q) {
+                    // the layout is a pixel per foot
+                    let per = layout.px_per_ft.max(1e-6);
+                    e.at = [(at[0] / per * q) as i32, (at[1] / per * q) as i32];
+                }
+            }
+            m
+        })
+        .collect();
+    let marks = &marks[..];
     crate::wounds::sheet(key, || {
         // the edge fade per ring, per segment, as the mesh has them
         let mut tints: Vec<Vec<f32>> = vec![Vec::new(); puppet.segments.len()];
@@ -1159,14 +1218,14 @@ impl Posed<'_> {
         let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
         let layout = (marked || effects.any()).then(|| UvLayout::new(puppet, 1.0));
         let marks = layout.as_ref().filter(|_| marked).map(|layout| {
-            let sheet = marks_sheet(puppet, layout, &surfs, &marks, strand_ft * 0.8);
+            let sheet = marks_sheet(puppet, layout, &surfs, &marks, strand_ft * MARKS_MIN_STRANDS);
             (sheet, marks.iter().map(|m| m.any()).collect::<Vec<bool>>())
         });
         // an unpainted skin's eyes, as the CPU places them
         let mut eyes = Vec::new();
         if !look.dead && texture.is_none() {
             let turn = rot_y(look.yaw);
-            for eye in &puppet.eyes {
+            for eye in puppet.eyes.iter().filter(|e| !crate::draw::eye_lost(look, e)) {
                 if !surfs.iter().any(|s| s.index == eye.segment) {
                     continue;
                 }
@@ -1332,7 +1391,7 @@ impl Posed<'_> {
         let turn = rot_y(look.yaw);
         let rot = |seg: usize, v: V3| mul_mv(&turn, self.xf[seg].dir(v));
         let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
-        let marks_sheet = surface.as_ref().filter(|_| marked).map(|layout| marks_sheet(puppet, layout, &surfs, &marks, strand_ft * 0.8));
+        let marks_sheet = surface.as_ref().filter(|_| marked).map(|layout| marks_sheet(puppet, layout, &surfs, &marks, strand_ft * MARKS_MIN_STRANDS));
         let paint = Paint {
             tex: texture,
             rot: &rot,
@@ -1439,7 +1498,7 @@ impl Posed<'_> {
         // on top of them would give it four)
         if !look.dead && texture.is_none() {
             let turn = rot_y(look.yaw);
-            for eye in &puppet.eyes {
+            for eye in puppet.eyes.iter().filter(|e| !crate::draw::eye_lost(look, e)) {
                 if !surfs.iter().any(|s| s.index == eye.segment) {
                     continue;
                 }

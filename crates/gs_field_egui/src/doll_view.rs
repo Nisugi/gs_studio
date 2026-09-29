@@ -1,9 +1,12 @@
 //! The injury doll: one puppet in a window of its own -- its wounds, lost
 //! limbs, statuses, pose, breath and what it holds are all the
-//! [`PuppetKey`]'s -- lit by the v2 pass ([`field_gpu`]) under the sky round
-//! the player ([`gs_field::doll_sky`]: the sun or the moons from where they
-//! are round the way the player faces, a room light indoors), over a
-//! background of that sky and the ground it stands on.
+//! [`PuppetKey`]'s -- lit by the v2 pass ([`field_gpu`]) by the [`DollSky`]
+//! it is given: as a display (`gs_field::doll_sky::display`, what a client
+//! shows by default: a steady key and fill over a dark backdrop, so wounds
+//! and statuses read at any hour), or under the sky round the player
+//! (`gs_field::doll_sky::doll_sky`: the sun or the moons from where they
+//! are round the way the player faces, a room light indoors) over that sky
+//! and the ground it stands on.
 //!
 //! It is its own view of the pass ([`field_gpu::paint_view`], [`DOLL_VIEW`]),
 //! so it draws in the same egui pass as the field, lit its own way.
@@ -57,8 +60,15 @@ const CONTACT_DARK: f32 = 0.55;
 /// The rim: the sky behind the doll lighting its edges -- this high,
 /// this strong outdoors (by the sky's horizon colour) and indoors.
 const RIM_ELEVATION: f32 = 28.0;
-const RIM_POWER: f32 = 0.55;
-const RIM_POWER_INDOOR: f32 = 0.25;
+const RIM_POWER: f32 = 0.28;
+const RIM_POWER_INDOOR: f32 = 0.14;
+/// The backdrop is the sky and ground a little dimmed -- the pass lights
+/// it too, and at noon a true sky washes the doll out -- and darkened
+/// toward the window's edges (`VIGNETTE` at the corners), so the figure
+/// and what marks it stand out.
+const SKY_GAIN: f32 = 0.55;
+const GROUND_GAIN: f32 = 0.7;
+const VIGNETTE: f32 = 0.45;
 /// A hit on the back turns the doll to show it: this long in all, the turn
 /// round and back each taking [`TURN_SECS`].
 const SHOW_BACK_SECS: f64 = 2.4;
@@ -142,7 +152,8 @@ fn sky_light(cam: &FieldCamera, azimuth: f32, elevation: f32, colour: [f32; 3], 
     let (sa, ca) = azimuth.to_radians().sin_cos();
     let (se, ce) = elevation.to_radians().sin_cos();
     let toward = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
-    FieldLight::moon(toward, colour, power, 0.0, [0.0, 0.0])
+    // matte: a sheen off the figure bleaches its wounds and marks
+    FieldLight { sheen_creature: 0.0, ..FieldLight::moon(toward, colour, power, 0.0, [0.0, 0.0]) }
 }
 
 /// The background: the sky from its top to the horizon (a wall indoors),
@@ -167,23 +178,26 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32)) -
             let ground = sy >= cam.cy;
             let (a, l) = if !ground {
                 let t = (sy / cam.cy.max(1.0)).clamp(0.0, 1.0).powf(1.6);
-                let c = [0, 1, 2].map(|i| sky.sky_top[i] + (sky.sky_horizon[i] - sky.sky_top[i]) * t);
+                let c = [0, 1, 2].map(|i| (sky.sky_top[i] + (sky.sky_horizon[i] - sky.sky_top[i]) * t) * SKY_GAIN);
                 (c, c)
             } else {
                 // the ground, darkening toward the viewer's feet so the doll
                 // stands out of it
                 let t = ((sy - cam.cy) / (sh - cam.cy).max(1.0)).clamp(0.0, 1.0);
-                let c = sky.ground.map(|g| g * (1.0 - 0.35 * t));
+                let c = sky.ground.map(|g| g * GROUND_GAIN * (1.0 - 0.35 * t));
                 (c, [0, 1, 2].map(|i| c[i] * sky.floor[i]))
             };
             for i in 0..w {
+                let sx = (i as f32 + 0.5) * sw / w as f32;
                 let k = if ground {
-                    let sx = (i as f32 + 0.5) * sw / w as f32;
                     let d = ((sx - feet.x) / rx).powi(2) + ((sy - feet.y) / ry).powi(2);
                     1.0 - CONTACT_DARK * (-1.6 * d).exp()
                 } else {
                     1.0
                 };
+                // the vignette: 0 in the middle, 1 at the corners
+                let (vx, vy) = (sx / sw * 2.0 - 1.0, sy / sh * 2.0 - 1.0);
+                let k = k * (1.0 - VIGNETTE * ((vx * vx + vy * vy) * 0.5).min(1.0));
                 let (a, l) = (srgb(a.map(|c| c * k)), srgb(l.map(|c| c * k)));
                 albedo.extend_from_slice(&[a[0], a[1], a[2], 255]);
                 lit.extend_from_slice(&[l[0], l[1], l[2], 0]);
@@ -337,6 +351,17 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     true
 }
 
+/// `text` at `at`, `size` points, over a dark shadow so it reads on a
+/// bright sky as on a dark one.
+fn shadowed_text(painter: &egui::Painter, at: egui::Pos2, text: &str, size: f32, colour: egui::Color32) {
+    let font = egui::FontId::proportional(size);
+    let shade = egui::Color32::from_black_alpha((colour.a() as f32 * 0.8) as u8);
+    for d in [egui::vec2(1.2, 1.2), egui::vec2(-1.0, 1.0), egui::vec2(1.0, -1.0)] {
+        painter.text(at + d, egui::Align2::CENTER_CENTER, text, font.clone(), shade);
+    }
+    painter.text(at, egui::Align2::CENTER_CENTER, text, font, colour);
+}
+
 /// How far the doll is turned from facing the viewer when the host does
 /// not say: a little, so it reads as a figure and not a cut-out.
 pub const DOLL_TURN_DEG: f32 = 20.0;
@@ -402,7 +427,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
             let a = t * 2.4 + k as f32 * tau / 3.0;
             let c = pos2(head.x + a.cos() * u * 0.1, top - u * 0.02 + a.sin() * u * 0.025);
             let near = 0.5 + 0.5 * a.sin();
-            let r = u * (0.018 + 0.01 * near);
+            let r = u * (0.026 + 0.012 * near);
             let pts: Vec<egui::Pos2> = (0..10)
                 .map(|i| {
                     let ang = -tau / 4.0 + i as f32 * tau / 10.0 + t * 1.5;
@@ -411,7 +436,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
                 })
                 .collect();
             painter.add(Shape::convex_polygon(pts.clone(), rgba(255, 226, 90, 0.55 + 0.45 * near), Stroke::NONE));
-            painter.add(Shape::closed_line(pts, Stroke::new(1.0, rgba(120, 80, 10, 0.6 + 0.4 * near))));
+            painter.add(Shape::closed_line(pts, Stroke::new(1.6, rgba(70, 40, 0, 0.75 + 0.25 * near))));
         }
     }
     if s.has(Status::Sleeping) {
@@ -419,8 +444,8 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
         for k in 0..3 {
             let p = fract(t / 2.6 + k as f32 / 3.0);
             let at = pos2(head.x + u * (0.06 + 0.1 * p) + (p * tau).sin() * u * 0.015, top - u * 0.02 - p * u * 0.2);
-            let size = u * (0.04 + 0.05 * p);
-            painter.text(at, egui::Align2::CENTER_CENTER, "z", egui::FontId::proportional(size), rgba(220, 230, 255, (1.0 - p) * 1.4));
+            let size = u * (0.055 + 0.06 * p);
+            shadowed_text(painter, at, "z", size, rgba(225, 235, 255, (1.0 - p) * 1.4));
         }
     }
     if s.has(Status::Confused) {
@@ -428,7 +453,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
         for k in 0..2 {
             let a = t * 1.3 + k as f32 * std::f32::consts::PI;
             let at = pos2(head.x + a.cos() * u * 0.11, top - u * 0.05 + (t * 3.0 + k as f32).sin() * u * 0.02);
-            painter.text(at, egui::Align2::CENTER_CENTER, "?", egui::FontId::proportional(u * 0.07), rgba(214, 190, 255, 0.6 + 0.3 * a.sin()));
+            shadowed_text(painter, at, "?", u * 0.09, rgba(222, 200, 255, 0.75 + 0.25 * a.sin()));
         }
     }
     if s.has(Status::Bleeding) {
@@ -439,8 +464,8 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
             let x = mid_x + (fract(seed * 7.3) - 0.5) * half_w * 0.9;
             let from = foot.y - body * (0.35 + 0.3 * fract(seed * 3.1));
             let y = from + (foot.y - from) * p * p;
-            let r = u * 0.009;
-            let red = rgba(150, 12, 16, if p > 0.92 { (1.0 - p) * 12.0 } else { 0.95 });
+            let r = u * 0.012;
+            let red = rgba(170, 10, 14, if p > 0.92 { (1.0 - p) * 12.0 } else { 1.0 });
             painter.circle_filled(pos2(x, y), r, red);
             painter.add(Shape::convex_polygon(vec![pos2(x - r * 0.8, y - r * 0.3), pos2(x + r * 0.8, y - r * 0.3), pos2(x, y - r * 2.4)], red, Stroke::NONE));
         }
@@ -454,9 +479,10 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
             let p = fract(t / 2.8 + seed);
             let x = mid_x + (fract(seed * 5.7) - 0.5) * half_w * 1.4 + (p * tau * 1.5 + k as f32).sin() * u * 0.012;
             let y = foot.y - body * 0.4 - u * 0.8 * p;
-            let r = u * (0.008 + 0.01 * fract(seed * 9.1)) * (0.6 + 0.6 * p);
-            let a = (1.0 - p) * 0.9;
-            painter.circle(pos2(x, y), r, rgba(120, 200, 70, a * 0.35), Stroke::new(1.0, rgba(150, 230, 90, a)));
+            let r = u * (0.012 + 0.012 * fract(seed * 9.1)) * (0.6 + 0.6 * p);
+            let a = (1.0 - p).min(1.0);
+            painter.circle_stroke(pos2(x, y), r + 1.0, Stroke::new(1.5, rgba(20, 50, 10, a * 0.7)));
+            painter.circle(pos2(x, y), r, rgba(110, 210, 60, a * 0.55), Stroke::new(1.5, rgba(170, 255, 100, a)));
         }
     }
     if s.has(Status::Blinded) {
@@ -473,22 +499,26 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
         // a hush by the mouth: a small circle, struck through
         let c = pos2(head.x + head_r * 1.9, eyes_y + head_r * 0.7);
         let r = u * 0.022;
-        let grey = rgba(200, 200, 210, 0.85);
-        painter.circle_stroke(c, r, Stroke::new(1.5, grey));
-        painter.line_segment([pos2(c.x - r * 0.7, c.y + r * 0.7), pos2(c.x + r * 0.7, c.y - r * 0.7)], Stroke::new(1.5, grey));
+        let r = r * 1.3;
+        let dark = Stroke::new(4.0, rgba(20, 20, 26, 0.7));
+        painter.circle_stroke(c, r, dark);
+        painter.line_segment([pos2(c.x - r * 0.7, c.y + r * 0.7), pos2(c.x + r * 0.7, c.y - r * 0.7)], dark);
+        let light = Stroke::new(2.0, rgba(235, 235, 245, 1.0));
+        painter.circle_stroke(c, r, light);
+        painter.line_segment([pos2(c.x - r * 0.7, c.y + r * 0.7), pos2(c.x + r * 0.7, c.y - r * 0.7)], light);
     }
     if s.has(Status::Vulnerable) {
         shown = true;
         let pulse = 0.5 + 0.5 * (t * 3.2).sin();
         let ring = (u * 0.14).max(half_w * 0.8);
-        painter.add(Shape::ellipse_stroke(pos2(mid_x, foot.y), vec2(ring + u * 0.015 * pulse, u * 0.028 + u * 0.005 * pulse), Stroke::new(2.0, rgba(230, 50, 40, 0.45 + 0.4 * pulse))));
+        painter.add(Shape::ellipse_stroke(pos2(mid_x, foot.y), vec2(ring + u * 0.015 * pulse, u * 0.028 + u * 0.005 * pulse), Stroke::new(3.0, rgba(240, 40, 30, 0.6 + 0.4 * pulse))));
     }
     if s.has(Status::Calmed) {
         shown = true;
         for k in 0..4 {
             let a = t * 0.6 + k as f32 * tau / 4.0;
             let c = pos2(mid_x + a.cos() * half_w * 1.3, top + u * (0.25 + 0.12 * (a * 1.7).sin()));
-            painter.circle_filled(c, u * 0.008, rgba(170, 210, 255, 0.35 + 0.25 * (a * 2.0).sin()));
+            painter.circle_filled(c, u * 0.013, rgba(180, 220, 255, 0.6 + 0.3 * (a * 2.0).sin()));
         }
     }
     if shown {

@@ -204,8 +204,8 @@ fn normal_of(g: vec3<f32>) -> vec3<f32> {
 // blood must read wet from the front.
 const WET_DRY_LEN: f32 = 0.88;
 const WET_SPAN: f32 = 0.3;
-const WET_GLINT: f32 = 0.9;
-const WET_GLINT_SHINE: f32 = 10.0;
+const WET_GLINT: f32 = 0.25;
+const WET_GLINT_SHINE: f32 = 18.0;
 fn wet_of(g: vec3<f32>) -> f32 {
     let l = length(g);
     if (l <= 0.5 || l >= 0.9) { return 0.0; }
