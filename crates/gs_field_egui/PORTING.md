@@ -1005,6 +1005,20 @@ Two more `creature_field.rs` regions (twenty-two in all,
   `field_gpu::time_offscreen` -- whole, without each lamp, each lamp's
   shadow off -- into `PassTimings` (**a new type**).
 
+### 7.35 Liabo by day, Makiri, and the day's own sunrise and sunset
+
+* `LightState::moon_of`: by day Liabo still shows, "ensconced in pale
+  gold" (`LIABO_BY_DAY`), unless it is new (`LIABO_NEW_LIT`) -- a moon
+  with no light, whose disc the pass draws; Lornon keeps to the night (the
+  game's sky, gs_field PORTING 6.23). A moon lighting nothing takes no
+  shadow slot (`field_gpu_stage` `moon_light`).
+* `field_gpu.wgsl` `moon_discs`: Makiri, a dark speck (`MAKIRI_SRGB`),
+  circles Liabo with Tilaok, slower and farther out.
+* The relight takes the sky whatever the pass: with the v2 pass on it had
+  been handed none, to keep the moons' light off the CPU relight -- and so
+  missed the day's sunrise and sunset. It is handed the sky with its moons
+  dark instead.
+
 ### 7.36 Views: more than one lit frame in an egui pass
 
 * `field_gpu::paint_view` (**a new function**): `paint` with a `view` id.

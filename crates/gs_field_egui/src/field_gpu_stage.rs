@@ -831,12 +831,17 @@ fn moon_light(cam: &FieldCamera, moon: &crate::creature_light::MoonNow, wind: f3
     let disc_el = (moon.elevation / gs_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * top_deg * DISC_SKY_SHARE;
     let (sd, cd) = disc_el.to_radians().sin_cos();
     let disc = [0, 1, 2].map(|i| cd * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + sd * up[i]);
-    FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()]).with_disc(
+    let mut light = FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()]).with_disc(
         disc,
         moon.disc_deg.to_radians(),
         moon.phase,
         moon.companion,
-    )
+    );
+    // Liabo by day: its disc, lighting nothing, so no shadow slot either
+    if moon.brightness <= 0.0 {
+        light.shadows = false;
+    }
+    light
 }
 
 /// How much of the sky above the horizon a moon's disc climbs through, at

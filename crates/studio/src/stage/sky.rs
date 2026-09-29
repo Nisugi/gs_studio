@@ -4,7 +4,7 @@
 use super::elanthian_time::{eastern_date, elanthian_hour_f};
 use super::state::StageState;
 use gs_field::lighting::Sky;
-use gs_field::sky::{GameSky, Moon};
+use gs_field::sky::{elongation, moon_age, moon_place, phase_name, place_words, GameSky, Moon};
 
 impl StageState {
     /// The instant the game's moons are taken at: pinned, else `now` moved
@@ -26,19 +26,26 @@ impl StageState {
         Sky { clouds, facing: self.facing, ..game }
     }
 
-    /// The game's moons at the instant shown, one line: how lit each is,
-    /// growing or waning, and the hour it is highest.
+    /// The game's moons at the instant shown, in its own words: how lit
+    /// each is and its phase, and where it stands ("Liabo 96% waning
+    /// gibbous, almost arrives at her azimuth"), or when it is highest while
+    /// it is down.
     pub fn moons_line(&self, now: f64, game_hour: f32) -> String {
         let at = self.sky_instant(now, game_hour);
-        let sky = GameSky::default();
         [Moon::Liabo, Moon::Lornon]
             .map(|m| {
-                let age = sky.moon_age(m, at);
-                let h = age.highest();
-                let way = if age.waxing() { "waxing" } else { "waning" };
-                format!("{} {:.0}% {way}, highest {:02}:{:02}", m.name(), age.lit() * 100.0, h as u32, ((h.fract()) * 60.0) as u32)
+                let age = moon_age(m, at);
+                let phase = phase_name(elongation(m, at));
+                let place = match place_words(moon_place(m, at, game_hour)) {
+                    Some(words) => words.to_owned(),
+                    None => {
+                        let h = age.highest();
+                        format!("below the horizon, highest {:02}:{:02}", h as u32, (h.fract() * 60.0) as u32)
+                    }
+                };
+                format!("{} {:.0}% {phase}, {place}", m.name(), age.lit() * 100.0)
             })
-            .join(" · ")
+            .join(" - ")
     }
 }
 
@@ -69,7 +76,11 @@ mod tests {
         assert!(sky.moon > 0.9 && sky.moon < 0.99 && sky.lornon > 0.7 && sky.clouds == 0.2, "{sky:?}");
         assert_eq!(sky.lornon_blood, 0.0);
         let line = stage.moons_line(0.0, 1.5);
-        assert!(line.starts_with("Liabo 9") && line.contains("waning, highest 01:2") && line.contains("Lornon") && line.contains("waxing"), "{line}");
+        // the look of that moment: "Liabo almost arrives at her azimuth as
+        // less than full", Lornon "falls farther toward the western horizon
+        // almost complete"
+        assert!(line.starts_with("Liabo 9") && line.contains("waning gibbous, almost arrives at her azimuth"), "{line}");
+        assert!(line.contains("Lornon") && line.contains("waxing gibbous, falls farther toward the western horizon"), "{line}");
         stage.lornons_eve = true;
         assert_eq!(stage.sky(0.0, 1.5, 0.2).lornon_blood, 1.0);
     }

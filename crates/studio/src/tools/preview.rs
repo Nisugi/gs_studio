@@ -870,7 +870,7 @@ fn time_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
 
     super::group(ui, "Sky");
     ui.checkbox(&mut stage.game_sky, "The game's moons").on_hover_text(
-        "Liabo and Lornon as the game has them at the hour shown, today: Liabo circles in 7.449 days (the astrolabe script), Lornon in about a month, from the last look at it. Each is highest at midnight when full and runs later as it wanes; outdoors only",
+        "Liabo and Lornon as the game has them at the hour shown, today: the game's own sky math (Saga's almanac). Liabo's phase comes round every 7.449 days, Lornon's every 35.3; each is highest at 01:00 when full and runs later as it wanes. By day Liabo shows pale gold unless new; outdoors only",
     );
     if stage.game_sky {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());

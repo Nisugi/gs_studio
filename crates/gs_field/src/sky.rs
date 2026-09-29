@@ -5,23 +5,26 @@
 //! comes and asks it for the sky at each frame.
 //!
 //! Not in VellumFE (an addition, `PORTING.md`). What it rests on:
-//! - Liabo, the great moon, circles in 7.449 days and is full for a twelfth
-//!   of that (the Lich script `astrolabe`, on Gillien's figures: a full moon
-//!   began 2021-05-08 22:32 UTC). Checked against the log archive: every
-//!   brooch reading of "Liabo's full moon" (175, on 22 full moons from April
-//!   2025 to January 2026) falls inside its full window, and a phase
-//!   trinket's crescent, first half, full and waning gibbous each read at the
-//!   age it gives. Tilaok circles Liabo and reads the same; Makiri is
-//!   "simply too small to make out".
-//! - Lornon, the dark moon, takes "around a full month" (The Elanthian
-//!   Moons, an official document); where it is in that is taken from the
-//!   last `look lornon` ([`LORNON_SEEN`] until one comes). From Eorgaen
-//!   (December) 20 crimson swirls over it until it is all crimson, and on
-//!   the 31st, Lornon's Eve, it glows ([`lornon_blood`]).
-//! - A moon is highest at midnight when full, at 18:00 half full and
-//!   growing, at 06:00 half full and waning -- like our own. Nothing
-//!   documents this; it fits every look so far (three, `data/sky.toml`), and
-//!   a look's own "where" words take over from it.
+//! - The moons are the game's own sky math, as Simutronics' Saga client
+//!   carries it for its Almanac panel ("the same calculation behind
+//!   /MOONS"): each body turns through 360 degrees in its orbit counted
+//!   from unix time 0 -- Liabo in 630,720 s (7.3 days), Lornon in 2,782,080
+//!   s (32.2 days), Elanthia round its sun in 31,557,600 s (365.25 days).
+//!   A moon's phase is its angle less Elanthia's ([`elongation`]): full
+//!   within 15 degrees of 0, new about 180, so it comes round every 7.449
+//!   days for Liabo (what the Lich script `astrolabe` fitted) and 35.3 for
+//!   Lornon. Where it stands is that angle less the hour, a degree every
+//!   four minutes of US Central time ([`moon_place`]): up within 90 of its
+//!   peak, highest at 01:00 game (US Eastern) time when full. Checked on
+//!   the log archive's looks: all four read the phase and the place words
+//!   the formula gives ([`place_words`], [`phase_name`]).
+//! - Tilaok circles Liabo and Makiri, "simply too small to make out", too;
+//!   both read Liabo's phase. From Eorgaen (December) 20 crimson swirls over
+//!   Lornon until it is all crimson, and on the 31st, Lornon's Eve, it glows
+//!   ([`lornon_blood`]).
+//! - Sunrise and sunset move with the year, from the same client: sunrise
+//!   05:30 at midsummer to 08:19 at midwinter, sunset 20:30 to 17:41, game
+//!   time ([`sun_hours`]); the day's light follows them ([`Sky::sun`]).
 //! - `<roommeta>`: `inside` 0/1; `climate` and `terrain` codes (named here
 //!   from the Lich logs' rooms paired with the map's); `weather` 0 while
 //!   nothing falls and 2 while it snows (the Hinterwilds, the only place a
@@ -76,13 +79,14 @@ impl MoonAge {
         self.0.rem_euclid(1.0) < 0.5
     }
 
-    /// The game hour it is highest: midnight at full, noon at new.
+    /// The game hour it is highest: 01:00 at full, 13:00 at new (the
+    /// game turns the sky by US Central time, an hour behind its clock).
     pub fn highest(self) -> f32 {
-        (12.0 + 24.0 * self.0).rem_euclid(24.0)
+        (13.0 + 24.0 * self.0).rem_euclid(24.0)
     }
 
     fn from_highest(hour: f32) -> MoonAge {
-        MoonAge(((hour - 12.0) / 24.0).rem_euclid(1.0))
+        MoonAge(((hour - 13.0) / 24.0).rem_euclid(1.0))
     }
 
     /// The two ages showing `lit`: growing, then waning.
@@ -91,28 +95,126 @@ impl MoonAge {
         (MoonAge(a), MoonAge(1.0 - a))
     }
 
-    fn after(self, days: f64, orbit_days: f64) -> MoonAge {
-        MoonAge((self.0 as f64 + days / orbit_days).rem_euclid(1.0) as f32)
+}
+
+/// Liabo's orbit, seconds (7.3 days), counted from unix time 0.
+pub const LIABO_ORBIT_SECS: f64 = 630_720.0;
+/// Lornon's (32.2 days).
+pub const LORNON_ORBIT_SECS: f64 = 2_782_080.0;
+/// Elanthia's round its sun (365.25 days).
+pub const YEAR_SECS: f64 = 31_557_600.0;
+
+fn orbit_of(moon: Moon) -> f64 {
+    match moon {
+        Moon::Lornon => LORNON_ORBIT_SECS,
+        // Tilaok and Makiri go round Liabo
+        _ => LIABO_ORBIT_SECS,
     }
 }
 
-pub const LIABO_ORBIT_DAYS: f64 = 7.449;
-/// Unix seconds a full Liabo began (2021-05-08 22:32 UTC).
-pub const LIABO_FULL_BEGAN: f64 = 1_620_513_120.0;
-/// The share of its orbit Liabo is full.
-pub const LIABO_FULL_SHARE: f64 = 1.0 / 12.0;
-/// "Around a full month".
-pub const LORNON_ORBIT_DAYS: f64 = 30.0;
-/// Lornon until a look says otherwise: (unix seconds, age) -- 2026-09-24
-/// 02:56 UTC, half full and setting at 22:56 game time, so growing.
-pub const LORNON_SEEN: (f64, f32) = (1_790_218_583.0, 0.25);
+/// How far a body is through its orbit at `unix`, whole degrees 1..=360, as
+/// the game counts it: `period / 360` seconds a degree, truncated.
+fn game_degree(period: f64, unix: f64) -> i32 {
+    let per = (period / 360.0).trunc();
+    let d = ((unix.rem_euclid(period)) / per).trunc() as i32;
+    if d == 0 {
+        360
+    } else {
+        d
+    }
+}
 
-const DAY_SECS: f64 = 86_400.0;
+/// A moon's angle from Elanthia's, whole degrees 1..=360, as the game
+/// counts it: under 15 or 345 and up is full, 165..195 new.
+pub fn elongation(moon: Moon, unix: f64) -> i32 {
+    let i = game_degree(orbit_of(moon), unix) - game_degree(YEAR_SECS, unix);
+    if i < 1 {
+        i + 360
+    } else {
+        i
+    }
+}
 
-/// Liabo's age at `unix` seconds: full across the astrolabe's window.
-pub fn liabo_age(unix: f64) -> MoonAge {
-    let orbit = ((unix - LIABO_FULL_BEGAN) / (LIABO_ORBIT_DAYS * DAY_SECS)).rem_euclid(1.0);
-    MoonAge((0.5 + orbit - LIABO_FULL_SHARE / 2.0).rem_euclid(1.0) as f32)
+/// A moon's age at `unix` seconds, 0 new, 0.5 full: its [`elongation`],
+/// smoothly (between the game's whole degrees).
+pub fn moon_age(moon: Moon, unix: f64) -> MoonAge {
+    let turn = |period: f64| unix.rem_euclid(period) / period;
+    let apart = (turn(orbit_of(moon)) - turn(YEAR_SECS)).rem_euclid(1.0);
+    MoonAge((apart + 0.5).rem_euclid(1.0) as f32)
+}
+
+/// The game's name for a phase at [`elongation`] `deg`.
+pub fn phase_name(deg: i32) -> &'static str {
+    match deg {
+        d if d < 15 => "full",
+        d if d < 75 => "waning gibbous",
+        d if d < 105 => "last half",
+        d if d < 165 => "waning crescent",
+        d if d < 195 => "new",
+        d if d < 255 => "waxing crescent",
+        d if d < 285 => "first half",
+        d if d < 345 => "waxing gibbous",
+        _ => "full",
+    }
+}
+
+/// Where a moon stands at `unix` seconds, `game_hour` (US Eastern) on the
+/// game's clock: degrees from its peak, positive still rising in the east,
+/// negative sinking west, -180..180; up within 90. The sky turns a degree
+/// every four minutes of US Central time.
+pub fn moon_place(moon: Moon, unix: f64, game_hour: f32) -> i32 {
+    let central_minutes = ((game_hour - 1.0).rem_euclid(24.0) * 60.0) as i32;
+    let mut r = game_degree(orbit_of(moon), unix) - game_degree(YEAR_SECS, unix) - central_minutes / 4;
+    while r < -180 {
+        r += 360;
+    }
+    while r >= 180 {
+        r -= 360;
+    }
+    r
+}
+
+/// The game's words for where a moon at [`moon_place`] `lat` stands ("sits
+/// at the peak of her ascent"); None below the horizon.
+pub fn place_words(lat: i32) -> Option<&'static str> {
+    if !(-90..=90).contains(&lat) {
+        return None;
+    }
+    Some(match lat {
+        l if l > 85 => "just crests over the eastern horizon",
+        l if l > 70 => "begins to rise in the east",
+        l if l > 40 => "continues to rise",
+        l if l > 30 => "reaches into the eastern quarter of the sky",
+        l if l > 20 => "drifts through the upper sky",
+        l if l > 5 => "almost arrives at her azimuth",
+        l if l > -5 => "sits at the peak of her ascent",
+        l if l > -20 => "starts her long journey home",
+        l if l > -40 => "continues her descent to the west",
+        l if l > -50 => "sits in the western sky",
+        l if l > -70 => "falls farther toward the western horizon",
+        l if l > -85 => "prepares to fall into the west",
+        _ => "almost disappears in the west",
+    })
+}
+
+/// Sunrise and sunset at `unix` seconds, game (US Eastern) hours: 05:30 and
+/// 20:30 at midsummer, 08:19 and 17:41 at midwinter, from the year's turn.
+pub fn sun_hours(unix: f64) -> (f32, f32) {
+    const HALF: i64 = YEAR_SECS as i64 / 2;
+    // where the year is, seconds; the shortest day falls 954,000 s before
+    // the year's turn from unix time 0
+    let t = (unix as i64).rem_euclid(YEAR_SECS as i64);
+    let (rise_turn, set_turn) = (14_792_400, 30_603_600);
+    let from_long = if t < rise_turn {
+        HALF - (t + 954_000)
+    } else if t < set_turn {
+        t - rise_turn
+    } else {
+        HALF - (t - set_turn)
+    };
+    let n = from_long.div_euclid(1461) as f32;
+    // the game's sky counts Central seconds; its clock is Eastern
+    ((16_200.0 + n) / 3600.0 + 1.0, (70_200.0 - n) / 3600.0 + 1.0)
 }
 
 /// How crimson Lornon is on an Elanthian (US Eastern) date, 0..1: swirls
@@ -367,8 +469,6 @@ pub enum SkyNews {
 /// The game's sky as the text has shown it so far.
 #[derive(Clone, Debug, Default)]
 pub struct GameSky {
-    /// Lornon's age from the last look at it, and when.
-    lornon: Option<(f64, MoonAge)>,
     /// The room, and when it came.
     room: Option<(f64, RoomMeta)>,
     /// The last weather line, and when.
@@ -399,27 +499,17 @@ pub fn bearing_of(command: &str) -> Option<f32> {
 }
 
 impl GameSky {
-    /// A moon's age at `unix` seconds: Liabo's (and Tilaok's, Makiri's)
-    /// from its orbit, Lornon's from the last look at it.
+    /// A moon's age at `unix` seconds, from its orbit ([`moon_age`]).
     pub fn moon_age(&self, moon: Moon, unix: f64) -> MoonAge {
-        match moon {
-            Moon::Lornon => {
-                let (at, age) = self.lornon.unwrap_or((LORNON_SEEN.0, MoonAge(LORNON_SEEN.1)));
-                age.after((unix - at) / DAY_SECS, LORNON_ORBIT_DAYS)
-            }
-            _ => liabo_age(unix),
-        }
+        moon_age(moon, unix)
     }
 
     /// One line of the game's text, at `unix` seconds and `game_hour`: a
-    /// `look <moon>` reply or a weather line is taken in and returned.
+    /// `look <moon>` reply or a weather line is taken in and returned. (A
+    /// look moves nothing: the orbits give the moons.)
     pub fn read_line(&mut self, line: &str, unix: f64, game_hour: f32) -> Option<SkyNews> {
+        let _ = game_hour;
         if let Some(look) = read_moon_look(line) {
-            if look.moon == Moon::Lornon {
-                if let Some(age) = look.age(game_hour) {
-                    self.lornon = Some((unix, age));
-                }
-            }
             return Some(SkyNews::Moon(look));
         }
         let w = read_weather_line(line)?;
@@ -462,7 +552,7 @@ impl GameSky {
     /// `month`/`day` at `game_hour`. Cloud is left to the host (its weather
     /// brings its own).
     pub fn sky(&self, unix: f64, month: u32, day: u32, game_hour: f32) -> Sky {
-        Sky { facing: self.facing, ..moons_sky(self.moon_age(Moon::Liabo, unix), self.moon_age(Moon::Lornon, unix), month, day, game_hour) }
+        Sky { facing: self.facing, sun: Some(sun_hours(unix)), ..moons_sky(moon_age(Moon::Liabo, unix), moon_age(Moon::Lornon, unix), month, day, game_hour) }
     }
 
     /// What falls now and how hard, 0..1: None indoors or in the clear.
@@ -567,31 +657,55 @@ mod tests {
     const AT_HALF: (f64, f32) = (1_790_218_583.0, 22.94);
     const AT_ALMOST: (f64, f32) = (1_790_487_120.0, 1.53);
 
-    /// The astrolabe's full moon: full through its window, a day past it
-    /// just short of full and waning -- and highest near 01:30, when the
-    /// look found it almost at its height.
+    /// The game's sky math against the log archive's looks: each reads the
+    /// phase and the place words the formula gives, at its moment.
     #[test]
-    fn liabo_keeps_the_astrolabes_orbit() {
-        let began = LIABO_FULL_BEGAN + 264.0 * LIABO_ORBIT_DAYS * DAY_SECS;
-        let window = LIABO_FULL_SHARE * LIABO_ORBIT_DAYS * DAY_SECS;
-        for t in [0.0, 0.5, 1.0] {
-            assert!(liabo_age(began + t * window).lit() > 0.98, "full through the window at {t}");
+    fn the_game_sky_math_reads_every_look() {
+        let (almost, almost_hour) = AT_ALMOST;
+        let (half, half_hour) = AT_HALF;
+        for (look, moon, unix, hour, phase) in [
+            (LIABO_LOOK, Moon::Liabo, almost, almost_hour, "waning gibbous"),
+            (LORNON_HALF, Moon::Lornon, half, half_hour, "first half"),
+            (LORNON_ALMOST, Moon::Lornon, almost, almost_hour, "waxing gibbous"),
+            (LIABO_PEAK, Moon::Liabo, 1_745_383_140.0, 0.65, "full"),
+        ] {
+            let place = place_words(moon_place(moon, unix, hour)).expect("up");
+            assert!(look.contains(place), "{}: the formula says '{place}': {look}", moon.name());
+            assert_eq!(phase_name(elongation(moon, unix)), phase, "{look}");
         }
-        let (unix, hour) = AT_ALMOST;
-        let age = liabo_age(unix);
-        assert!(!age.waxing() && (0.9..0.99).contains(&age.lit()), "{age:?} lit {}", age.lit());
-        let look = read_moon_look(LIABO_LOOK).unwrap();
-        let seen = look.age(hour).unwrap();
-        assert!((seen.highest() - age.highest()).abs() < 1.0, "look says highest {} vs orbit {}", seen.highest(), age.highest());
-        assert!(liabo_age(began + 0.5 * LIABO_ORBIT_DAYS * DAY_SECS).lit() < 0.02, "new half an orbit on");
-        // a year and a half earlier: at the peak of her ascent as a full moon
-        let (unix, hour) = (1_745_383_140.0, 0.65);
-        let look = read_moon_look(LIABO_PEAK).unwrap();
-        assert_eq!((look.lit, look.from_highest), (Some(1.0), Some(0.0)));
-        let age = liabo_age(unix);
-        assert!(age.lit() > 0.99, "full then: {age:?}");
-        let off = (hour - age.highest() + 12.0).rem_euclid(24.0) - 12.0;
-        assert!(off.abs() < 1.5, "highest {} vs the look at {hour}", age.highest());
+        // the smooth age agrees with the game's whole degrees
+        let age = moon_age(Moon::Liabo, almost);
+        assert!(!age.waxing() && (0.9..0.99).contains(&age.lit()), "{age:?}");
+        assert!((moon_age(Moon::Lornon, half).0 - ((elongation(Moon::Lornon, half) as f32 / 360.0 + 0.5) % 1.0)).abs() < 0.01);
+        // at its peak when the look said so (00:39 game time, just short of
+        // full, so a little before 01:00); Tilaok reads Liabo
+        assert!((moon_age(Moon::Liabo, 1_745_383_140.0).highest() - 0.65).abs() < 0.25);
+        assert_eq!(moon_age(Moon::Tilaok, almost), age);
+    }
+
+    /// The phases come round every 7.449 days for Liabo (the astrolabe's
+    /// figure) and 35.3 for Lornon: the orbit less Elanthia's year.
+    #[test]
+    fn the_phases_come_round() {
+        let t = 1_790_000_000.0;
+        for (moon, days) in [(Moon::Liabo, 7.4489), (Moon::Lornon, 35.3132)] {
+            let (a, b) = (moon_age(moon, t).0, moon_age(moon, t + days * 86_400.0).0);
+            assert!(((a - b + 0.5).rem_euclid(1.0) - 0.5).abs() < 1e-3, "{}: {a} vs {b}", moon.name());
+        }
+    }
+
+    /// Sunrise and sunset move with the year: early and late at midsummer,
+    /// late and early at midwinter; the day's phases follow.
+    #[test]
+    fn the_sun_keeps_the_seasons() {
+        let (rise, set) = sun_hours(1_782_000_000.0); // 2026-06-21
+        assert!((rise - 5.5).abs() < 0.1 && (set - 20.5).abs() < 0.1, "{rise} {set}");
+        let (rise, set) = sun_hours(1_797_811_200.0); // 2026-12-21
+        assert!((rise - 8.4).abs() < 0.2 && (set - 17.6).abs() < 0.2, "{rise} {set}");
+        let sky = crate::lighting::Sky { sun: Some((8.0, 17.5)), ..Default::default() };
+        let b = sky.bounds();
+        assert_eq!((b.dawn, b.day, b.dusk, b.night), (7.0, 9.0, 16.5, 18.5));
+        assert!(crate::lighting::night_share_in(18.0, b) > crate::lighting::night_share(18.0), "a winter evening is darker at six");
     }
 
     /// Each reply reads to its moon, phase and place; an unknown line, and
@@ -610,29 +724,6 @@ mod tests {
         assert_eq!((g.lit, g.from_highest), (Some(0.2), Some(-4.0)));
     }
 
-    /// Half full and setting in the evening can only be growing; three days
-    /// on, a month's orbit makes it almost full and still setting after
-    /// midnight -- what the second look found.
-    #[test]
-    fn lornon_follows_its_looks() {
-        let (unix, hour) = AT_HALF;
-        let age = read_moon_look(LORNON_HALF).unwrap().age(hour).unwrap();
-        assert!(age.waxing() && (age.0 - 0.25).abs() < 0.03, "{age:?}");
-        let mut sky = GameSky::default();
-        sky.read_line(LORNON_HALF, unix, hour);
-        let (then, at) = AT_ALMOST;
-        let later = sky.moon_age(Moon::Lornon, then);
-        assert!(later.waxing() && (0.75..0.95).contains(&later.lit()), "{later:?} lit {}", later.lit());
-        let since_high = (at - later.highest()).rem_euclid(24.0);
-        assert!((2.0..6.0).contains(&since_high), "falling west: {since_high} h past highest");
-        // the second look re-anchors it
-        sky.read_line(LORNON_ALMOST, then, at);
-        let now = sky.moon_age(Moon::Lornon, then);
-        assert!(now.waxing() && (now.lit() - 0.9).abs() < 0.01, "{now:?}");
-        // with no look at all, the shipped one
-        assert_eq!(GameSky::default().moon_age(Moon::Lornon, unix), MoonAge(0.25));
-    }
-
     #[test]
     fn lornons_eve_turns_it_crimson() {
         assert_eq!(lornon_blood(11, 30, 23.0), 0.0);
@@ -644,7 +735,7 @@ mod tests {
         assert!(eve.lornon_blood == 1.0 && eve.lornon == 1.0, "{eve:?}");
         // a host tracking the moons itself gets the same sky from their ages
         let (liabo, lornon) = (sky.moon_age(Moon::Liabo, 1_798_700_000.0), sky.moon_age(Moon::Lornon, 1_798_700_000.0));
-        assert_eq!(moons_sky(liabo, lornon, 12, 31, 22.0), eve);
+        assert_eq!(Sky { sun: Some(sun_hours(1_798_700_000.0)), ..moons_sky(liabo, lornon, 12, 31, 22.0) }, eve);
     }
 
     #[test]

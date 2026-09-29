@@ -800,13 +800,16 @@ fn bounce_at(P: vec3<f32>, n: vec3<f32>, px: vec2<f32>) -> vec3<f32> {
 // (beam.w its angular radius, beam.xyz where it is drawn -- its height
 // squeezed into the frame's sky), lit to its phase (fract(prop.w), growing
 // lit on the right), dim on its dark side, under the cloud crossing it,
-// with a faint glow; Tilaok, small and red, circles one with prop.w >= 1.
+// with a faint glow; Tilaok, small and red, and Makiri, a dark speck,
+// circle one with prop.w >= 1.
 // Drawn round on the screen, where its centre falls: the camera is a wide
 // pinhole, and a true circle of sky off to the side projects as an oval.
 const DISC_GLOW: f32 = 2.2;
 // Lornon, "the dark moon", shows dimmer than Liabo, "a beacon"
 const LORNON_DISC: f32 = 0.3;
 const TILAOK_SRGB: vec3<f32> = vec3<f32>(1.0, 0.48, 0.23);
+// Makiri: dark, featureless, grey (Saga's almanac: #5a565e)
+const MAKIRI_SRGB: vec3<f32> = vec3<f32>(0.35, 0.34, 0.37);
 // (how much of the pixel is the disc, how lit it is there; uv: the pixel
 // from the disc's centre in its radii, u right, v up; aa: a pixel, in radii)
 fn disc_at(uv: vec2<f32>, aa: f32, age: f32) -> vec2<f32> {
@@ -979,6 +982,11 @@ fn moon_discs(px: vec2<f32>) -> vec3<f32> {
             let a = U.up.w * 0.35 + 1.3;
             let dt = disc_at((d / rp - vec2<f32>(cos(a), sin(a) * 0.45) * 2.8) / 0.3, aa / 0.3, age);
             o = o + s2l(TILAOK_SRGB) * DISC_GLOW * dt.x * (dt.y + 0.05 * (1.0 - dt.y)) * clear;
+            // Makiri, the tiniest, dark and smooth, bound to Liabo too:
+            // a speck, slower and farther out
+            let b = U.up.w * 0.2 + 3.4;
+            let dm = disc_at((d / rp - vec2<f32>(cos(b), sin(b) * 0.45) * 3.6) / 0.16, aa / 0.16, age);
+            o = o + s2l(MAKIRI_SRGB) * DISC_GLOW * 0.5 * dm.x * (dm.y + 0.1 * (1.0 - dm.y)) * clear;
         }
     }
     return o;

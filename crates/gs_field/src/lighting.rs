@@ -674,13 +674,29 @@ pub struct Sky {
     /// ([`crate::stars::year_turn`]): which constellations are up, and
     /// where. None = no stars drawn.
     pub year: Option<f32>,
+    /// Sunrise and sunset today, game hours ([`crate::sky::sun_hours`]):
+    /// dawn and dusk follow them ([`Sky::bounds`]). None = the fixed
+    /// 07:00 and 19:00.
+    pub sun: Option<(f32, f32)>,
 }
 
 impl Default for Sky {
     /// A full moon highest at midnight, no Lornon, no cloud, no facing, no
-    /// stars.
+    /// stars, the fixed day.
     fn default() -> Self {
-        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0, facing: None, year: None }
+        Sky { moon: 1.0, clouds: 0.0, moon_high: 0.0, lornon: 0.0, lornon_high: 0.0, lornon_blood: 0.0, facing: None, year: None, sun: None }
+    }
+}
+
+impl Sky {
+    /// The day's phases under this sky: dawn from an hour before sunrise to
+    /// an hour after, dusk likewise round sunset -- the fixed 06-08 and
+    /// 18-20 without a [`Sky::sun`].
+    pub fn bounds(&self) -> vellum_light::PhaseBoundaries {
+        match self.sun {
+            Some((rise, set)) => vellum_light::PhaseBoundaries { dawn: rise - 1.0, day: rise + 1.0, dusk: set - 1.0, night: set + 1.0 },
+            None => vellum_light::PhaseBoundaries::default(),
+        }
     }
 }
 
@@ -736,25 +752,31 @@ pub const MOON_SWING_DEG: f32 = 70.0;
 /// lights nothing the sun does not), less what the clouds hold back (on
 /// average: they drift).
 pub fn moon_light(game_hour: f32, sky: &Sky) -> f32 {
-    moon_light_of(game_hour, sky.moon, sky.moon_high, sky.clouds, sky.facing)
+    moon_light_of(game_hour, sky.moon, sky.moon_high, sky)
 }
 
 /// [`moon_light`] for Lornon, as a share of a full Lornon's light.
 pub fn lornon_light(game_hour: f32, sky: &Sky) -> f32 {
-    moon_light_of(game_hour, sky.lornon, sky.lornon_high, sky.clouds, sky.facing)
+    moon_light_of(game_hour, sky.lornon, sky.lornon_high, sky)
 }
 
-fn moon_light_of(game_hour: f32, full: f32, high: f32, clouds: f32, facing: Option<f32>) -> f32 {
-    let Some((_, elevation)) = moon_sky_arc(game_hour, high, facing) else { return 0.0 };
+fn moon_light_of(game_hour: f32, full: f32, high: f32, sky: &Sky) -> f32 {
+    let Some((_, elevation)) = moon_sky_arc(game_hour, high, sky.facing) else { return 0.0 };
     let t = (elevation / 12.0).clamp(0.0, 1.0);
-    full.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * night_share(game_hour) * (1.0 - 0.9 * clouds.clamp(0.0, 1.0))
+    full.clamp(0.0, 1.0) * t * t * (3.0 - 2.0 * t) * night_share_in(game_hour, sky.bounds()) * (1.0 - 0.9 * sky.clouds.clamp(0.0, 1.0))
 }
 
 /// How much of the night it is at `game_hour`, 0..1: the time-of-day
 /// weights with night whole, dusk and dawn half, day none -- the share of
-/// the darkness a lit scene takes then.
+/// the darkness a lit scene takes then. The fixed day; [`night_share_in`]
+/// for a sky's.
 pub fn night_share(game_hour: f32) -> f32 {
-    vellum_light::phase_keyframes(game_hour, vellum_light::PhaseBoundaries::default())
+    night_share_in(game_hour, vellum_light::PhaseBoundaries::default())
+}
+
+/// [`night_share`] under a day's own phases ([`Sky::bounds`]).
+pub fn night_share_in(game_hour: f32, bounds: vellum_light::PhaseBoundaries) -> f32 {
+    vellum_light::phase_keyframes(game_hour, bounds)
         .into_iter()
         .map(|(p, w)| {
             w * match p {
@@ -948,7 +970,7 @@ impl SceneLighting {
         let dark = (light.darkness.unwrap_or(global.darkness.at(outdoor)) * (1.0 - moon)).clamp(0.0, 1.0);
         let mut keyframes: Vec<(Phase, Option<LightEnv>, f32)> = match game_hour.filter(|_| outdoor) {
             None => Vec::new(),
-            Some(h) => vellum_light::phase_keyframes(h, vellum_light::PhaseBoundaries::default())
+            Some(h) => vellum_light::phase_keyframes(h, sky.map_or_else(vellum_light::PhaseBoundaries::default, Sky::bounds))
                 .into_iter()
                 .filter(|(_, w)| *w > 0.0)
                 .map(|(p, w)| {

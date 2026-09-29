@@ -27,7 +27,8 @@ What stays single-sourced, whichever side tracks:
 
 - **The words**: look phrases and weather lines, in
   `crates/gs_field/data/sky.toml`. Add new ones there.
-- **The arithmetic**, pure functions in `gs_field::sky`: `liabo_age`,
+- **The arithmetic**, pure functions in `gs_field::sky`: `moon_age`,
+  `elongation`, `phase_name`, `moon_place`, `place_words`, `sun_hours`,
   `MoonAge` (`lit`, `waxing`, `highest`), `lornon_blood`, `moons_sky`,
   `read_moon_look`, `read_weather_line`, `RoomMeta::parse` and its names,
   `Precip::of_climate`; `WeatherKind::from(Precip)` in `gs_field_egui`.
@@ -108,38 +109,50 @@ Hinterwilds. Whether rain elsewhere sets 2 (or 1) is not known yet.
 The Elanthian calendar is ours on US Eastern time: Lormesta = January ..
 Eorgaen = December.
 
-### 5.1 Liabo (and Tilaok, Makiri): computed, nothing to track
+### 5.1 The moons: the game's own math, nothing to track
 
-From the Lich script `astrolabe` (`lich_repo_mirror/lib/astrolabe.lic`, on
-Gillien's figures, "may be off by up to 30 minutes"): Liabo's orbit is
-7.449 days; a full moon began 2021-05-08 22:32 UTC (unix 1,620,513,120);
-it stays full for 1/12 of the orbit, about 14.9 h. `liabo_age(unix)` gives
-its age (0 = new, 0.5 = full). Tilaok circles Liabo and reads the same;
-Makiri is "simply too small to make out".
+Simutronics' Saga client carries the game's sky for its Almanac panel,
+"the same calculation behind /MOONS" (`registry-*.js` in Saga 0.9.9;
+`C:\Gemstone\saga-research`). Each body turns through 360 whole degrees
+counted from unix time 0: Liabo in 630,720 s (7.3 days), Lornon in
+2,782,080 s (32.2 days), Elanthia round its sun in 31,557,600 s (365.25
+days), `degree = (t mod period) / trunc(period / 360)`, truncated, 0 read
+as 360.
 
-Checked against the log archive: all 175 quintuple orb brooch readings of
-"Liabo's full moon strengthens the power of the brooch." (22 full moons,
-April 2025 to January 2026) fall inside the orbit's full window (98.3% lit
-or more); a phase trinket's "waxing crescent", "first half", "full moon"
-and "waning gibbous" each read where the orbit puts them (27%, 62%, 99%
-and 83% lit).
+- **Phase**: the moon's degree less Elanthia's (`elongation`, 1..360):
+  full under 15 or from 345, waning gibbous to 75, last half to 105,
+  waning crescent to 165, new to 195, waxing crescent to 255, first half
+  to 285, waxing gibbous to 345 (`phase_name`). Liabo's phase comes round
+  every 7.449 days (what the Lich script `astrolabe` had fitted), Lornon's
+  every 35.3. `moon_age(moon, unix)` is the same smoothly (0 new, 0.5
+  full). Tilaok and Makiri read Liabo's.
+- **Where it stands**: that less the hour, a degree every four minutes of
+  US Central time -- an hour behind the game's Eastern clock
+  (`moon_place(moon, unix, game_hour)`, -180..180): up within 90 of its
+  peak, rising east when positive. `place_words` are the game's own
+  phrases, "just crests over the eastern horizon" (over 85) to "almost
+  disappears in the west" (under -85). Full, a moon is highest at 01:00
+  game time (`MoonAge::highest`).
+- **By day** Saga shows no Lornon, and Liabo unless it is new (pale gold);
+  we draw the same.
+- From Eorgaen 20 Lornon turns crimson, all crimson by the 30th; on the
+  31st, Lornon's Eve, it "glows brightly" (`lornon_blood`, `moons_sky`).
 
-### 5.2 Lornon: track the last look
+Checked against the log archive: every look below reads the phase and the
+place words the formula gives, and the 175 brooch readings of "Liabo's
+full moon" all fall in its full window.
 
-"Around a full month" (The Elanthian Moons, an official document); no
-ephemeris is known. Keep the last `look lornon` (its time, the reply, what
-it read as) and advance it at a provisional 30 days per cycle
-(`LORNON_ORBIT_DAYS`) until the next look. With no look yet,
-`LORNON_SEEN` (§5.4). From Eorgaen 20 it turns crimson, all crimson by the
-30th; on the 31st, Lornon's Eve, it "glows brightly" (`lornon_blood`,
-`moons_sky`).
+### 5.2 The sun
 
-### 5.3 A moon's hours (fitted, not documented)
+Sunrise and sunset move with the year, from the same client (`sun_hours`):
+05:30 and 20:30 game time at midsummer, 08:19 and 17:41 at midwinter.
+`GameSky::sky` puts them in `Sky::sun`; the day's light then has dawn an
+hour either side of sunrise and dusk of sunset (`Sky::bounds`).
 
-A moon is highest at midnight when full, at 18:00 half full and growing,
-at 06:00 half full and waning, and is up six hours either side of that,
-like our own (`MoonAge::highest`). This fits every look so far to within
-minutes. A look's own "where" words take over from it.
+### 5.3 (retired) A moon's hours
+
+The fitted rule (highest at midnight when full) is replaced by 5.1: it is
+01:00, the game turning its sky by Central time.
 
 ### 5.4 Reading a look
 
@@ -147,17 +160,18 @@ Reply: `<Moon> <where> [as] <phase>[.,] <description>`. Seen so far:
 
 | Game time (Eastern) | Reply (first clause) | Read as |
 | --- | --- | --- |
-| 2025-04-23 00:39 | Liabo sits at the peak of her ascent as a full moon | 100%, highest 23:28 (orbit) |
-| 2026-09-23 22:56 | Lornon falls farther toward the western horizon half full | 50%, growing (setting in the evening), ~5 h past highest |
-| 2026-09-27 01:32 | Liabo almost arrives at her azimuth as less than full | ~96% lit, waning, highest 01:26 (orbit) |
-| 2026-09-27 01:32 | Lornon falls farther toward the western horizon almost complete | ~80–90%, growing, ~5 h past highest |
+| 2025-04-23 00:39 | Liabo sits at the peak of her ascent as a full moon | formula: -1 deg (the peak), full |
+| 2026-09-23 22:56 | Lornon falls farther toward the western horizon half full | formula: -58 deg (that phrase), first half |
+| 2026-09-27 01:32 | Liabo almost arrives at her azimuth as less than full | formula: 14 deg (that phrase), waning gibbous |
+| 2026-09-27 01:32 | Lornon falls farther toward the western horizon almost complete | formula: -65 deg (that phrase), waxing gibbous |
 | 2026-09-27 01:32 | Tilaok almost arrives at her azimuth as less than full | as Liabo |
 | 2026-09-27 01:32 | Makiri is simply too small to make out. | unseen |
 
 The phrases are `[phases]` and `[places]` in `sky.toml`. Unknown words fall
 back on their sense: new, crescent, half, gibbous, full for the phase;
 azimuth or overhead, western or eastern horizon for the place.
-`MoonLook::age` combines the two.
+`MoonLook::age` combines the two. A look now only confirms: the orbits
+give the moons.
 
 Whether Hydra should send `look <moon>` itself (say, on stepping outside
 at night) is **not decided**; the default is no.
@@ -165,7 +179,7 @@ at night) is **not decided**; the default is no.
 ## 6. What Hydra keeps, and what it hands over
 
 Keep: the room's `RoomMeta` and when it came; the last weather line (kind,
-gust, time); the last `look lornon` (time, reply); the way the player last
+gust, time); the way the player last
 walked (`gs_field::sky::bearing_of` of each movement command -- n, ne, ...,
 `go north`; up, down, out and portals like `go door` keep it), which faces
 the view: `Sky.facing`, a compass bearing. Liabo's looks only as a
@@ -173,9 +187,10 @@ check.
 
 Hand the renderer:
 
-- `LightClock.sky = gs_field::sky::moons_sky(liabo_age(now), lornon_age,
-  month, day, game_hour)`, with `clouds` = the weather's
-  `Weather::cloud_cover()` (0 when clear).
+- `LightClock.sky = Sky { sun: Some(sun_hours(now)), ..moons_sky(moon_age(Moon::Liabo,
+  now), moon_age(Moon::Lornon, now), month, day, game_hour) }`, with
+  `clouds` = the weather's `Weather::cloud_cover()` (0 when clear) --
+  what `GameSky::sky` gives.
 - `set_weather(ctx, Some(Weather { kind: precip.into(), intensity:
   amount, wind }))`, the wind raised during a gust; `None` when clear.
 - `LightClock.outdoor_guess = Some(!inside)`.
@@ -187,6 +202,4 @@ Hand the renderer:
 - Rain, thunderstorm, fog, sand and blood rain lines.
 - Phase and place words beyond the six looks: more `look liabo` /
   `look lornon` at other hours would fill them in.
-- Lornon's true period: the log archive holds no `look lornon` at all;
-  only new looks will fit it.
 - Terrain 3; the climate codes of "arid temperate" and "saltwater".

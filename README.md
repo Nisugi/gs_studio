@@ -641,17 +641,27 @@ an *x* to put it back:
   is covered; rain, snow and fog bring their own). Outdoors a full moon
   rises at 18:00 low on the left, is highest at midnight and sets at 06:00
   low on the right, always on the viewer's side, and lights nothing by day
-  (half its light at dusk and dawn); on the GPU (v2) it is a light
+  (half its light at dusk and dawn; dawn and dusk come an hour either side
+  of the day's own sunrise and sunset, which move with the year: 05:30 and
+  20:30 at midsummer, 08:19 and 17:41 at midwinter, `sky::sun_hours`); on the GPU (v2) it is a light
   from the sky with soft shadows, a fill from the whole sky and cloud
   shadows drifting with the wind, and elsewhere it lifts the darkness
   evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
   lift, under *Every scene*). *The game's moons* (on by
   default) replaces the Moon slider with Elanthia's own at the hour shown, today
-  (`gs_field::sky`, and a line of how lit each is and when it is highest):
-  Liabo, the great moon, circles in 7.449 days, full for a twelfth of it
-  (the Lich script `astrolabe`); Lornon, the dark moon, in about a month,
-  from the last `look lornon`; each is highest at midnight when full and
-  runs later as it wanes. Lornon is a second, dimmer light, a cloudy grey
+  (`gs_field::sky`, and a line in the game's own words: how lit each is,
+  its phase, and where it stands -- "Liabo 96% waning gibbous, almost
+  arrives at her azimuth"). They are the game's sky math, as Simutronics'
+  Saga client carries it for its Almanac ("the same calculation behind
+  /MOONS"): each moon's angle through its orbit from unix time 0 (Liabo
+  7.3 days, Lornon 32.2) less Elanthia's round its sun (365.25 days) gives
+  its phase -- round every 7.449 days for Liabo, 35.3 for Lornon -- and
+  less the hour (a degree every four minutes of US Central time) where it
+  stands: highest at 01:00 game time when full, later as it wanes. The
+  log archive's four looks each read the phase and place words the
+  formula gives. By day Liabo still shows, pale gold, unless it is new,
+  lighting nothing; Lornon keeps to the night. Tilaok, small and red, and
+  Makiri, a dark speck, circle Liabo. Lornon is a second, dimmer light, a cloudy grey
   (`lornon_color`, `lornon_strength` in `[moon]`), turning crimson from
   Eorgaen 20 to Lornon's Eve on the 31st (*Lornon's Eve* shows it).
   *Facing* (N .. NW; in the game, the way you last walked -- a portal, up

@@ -13,7 +13,7 @@
 //! turns the way the sky does, upright at its highest and leaning as it
 //! rises and sets ([`tilt`]).
 
-use crate::lighting::{moon_light, moon_sky_arc, night_share, Sky, MOON_UP_HOURS};
+use crate::lighting::{moon_light, moon_sky_arc, night_share_in, Sky, MOON_UP_HOURS};
 use serde::Deserialize;
 use std::sync::OnceLock;
 
@@ -156,7 +156,7 @@ pub fn tilt(game_hour: f32, high: f32) -> f32 {
 /// a bright Liabo; None when the sky has no date to set them by.
 pub fn star_light(game_hour: f32, sky: &Sky) -> Option<f32> {
     sky.year?;
-    let night = night_share(game_hour);
+    let night = night_share_in(game_hour, sky.bounds());
     let moon = moon_light(game_hour, &Sky { clouds: 0.0, ..*sky });
     Some((night * night * (1.0 - 0.45 * moon)).clamp(0.0, 1.0))
 }

@@ -468,13 +468,11 @@ and `set_room` (`RoomMeta::parse` of `<roommeta>`) -- and answers
 (what falls and how hard, `Precip`), `gust(unix)` and `outdoor()`. The
 host keeps one per session.
 
-* Liabo: `liabo_age` from the Lich script `astrolabe` (a 7.449-day orbit,
-  full for a twelfth of it from 2021-05-08 22:32 UTC); Tilaok and Makiri
-  follow it. Lornon: a 30-day cycle ("around a full month", The Elanthian
-  Moons) anchored by the last `look lornon`, `LORNON_SEEN` until one;
-  `lornon_blood` from Eorgaen (December) 20 to the 31st.
-* A moon is highest at midnight when full and runs later as it wanes, like
-  ours (`MoonAge::highest`): fitted to three looks, not documented.
+* The moons are the game's sky math, as Saga's Almanac carries it
+  (6.23): `moon_age`, `elongation`, `phase_name`, `moon_place`,
+  `place_words`; Tilaok and Makiri read Liabo. `lornon_blood` from Eorgaen
+  (December) 20 to the 31st. A look is read and returned, and moves
+  nothing.
 * `RoomMeta`: `CLIMATES` / `TERRAINS` name the codes (the Lich logs' rooms
   paired with the map's names); `weather` 0 = clear, 2 = snowing (the only
   non-zero value seen, the Hinterwilds). `Precip::of_climate` says what a
@@ -541,3 +539,32 @@ set one; every room there names the aurora overhead.
   the front-and-centre seed falls through to the search when its foot
   would. A placement input like the obstacles: no generation bump, nobody
   already placed moves. None (the default, and VellumFE's) changes nothing.
+
+### 6.23 `src/sky.rs`, `src/lighting.rs`: the game's own sky math
+
+Simutronics' Saga client carries the game's sky for its Almanac panel
+("the same calculation behind /MOONS"); ported here:
+
+* Each body turns through 360 whole degrees counted from unix time 0 --
+  Liabo in 630,720 s (`LIABO_ORBIT_SECS`, 7.3 days), Lornon in 2,782,080 s
+  (32.2 days), Elanthia round its sun in 31,557,600 s (365.25 days).
+  `elongation` (the moon's angle less Elanthia's) is its phase:
+  `phase_name` bands it as the game does (full within 15 degrees of 0, new
+  165..195), and `moon_age` is it smoothly -- round every 7.449 days for
+  Liabo, what the Lich script `astrolabe` had fitted, and 35.3 for Lornon,
+  where we had guessed "around a month". `moon_place` is where it stands:
+  that angle less the hour, a degree every four minutes of US Central
+  time, so a moon is highest at 01:00 game time when full
+  (`MoonAge::highest`, which said midnight). `place_words` are the game's
+  phrases for it. All four of the log archive's looks read the phase and
+  place the formula gives.
+* **Removed**: `liabo_age` (now `moon_age(Moon::Liabo, _)`),
+  `LIABO_ORBIT_DAYS`, `LIABO_FULL_BEGAN`, `LIABO_FULL_SHARE`,
+  `LORNON_ORBIT_DAYS`, `LORNON_SEEN`, and `GameSky`'s Lornon from looks.
+* `sun_hours` (**new**): sunrise and sunset with the year, game hours
+  (05:30 / 20:30 at midsummer, 08:19 / 17:41 at midwinter).
+  `Sky::sun` (**a new field**) carries them and `Sky::bounds` (**new**)
+  makes the day's phases of them -- dawn an hour either side of sunrise,
+  dusk of sunset; `night_share_in` (**new**) is `night_share` under them,
+  and the moonlight, the stars and `SceneLighting::resolve_under` follow
+  a sky's. `GameSky::sky` sets it; None keeps the fixed day.

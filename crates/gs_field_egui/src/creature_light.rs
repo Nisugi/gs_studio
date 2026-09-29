@@ -213,6 +213,11 @@ pub struct StarsNow {
 /// and the largest; Lornon large but far. Drawn bigger than a real moon
 /// looks: the stage is small.
 pub const LIABO_DISC_DEG: f32 = 2.2;
+/// Liabo by day: "ensconced in pale gold".
+const LIABO_BY_DAY: &str = "#f2e2b0";
+/// Lit share under which Liabo is new, and not seen by day (the game's
+/// "new" is within 15 degrees of it: 1.7% lit).
+const LIABO_NEW_LIT: f32 = 0.017;
 pub const LORNON_DISC_DEG: f32 = 1.4;
 
 /// What a bake needs besides pixels: every light, at intensity x strength.
@@ -499,13 +504,17 @@ impl LightState {
         };
         let (azimuth, elevation) = moon_sky_arc(hour, high, sky.facing)?;
         let brightness = lit * global.moon.strength.max(0.0) * self.clock.strength.clamp(0.0, 1.0);
+        // By day Liabo still shows, "ensconced in pale gold", unless it is
+        // new; it lights nothing the sun does not. Lornon keeps to the night.
+        let by_day = !lornon && brightness <= 0.0 && sky.moon > LIABO_NEW_LIT;
+        let colour = if by_day { LIABO_BY_DAY.to_owned() } else { colour };
         // its phase: how full, and growing or waning by the hour it is highest
         let full = if lornon { sky.lornon } else { sky.moon }.clamp(0.0, 1.0);
         let by_hour = ((high - 12.0) / 24.0).rem_euclid(1.0);
         let a = (1.0 - 2.0 * full).acos() / std::f32::consts::TAU;
         let phase = if by_hour < 0.5 { a } else { 1.0 - a };
         let disc_deg = if lornon { LORNON_DISC_DEG } else { LIABO_DISC_DEG };
-        (brightness > 0.0).then(|| MoonNow { azimuth, elevation, colour, brightness, clouds: sky.clouds.clamp(0.0, 1.0), phase, disc_deg, companion: !lornon })
+        (brightness > 0.0 || by_day).then(|| MoonNow { azimuth, elevation, colour, brightness, clouds: sky.clouds.clamp(0.0, 1.0), phase, disc_deg, companion: !lornon })
     }
 
     pub fn set_global(&mut self, global: GlobalLighting) {
@@ -604,8 +613,12 @@ impl LightState {
             lornon_blood: q(s.lornon_blood),
             facing: s.facing,
             year: s.year,
+            sun: s.sun.map(|(rise, set)| (q(rise), q(set))),
         };
-        let sky = (!self.keep_pixels).then_some(&sky);
+        // With the v2 pass drawing the moons, the relight takes none of
+        // their light -- but still the day's own sunrise and sunset.
+        let sky = if self.keep_pixels { Sky { moon: 0.0, lornon: 0.0, ..sky } } else { sky };
+        let sky = Some(&sky);
         let lit = SceneLighting::resolve_under(&scene, &auto, &global, hour, self.clock.outdoor_guess, sky)?;
         let strength = self.clock.strength.clamp(0.0, 1.0);
         let mut h = std::collections::hash_map::DefaultHasher::new();
