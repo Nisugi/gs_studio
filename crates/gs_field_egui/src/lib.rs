@@ -35,6 +35,9 @@ pub mod creature_light;
 /// Addition since the port (not in VellumFE): the no-art creature puppet,
 /// preferred over the flat doll whenever a baked puppet resolves.
 pub mod creature_puppet;
+/// Addition since the port (not in VellumFE): the injury doll -- one
+/// puppet in a window of its own, lit by the sky round the player.
+pub mod doll_view;
 /// Addition since the port (not in VellumFE): the v2 lighting pass -- local
 /// lights and their shadows on the GPU, over each layer's v1 result.
 pub mod field_gpu;

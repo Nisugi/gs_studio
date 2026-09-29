@@ -13,6 +13,9 @@
 //! paints every segment its own colour, to see which one makes a shape.
 //! `TURNAROUND_WEAR=<piece>[,<piece>...]` dresses it from the clothing kit
 //! (`data/outfits/kit.toml`).
+//! `TURNAROUND_WOUNDS=chest:2,leftArm:3` wounds it, `TURNAROUND_SCARS=` (the
+//! same) scars it: the marks the skin draws for them, and a hurt back's
+//! guarding posture (`[guard.back]`).
 
 use std::path::Path;
 
@@ -34,6 +37,17 @@ fn main() {
     if yaws.is_empty() {
         yaws = (0..8).map(|k| k as f32 * 45.0).collect();
     }
+    let ranks = |var: &str| -> Vec<(&'static str, u8)> {
+        let v = std::env::var(var).unwrap_or_default();
+        v.split(',')
+            .filter_map(|item| {
+                let (part, rank) = item.split_once(':')?;
+                let part: &'static str = Box::leak(part.trim().to_owned().into_boxed_str());
+                Some((part, rank.trim().parse().ok()?))
+            })
+            .collect()
+    };
+    let (wounds, scars) = (ranks("TURNAROUND_WOUNDS"), ranks("TURNAROUND_SCARS"));
     let tile: usize = std::env::var("TURNAROUND_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(320);
 
     let data = std::env::var_os("TURNAROUND_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data"));
@@ -65,7 +79,10 @@ fn main() {
         }
     }
     let set = PoseSet::load(&data.join("poses"), &rig.body_type).expect("pose set").for_family(family).into_owned();
-    let pose = if pose_name == "rest" { Pose::default() } else { set.clamp(set.get(pose_name).expect("no such pose")) };
+    let pose = if pose_name == "rest" { Pose::default() } else { set.get(pose_name).expect("no such pose").clone() };
+    // a wound it guards (a hurt back) shows in how it stands
+    let back = wounds.iter().filter(|(p, _)| *p == "back").map(|(_, r)| *r).max().unwrap_or(0);
+    let pose = set.clamp(&set.guarded(&pose, "back", back));
     let posed = puppet.pose(&pose);
 
     // Frame the pose: its height, or its reach round the turning axis.
@@ -85,7 +102,7 @@ fn main() {
     }
     let mut rgba = canvas.to_rgba8();
     for (yaw, cam) in yaws.iter().zip(&cams) {
-        let skin = posed.skin(&|p| cam.project(p), &Look { yaw: *yaw, outline_px: 1.5, ..Look::default() });
+        let skin = posed.skin(&|p| cam.project(p), &Look { yaw: *yaw, outline_px: 1.5, wounds: &wounds, scars: &scars, ..Look::default() });
         // The skin is straight RGBA placed at `origin`: blend it over.
         for y in 0..skin.h {
             for x in 0..skin.w {

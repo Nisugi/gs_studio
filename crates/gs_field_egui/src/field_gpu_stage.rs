@@ -1285,7 +1285,7 @@ const OUTLINE_REACH: usize = 8;
 /// surface -- keep their colour and are left unlit (no albedo for a lamp
 /// to light), at the depth of the nearest surface pixel, so the shadow
 /// they cast is the body's edge.
-fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::SkinSurface, m_per_ft: f32) -> LitImage {
+pub(crate) fn skin_image(key: u64, skin: &gs_puppet::Skin, surface: &gs_puppet::SkinSurface, m_per_ft: f32) -> LitImage {
     // the skin's frame (x right, y up, +z toward the viewer) to the
     // camera's (x right, y down, z away)
     let back = surface.to_cam();

@@ -341,6 +341,9 @@ pub struct PuppetKey {
     pub pose: PoseChoice,
     /// Wound rank per doll label (index = label - 1), 0 = healthy, 1..=3.
     pub ranks: [u8; PARTS],
+    /// Scar rank per doll label, as `ranks` (a hero's healed wounds; a
+    /// creature has none). Drawn on the smooth skin only.
+    pub scars: [u8; PARTS],
     pub dead: bool,
     pub boss: bool,
     /// Body colour. Not shape, but it is baked into the display list's
@@ -416,6 +419,7 @@ impl PuppetKey {
         PuppetKey {
             pose,
             ranks,
+            scars: [0; PARTS],
             dead,
             boss,
             body,
@@ -440,6 +444,28 @@ impl PuppetKey {
     pub fn with_breath(mut self, step: u8) -> Self {
         self.breath = step.min(BREATH_STEPS);
         self
+    }
+
+    /// The same key with these scars: `(part, rank)` as the injuries are.
+    pub fn with_scars(mut self, scars: &[(String, u8)]) -> Self {
+        self.scars = [0; PARTS];
+        for (part, rank) in scars {
+            if let Some(label) = gs_field::dolls::part_label(part) {
+                let slot = &mut self.scars[label as usize - 1];
+                *slot = (*slot).max((*rank).min(3));
+            }
+        }
+        self
+    }
+
+    /// The scars as `gs_puppet::Look` takes them, in doll part order.
+    pub fn scar_list(&self) -> Vec<(&'static str, u8)> {
+        self.scars
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| **r > 0)
+            .filter_map(|(i, r)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *r)))
+            .collect()
     }
 
     /// The same key with these body effects.
@@ -814,8 +840,23 @@ pub fn pose_puppet_with(
     light: Option<&crate::creature_light::ResolvedLight>,
     texture: Option<&gs_puppet::Texture>,
 ) -> PosedPuppet {
+    pose_puppet_inner(puppet, pose, key, skin, light, texture, false)
+}
+
+/// [`pose_puppet_with`]; `keep_surface` keeps the skin's surface even
+/// unlit (the doll's: the v2 pass does all its lighting).
+fn pose_puppet_inner(
+    puppet: &Puppet,
+    pose: &gs_puppet::Pose,
+    key: &PuppetKey,
+    skin: bool,
+    light: Option<&crate::creature_light::ResolvedLight>,
+    texture: Option<&gs_puppet::Texture>,
+    keep_surface: bool,
+) -> PosedPuppet {
     let posed: Posed<'_> = puppet.pose(pose);
     let wounds = key.wounds();
+    let scars = key.scar_list();
     // Build at the size it will be SEEN at, so `outline_px` and
     // `min_station_px` mean the pixels they say. Everything is then
     // reported in this same space and the placement scales it to the card.
@@ -823,6 +864,7 @@ pub fn pose_puppet_with(
     let look = Look {
         body: key.body,
         wounds: &wounds,
+        scars: &scars,
         dead: key.dead,
         boss_outline: key.boss,
         yaw: key.yaw(),
@@ -854,6 +896,13 @@ pub fn pose_puppet_with(
             return Arc::new(image);
         }
         let Some(light) = light else {
+            if keep_surface {
+                let (skin, kept) = posed.skin_surface(&project, &look, texture, key.effects);
+                if !skin.is_empty() {
+                    surface = Some(Arc::new(kept));
+                }
+                return Arc::new(skin);
+            }
             return Arc::new(posed.skin_with(&project, &look, texture, key.effects));
         };
         // Scene lighting: the skin is its own standing base, lit exactly as
@@ -963,8 +1012,12 @@ struct PosedKey {
     key: PuppetKey,
     skin: bool,
     /// The scene light's key (0 = unlit); only skins are lit.
+    /// [`BARE_SURFACE`]: unlit, its surface kept ([`PuppetCache::posed_surface`]).
     light: u64,
 }
+
+/// [`PosedKey::light`] for a skin kept with its surface and no light.
+const BARE_SURFACE: u64 = u64::MAX;
 
 /// Per-`egui::Context` puppet state: parsed puppets, the pose sets, the
 /// creature -> family resolutions, and the LRU of posed display lists.
@@ -1048,6 +1101,19 @@ fn ease(x: f32) -> f32 {
 /// `pose` at breath step `step` of the set's idle cycle (0, or no cycle:
 /// the pose itself), the offsets scaled by `weight`. A step is drawn at
 /// its middle.
+/// `pose` as `key`'s figure holds it: guarding a hurt back (`[guard.back]`,
+/// by the wound's rank) while it is up -- standing, sitting, kneeling, dazed
+/// -- not lying down or dead.
+fn held(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey) -> gs_puppet::Pose {
+    let up = !key.dead && !matches!(key.pose, PoseChoice::Dead { .. } | PoseChoice::Prone { .. } | PoseChoice::Sleeping);
+    let back = gs_field::dolls::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
+    if up && back > 0 {
+        set.guarded(pose, "back", back)
+    } else {
+        pose.clone()
+    }
+}
+
 fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, step: u8, weight: f32) -> gs_puppet::Pose {
     match (&set.idle, step) {
         (Some(idle), 1..) => pose.breathe(idle, (step as f32 - 0.5) / BREATH_STEPS as f32, weight),
@@ -1536,15 +1602,26 @@ impl PuppetCache {
         key: &PuppetKey,
         skin: bool,
     ) -> Option<Arc<PosedPuppet>> {
+        self.posed_cached(family, key, skin, false)
+    }
+
+    /// The smooth skin with its surface kept but no scene light on it
+    /// (ADDITION): what the v2 pass lights by itself -- the injury doll's
+    /// (`doll_view`). Cached apart from the stage's skins.
+    pub fn posed_surface(&mut self, family: &Arc<str>, key: &PuppetKey) -> Option<Arc<PosedPuppet>> {
+        self.posed_cached(family, key, true, true)
+    }
+
+    fn posed_cached(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, bare: bool) -> Option<Arc<PosedPuppet>> {
         self.follow_texture_detail();
         self.tick += 1;
         let tick = self.tick;
-        let light = self.light.clone().filter(|_| skin);
+        let light = self.light.clone().filter(|_| skin && !bare);
         let cache_key = PosedKey {
             family: family.clone(),
             key: *key,
             skin,
-            light: light.as_ref().map_or(0, |l| l.key),
+            light: if bare { BARE_SURFACE } else { light.as_ref().map_or(0, |l| l.key) },
         };
         if let Some((posed, used)) = self.posed.get_mut(&cache_key) {
             *used = tick;
@@ -1557,11 +1634,11 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let pose = breathe(&set, pose, key.breath, 1.0);
+        let pose = held(&set, &breathe(&set, pose, key.breath, 1.0), key);
         // Inside the body type's joint limits, whatever the file says.
         let pose = &set.clamp(&pose);
         let texture = if skin { self.texture(family) } else { None };
-        let posed = Arc::new(pose_puppet_with(&puppet, pose, key, skin, light.as_deref(), texture.as_deref()));
+        let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), bare));
         self.builds += 1;
         if self.posed.len() >= POSE_CACHE_CAP {
             if let Some(oldest) = self
@@ -1653,6 +1730,12 @@ impl PuppetCache {
         (0.0..gs_puppet::FLINCH_SECS).contains(&t).then_some((label, t))
     }
 
+    /// The last hit creature `id` took (ADDITION): the part's doll label
+    /// and when (seconds, the clock [`flinch`](Self::flinch) was given).
+    pub fn last_hit(&self, id: &str) -> Option<(u8, f64)> {
+        self.lives.get(id)?.hit
+    }
+
     /// The flinch creature `id` was in when it died, if it died mid-flinch:
     /// the part and how far in (seconds) the fall began, so the fall starts
     /// from that shape ([`posed_falling`](Self::posed_falling)).
@@ -1707,6 +1790,10 @@ impl PuppetCache {
     /// angle, held inside the joint limits), flinching from a hit if one
     /// is in progress ([`flinch`](Self::flinch)). Built every call, never cached.
     pub fn posed_changing(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32, flinch: Option<(u8, f32)>) -> Option<Arc<PosedPuppet>> {
+        self.posed_changing_as(family, key, skin, from, u, flinch, false)
+    }
+
+    fn posed_changing_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32, flinch: Option<(u8, f32)>, bare: bool) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = |c: PoseChoice| match c {
@@ -1716,18 +1803,22 @@ impl PuppetCache {
         let (_, to) = key.pose.resolve(&set, variant(key.pose))?;
         let (_, start) = from.resolve(&set, variant(from))?;
         // The new pose's breath comes in with the change, so it never jumps.
-        let to = breathe(&set, to, key.breath, u);
+        let to = held(&set, &breathe(&set, to, key.breath, u), key);
         let pose = set.clamp(&flinched(&set, &start.blend(&to, u), flinch));
-        let light = self.light.clone().filter(|_| skin);
+        let light = self.light.clone().filter(|_| skin && !bare);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), bare)))
     }
 
     /// The figure holding `key`'s pose (breathing as the key says) and
     /// flinching from a hit: `flinch` as [`flinch`](Self::flinch) gave it.
     /// Built every call, never cached: a flinch is drawn once per frame.
     pub fn posed_flinching(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, flinch: (u8, f32)) -> Option<Arc<PosedPuppet>> {
+        self.posed_flinching_as(family, key, skin, flinch, false)
+    }
+
+    fn posed_flinching_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, flinch: (u8, f32), bare: bool) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = match key.pose {
@@ -1735,11 +1826,11 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let pose = set.clamp(&flinched(&set, &breathe(&set, pose, key.breath, 1.0), Some(flinch)));
-        let light = self.light.clone().filter(|_| skin);
+        let pose = set.clamp(&flinched(&set, &held(&set, &breathe(&set, pose, key.breath, 1.0), key), Some(flinch)));
+        let light = self.light.clone().filter(|_| skin && !bare);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), bare)))
     }
 
     /// The figure `t` seconds into falling dead from `from` into `key`'s
@@ -1748,6 +1839,10 @@ impl PuppetCache {
     /// from that shape. Built every call, never cached: each frame of a
     /// fall is drawn once.
     pub fn posed_falling(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32, flinch: Option<(u8, f32)>) -> Option<Arc<PosedPuppet>> {
+        self.posed_falling_as(family, key, skin, from, t, flinch, false)
+    }
+
+    fn posed_falling_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32, flinch: Option<(u8, f32)>, bare: bool) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = match key.pose {
@@ -1759,10 +1854,33 @@ impl PuppetCache {
         let start = flinched(&set, start, flinch);
         // A spring's overshoot never bends a joint past its limit.
         let pose = set.clamp(&gs_puppet::Fall::new(&puppet, &start, to, variant).at(t));
-        let light = self.light.clone().filter(|_| skin);
+        let light = self.light.clone().filter(|_| skin && !bare);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_with(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref())))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), bare)))
+    }
+
+    /// The doll's figure now (ADDITION): as the stage draws a creature --
+    /// easing between poses, flinching from a hit, falling dead, else
+    /// holding `key`'s pose -- tracked as `id`, its skin's surface kept and
+    /// unlit ([`posed_surface`](Self::posed_surface)). True with it while it
+    /// moves: the caller paints again next frame.
+    pub fn posed_live_surface(&mut self, family: &Arc<str>, key: &PuppetKey, id: &str, now_s: f64) -> Option<(Arc<PosedPuppet>, bool)> {
+        let choice = self.dead_choice(id, family, key.pose);
+        let key = PuppetKey { pose: choice, ..*key };
+        let motion = self.motion(id, choice, now_s);
+        let flinch = self.flinch(id, &key.ranks, now_s);
+        match motion {
+            Motion::Falling { from, t } => {
+                let died_in = self.death_flinch(id);
+                Some((self.posed_falling_as(family, &key, true, from, t, died_in, true)?, true))
+            }
+            Motion::Changing { from, u } => Some((self.posed_changing_as(family, &key, true, from, u, flinch, true)?, true)),
+            Motion::Still => match flinch {
+                Some(f) => Some((self.posed_flinching_as(family, &key, true, f, true)?, true)),
+                None => Some((self.posed_surface(family, &key)?, false)),
+            },
+        }
     }
 
     pub fn posed_count(&self) -> usize {

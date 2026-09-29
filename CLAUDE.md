@@ -40,7 +40,9 @@ calendar (*The game's moons*), `=<unix seconds>` at that instant, and
 `GS_STUDIO_LORNONS_EVE=1` shows them on Lornon's Eve, `GS_STUDIO_FACING=<n|ne|..|w|nw>`
 faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
-*Splats* checkbox; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
+*Splats* checkbox; `GS_STUDIO_DOLL=<hour>[,<n|ne|..>][,indoor][,new][,field]` (`field`: under the stage's sky) opens the
+*Doll* window (the injury doll, `tools/doll.rs` over `gs_field_egui::doll_view`)
+at that hour and facing, `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot); `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
 lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
@@ -139,7 +141,9 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   (`examples/uv_sheet` writes a template and a checker check); `prop.rs`
   builds held weapons and shields onto a hand from `data/props/weapons.toml`
   (`turnaround` with `TURNAROUND_HOLD` shows them); `outfit.rs` dresses it
-  from the clothing kit `data/outfits/kit.toml` (`TURNAROUND_WEAR`); `prefill.rs`
+  from the clothing kit `data/outfits/kit.toml` (`TURNAROUND_WEAR`); `TURNAROUND_WOUNDS=back:3,chest:1` /
+  `TURNAROUND_SCARS` draw wound and scar marks (`wounds.rs`) and a hurt back's
+  `[guard.back]` stoop; `prefill.rs`
   projects front / side / back paintings, drawn over the silhouettes, onto
   that sheet (`uv_sheet --demo` shows it; the side over the figure with any
   raised arm hung, `Puppet::with_arms_hung` / `side_silhouette`, since a

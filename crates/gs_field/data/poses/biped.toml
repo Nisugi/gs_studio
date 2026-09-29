@@ -234,6 +234,16 @@ neck = { rot = [-8.0, 0.0, 0.0] }
 skull = { rot = [-6.0, 0.0, 0.0] }
 arm = { rot = [-10.0, 0.0, 10.0] }
 
+# Guarding a hurt back (held while the wound lasts, at 55 / 85 / 100% by
+# rank): stooped, the head kept up, the right hand pressed to the small of
+# the back.
+[guard.back]
+torso_upper = { rot = [14.0, 0.0, 0.0] }
+torso_lower = { rot = [9.0, 0.0, 0.0] }
+neck = { rot = [-9.0, 0.0, 0.0] }
+skull = { rot = [-7.0, 0.0, 0.0] }
+arm_r = { rot = [24.0, 55.0, 2.0], bend = [-85.0] }
+
 # The arm jerks back and out, the shoulder turns away, the near leg steps.
 [flinch.arm]
 arm_r = { rot = [-18.0, 0.0, 16.0], bend = [-20.0] }

@@ -122,6 +122,8 @@ pub struct StudioApp {
     import: Import,
     /// A window close waiting on the unsaved-work questions.
     closing: CloseSequence,
+    /// The injury doll window, over any tab.
+    doll: crate::tools::doll::DollWindow,
 }
 
 /// A dev screenshot (`GS_STUDIO_SHOT`): frames drawn, and asked for yet.
@@ -178,6 +180,7 @@ impl StudioApp {
             report: std::env::var_os("GS_STUDIO_REPORT").filter(|p| !p.is_empty()).map(PathBuf::from),
             import: Import::default(),
             closing: CloseSequence::default(),
+            doll: crate::tools::doll::DollWindow::from_env(),
         }
     }
 
@@ -381,6 +384,8 @@ impl StudioApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.toggle_value(&mut self.settings_open, "Settings")
                     .on_hover_text("The folders: data root, art pool, where Publish ships, the silhouette chart");
+                ui.toggle_value(&mut self.doll.open, "Doll")
+                    .on_hover_text("The injury doll: one puppet, wounded and lit by the sky round the player, over any tab");
             });
         });
     }
@@ -629,7 +634,7 @@ impl StudioApp {
         let ctx = ui.ctx().clone();
         self.import_window(&ctx);
         self.settings_window(&ctx);
-
+        self.doll.show(&ctx);
 
         match self.active {
             ToolId::Rigs => match &mut self.rigs {

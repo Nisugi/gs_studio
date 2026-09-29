@@ -1033,3 +1033,34 @@ Two more `creature_field.rs` regions (twenty-two in all,
   the render done), not whenever the frame id changes.
 * A view unseen for `VIEW_RENDERS_KEPT` (300) renders is dropped. Each view
   has its own 2048x2048 atlas, about 64 MB of textures.
+
+### 7.37 The injury doll
+
+* `src/doll_view.rs` (**a new file**): `doll_view::paint` draws one puppet
+  in a rect -- the `PuppetKey`'s wounds, severed limbs, pose, effects,
+  breath and held weapon -- as its own view of the v2 pass (`DOLL_VIEW`,
+  7.36), lit by `gs_field::doll_sky` (6.24 there): its skin dimmed to the
+  sky's floor as the base, the sun or moons as lights at infinity, a
+  gradient of that sky and its ground as the backdrop, the doll's shadow
+  on it. Without the pass it draws the skin unlit.
+* `PuppetCache::posed_surface` (**a new method**): the smooth skin with its
+  surface kept and no scene light on it, cached apart (`BARE_SURFACE`).
+* `field_gpu_stage::skin_image` is `pub(crate)`: the doll builds its
+  layer the stage's way.
+* `PuppetKey::scars` (**a new field**), `with_scars`, `scar_list`: scar
+  ranks per part, drawn by `gs_puppet`'s skin as pale healed cuts; wounds
+  on the skin are now marks (bruises, cuts, wet blood) instead of a tint
+  over the whole part (`gs_puppet::wounds`). The flat shape list keeps the
+  tint.
+* `PuppetCache::posed_live_surface` (**a new method**): a doll's figure
+  easing, flinching and falling as the field's creatures do, its surface
+  kept; `posed_changing` / `posed_flinching` / `posed_falling` are
+  unchanged, each over a private `_as` that can keep the surface.
+* `LightState::doll_sky`, `doll_view::publish_sky` / `field_sky`: the art
+  cache publishes the field's sky (its scene, clock and facing) each frame
+  it lights the field -- one marked line in `creature_art.rs` -- for a
+  doll beside it to stand under.
+* A wound a figure guards (`[guard.back]`, `gs_puppet::PoseSet::guarded`)
+  holds in every pose the cache builds for it while it is up (`held`);
+  `PuppetCache::last_hit` (**a new method**) is the last hit's part and
+  time, which turns the doll round to show a hit on its back.

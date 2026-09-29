@@ -53,6 +53,9 @@ pub struct Look<'a> {
     pub body: [u8; 3],
     /// `(part, rank 1..=3)`. Rank 3 on an arm / leg part severs it.
     pub wounds: &'a [(&'a str, u8)],
+    /// `(part, rank 1..=3)`: healed wounds' scars (a hero's, healed with
+    /// herbs). Drawn on the smooth skin only.
+    pub scars: &'a [(&'a str, u8)],
     /// Grey body, no eyes. (The pose is the caller's: use a `dead` pose.)
     pub dead: bool,
     /// A bright second contour round the whole figure.
@@ -72,6 +75,7 @@ impl Default for Look<'_> {
         Look {
             body: BODY_DEFAULT,
             wounds: &[],
+            scars: &[],
             dead: false,
             boss_outline: false,
             yaw: 0.0,
@@ -83,9 +87,17 @@ impl Default for Look<'_> {
 
 impl Look<'_> {
     fn rank(&self, part: Option<&str>) -> u8 {
-        let Some(part) = part else { return 0 };
-        self.wounds.iter().filter(|(p, _)| *p == part).map(|(_, r)| (*r).min(3)).max().unwrap_or(0)
+        rank_in(self.wounds, part)
     }
+
+    fn scar(&self, part: Option<&str>) -> u8 {
+        rank_in(self.scars, part)
+    }
+}
+
+fn rank_in(list: &[(&str, u8)], part: Option<&str>) -> u8 {
+    let Some(part) = part else { return 0 };
+    list.iter().filter(|(p, _)| *p == part).map(|(_, r)| (*r).min(3)).max().unwrap_or(0)
 }
 
 fn is_severable(part: &str) -> bool {
@@ -283,6 +295,9 @@ pub(crate) struct Surface {
     /// The part's wound colour (the body colour when unwounded); a severed
     /// limb's stump wears its rank-3 colour like any other wound.
     pub base: [u8; 3],
+    /// Its part's wound and scar ranks (0 = none; always 0 on a prop).
+    pub rank: u8,
+    pub scar: u8,
     pub rings: Vec<SurfRing>,
 }
 
@@ -361,7 +376,8 @@ pub(crate) fn surfaces(posed: &Posed, look: &Look) -> Vec<Surface> {
             // Its own colour all over, not a tint fading at the ends.
             rings.iter_mut().for_each(|r| r.tint = 1.0);
         }
-        out.push(Surface { index: i, group: s.group, base, rings });
+        let (rank, scar) = if s.kind.is_prop() { (0, 0) } else { (rank, look.scar(s.part.as_deref())) };
+        out.push(Surface { index: i, group: s.group, base, rank, scar, rings });
     }
     out
 }

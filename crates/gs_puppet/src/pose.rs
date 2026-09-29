@@ -122,6 +122,14 @@
 //! [`FLINCH_SECS`]. A missing region is no flinch. Renderers clamp the
 //! result as they do every pose.
 //!
+//! # Guarding
+//!
+//! `[guard.<region>]` (same regions, same form) is how a figure holds
+//! itself while a wound there lasts -- a biped with a hurt back stoops, a
+//! hand pressed to it -- held at a share of it by the wound's rank
+//! ([`PoseSet::guarded`]), on top of whatever upright pose it is in. It is
+//! what shows a wound the viewer cannot see.
+//!
 //! The override lives HERE, in the body type's file, and not in the
 //! family's `.rig.toml`, because a `.rig.toml` is studio source that is
 //! never published: a game client is shipped `<family>.puppet.toml` (baked
@@ -474,6 +482,9 @@ struct PoseFile {
     /// `[flinch.<region>]`: peak offsets for a hit there (see the module docs).
     #[serde(default)]
     flinch: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[guard.<region>]`: how the figure holds a wound there.
+    #[serde(default)]
+    guard: BTreeMap<String, BTreeMap<String, toml::Value>>,
 }
 
 /// The hit regions a `[flinch]` table may name.
@@ -573,7 +584,13 @@ pub struct PoseSet {
     /// Hit region -> the peak offsets of its flinch (bones only; written for
     /// the right side). See the module docs, "Flinches".
     pub flinch: BTreeMap<String, Pose>,
+    /// Region -> how the figure holds itself with a wound there, fully
+    /// (rank 3). See the module docs, "Guarding".
+    pub guard: BTreeMap<String, Pose>,
 }
+
+/// How much of a `[guard]` a wound of rank 1, 2, 3 holds.
+pub const GUARD_SHARE: [f32; 3] = [0.55, 0.85, 1.0];
 
 /// The pose files this crate ships, embedded: `(body type, toml)`.
 pub const SHIPPED_POSES: [(&str, &str); 13] = [
@@ -653,22 +670,37 @@ impl PoseSet {
                 family_idle.insert(family, over);
             }
         }
-        let mut flinch = BTreeMap::new();
-        for (region, entries) in file.flinch {
-            if !FLINCH_REGIONS.contains(&region.as_str()) {
-                return Err(format!("flinch.{region}: not a hit region ({})", FLINCH_REGIONS.join(", ")));
-            }
-            let mut pose = Pose::default();
-            for (key, value) in entries {
-                let where_ = format!("flinch '{region}'");
-                if key == "root" {
-                    return Err(format!("{where_}: a flinch moves bones, not the root"));
+        let offsets = |what: &str, tables: BTreeMap<String, BTreeMap<String, toml::Value>>| -> Result<BTreeMap<String, Pose>, String> {
+            let mut out = BTreeMap::new();
+            for (region, entries) in tables {
+                if !FLINCH_REGIONS.contains(&region.as_str()) {
+                    return Err(format!("{what}.{region}: not a hit region ({})", FLINCH_REGIONS.join(", ")));
                 }
-                pose.bones.insert(key.clone(), bone_def(&where_, &key, value)?);
+                let mut pose = Pose::default();
+                for (key, value) in entries {
+                    let where_ = format!("{what} '{region}'");
+                    if key == "root" {
+                        return Err(format!("{where_}: a {what} moves bones, not the root"));
+                    }
+                    pose.bones.insert(key.clone(), bone_def(&where_, &key, value)?);
+                }
+                out.insert(region, pose);
             }
-            flinch.insert(region, pose);
+            Ok(out)
+        };
+        let flinch = offsets("flinch", file.flinch)?;
+        let guard = offsets("guard", file.guard)?;
+        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle, flinch, guard })
+    }
+
+    /// `pose` held as a figure with a wound of `rank` (1..=3) in `region`
+    /// holds itself: that region's `[guard]` at [`GUARD_SHARE`] of it. As
+    /// it is with no guard for the region, or rank 0.
+    pub fn guarded(&self, pose: &Pose, region: &str, rank: u8) -> Pose {
+        match (self.guard.get(region), rank.min(3)) {
+            (Some(guard), r) if r > 0 => pose.flinched(guard, GUARD_SHARE[r as usize - 1], false),
+            _ => pose.clone(),
         }
-        Ok(PoseSet { body_type: file.body_type, poses, families, limits, family_limits, idle, family_idle, flinch })
     }
 
     /// This set as `family` sees it: the shared poses with that family's

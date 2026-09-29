@@ -61,6 +61,7 @@ pub mod shadow;
 pub mod skin;
 pub mod splat;
 pub mod uv;
+mod wounds;
 
 pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};
 pub use camera::Camera;

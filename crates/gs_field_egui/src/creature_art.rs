@@ -810,6 +810,8 @@ impl CreatureArtStore {
             cache.swap_texture(&slot, tex);
         }
         crate::creature_light::publish(ctx, cache.light.current());
+        // ADDITION: the sky an injury doll beside this field stands under
+        crate::doll_view::publish_sky(ctx, cache.light.doll_sky());
     }
 
     /// ADDITION (not in VellumFE): the game clock, the player's Lighting

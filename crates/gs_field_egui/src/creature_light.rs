@@ -955,6 +955,20 @@ fn blend_keyframes(
     out
 }
 
+impl LightState {
+    /// The sky an injury doll stands under here (ADDITION): this scene's,
+    /// indoors or out, at the clock's hour, under its sky and facing
+    /// (`gs_field::doll_sky`). None with no scene or with lighting off.
+    pub fn doll_sky(&self) -> Option<gs_field::doll_sky::DollSky> {
+        let (light, _) = self.scene.as_ref()?;
+        if self.clock.strength <= 0.0 {
+            return None;
+        }
+        let outdoor = light.is_outdoor(self.clock.outdoor_guess);
+        Some(gs_field::doll_sky::doll_sky(self.clock.game_hour, &self.clock.sky, outdoor))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -411,6 +411,12 @@ a hit on the creature's RIGHT side -- a hit on the left mirrors every key
 quick-rise, slow-settle envelope over `gs_puppet::FLINCH_SECS` and clamps
 the result; a region with no table is no reaction.
 
+And `[guard.<region>]` tables, the same form: how the figure HOLDS itself
+while a wound there lasts, at 55 / 85 / 100% for rank 1 / 2 / 3, over any
+upright pose (not lying down or dead; `PoseSet::guarded`). The biped's
+`[guard.back]` stoops, head up, the right hand pressed to the small of the
+back -- what shows a back wound from the front.
+
 In **DEPTH** view the same canvas shows the OTHER silhouette instead, and the
 bindings change:
 
@@ -858,6 +864,29 @@ an *x* to put it back:
   `[flinch.<region>]` offsets for that part on and springs them back over
   0.55 s (`PuppetCache::flinch`, drawn fresh each frame); a creature killed
   mid-flinch falls from that shape (`death_flinch`).
+  On the smooth skin a wound is marks on the part, laid out on the body's
+  own surface so they keep to it in any pose (`gs_puppet::wounds`): rank 1
+  bruising, rank 2 cuts with blood run round them, rank 3 gashes in wet
+  blood (rank 3 on a limb severs it, as before). A scar -- a hero's healed
+  wound, `PuppetKey::scars` -- is a pale ridged line. The flat shape list
+  small cards fall back to keeps a wound-coloured tint per part. A form
+  with no `back` part of its own (a biped) takes a back wound on the REAR
+  of its chest and abdomen, which keep theirs on the front; from the front
+  it shows by the blood it runs (rank 2 and 3: down the sides and the
+  backs of the legs) and by the `[guard.back]` stoop.
+- **Doll** (the toggle beside *Settings*, over any tab): the injury doll --
+  one puppet in a window of its own, lit by the v2 pass as its own view
+  (`gs_field_egui::doll_view`, `field_gpu::paint_view`) under the sky round
+  the player (`gs_field::doll_sky`): the sun by day, the moons by night,
+  from where they are round the way the player faces, a room light
+  indoors, and a floor of light so it reads at a new moon's midnight; that
+  sky and the ground behind it, its shadow on the ground. Wound and scar
+  per part (*Heal* turns every wound into a scar of its rank, as herbs
+  do), a status pose, web and frost, what it holds (`weapon[+shield]`),
+  breathing; it flinches and eases between poses as the field's creatures
+  do, and a hit on its back turns it round to show the wound for a moment.
+  Drag across it to turn it by hand. *The field's sky* stands it under the stage's own scene, hour and
+  facing instead of the window's sliders.
 
 **What a creature draws as**, first that it has
 (`CreatureArtCache::prepare_creature_art`):

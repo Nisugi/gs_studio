@@ -1,6 +1,6 @@
 //! The smooth skin against the shipped humanoid.
 
-use crate::draw::{Look, BOSS_OUTLINE, WOUND_COLORS};
+use crate::draw::{Look, BOSS_OUTLINE};
 use crate::math::{mul_mv, rot_y};
 use crate::raster::Canvas;
 use crate::{Camera, Pose, Puppet, Skin};
@@ -56,22 +56,28 @@ fn a_near_arm_hides_the_trunk_and_a_far_one_is_hidden_by_it() {
     let arm = p.segments.iter().position(|s| s.part.as_deref() == Some("rightArm")).expect("an arm");
     let st = p.segments[arm].stations[p.segments[arm].stations.len() / 2];
     let wounds = [("rightArm", 2u8)];
-    // Orange is much less green for its red than the body colour.
-    let orange = |c: [u8; 4]| (c[1] as f32 / c[0].max(1) as f32) < 0.72;
-    let [w, body] = [WOUND_COLORS[1], crate::BODY_DEFAULT].map(|c| c[1] as f32 / c[0] as f32);
-    assert!(w < 0.72 && body > 0.72, "the test's colour split no longer separates them");
-
-    let shows = |yaw: f32| {
-        let look = Look { yaw, wounds: &wounds, ..Look::default() };
-        let skin = posed.skin(&project, &look);
+    // Round the arm's middle: how many pixels its wound marks change.
+    let marked = |yaw: f32| {
+        let bare = posed.skin(&project, &Look { yaw, ..Look::default() });
+        let hurt = posed.skin(&project, &Look { yaw, wounds: &wounds, ..Look::default() });
+        assert_eq!((bare.w, bare.h, bare.origin), (hurt.w, hurt.h, hurt.origin));
         let (at, _) = project(mul_mv(&rot_y(yaw), posed.point(arm, st.c)));
-        let c = pixel(&skin, at).expect("the arm is in frame");
-        assert!(c[3] > 200, "yaw {yaw}: the arm's middle is covered");
-        orange(c)
+        assert!(pixel(&bare, at).expect("the arm is in frame")[3] > 200, "yaw {yaw}: the arm's middle is covered");
+        let (cx, cy) = (at[0] - bare.origin[0], at[1] - bare.origin[1]);
+        let mut n = 0;
+        for y in (cy as i64 - 25).max(0)..(cy as i64 + 25).min(bare.h as i64) {
+            for x in (cx as i64 - 12).max(0)..(cx as i64 + 12).min(bare.w as i64) {
+                let i = (y as usize * bare.w + x as usize) * 4;
+                if (0..3).any(|k| bare.rgba[i + k].abs_diff(hurt.rgba[i + k]) > 10) {
+                    n += 1;
+                }
+            }
+        }
+        n
     };
     // Yaw 90 turns the figure's right side (-x) toward the camera.
-    assert!(shows(90.0), "near arm shows its wound");
-    assert!(!shows(-90.0), "far arm is behind the trunk");
+    assert!(marked(90.0) > 20, "near arm shows its wound: {}", marked(90.0));
+    assert_eq!(marked(-90.0), 0, "far arm is behind the trunk");
 }
 
 #[test]

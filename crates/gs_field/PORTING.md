@@ -568,3 +568,14 @@ Simutronics' Saga client carries the game's sky for its Almanac panel
   dusk of sunset; `night_share_in` (**new**) is `night_share` under them,
   and the moonlight, the stars and `SceneLighting::resolve_under` follow
   a sky's. `GameSky::sky` sets it; None keeps the fixed day.
+
+### 6.24 `src/doll_sky.rs`: the light an injury doll stands in
+
+A new module. `doll_sky(hour, &Sky, outdoor)` is the sun by day and the
+moons by night (`moon_sky_arc`, `moon_light`, `lornon_light`), placed
+round the player's facing, or one room light indoors; the sky, horizon and
+ground colours behind the doll; and a `floor`, the least light on it, so
+it reads at a new moon's midnight. `sun_arc` places the sun as
+`moon_sky_arc` places a moon: due east at sunrise (`Sky::sun`, 6-18 with
+none), due south at midday, due west at sunset. Egui-free; the doll's
+drawing is `gs_field_egui::doll_view`.

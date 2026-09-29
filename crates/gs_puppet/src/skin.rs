@@ -181,6 +181,35 @@ struct Paint<'a> {
     effects: Effects,
     /// Half a web strand's width, feet.
     strand_ft: f32,
+    /// Per segment: its wound and scar marks ([`crate::wounds`]).
+    marks: &'a [crate::wounds::Marks],
+}
+
+/// Every segment's wound marks: its own part's wound and scar; on a form
+/// with no `back` part, its chest and abdomen split front from back, the
+/// back's wound on their rear, and the back's blood (rank 2 and up) run down
+/// their sides and the backs of the legs.
+fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look) -> Vec<crate::wounds::Marks> {
+    let mut marks = vec![crate::wounds::Marks::default(); puppet.segments.len()];
+    let has_back = puppet.segments.iter().any(|s| s.part.as_deref() == Some("back"));
+    let rank_of = |list: &[(&str, u8)]| list.iter().filter(|(p, _)| *p == "back").map(|(_, r)| (*r).min(3)).max().unwrap_or(0);
+    let (back, back_scar) = if has_back { (0, 0) } else { (rank_of(look.wounds), rank_of(look.scars)) };
+    for surf in surfs {
+        let Some(m) = marks.get_mut(surf.index) else { continue };
+        let part = puppet.segments[surf.index].part.as_deref().unwrap_or("");
+        let split = !has_back && matches!(part, "chest" | "abdomen");
+        let leg = part.ends_with("Leg");
+        *m = crate::wounds::Marks {
+            rank: surf.rank,
+            scar: surf.scar,
+            split,
+            back: if split { back } else { 0 },
+            back_scar: if split { back_scar } else { 0 },
+            run: if back >= 2 && (split || leg) { back } else { 0 },
+            leg,
+        };
+    }
+    marks
 }
 
 /// A rendered figure.
@@ -217,6 +246,12 @@ struct Vert {
     addr: [f32; 2],
     /// A wound's colour and how strongly it shows over a texture here.
     wound: [f32; 4],
+    /// How much of its part's wound marks show here (fading where the part
+    /// meets another).
+    edge: f32,
+    /// Which way the surface faces at rest: -1 straight back .. 1 straight
+    /// forward (the back's marks go on the rear of a split trunk).
+    front: f32,
 }
 
 /// Samples round a ring for a figure whose largest ring is `px` across.
@@ -324,6 +359,11 @@ impl Samples {
                     None => [0, 1, 2].map(|k| w0 * v[0].col[k] + w1 * v[1].col[k] + w2 * v[2].col[k]),
                 };
                 let feet = surface.and_then(|l| l.locate(seg, station, angle));
+                if let (Some(at), Some(m)) = (feet, paint.marks.get(seg)) {
+                    if m.any() {
+                        col = crate::wounds::marks(col, at, seg as u32, m, lerp(|c| c.front), lerp(|c| c.edge), paint.strand_ft * 0.8);
+                    }
+                }
                 if paint.effects.frozen {
                     col = [0, 1, 2].map(|k| col[k] + (FROST_RGB[k] - col[k]) * 0.62);
                     if feet.is_some_and(frost_glint) {
@@ -657,14 +697,18 @@ impl Posed<'_> {
             let middle = scale(surf.rings.iter().fold([0.0; 3], |acc, r| add(acc, r.c)), 1.0 / n as f32);
             let base = verts.len() as u32;
             let measured = puppet.segments[surf.index].stations.len();
+            let seg_axes = (puppet.segments[surf.index].axis_w, puppet.segments[surf.index].axis_d);
             for (k, ring) in surf.rings.iter().enumerate() {
-                let col = ring.color(body, surf.base).map(|c| c as f32);
+                // A wounded part keeps its own colour: its marks are the
+                // wound (`wounds::mark`), not a tint over the whole part.
+                let base = if surf.rank > 0 { body } else { surf.base };
+                let col = ring.color(body, base).map(|c| c as f32);
                 let wound = if ring.red {
                     [col[0], col[1], col[2], 1.0]
                 } else if look.dead {
                     [BODY_DEAD[0] as f32, BODY_DEAD[1] as f32, BODY_DEAD[2] as f32, 0.7]
-                } else if surf.base != body {
-                    [surf.base[0] as f32, surf.base[1] as f32, surf.base[2] as f32, ring.tint * 0.75]
+                } else if base != body {
+                    [base[0] as f32, base[1] as f32, base[2] as f32, ring.tint * 0.75]
                 } else {
                     [0.0; 4]
                 };
@@ -683,7 +727,10 @@ impl Posed<'_> {
                     let (sp, z) = project(p);
                     let theta = j as f32 / m as f32 * std::f32::consts::TAU;
                     let addr = if addressed { [k as f32, theta] } else { [f32::NAN; 2] };
-                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound });
+                                        let (c, s) = angles[j];
+                    let rest = add(scale(seg_axes.0, c * len(ring.a)), scale(seg_axes.1, s * len(ring.b)));
+                    let front = if len(rest) > 1e-5 { rest[2] / len(rest) } else { 0.0 };
+                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound, edge: ring.tint, front });
                 }
             }
             let at = |k: usize, j: usize| base + (k * m + j % m) as u32;
@@ -704,10 +751,12 @@ impl Posed<'_> {
                     z,
                     n: out,
                     w: ring.c,
-                    col: ring.color(body, surf.base).map(|c| c as f32),
+                    col: ring.color(body, if surf.rank > 0 { body } else { surf.base }).map(|c| c as f32),
                     seg: surf.index as u32,
                     addr: [f32::NAN; 2],
                     wound: [0.0; 4],
+                    edge: ring.tint,
+                    front: 0.0,
                 });
                 for j in 0..m {
                     tris.push([centre, at(k, j), at(k, j + 1)]);
@@ -744,7 +793,9 @@ impl Posed<'_> {
             let (b, _) = project(add(mid, [0.0, 1.0, 0.0]));
             (a[0] - b[0]).hypot(a[1] - b[1])
         };
-        let surface = effects.any().then(|| UvLayout::new(puppet, 1.0));
+        let marks = if look.dead { vec![crate::wounds::Marks::default(); puppet.segments.len()] } else { segment_marks(puppet, &surfs, look) };
+        let marked = marks.iter().any(|m| m.any());
+        let surface = (effects.any() || marked).then(|| UvLayout::new(puppet, 1.0));
         let turn = rot_y(look.yaw);
         let rot = |seg: usize, v: V3| mul_mv(&turn, self.xf[seg].dir(v));
         let paint = Paint {
@@ -754,6 +805,7 @@ impl Posed<'_> {
             effects,
             // At least about a pixel wide, however small the figure.
             strand_ft: (0.9 / px_per_ft.max(1e-3)).max(0.018),
+            marks: &marks,
         };
         let mut samples = Samples::new(w * SS, h * SS, keep_surface);
         for t in &tris {
@@ -771,7 +823,7 @@ impl Posed<'_> {
             let (a, b) = (a as usize, b as usize);
             a < count && b < count && table[a * count + b]
         };
-        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any(), &is_joined);
+        px.smooth(radius, BLEND_DEPTH_OF_HEIGHT * height, texture.is_none() && !effects.any() && !marked, &is_joined);
         // The normal sheet's relief goes on AFTER the smoothing (which is
         // for the geometry's seams, and would blur a rib away), leaning the
         // surface's own normal by the painted deviation: the cel bands and
