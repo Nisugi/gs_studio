@@ -894,8 +894,8 @@ an *x* to put it back:
   (`gs_field_egui::skin_gpu`): the mesh `gs_puppet::Posed::skin_mesh` hands
   over, rasterised, resolved, smoothed and shaded pass by pass as the CPU
   skin is, straight into the v2 pass's atlas -- a turning doll's frame
-  2-3 ms of CPU instead of 20-26. A figure it does not cover yet
-  (unpainted, webbed, frozen) is drawn on the CPU. *The field's sky* stands it under the stage's own scene, hour and
+  2-3 ms of CPU instead of 20-26, eyes, web and frost included. On by
+  default; off draws the same figure on the CPU. *The field's sky* stands it under the stage's own scene, hour and
   facing instead of the window's sliders.
 
 **What a creature draws as**, first that it has

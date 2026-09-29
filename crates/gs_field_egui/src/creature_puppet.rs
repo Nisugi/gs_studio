@@ -538,7 +538,7 @@ pub struct PosedPuppet {
     pub caster: Option<Arc<gs_puppet::ShadowCaster>>,
     /// Built with [`Bare::Mesh`]: the figure as a mesh, and its paint, for
     /// the GPU skin (`skin_gpu`) -- and then no `skin`.
-    pub mesh: Option<(Arc<gs_puppet::SkinMesh>, Arc<gs_puppet::Texture>)>,
+    pub mesh: Option<(Arc<gs_puppet::SkinMesh>, Option<Arc<gs_puppet::Texture>>)>,
     lamp_layers: LampLayers,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
@@ -889,12 +889,11 @@ fn pose_puppet_inner(
     let bounds = yawed_bounds(&posed, look.yaw);
     let mut surface = None;
     let mut caster = None;
-    // For the GPU skin: the figure as a mesh, and no CPU skin at all --
-    // unless the mesh does not cover it (unpainted, a status effect).
+    // For the GPU skin: the figure as a mesh, and no CPU skin at all.
     let mesh = (skin && bare == Bare::Mesh && light.is_none())
         .then(|| {
-            let tex = texture_arc.clone()?;
-            let m = posed.skin_mesh(&project, &look, Some(&tex), key.effects)?;
+            let tex = texture_arc.clone();
+            let m = posed.skin_mesh(&project, &look, tex.as_deref(), key.effects)?;
             Some((Arc::new(m), tex))
         })
         .flatten();
@@ -1040,7 +1039,7 @@ const BARE_MESH: u64 = u64::MAX - 1;
 /// How a figure's skin is built: lit by the scene (the stage's), kept with
 /// its surface and unlit (the doll's on the CPU), or handed over as a mesh
 /// for the GPU skin to draw (`skin_gpu`) -- falling back to the surface when
-/// the mesh does not cover the figure.
+/// there is no mesh (nothing shows).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bare {
     No,

@@ -42,7 +42,7 @@ faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEA
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_DOLL=<hour>[,<n|ne|..>][,indoor][,new][,field]` (`field`: under the stage's sky) opens the
 *Doll* window (the injury doll, `tools/doll.rs` over `gs_field_egui::doll_view`)
-at that hour and facing, `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, `GS_STUDIO_DOLL_GPU=1` draws its skin on the GPU (`gs_field_egui::skin_gpu`, the window's *GPU skin*); `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
+at that hour and facing, `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, its skin is drawn on the GPU (`gs_field_egui::skin_gpu`, the window's *GPU skin*), `GS_STUDIO_DOLL_GPU=0` draws the CPU one, `GS_STUDIO_DOLL_FIGURE=<form>` / `GS_STUDIO_DOLL_FX=webbed,frozen` set its figure; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
 lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`

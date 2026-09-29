@@ -27,6 +27,11 @@ struct U {
     floor: vec4<f32>,     // the lit layer's floor (linear), has_normal
     flags: vec4<f32>,     // has_marks, smooth axis x, smooth axis y, marks texels per foot
     sheet: vec4<f32>,     // paint sheet w, h, marks sheet w, h
+    fx: vec4<f32>,        // has_paint, frozen, webbed, half a strand (feet)
+    web: vec4<f32>,       // thread half width (px), threads, smooth colours, eyes
+    web_rgb: vec4<f32>,   // web colour 0..1, strand spacing (feet)
+    frost_rgb: vec4<f32>, // frost colour 0..1
+    eye_rgb: vec4<f32>,   // eye colour 0..1
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -39,6 +44,10 @@ struct U {
 @group(0) @binding(6) var normals: texture_2d<f32>;
 @group(0) @binding(7) var marks_bk: texture_2d<f32>;
 @group(0) @binding(8) var marks_glow: texture_2d<f32>;
+// an unpainted skin's eyes: centre x, y (pixels), radius, depth
+@group(0) @binding(9) var<storage, read> eyes: array<vec4<f32>>;
+// a webbed figure's threads, two per: (point x, y, direction x, y), (steps)
+@group(0) @binding(10) var<storage, read> threads: array<vec4<f32>>;
 
 const TAU: f32 = 6.2831853;
 const ARC: u32 = 48u;
@@ -168,6 +177,39 @@ fn apply_marks(col: vec3<f32>, feet: vec2<f32>) -> vec4<f32> {
     return vec4<f32>(col * bk.a + bk.rgb, g);
 }
 
+// ---- gs_puppet's hash, and the web and frost measured on the surface
+
+fn hash(a: i32, b: u32) -> f32 {
+    var x = (bitcast<u32>(a) * 0x9E3779B9u) ^ (b * 0x85EBCA6Bu);
+    x = x ^ (x >> 15u);
+    x = x * 0x2C1B3C6Du;
+    x = x ^ (x >> 12u);
+    return f32(x & 0xFFFFu) / 65535.0;
+}
+
+fn web_alpha(at: vec2<f32>, half_width: f32) -> f32 {
+    var a = 0.0;
+    let fam = array<vec3<f32>, 3>(vec3<f32>(0.8, 0.6, 1.0), vec3<f32>(-0.6, 0.8, 1.13), vec3<f32>(0.0, 1.0, 1.7));
+    for (var k = 0; k < 3; k = k + 1) {
+        let f = fam[k];
+        let sp = f.z * u.web_rgb.w;
+        let across = (at.x * f.x + at.y * f.y) / sp;
+        let along = (-at.x * f.y + at.y * f.x) / sp;
+        let cell = floor(across);
+        if (hash(i32(cell), u32(k) + 11u) < 0.22) { continue; }
+        let wobble = 0.18 * sin(along * 1.9 + hash(i32(cell), u32(k)) * TAU);
+        let d = abs(across - cell - 0.5 - wobble) * sp;
+        a = max(a, 1.0 - smoothstep(half_width * 0.5, half_width, d));
+    }
+    return a;
+}
+
+fn frost_glint(at: vec2<f32>) -> bool {
+    let cx = i32(floor(at.x / 0.07));
+    let cy = i32(floor(at.y / 0.07));
+    return hash((cx * 7919) ^ cy, 3u) > 0.965;
+}
+
 // ---- raster
 
 struct VIn {
@@ -222,7 +264,7 @@ struct RasterOut {
     var col = i.col;
     var dev = vec3<f32>(0.0);
     var glow = 0.0;
-    if (i.addressed > 0.5) {
+    if (i.addressed > 0.5 && u.fx.x > 0.5) {
         let at = locate(0u, i.seg, i.addr.x, i.addr.y);
         if (at.x >= 0.0) {
             let painted = sample_paint(at);
@@ -237,14 +279,26 @@ struct RasterOut {
                 }
             }
         }
-        if (u.flags.x > 0.5 && segs[i.seg * 4u + 3u].x > 0.5) {
-            let feet = locate(1u, i.seg, i.addr.x, i.addr.y);
-            if (feet.x >= 0.0) {
-                let m = apply_marks(col, feet);
-                col = m.rgb;
-                glow = m.a;
-            }
+    }
+    // the surface layout, where marks and effects are measured
+    var feet = vec2<f32>(-1.0, -1.0);
+    if (i.addressed > 0.5 && (u.flags.x > 0.5 || u.fx.y > 0.5 || u.fx.z > 0.5)) {
+        feet = locate(1u, i.seg, i.addr.x, i.addr.y);
+    }
+    if (feet.x >= 0.0 && u.flags.x > 0.5 && segs[i.seg * 4u + 3u].x > 0.5) {
+        let m = apply_marks(col, feet);
+        col = m.rgb;
+        glow = m.a;
+    }
+    if (u.fx.y > 0.5) {
+        col = col + (u.frost_rgb.rgb - col) * 0.62;
+        if (feet.x >= 0.0 && frost_glint(feet)) {
+            col = col + (vec3<f32>(1.0) - col) * 0.85;
         }
+    }
+    if (u.fx.z > 0.5 && feet.x >= 0.0) {
+        let a = web_alpha(feet, u.fx.w) * 0.92;
+        col = col + (u.web_rgb.rgb - col) * a;
     }
     var o: RasterOut;
     o.col = vec4<f32>(col, glow);
@@ -265,6 +319,8 @@ struct RasterOut {
 @group(1) @binding(1) var s_n: texture_2d<f32>;
 @group(1) @binding(2) var s_dev: texture_2d<f32>;
 @group(1) @binding(3) var s_pos: texture_2d<f32>;
+// per thread (x = its index): first and last step on the body, drawn
+@group(1) @binding(4) var s_threads: texture_2d<f32>;
 
 struct Resolved {
     @location(0) col: vec4<f32>,   // colour avg, glow avg
@@ -316,18 +372,30 @@ struct Resolved {
     return o;
 }
 
-// Pixels::smooth, one axis (u.flags.yz): normals averaged over the radius,
-// between pixels near in depth (or joined and a little further).
-@fragment fn fs_smooth(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
+// Pixels::smooth, one axis (u.flags.yz): normals (and an unpainted skin's
+// colours) averaged over the radius, between pixels near in depth (or
+// joined and a little further).
+struct Smoothed {
+    @location(0) n: vec4<f32>,
+    @location(1) col: vec4<f32>,
+};
+
+@fragment fn fs_smooth(@builtin(position) fc: vec4<f32>) -> Smoothed {
     let px = vec2<i32>(fc.xy);
     let here = textureLoad(s_n, px, 0);
+    let here_col = textureLoad(s_col, px, 0);
     let p0 = textureLoad(s_pos, px, 0);
-    if (p0.w >= FAR * 0.5) { return here; }
+    var out: Smoothed;
+    out.n = here;
+    out.col = here_col;
+    if (p0.w >= FAR * 0.5) { return out; }
     let s0 = textureLoad(s_dev, px, 0).w;
     let r = i32(u.line.w);
     let dir = vec2<i32>(i32(u.flags.y), i32(u.flags.z));
     let wh = vec2<i32>(i32(u.size.x), i32(u.size.y));
     var n = vec3<f32>(0.0);
+    var col = vec3<f32>(0.0);
+    var k = 0.0;
     for (var t = -r; t <= r; t = t + 1) {
         let q = px + dir * t;
         if (q.x < 0 || q.y < 0 || q.x >= wh.x || q.y >= wh.y) { continue; }
@@ -337,8 +405,45 @@ struct Resolved {
         let tol = u.depth.z;
         if (dz > tol && !(dz <= tol * u.more.y && s0 >= 0.0 && sq >= 0.0 && is_joined(u32(s0), u32(sq)))) { continue; }
         n = n + textureLoad(s_n, q, 0).xyz;
+        col = col + textureLoad(s_col, q, 0).rgb;
+        k = k + 1.0;
     }
-    return vec4<f32>(select(here.xyz, normalize(n), dot(n, n) > 1e-12), here.w);
+    out.n = vec4<f32>(select(here.xyz, normalize(n), dot(n, n) > 1e-12), here.w);
+    if (u.web.z > 0.5) {
+        out.col = vec4<f32>(col / max(k, 1.0), here_col.a);
+    }
+    return out;
+}
+
+// bind_threads' walk: where thread k (this fragment's x) first and last
+// meets the body, in half-pixel steps, and whether it binds (a short
+// bridge over a gap, not a tripwire of air)
+@fragment fn fs_threads(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
+    let k = u32(fc.x);
+    let a = threads[2u * k];
+    let steps = i32(threads[2u * k + 1u].x);
+    let wh = vec2<f32>(u.size.x, u.size.y);
+    var first = 1e9;
+    var last = -1e9;
+    var covered = 0.0;
+    for (var s = -steps; s <= steps; s = s + 1) {
+        let t = f32(s) * 0.5;
+        let p = a.xy + a.zw * t;
+        if (p.x < 0.0 || p.y < 0.0 || p.x >= wh.x || p.y >= wh.y) { continue; }
+        if (textureLoad(s_n, vec2<i32>(p), 0).w >= 0.5) {
+            first = min(first, t);
+            last = max(last, t);
+            covered = covered + 1.0;
+        }
+    }
+    let ok = last >= first && last - first >= 4.0 && covered * 0.5 >= (last - first) * 0.6;
+    return vec4<f32>(first, last, select(0.0, 1.0, ok), 0.0);
+}
+
+fn over(top: vec4<f32>, under: vec4<f32>) -> vec4<f32> {
+    let a = top.a + under.a * (1.0 - top.a);
+    if (a <= 1e-6) { return vec4<f32>(0.0); }
+    return vec4<f32>((top.rgb * top.a + under.rgb * under.a * (1.0 - top.a)) / a, a);
 }
 
 // ---- final: shade, contours, and the v2 pass's layer
@@ -456,9 +561,34 @@ struct Layer {
         top_a = cov;
     }
     // over(top, under)
-    let a = top_a + under_a * (1.0 - top_a);
-    var c = vec3<f32>(0.0);
-    if (a > 1e-6) { c = (top_c * top_a + under_c * under_a * (1.0 - top_a)) / a; }
+    var ca = over(vec4<f32>(top_c, top_a), vec4<f32>(under_c, under_a));
+    let q = vec2<f32>(f32(px.x) + 0.5, f32(px.y) + 0.5);
+    // a webbed figure's threads, binding limb to body
+    for (var k = 0; k < i32(u.web.y); k = k + 1) {
+        let span = textureLoad(s_threads, vec2<i32>(k, 0), 0);
+        if (span.z < 0.5) { continue; }
+        let t = threads[2u * u32(k)];
+        let a0 = t.xy + t.zw * span.x;
+        let b0 = t.xy + t.zw * span.y;
+        let ab = b0 - a0;
+        let s = clamp(dot(q - a0, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+        let d = length(q - (a0 + ab * s));
+        let wa = clamp(u.web.x + 0.5 - d, 0.0, 1.0) * 0.8;
+        if (wa > 0.0) { ca = over(vec4<f32>(u.web_rgb.rgb, wa), ca); }
+    }
+    // an unpainted skin's eyes, where the surface they sit on shows
+    for (var k = 0; k < i32(u.web.w); k = k + 1) {
+        let e = eyes[u32(k)];
+        let at = vec2<i32>(floor(e.xy));
+        if (at.x < 0 || at.y < 0 || at.x >= wh.x || at.y >= wh.y) { continue; }
+        if (textureLoad(s_pos, at, 0).w < e.w - u.depth.w) { continue; }
+        let sat = textureLoad(s_dev, at, 0).w;
+        if (sat >= 0.0 && segs[u32(sat) * 4u + 3u].y > 0.5) { continue; }
+        let ea = clamp(e.z - length(q - e.xy) + 0.5, 0.0, 1.0);
+        if (ea > 0.0) { ca = over(vec4<f32>(u.eye_rgb.rgb, ea), ca); }
+    }
+    let a = ca.a;
+    let c = ca.rgb;
     if (a <= 0.0) { return o; }
     // the layer (field_gpu_stage::skin_image): toward the camera's frame
     let back = u.to_cam.xyz;

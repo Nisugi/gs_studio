@@ -15,7 +15,8 @@ use egui_wgpu::wgpu;
 #[derive(Debug)]
 pub struct SkinJob {
     pub mesh: Arc<gs_puppet::SkinMesh>,
-    pub texture: Arc<gs_puppet::Texture>,
+    /// Its paint; None = unpainted (the mesh's own colours).
+    pub texture: Option<Arc<gs_puppet::Texture>>,
     pub floor: [f32; 3],
     pub m_per_ft: f32,
 }
@@ -37,7 +38,9 @@ impl SkinJob {
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Floats in the uniform block (`U` in the shader).
-const UNIFORM_FLOATS: usize = 48;
+const UNIFORM_FLOATS: usize = 68;
+/// The threads' spans (`fs_threads`): one texel each.
+const SPANS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 /// Bytes per mesh corner (`VIn`).
 const CORNER_BYTES: u64 = 80;
 
@@ -47,6 +50,7 @@ pub(crate) struct SkinGpu {
     raster: wgpu::RenderPipeline,
     resolve: wgpu::RenderPipeline,
     smooth: wgpu::RenderPipeline,
+    threads: wgpu::RenderPipeline,
     finish: wgpu::RenderPipeline,
     layout0: wgpu::BindGroupLayout,
     layout1: wgpu::BindGroupLayout,
@@ -59,8 +63,8 @@ struct Sheets {
     paint: Option<((usize, usize), wgpu::TextureView, wgpu::TextureView)>,
     /// (the marks sheet's address, b+k, glow)
     marks: Option<(usize, wgpu::TextureView, wgpu::TextureView)>,
-    /// 1 x 1 stand-ins: (rgba, r)
-    blank: Option<(wgpu::TextureView, wgpu::TextureView)>,
+    /// 1 x 1 stand-ins: (rgba, r, a thread span)
+    blank: Option<(wgpu::TextureView, wgpu::TextureView, wgpu::TextureView)>,
 }
 
 fn texture_entry(binding: u32, stage: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {
@@ -151,11 +155,13 @@ impl SkinGpu {
                 texture_entry(6, frag),
                 texture_entry(7, frag),
                 texture_entry(8, frag),
+                storage_entry(9),
+                storage_entry(10),
             ],
         });
         let layout1 = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("skin_gpu buffers"),
-            entries: &[texture_entry(0, frag), texture_entry(1, frag), texture_entry(2, frag), texture_entry(3, frag)],
+            entries: &[texture_entry(0, frag), texture_entry(1, frag), texture_entry(2, frag), texture_entry(3, frag), texture_entry(4, frag)],
         });
         let raster_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("skin_gpu raster"), bind_group_layouts: &[Some(&layout0)], immediate_size: 0 });
         let full_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("skin_gpu passes"), bind_group_layouts: &[Some(&layout0), Some(&layout1)], immediate_size: 0 });
@@ -212,9 +218,10 @@ impl SkinGpu {
             })
         };
         let resolve = full("fs_resolve", &[target(COLOR), target(COLOR), target(COLOR), target(COLOR)]);
-        let smooth = full("fs_smooth", &[target(COLOR)]);
+        let smooth = full("fs_smooth", &[target(COLOR), target(COLOR)]);
+        let threads = full("fs_threads", &[target(SPANS)]);
         let finish = full("fs_final", &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float)]);
-        SkinGpu { raster, resolve, smooth, finish, layout0, layout1, sheets: Mutex::new(Sheets::default()) }
+        SkinGpu { raster, resolve, smooth, threads, finish, layout0, layout1, sheets: Mutex::new(Sheets::default()) }
     }
 
     /// Draw `job` into the atlas `albedo` / `lit` / `geo` with its image's
@@ -238,10 +245,16 @@ impl SkinGpu {
             return;
         }
         let mut sheets = self.sheets.lock().unwrap_or_else(|e| e.into_inner());
+        if sheets.blank.is_none() {
+            let rgba = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::Rgba8Unorm, &[0, 0, 0, 255], 4, "skin_gpu blank");
+            let r = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::R8Unorm, &[0; 4][..1], 1, "skin_gpu blank r");
+            let span = upload_rgba(device, queue, 1, 1, SPANS, &[0; 16], 16, "skin_gpu blank span");
+            sheets.blank = Some((rgba, r, span));
+        }
         // the paint and its normal sheet, uploaded once per texture
-        let tex = &job.texture;
-        let paint_key = (tex.rgba.as_ptr() as usize, tex.rgba.len());
-        if sheets.paint.as_ref().is_none_or(|(k, _, _)| *k != paint_key) {
+        if let Some(tex) = &job.texture {
+            let paint_key = (tex.rgba.as_ptr() as usize, tex.rgba.len());
+            if sheets.paint.as_ref().is_none_or(|(k, _, _)| *k != paint_key) {
             let (pw, ph) = (tex.layout.w as u32, tex.layout.h as u32);
             let paint = upload_rgba(device, queue, pw, ph, wgpu::TextureFormat::Rgba8Unorm, &tex.rgba, 4, "skin_gpu paint");
             let normal = match &tex.normal {
@@ -249,13 +262,9 @@ impl SkinGpu {
                 _ => upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::Rgba8Unorm, &[0; 4], 4, "skin_gpu no normals"),
             };
             sheets.paint = Some((paint_key, paint, normal));
+            }
         }
-        if sheets.blank.is_none() {
-            let rgba = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::Rgba8Unorm, &[0, 0, 0, 255], 4, "skin_gpu blank");
-            let r = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::R8Unorm, &[0; 4][..1], 1, "skin_gpu blank r");
-            sheets.blank = Some((rgba, r));
-        }
-        if let Some((sheet, _, _)) = &m.marks {
+        if let Some((sheet, _)) = &m.marks {
             let key = Arc::as_ptr(sheet) as usize;
             if sheets.marks.as_ref().is_none_or(|(k, _, _)| *k != key) {
                 let [sw, sh] = sheet.size();
@@ -266,11 +275,15 @@ impl SkinGpu {
                 sheets.marks = Some((key, bk, glow));
             }
         }
-        let has_normal = tex.normal.as_ref().is_some_and(|n| n.len() == tex.rgba.len());
-        let (paint, normal) = sheets.paint.as_ref().map(|(_, p, n)| (p, n)).expect("uploaded above");
         let blank = sheets.blank.as_ref().expect("made above");
+        let has_normal = job.texture.as_ref().is_some_and(|t| t.normal.as_ref().is_some_and(|n| n.len() == t.rgba.len()));
+        let (paint, normal) = match (&job.texture, &sheets.paint) {
+            (Some(_), Some((_, p, n))) => (p, n),
+            _ => (&blank.0, &blank.0),
+        };
+        let paint_size = job.texture.as_ref().map_or([1, 1], |t| [t.layout.w, t.layout.h]);
         let (marks_bk, marks_glow, marks_size, marks_per_ft) = match (&m.marks, &sheets.marks) {
-            (Some((sheet, _, _)), Some((_, bk, glow))) => (bk, glow, sheet.size(), sheet.per_ft()),
+            (Some((sheet, _)), Some((_, bk, glow))) => (bk, glow, sheet.size(), sheet.per_ft()),
             _ => (&blank.0, &blank.1, [1, 1], 1.0),
         };
 
@@ -290,28 +303,39 @@ impl SkinGpu {
         u.extend(v3(job.floor, if has_normal { 1.0 } else { 0.0 }));
         let flags = |x: f32, y: f32| [if m.marks.is_some() { 1.0 } else { 0.0 }, x, y, marks_per_ft];
         u.extend(flags(0.0, 0.0));
-        u.extend([tex.layout.w as f32, tex.layout.h as f32, marks_size[0] as f32, marks_size[1] as f32]);
+        u.extend([paint_size[0] as f32, paint_size[1] as f32, marks_size[0] as f32, marks_size[1] as f32]);
+        let flag = |b: bool| if b { 1.0 } else { 0.0 };
+        u.extend([flag(job.texture.is_some()), flag(m.effects.frozen), flag(m.effects.webbed), m.strand_ft]);
+        u.extend([m.thread_half, m.threads.len() as f32, flag(m.smooth_colours), m.eyes.len() as f32]);
+        u.extend(v3(s.web_rgb.map(|c| c / 255.0), s.web_spacing_ft));
+        u.extend(v3(s.frost_rgb.map(|c| c / 255.0), 0.0));
+        u.extend(v3(s.eye_rgb.map(|c| c / 255.0), 0.0));
         debug_assert_eq!(u.len(), UNIFORM_FLOATS);
         let uniform = |u: &[f32], label: &str| {
             let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: (UNIFORM_FLOATS * 4) as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
             queue.write_buffer(&buf, 0, &floats(u));
             buf
         };
-        let marked: Vec<bool> = m.marks.as_ref().map(|(_, _, segs)| segs.clone()).unwrap_or_default();
+        let marked: Vec<bool> = m.marks.as_ref().map(|(_, segs)| segs.clone()).unwrap_or_default();
         let mut seg_data = Vec::with_capacity(m.segments * 16);
         for (i, rot) in m.seg_rot.iter().enumerate() {
             for col in rot {
                 seg_data.extend(v3(*col, 0.0));
             }
-            seg_data.extend([if marked.get(i).copied().unwrap_or(false) { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0]);
+            seg_data.extend([flag(marked.get(i).copied().unwrap_or(false)), flag(m.garment.get(i).copied().unwrap_or(false)), 0.0, 0.0]);
         }
         let joined: Vec<u8> = m.joined.iter().flat_map(|j| (*j as u32).to_le_bytes()).collect();
-        let marks_layout = m.marks.as_ref().map_or_else(|| vec![0.0, 1.0], |(_, l, _)| l.clone());
+        let surface_layout = m.surface_layout.clone().unwrap_or_else(|| vec![0.0, 1.0]);
+        let paint_layout = if m.paint_layout.is_empty() { vec![0.0, 1.0] } else { m.paint_layout.clone() };
+        let eyes: Vec<f32> = m.eyes.iter().flatten().copied().collect();
+        let threads: Vec<f32> = m.threads.iter().flat_map(|t| [t[0], t[1], t[2], t[3], t[4], 0.0, 0.0, 0.0]).collect();
         let buffers = [
-            storage(device, queue, &floats(&m.paint_layout), "skin_gpu paint layout"),
-            storage(device, queue, &floats(&marks_layout), "skin_gpu marks layout"),
+            storage(device, queue, &floats(&paint_layout), "skin_gpu paint layout"),
+            storage(device, queue, &floats(&surface_layout), "skin_gpu surface layout"),
             storage(device, queue, &floats(&seg_data), "skin_gpu segments"),
             storage(device, queue, &joined, "skin_gpu joined"),
+            storage(device, queue, &floats(&eyes), "skin_gpu eyes"),
+            storage(device, queue, &floats(&threads), "skin_gpu threads"),
         ];
         let group0 = |uniform: &wgpu::Buffer| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -327,6 +351,8 @@ impl SkinGpu {
                     wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(normal) },
                     wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(marks_bk) },
                     wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(marks_glow) },
+                    wgpu::BindGroupEntry { binding: 9, resource: buffers[4].as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 10, resource: buffers[5].as_entire_binding() },
                 ],
             })
         };
@@ -361,7 +387,9 @@ impl SkinGpu {
         let samples = views(w * ss, h * ss, "skin_gpu samples");
         let depth = make_texture(device, w * ss, h * ss, DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, "skin_gpu depth").create_view(&wgpu::TextureViewDescriptor::default());
         let pixels = views(w, h, "skin_gpu pixels");
-        let smoothed: [wgpu::TextureView; 2] = std::array::from_fn(|_| make_texture(device, w, h, COLOR, rt, "skin_gpu smoothed").create_view(&wgpu::TextureViewDescriptor::default()));
+        let smoothed: [[wgpu::TextureView; 2]; 2] =
+            std::array::from_fn(|_| std::array::from_fn(|_| make_texture(device, w, h, COLOR, rt, "skin_gpu smoothed").create_view(&wgpu::TextureViewDescriptor::default())));
+        let spans_tex = (!m.threads.is_empty()).then(|| make_texture(device, m.threads.len() as u32, 1, SPANS, rt, "skin_gpu thread spans").create_view(&wgpu::TextureViewDescriptor::default()));
         let (ow, oh) = (w + 2 * pad, h + 2 * pad);
         let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
         let outs = [
@@ -370,18 +398,20 @@ impl SkinGpu {
             make_texture(device, ow, oh, wgpu::TextureFormat::Rgba16Float, out_usage, "skin_gpu geo"),
         ];
         let out_views: Vec<wgpu::TextureView> = outs.iter().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default())).collect();
-        let group1 = |n: &wgpu::TextureView, of: &[wgpu::TextureView; 4]| {
+        let group1 = |col: &wgpu::TextureView, n: &wgpu::TextureView, of: &[wgpu::TextureView; 4], spans: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("skin_gpu buffers"),
                 layout: &self.layout1,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&of[0]) },
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(col) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(n) },
                     wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&of[2]) },
                     wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(&of[3]) },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(spans) },
                 ],
             })
         };
+        let no_spans = &blank.2;
 
         let none = wgpu::Color::TRANSPARENT;
         let far = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 60000.0 };
@@ -406,7 +436,7 @@ impl SkinGpu {
         }
         // resolve
         {
-            let g1 = group1(&samples[1], &samples);
+            let g1 = group1(&samples[0], &samples[1], &samples, no_spans);
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("skin_gpu resolve"),
                 color_attachments: &[attach(&pixels[0], none), attach(&pixels[1], none), attach(&pixels[2], no_seg), attach(&pixels[3], far)],
@@ -418,7 +448,7 @@ impl SkinGpu {
             pass.draw(0..3, 0..1);
         }
         // smooth, x then y
-        let mut normals = &pixels[1];
+        let (mut normals, mut colours) = (&pixels[1], &pixels[0]);
         if m.smooth_radius > 0 {
             for (k, (dx, dy)) in [(1.0, 0.0), (0.0, 1.0)].into_iter().enumerate() {
                 let mut ua = u.clone();
@@ -427,10 +457,10 @@ impl SkinGpu {
                 ua[f + 2] = dy;
                 let ub = uniform(&ua, "skin_gpu smooth uniforms");
                 let g0 = group0(&ub);
-                let g1 = group1(normals, &pixels);
+                let g1 = group1(colours, normals, &pixels, no_spans);
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("skin_gpu smooth"),
-                    color_attachments: &[attach(&smoothed[k], none)],
+                    color_attachments: &[attach(&smoothed[k][0], none), attach(&smoothed[k][1], none)],
                     ..Default::default()
                 });
                 pass.set_pipeline(&self.smooth);
@@ -438,12 +468,26 @@ impl SkinGpu {
                 pass.set_bind_group(1, &g1, &[]);
                 pass.draw(0..3, 0..1);
                 drop(pass);
-                normals = &smoothed[k];
+                normals = &smoothed[k][0];
+                colours = &smoothed[k][1];
             }
+        }
+        // a webbed figure's threads: where each first and last meets the body
+        if let Some(spans) = &spans_tex {
+            let g1 = group1(colours, normals, &pixels, no_spans);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("skin_gpu threads"),
+                color_attachments: &[attach(spans, none)],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.threads);
+            pass.set_bind_group(0, &g_main, &[]);
+            pass.set_bind_group(1, &g1, &[]);
+            pass.draw(0..3, 0..1);
         }
         // shade, contours, the layer
         {
-            let g1 = group1(normals, &pixels);
+            let g1 = group1(colours, normals, &pixels, spans_tex.as_ref().unwrap_or(no_spans));
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("skin_gpu final"),
                 color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none)],

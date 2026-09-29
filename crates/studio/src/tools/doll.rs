@@ -84,7 +84,7 @@ impl Default for DollWindow {
             follow_field: false,
             hit: None,
             frames: 0,
-            gpu_skin: false,
+            gpu_skin: true,
         }
     }
 }
@@ -113,7 +113,16 @@ impl DollWindow {
                 }
             }
         }
-        w.gpu_skin = std::env::var("GS_STUDIO_DOLL_GPU").is_ok_and(|v| v == "1");
+        // on by default; GS_STUDIO_DOLL_GPU=0 draws the CPU skin
+        w.gpu_skin = std::env::var("GS_STUDIO_DOLL_GPU").map_or(true, |v| v.trim() != "0");
+        // GS_STUDIO_DOLL_FIGURE=<form>, GS_STUDIO_DOLL_FX=webbed,frozen
+        if let Ok(v) = std::env::var("GS_STUDIO_DOLL_FIGURE") {
+            w.family = v.trim().to_owned();
+        }
+        if let Ok(v) = std::env::var("GS_STUDIO_DOLL_FX") {
+            w.webbed = v.contains("webbed");
+            w.frozen = v.contains("frozen");
+        }
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_HIT") {
             let parsed = v.split_once('@').and_then(|(wound, frame)| {
                 let (part, rank) = wound.split_once(':')?;
@@ -231,7 +240,7 @@ impl DollWindow {
         });
         ui.add(egui::Slider::new(&mut self.turn, -180.0..=180.0).text("turned").suffix(" deg"));
         ui.checkbox(&mut self.gpu_skin, "GPU skin")
-            .on_hover_text("Draw the skin on the GPU. A figure it does not cover yet (unpainted, webbed or frozen) is drawn on the CPU");
+            .on_hover_text("Draw the skin on the GPU (off: the CPU skin, the same figure, slower to move)");
 
         super::group(ui, "Wounds and scars");
         egui::Grid::new("doll_wounds").num_columns(3).show(ui, |ui| {

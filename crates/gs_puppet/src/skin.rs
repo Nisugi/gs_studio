@@ -347,6 +347,12 @@ pub struct SkinShading {
     pub joined_blend: f32,
     pub boss_extra_px: f32,
     pub boss_rgb: [f32; 3],
+    /// Web, frost and eye colours (0..255), and the web's strand spacing
+    /// (feet).
+    pub web_rgb: [f32; 3],
+    pub frost_rgb: [f32; 3],
+    pub eye_rgb: [f32; 3],
+    pub web_spacing_ft: f32,
 }
 
 /// Samples per pixel along each axis the skin is rasterised at.
@@ -385,11 +391,29 @@ pub struct SkinMesh {
     pub contour_tol: f32,
     pub near: f32,
     pub range: f32,
-    /// The paint's layout, [`UvLayout::packed`].
+    /// The paint's layout, [`UvLayout::packed`]; empty when unpainted (the
+    /// corners' own colours, smoothed as the CPU smooths them).
     pub paint_layout: Vec<f32>,
-    /// Wound, scar and nerve marks: their sheet, the 1 px-per-foot surface
-    /// layout it is laid on (packed), and which segments carry any.
-    pub marks: Option<(Arc<crate::wounds::MarksSheet>, Vec<f32>, Vec<bool>)>,
+    pub smooth_colours: bool,
+    /// The 1 px-per-foot surface layout (packed), when marks or effects are
+    /// measured on it.
+    pub surface_layout: Option<Vec<f32>>,
+    /// Wound, scar and nerve marks: their sheet (on the surface layout),
+    /// and which segments carry any.
+    pub marks: Option<(Arc<crate::wounds::MarksSheet>, Vec<bool>)>,
+    /// Status effects, and half a web strand's width (feet).
+    pub effects: Effects,
+    pub strand_ft: f32,
+    /// An unpainted skin's eyes: centre (pixels), radius, depth; drawn where
+    /// the surface they sit on shows and no garment covers it.
+    pub eyes: Vec<[f32; 4]>,
+    /// Per segment: a garment (it covers an eye under it).
+    pub garment: Vec<bool>,
+    /// A webbed figure's binding threads: a point and direction (pixels)
+    /// and how many half-pixel steps each way to walk, and their half
+    /// width; each spans where its line first to last meets the body.
+    pub threads: Vec<[f32; 5]>,
+    pub thread_half: f32,
     pub shading: SkinShading,
     /// Identifies this figure's pixels.
     pub key: u64,
@@ -1053,16 +1077,11 @@ impl Posed<'_> {
 
     /// This figure as a mesh and what shades it, for a host that
     /// rasterises the skin itself (the GPU skin): the same figure
-    /// [`Posed::skin_surface`] draws with `texture`. None when nothing
-    /// shows, or for what the host does not draw yet -- an unpainted skin
-    /// (its dotted eyes) and status effects -- which it draws on the CPU.
+    /// [`Posed::skin_surface`] draws with `texture` and `effects`. None
+    /// when nothing shows.
     pub fn skin_mesh(&self, project: &dyn Fn(V3) -> ([f32; 2], f32), look: &Look, texture: Option<&Texture>, effects: Effects) -> Option<SkinMesh> {
         use std::hash::{Hash, Hasher};
-        if effects.any() || texture.is_none() {
-            return None;
-        }
         let Mesh { texture, line, view, height, verts, tris, surfs, origin, w, h } = self.build_mesh(project, look, texture)?;
-        let texture = texture?;
         let puppet = self.puppet;
         let px_per_ft = {
             let mid = [0.0, height * 0.5, 0.0];
@@ -1073,11 +1092,57 @@ impl Posed<'_> {
         let marks = if look.dead { vec![crate::wounds::Marks::default(); puppet.segments.len()] } else { segment_marks(puppet, &surfs, look) };
         let marked = marks.iter().any(|m| m.any());
         let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
-        let marks = marked.then(|| {
-            let layout = UvLayout::new(puppet, 1.0);
-            let sheet = marks_sheet(puppet, &layout, &surfs, &marks, strand_ft * 0.8);
-            (sheet, layout.packed(), marks.iter().map(|m| m.any()).collect())
+        let layout = (marked || effects.any()).then(|| UvLayout::new(puppet, 1.0));
+        let marks = layout.as_ref().filter(|_| marked).map(|layout| {
+            let sheet = marks_sheet(puppet, layout, &surfs, &marks, strand_ft * 0.8);
+            (sheet, marks.iter().map(|m| m.any()).collect::<Vec<bool>>())
         });
+        // an unpainted skin's eyes, as the CPU places them
+        let mut eyes = Vec::new();
+        if !look.dead && texture.is_none() {
+            let turn = rot_y(look.yaw);
+            for eye in &puppet.eyes {
+                if !surfs.iter().any(|s| s.index == eye.segment) {
+                    continue;
+                }
+                let x = &self.xf[eye.segment];
+                let pos = mul_mv(&turn, x.point(eye.pos));
+                if dot(mul_mv(&turn, x.dir(eye.normal)), view.to_cam) <= 0.25 {
+                    continue;
+                }
+                let (at, z) = project(pos);
+                let (edge, _) = project(add(pos, scale(mul_mv(&turn, x.dir([0.0, 1.0, 0.0])), eye.radius)));
+                let r = (edge[0] - at[0]).hypot(edge[1] - at[1]).max(0.9);
+                let c = [at[0] - origin[0], at[1] - origin[1]];
+                if c[0].is_finite() && c[1].is_finite() && r.is_finite() {
+                    eyes.push([c[0], c[1], r, z]);
+                }
+            }
+        }
+        // a webbed figure's threads, as `bind_threads` lays them, over the
+        // mesh's box (the covered pixels' box, near enough)
+        let mut threads = Vec::new();
+        if effects.webbed {
+            let ss = SS as f32;
+            let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+            for v in verts.iter().filter(|v| v.p[0].is_finite() && v.p[1].is_finite()) {
+                for k in 0..2 {
+                    lo[k] = lo[k].min(v.p[k] / ss);
+                    hi[k] = hi[k].max(v.p[k] / ss);
+                }
+            }
+            if lo[0] <= hi[0] {
+                let seed = puppet.family.bytes().fold(0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                let (cx, cy) = ((lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5);
+                let reach = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+                for k in 0..BIND_THREADS {
+                    let angle = hash(k as i32, seed) * std::f32::consts::PI;
+                    let offset = (hash(k as i32, seed ^ 0xA5A5) - 0.5) * 0.7;
+                    let (dx, dy) = angle.sin_cos();
+                    threads.push([cx - dy * offset * (hi[0] - lo[0]), cy + dx * offset * (hi[1] - lo[1]), dx, dy, (reach * 2.0).floor()]);
+                }
+            }
+        }
         let mut corners = Vec::with_capacity(tris.len() * 3);
         for t in &tris {
             let v = t.map(|i| &verts[i as usize]);
@@ -1118,8 +1183,8 @@ impl Posed<'_> {
         for c in corners.iter().step_by(61) {
             (c.p.map(f32::to_bits), c.z.to_bits(), c.col.map(f32::to_bits), c.seg).hash(&mut hasher);
         }
-        (texture.rgba.len(), texture.rgba.as_ptr() as usize, look.outline_px.to_bits(), look.boss_outline).hash(&mut hasher);
-        if let Some((sheet, _, _)) = &marks {
+        (texture.map(|t| (t.rgba.len(), t.rgba.as_ptr() as usize)), look.outline_px.to_bits(), look.boss_outline, effects).hash(&mut hasher);
+        if let Some((sheet, _)) = &marks {
             (Arc::as_ptr(sheet) as usize).hash(&mut hasher);
         }
         Some(SkinMesh {
@@ -1140,8 +1205,16 @@ impl Posed<'_> {
             contour_tol: CONTOUR_DEPTH_OF_HEIGHT * height,
             near,
             range: (far - near).max(2.0),
-            paint_layout: texture.layout.packed(),
+            paint_layout: texture.map(|t| t.layout.packed()).unwrap_or_default(),
+            smooth_colours: texture.is_none() && !effects.any() && !marked,
+            surface_layout: layout.map(|l| l.packed()),
             marks,
+            effects,
+            strand_ft,
+            eyes,
+            garment: puppet.segments.iter().map(|s| s.kind.is_garment()).collect(),
+            threads,
+            thread_half: (px_per_ft * 0.012).max(0.7),
             shading: SkinShading {
                 light_above: LIGHT_ABOVE,
                 dark_below: DARK_BELOW,
@@ -1155,6 +1228,10 @@ impl Posed<'_> {
                 joined_blend: JOINED_BLEND,
                 boss_extra_px: BOSS_EXTRA_PX,
                 boss_rgb: BOSS_OUTLINE.map(|c| c as f32),
+                web_rgb: WEB_RGB,
+                frost_rgb: FROST_RGB,
+                eye_rgb: [EYE[0], EYE[1], EYE[2]].map(|v| v as f32),
+                web_spacing_ft: WEB_SPACING_FT,
             },
             key: hasher.finish(),
         })
