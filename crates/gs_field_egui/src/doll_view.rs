@@ -251,7 +251,7 @@ pub fn paint(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, family: &
         None
     } else if let Some((mesh, texture)) = &posed.mesh {
         let key = key_of(("doll gpu skin", mesh.key, sky.floor.map(f32::to_bits)));
-        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { mesh: mesh.clone(), texture: texture.clone(), floor: sky.floor, m_per_ft: M_PER_FT }));
+        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { mesh: mesh.clone(), texture: texture.clone(), lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT }));
         let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
         let image = LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))

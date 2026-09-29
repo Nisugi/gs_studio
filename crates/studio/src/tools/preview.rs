@@ -152,6 +152,10 @@ impl StageTool {
         if std::env::var_os("GS_STUDIO_SPLATS").is_some() {
             stage.show_splats = true;
         }
+        // GS_STUDIO_GPU_SKINS=1: the puppets' skins on the GPU (GPU skins)
+        if std::env::var("GS_STUDIO_GPU_SKINS").is_ok_and(|v| v.trim() == "1") {
+            stage.gpu_skins = true;
+        }
         // A lighting check with no one at the slider: GS_STUDIO_LIGHT_HOUR
         // holds the stage at that game hour (23 = night).
         if let Some(hour) = std::env::var("GS_STUDIO_LIGHT_HOUR").ok().and_then(|h| h.trim().parse::<f32>().ok()) {
@@ -390,6 +394,7 @@ impl StageTool {
         gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
         gs_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
         gs_field_egui::creature_puppet::set_puppet_splats(&ctx, stage.show_splats);
+        gs_field_egui::creature_puppet::set_puppet_gpu_skin(&ctx, stage.gpu_skins);
         gs_field_egui::creature_puppet::set_puppet_splat_params(&ctx, stage.splat_params);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
@@ -1599,6 +1604,10 @@ fn display_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     ui.checkbox(&mut stage.show_props, "Held weapons").on_hover_text(
         "A puppet holds the first weapon its bestiary entry attacks with (a forest troll its cudgel), \
          shaped by props/weapons.toml",
+    );
+    ui.checkbox(&mut stage.gpu_skins, "GPU skins").on_hover_text(
+        "Draw the puppets' skins on the GPU, relit there by the scene and the time of day -- with Light on the GPU (v2) \
+         and a lit scene; the CPU skin otherwise",
     );
     ui.checkbox(&mut stage.show_breath, "Breathing").on_hover_text(
         "A living puppet breathes: the slow cycle in its body type's poses file ([idle] in \

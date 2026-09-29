@@ -353,6 +353,13 @@ pub struct SkinShading {
     pub frost_rgb: [f32; 3],
     pub eye_rgb: [f32; 3],
     pub web_spacing_ft: f32,
+    /// [`SkinSurface::scene_lit`]'s: how far round light wraps, the rim's
+    /// strength and power, and how much less of the sky's fill a surface
+    /// facing the ground takes.
+    pub scene_wrap: f32,
+    pub scene_rim: f32,
+    pub scene_rim_power: f32,
+    pub fill_ground: f32,
 }
 
 /// Samples per pixel along each axis the skin is rasterised at.
@@ -1232,6 +1239,10 @@ impl Posed<'_> {
                 frost_rgb: FROST_RGB,
                 eye_rgb: [EYE[0], EYE[1], EYE[2]].map(|v| v as f32),
                 web_spacing_ft: WEB_SPACING_FT,
+                scene_wrap: SCENE_WRAP,
+                scene_rim: SCENE_RIM,
+                scene_rim_power: SCENE_RIM_POWER as f32,
+                fill_ground: FILL_GROUND,
             },
             key: hasher.finish(),
         })

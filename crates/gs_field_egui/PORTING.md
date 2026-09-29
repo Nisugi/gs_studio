@@ -1089,3 +1089,21 @@ Two more `creature_field.rs` regions (twenty-two in all,
 * The doll's *GPU skin* toggle (`doll_view::paint`'s `gpu_skin`).
 * dev-dependency `naga` (the version wgpu builds on): `skin_gpu`'s test
   validates both WGSL files offline.
+
+### 7.39 The stage's skins on the GPU
+
+* `src/relight_gpu.rs` + `.wgsl` (**new files**): vellum_light's relight
+  -- `light_pixel`, `LightFrame::measure` (a histogram's percentiles),
+  the keyframes' byte cross-fade -- on the GPU; `examples/relight_golden`
+  holds it to the golden cases (worst OKLab dE 0.0080 of 0.01).
+* `skin_gpu::SkinLit` (**a new type**): a job's lit base is the doll's
+  floor or the stage's scene -- relit by a `relight_gpu::Plan`, sun-shaded
+  first when the clock is sun-lit (`SkinSurface::scene_lit` in the final
+  pass).
+* `field_gpu_stage::StageGpu::paint_mesh` (**a new method**), and
+  `creature_puppet::set_puppet_gpu_skin` / `puppet_gpu_skin` (**new**,
+  off by default). `PuppetCache::posed_cached` and the `posed_*_as`
+  builders are public, taking a `Bare`.
+* `src/creature_field.rs`: inside the marked puppet region only -- the
+  figure is built as a mesh (`Bare::Mesh`) when GPU skins are on, the v2
+  pass is drawing and the scene is lit, and drawn by `paint_mesh`.

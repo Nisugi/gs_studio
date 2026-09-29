@@ -10,15 +10,27 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 
-/// One skin to draw into the atlas: its mesh, its paint, and the doll's
-/// floor (what its lit base is dimmed to, linear) and metres per foot.
+/// One skin to draw into the atlas: its mesh, its paint, how its lit base
+/// is lit, and metres per foot.
 #[derive(Debug)]
 pub struct SkinJob {
     pub mesh: Arc<gs_puppet::SkinMesh>,
     /// Its paint; None = unpainted (the mesh's own colours).
     pub texture: Option<Arc<gs_puppet::Texture>>,
-    pub floor: [f32; 3],
+    pub lit: SkinLit,
     pub m_per_ft: f32,
+}
+
+/// How a GPU skin's lit base -- what shows where no lamp reaches -- is lit.
+#[derive(Debug, Clone)]
+pub enum SkinLit {
+    /// The doll's: its colours dimmed to the sky's floor (linear).
+    Floor([f32; 3]),
+    /// The stage's: relit by the scene and the time of day
+    /// (`relight_gpu`), as `ResolvedLight::light_image` lights a CPU skin;
+    /// with a sun (toward it in the SKIN's frame), first shaded by it
+    /// (`SkinSurface::scene_lit`) and then given the time of day alone.
+    Scene { plan: crate::relight_gpu::Plan, sun: Option<gs_puppet::SceneLight> },
 }
 
 impl SkinJob {
@@ -38,7 +50,7 @@ impl SkinJob {
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// Floats in the uniform block (`U` in the shader).
-const UNIFORM_FLOATS: usize = 68;
+const UNIFORM_FLOATS: usize = 84;
 /// The threads' spans (`fs_threads`): one texel each.
 const SPANS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 /// Bytes per mesh corner (`VIn`).
@@ -52,6 +64,9 @@ pub(crate) struct SkinGpu {
     smooth: wgpu::RenderPipeline,
     threads: wgpu::RenderPipeline,
     finish: wgpu::RenderPipeline,
+    compose: wgpu::RenderPipeline,
+    compose_layout: wgpu::BindGroupLayout,
+    relight: crate::relight_gpu::RelightGpu,
     layout0: wgpu::BindGroupLayout,
     layout1: wgpu::BindGroupLayout,
     sheets: Mutex<Sheets>,
@@ -220,8 +235,24 @@ impl SkinGpu {
         let resolve = full("fs_resolve", &[target(COLOR), target(COLOR), target(COLOR), target(COLOR)]);
         let smooth = full("fs_smooth", &[target(COLOR), target(COLOR)]);
         let threads = full("fs_threads", &[target(SPANS)]);
-        let finish = full("fs_final", &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float)]);
-        SkinGpu { raster, resolve, smooth, threads, finish, layout0, layout1, sheets: Mutex::new(Sheets::default()) }
+        let finish = full(
+            "fs_final",
+            &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float), target(wgpu::TextureFormat::Rgba8Unorm)],
+        );
+        let compose_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: Some("skin_gpu compose"), entries: &[texture_entry(0, frag), texture_entry(1, frag)] });
+        let compose_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("skin_gpu compose"), bind_group_layouts: &[Some(&compose_layout)], immediate_size: 0 });
+        let compose = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("skin_gpu compose"),
+            layout: Some(&compose_pl),
+            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs_full"), buffers: &[], compilation_options: wgpu::PipelineCompilationOptions::default() },
+            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs_compose"), targets: &[target(wgpu::TextureFormat::Rgba8Unorm)], compilation_options: wgpu::PipelineCompilationOptions::default() }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        SkinGpu { raster, resolve, smooth, threads, finish, compose, compose_layout, relight: crate::relight_gpu::RelightGpu::new(device), layout0, layout1, sheets: Mutex::new(Sheets::default()) }
     }
 
     /// Draw `job` into the atlas `albedo` / `lit` / `geo` with its image's
@@ -300,7 +331,11 @@ impl SkinGpu {
         u.extend([s.dark_tone, s.lambert, s.relief_gain, s.normal_map_strength]);
         u.extend([s.depth_shade, s.joined_blend, s.boss_extra_px, job.m_per_ft]);
         u.extend(v3(s.boss_rgb.map(|c| c / 255.0), m.segments as f32));
-        u.extend(v3(job.floor, if has_normal { 1.0 } else { 0.0 }));
+        let floor = match &job.lit {
+            SkinLit::Floor(f) => *f,
+            SkinLit::Scene { .. } => [1.0; 3],
+        };
+        u.extend(v3(floor, if has_normal { 1.0 } else { 0.0 }));
         let flags = |x: f32, y: f32| [if m.marks.is_some() { 1.0 } else { 0.0 }, x, y, marks_per_ft];
         u.extend(flags(0.0, 0.0));
         u.extend([paint_size[0] as f32, paint_size[1] as f32, marks_size[0] as f32, marks_size[1] as f32]);
@@ -310,6 +345,26 @@ impl SkinGpu {
         u.extend(v3(s.web_rgb.map(|c| c / 255.0), s.web_spacing_ft));
         u.extend(v3(s.frost_rgb.map(|c| c / 255.0), 0.0));
         u.extend(v3(s.eye_rgb.map(|c| c / 255.0), 0.0));
+        let sun = match &job.lit {
+            SkinLit::Scene { sun: Some(sun), .. } => Some(sun),
+            _ => None,
+        };
+        let s2l = |c: u8| {
+            let c = c as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let toward = sun.map_or([0.0, 1.0, 0.0], |l| {
+            let n = (l.toward[0].powi(2) + l.toward[1].powi(2) + l.toward[2].powi(2)).sqrt();
+            if n > 1e-6 { l.toward.map(|v| v / n) } else { [0.0, 1.0, 0.0] }
+        });
+        u.extend(v3(toward, flag(sun.is_some())));
+        u.extend(v3(sun.map_or([0.0; 3], |l| l.rgb.map(|c| s2l(c) * l.strength)), 0.0));
+        u.extend(v3(sun.map_or([0.0; 3], |l| l.fill_rgb.map(|c| s2l(c) * l.fill)), 0.0));
+        u.extend([s.scene_wrap, s.scene_rim, s.scene_rim_power, s.fill_ground]);
         debug_assert_eq!(u.len(), UNIFORM_FLOATS);
         let uniform = |u: &[f32], label: &str| {
             let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: (UNIFORM_FLOATS * 4) as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
@@ -392,10 +447,12 @@ impl SkinGpu {
         let spans_tex = (!m.threads.is_empty()).then(|| make_texture(device, m.threads.len() as u32, 1, SPANS, rt, "skin_gpu thread spans").create_view(&wgpu::TextureViewDescriptor::default()));
         let (ow, oh) = (w + 2 * pad, h + 2 * pad);
         let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+        let out_usage = out_usage | wgpu::TextureUsages::TEXTURE_BINDING;
         let outs = [
             make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "skin_gpu albedo"),
             make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "skin_gpu lit"),
             make_texture(device, ow, oh, wgpu::TextureFormat::Rgba16Float, out_usage, "skin_gpu geo"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "skin_gpu rgba"),
         ];
         let out_views: Vec<wgpu::TextureView> = outs.iter().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default())).collect();
         let group1 = |col: &wgpu::TextureView, n: &wgpu::TextureView, of: &[wgpu::TextureView; 4], spans: &wgpu::TextureView| {
@@ -490,7 +547,7 @@ impl SkinGpu {
             let g1 = group1(colours, normals, &pixels, spans_tex.as_ref().unwrap_or(no_spans));
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("skin_gpu final"),
-                color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none)],
+                color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none), attach(&out_views[3], none)],
                 ..Default::default()
             });
             pass.set_pipeline(&self.finish);
@@ -498,9 +555,34 @@ impl SkinGpu {
             pass.set_bind_group(1, &g1, &[]);
             pass.draw(0..3, 0..1);
         }
+        // the stage's: the skin relit by the scene and the time of day, its
+        // glow kept, as the lit base
+        let relit_lit = match &job.lit {
+            SkinLit::Floor(_) => None,
+            SkinLit::Scene { plan, .. } => {
+                let relit = self.relight.run(device, queue, encoder, &outs[3], ow, oh, plan);
+                let composed = make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "skin_gpu relit lit");
+                let view = composed.create_view(&wgpu::TextureViewDescriptor::default());
+                let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("skin_gpu compose"),
+                    layout: &self.compose_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&relit.create_view(&wgpu::TextureViewDescriptor::default())) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&out_views[1]) },
+                    ],
+                });
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("skin_gpu compose"), color_attachments: &[attach(&view, none)], ..Default::default() });
+                pass.set_pipeline(&self.compose);
+                pass.set_bind_group(0, &group, &[]);
+                pass.draw(0..3, 0..1);
+                drop(pass);
+                Some(composed)
+            }
+        };
         // into the atlas, gutter and all
         let origin = wgpu::Origin3d { x: at[0].saturating_sub(pad), y: at[1].saturating_sub(pad), z: 0 };
-        for (src, dst) in outs.iter().zip(atlas) {
+        let lit_src = relit_lit.as_ref().unwrap_or(&outs[1]);
+        for (src, dst) in [&outs[0], lit_src, &outs[2]].into_iter().zip(atlas) {
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo { texture: src, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
                 wgpu::TexelCopyTextureInfo { texture: dst, mip_level: 0, origin, aspect: wgpu::TextureAspect::All },
@@ -518,7 +600,8 @@ fn jobs() -> &'static Mutex<Vec<(u64, Arc<SkinJob>)>> {
     JOBS.get_or_init(Default::default)
 }
 
-const JOBS_KEPT: usize = 8;
+/// Enough for a crowded stage and a doll.
+const JOBS_KEPT: usize = 96;
 
 /// Register `job` to be drawn for the image keyed `key` (one with no
 /// pixels of its own: `LitImage::gpu_only`).

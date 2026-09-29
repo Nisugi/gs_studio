@@ -32,6 +32,10 @@ struct U {
     web_rgb: vec4<f32>,   // web colour 0..1, strand spacing (feet)
     frost_rgb: vec4<f32>, // frost colour 0..1
     eye_rgb: vec4<f32>,   // eye colour 0..1
+    sun: vec4<f32>,       // toward the sun (skin frame), sun-lit (0/1)
+    sun_rgb: vec4<f32>,   // the sun's light, linear, times its strength
+    fill_rgb: vec4<f32>,  // the sky's fill, linear, times its share
+    scene: vec4<f32>,     // wrap, rim, rim power, ground's share of the fill
 };
 
 @group(0) @binding(0) var<uniform> u: U;
@@ -465,6 +469,9 @@ struct Layer {
     @location(0) albedo: vec4<f32>,
     @location(1) lit: vec4<f32>,
     @location(2) geo: vec4<f32>,
+    // the skin as the CPU's `Skin::rgba` (sun-lit: `SkinSurface::scene_lit`
+    // of it), for the relight to light on the stage
+    @location(3) rgba: vec4<f32>,
 };
 
 @fragment fn fs_final(@builtin(position) fc: vec4<f32>) -> Layer {
@@ -472,6 +479,7 @@ struct Layer {
     o.albedo = vec4<f32>(0.0);
     o.lit = vec4<f32>(0.0);
     o.geo = vec4<f32>(0.0);
+    o.rgba = vec4<f32>(0.0);
     let pad = i32(u.size.w);
     let px = vec2<i32>(fc.xy) - vec2<i32>(pad, pad);
     let wh = vec2<i32>(i32(u.size.x), i32(u.size.y));
@@ -598,6 +606,17 @@ struct Layer {
     o.albedo = vec4<f32>(albedo, a);
     // the doll's lit base: its colours dimmed to the sky's floor
     o.lit = vec4<f32>(l2s(s2l(c) * u.floor.rgb), colg.a);
+    o.rgba = vec4<f32>(c, a);
+    if (u.sun.w > 0.5 && cov > 0.0) {
+        // SkinSurface::scene_lit: the paint, flat, under the sun and the sky
+        let n = select(u.to_cam.xyz, normalize(nrm), dot(nrm, nrm) > 1e-12);
+        let facing = dot(n, u.sun.xyz);
+        let edge = pow(1.0 - max(dot(n, u.to_cam.xyz), 0.0), u.scene.z);
+        let diffuse = max((facing + u.scene.x) / (1.0 + u.scene.x), 0.0) + u.scene.y * edge * max(facing, 0.0);
+        let sky = 1.0 - u.scene.w * (1.0 - n.y) * 0.5;
+        let lit = l2s(s2l(albedo) * (u.fill_rgb.rgb * sky + u.sun_rgb.rgb * diffuse));
+        o.rgba = vec4<f32>(lit * cov + c * (1.0 - cov), a);
+    }
     if (cov > 0.0) {
         o.geo = vec4<f32>(dot(nrm, right), dot(nrm, down), dot(nrm, fwd), dot(p.xyz, fwd) * u.more.w);
     } else {
@@ -617,4 +636,14 @@ struct Layer {
         o.geo = vec4<f32>(0.0, 0.0, 0.0, depth);
     }
     return o;
+}
+
+// ---- the relit skin and its glow, as the layer's lit base (the stage's)
+
+@group(0) @binding(0) var relit: texture_2d<f32>;
+@group(0) @binding(1) var glowing: texture_2d<f32>;
+
+@fragment fn fs_compose(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
+    let px = vec2<i32>(fc.xy);
+    return vec4<f32>(textureLoad(relit, px, 0).rgb, textureLoad(glowing, px, 0).a);
 }

@@ -1432,7 +1432,15 @@ fn paint_creature_puppet(
         None => key,
     };
     let skin = crate::creature_puppet::puppet_skin(ctx);
-    puppets.set_light(crate::creature_light::current_light(ctx));
+    let light = crate::creature_light::current_light(ctx);
+    // On the GPU (`skin_gpu`, relit by `relight_gpu`) when asked, with the
+    // v2 pass drawing and the scene lit: the figure goes over as a mesh.
+    let bare = if skin && light.is_some() && crate::creature_puppet::puppet_gpu_skin(ctx) && crate::field_gpu_stage::with_current(|_| ()).is_some() {
+        crate::creature_puppet::Bare::Mesh
+    } else {
+        crate::creature_puppet::Bare::No
+    };
+    puppets.set_light(light.clone());
     // Seen alive and just died: it falls (a procedural ragdoll) into its
     // dead pose. Any other change of pose eases from the old one into the
     // new. Both are drawn fresh every frame until they settle.
@@ -1445,20 +1453,20 @@ fn paint_creature_puppet(
             *animated = true;
             ctx.request_repaint();
             let died_in = puppets.death_flinch(&creature.id);
-            puppets.posed_falling(&family, &key, skin, from, t, died_in)?
+            puppets.posed_falling_as(&family, &key, skin, from, t, died_in, bare)?
         }
         crate::creature_puppet::Motion::Changing { from, u } => {
             *animated = true;
             ctx.request_repaint();
-            puppets.posed_changing(&family, &key, skin, from, u, flinch)?
+            puppets.posed_changing_as(&family, &key, skin, from, u, flinch, bare)?
         }
         crate::creature_puppet::Motion::Still => match flinch {
             Some(f) => {
                 *animated = true;
                 ctx.request_repaint();
-                puppets.posed_flinching(&family, &key, skin, f)?
+                puppets.posed_flinching_as(&family, &key, skin, f, bare)?
             }
-            None => puppets.posed_with(&family, &key, skin)?,
+            None => puppets.posed_cached(&family, &key, skin, bare)?,
         },
     };
     // The parts this family's puppet actually carries, taken while the lock
@@ -1477,11 +1485,13 @@ fn paint_creature_puppet(
     place.paint(painter, &posed.shadow);
     // The v2 pass lights the skin itself (lamps, the shadows it casts and
     // takes), when on and the surface was kept (scene lighting is up).
-    let gpu_drawn = crate::field_gpu_stage::with_current(|g| match (posed.skin.as_ref(), posed.surface.as_ref()) {
-        (Some(skin), Some(surface)) if !skin.is_empty() => {
-            let m_per_ft = unit.standing.h * crate::field_gpu_stage::METRES_PER_CARD_UNIT / posed.standing_ft.max(1e-3);
-            g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft)
+    let m_per_ft = unit.standing.h * crate::field_gpu_stage::METRES_PER_CARD_UNIT / posed.standing_ft.max(1e-3);
+    let gpu_drawn = crate::field_gpu_stage::with_current(|g| match (posed.mesh.as_ref(), light.as_deref(), posed.skin.as_ref(), posed.surface.as_ref()) {
+        (Some((mesh, texture)), Some(light), _, _) => {
+            let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
+            g.paint_mesh(painter, mesh, texture, light, place.skin_rect(&frame), view.field.ground_z(unit), m_per_ft)
         }
+        (_, _, Some(skin), Some(surface)) if !skin.is_empty() => g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft),
         _ => false,
     })
     .unwrap_or(false);

@@ -1273,6 +1273,49 @@ impl StageGpu {
     }
 }
 
+impl StageGpu {
+    /// Draw a puppet's skin on the GPU (ADDITION: `skin_gpu`) as a lit
+    /// layer at `screen` (where its image goes), standing at solver depth
+    /// `ground_z`, its lit base relit by `light` as a CPU skin is
+    /// (`relight_gpu`: the scene and the time of day, or with a sun, the
+    /// sun and then the time of day). False = not drawn.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_mesh(
+        &self,
+        painter: &egui::Painter,
+        mesh: &Arc<gs_puppet::SkinMesh>,
+        texture: &Option<Arc<gs_puppet::Texture>>,
+        light: &crate::creature_light::ResolvedLight,
+        screen: egui::Rect,
+        ground_z: f32,
+        m_per_ft: f32,
+    ) -> bool {
+        if mesh.w == 0 || mesh.h == 0 {
+            return false;
+        }
+        // the sun is given toward it on the SCREEN: into the skin's frame
+        let sun = light.sun.map(|sun| {
+            let back = mesh.to_cam;
+            let up = [0.0f32, 1.0, 0.0];
+            let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+            let unit = |v: [f32; 3]| {
+                let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+                v.map(|c| c / l)
+            };
+            // as creature_puppet's `screen_to_skin`
+            let right = unit(cross(up, back));
+            let t = sun.toward;
+            gs_puppet::SceneLight { toward: [0, 1, 2].map(|i| right[i] * t[0] + up[i] * t[1] + back[i] * t[2]), ..sun }
+        });
+        let plan = crate::relight_gpu::Plan::of(if sun.is_some() { None } else { Some(&light.scene) }, &light.keyframes);
+        let key = key_of(("gpu skin", mesh.key, light.key, m_per_ft.to_bits()));
+        let job = crate::skin_gpu::SkinJob { mesh: mesh.clone(), texture: texture.clone(), lit: crate::skin_gpu::SkinLit::Scene { plan, sun }, m_per_ft };
+        crate::skin_gpu::submit(key, Arc::new(job));
+        let image = Arc::new(LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) });
+        self.push(painter, image, screen, ground_z, 1.0)
+    }
+}
+
 /// How far round the figure an outline pixel looks for the body's depth,
 /// pixels: past the widest outline a skin draws (the contour and a boss's
 /// gold round it).

@@ -103,6 +103,18 @@ pub fn puppet_skin(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(skin_id())).unwrap_or(true)
 }
 
+/// Draw the stage's puppet skins on the GPU (ADDITION: `skin_gpu`, lit by
+/// `relight_gpu`) when the v2 pass is drawing the stage and the scene is
+/// lit; the CPU skin otherwise. Off unless the host turns it on.
+pub fn set_puppet_gpu_skin(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("gs_field_egui::puppet_gpu_skin"), on));
+}
+
+/// See [`set_puppet_gpu_skin`].
+pub fn puppet_gpu_skin(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("gs_field_egui::puppet_gpu_skin"))).unwrap_or(false)
+}
+
 /// Puppets hold the weapon their bestiary entry attacks with (see
 /// [`PuppetCache::family_for`]). On unless the host turns it off.
 pub fn set_puppet_props(ctx: &egui::Context, on: bool) {
@@ -1656,7 +1668,8 @@ impl PuppetCache {
         self.posed_cached(family, key, true, Bare::Surface)
     }
 
-    fn posed_cached(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, bare: Bare) -> Option<Arc<PosedPuppet>> {
+    /// [`posed_with`](Self::posed_with), its skin built as `bare` says.
+    pub fn posed_cached(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, bare: Bare) -> Option<Arc<PosedPuppet>> {
         self.follow_texture_detail();
         self.tick += 1;
         let tick = self.tick;
@@ -1841,7 +1854,8 @@ impl PuppetCache {
         self.posed_changing_as(family, key, skin, from, u, flinch, Bare::No)
     }
 
-    fn posed_changing_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32, flinch: Option<(u8, f32)>, bare: Bare) -> Option<Arc<PosedPuppet>> {
+    /// [`posed_changing`](Self::posed_changing), its skin built as `bare` says.
+    pub fn posed_changing_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, u: f32, flinch: Option<(u8, f32)>, bare: Bare) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = |c: PoseChoice| match c {
@@ -1866,7 +1880,8 @@ impl PuppetCache {
         self.posed_flinching_as(family, key, skin, flinch, Bare::No)
     }
 
-    fn posed_flinching_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, flinch: (u8, f32), bare: Bare) -> Option<Arc<PosedPuppet>> {
+    /// [`posed_flinching`](Self::posed_flinching), its skin built as `bare` says.
+    pub fn posed_flinching_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, flinch: (u8, f32), bare: Bare) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = match key.pose {
@@ -1890,7 +1905,9 @@ impl PuppetCache {
         self.posed_falling_as(family, key, skin, from, t, flinch, Bare::No)
     }
 
-    fn posed_falling_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32, flinch: Option<(u8, f32)>, bare: Bare) -> Option<Arc<PosedPuppet>> {
+    /// [`posed_falling`](Self::posed_falling), its skin built as `bare` says.
+    #[allow(clippy::too_many_arguments)]
+    pub fn posed_falling_as(&mut self, family: &Arc<str>, key: &PuppetKey, skin: bool, from: PoseChoice, t: f32, flinch: Option<(u8, f32)>, bare: Bare) -> Option<Arc<PosedPuppet>> {
         let puppet = self.puppet(family)?;
         let set = self.pose_set(family)?;
         let variant = match key.pose {

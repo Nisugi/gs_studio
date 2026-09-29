@@ -873,7 +873,13 @@ an *x* to put it back:
   with no `back` part of its own (a biped) takes a back wound on the REAR
   of its chest and abdomen, which keep theirs on the front; from the front
   it shows by the blood it runs (rank 2 and 3: down the sides and the
-  backs of the legs) and by the `[guard.back]` stoop. A nerve wound
+  backs of the legs) and by the `[guard.back]` stoop. *GPU skins* (under
+  **Display**; `GS_STUDIO_GPU_SKINS=1`) draws the stage's puppet skins on the
+  GPU too (`gs_field_egui::skin_gpu`), relit there by the scene and the time
+  of day as the CPU relights them (`relight_gpu`: vellum_light's kernel,
+  frame and cross-fade, held to its golden cases by
+  `examples/relight_golden`) -- with *Light on the GPU (v2)* and a lit
+  scene; the CPU skin otherwise. A nerve wound
   (`nsys`) is on the whole body: violet lines branching along every part,
   more and brighter by rank, that GLOW -- the v2 pass keeps them showing
   where no light reaches (`SkinSurface::glow`, the layer's glow channel) --

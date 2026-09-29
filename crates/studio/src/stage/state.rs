@@ -176,6 +176,9 @@ pub struct StageState {
     /// Puppet skins shaded by the scene's sun and sky instead of their own
     /// cel light (the flat hull; `creature_light::LightClock::sun_lit`).
     pub sun_lit_skins: bool,
+    /// Puppet skins drawn on the GPU (`gs_field_egui::skin_gpu`) when the
+    /// v2 pass draws the stage.
+    pub gpu_skins: bool,
     /// Puppets drawn as Gaussian splat clouds instead of the smooth skin.
     pub show_splats: bool,
     /// The cloud's shape (`gs_puppet::splat::SplatParams`).
@@ -254,6 +257,7 @@ impl StageState {
             show_props: true,
             show_breath: true,
             sun_lit_skins: false,
+            gpu_skins: false,
             show_splats: false,
             splat_params: gs_puppet::splat::SplatParams::default(),
             selected_prop: None,
