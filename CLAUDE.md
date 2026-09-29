@@ -135,7 +135,9 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   side), posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
   drawn either as 2D shapes (`draw.rs`) or as one smooth z-buffered surface
   rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
-  compares the two; `SkinSurface::lamp_light` lights it from campfires and
+  compares the two; it is rasterised in bands on every core, `GS_PUPPET_THREADS=1`
+  for one, and its wound, scar and nerve marks are baked once per set of wounds onto
+  the surface layout, `wounds::MarksSheet`; `SkinSurface::lamp_light` lights it from campfires and
   torches placed round it, and `shadow.rs` casts their shadows on the ground). `uv.rs` cuts the skin open into a flat pattern sheet
   (`UvLayout`) that `Posed::skin_textured` reads paint from
   (`examples/uv_sheet` writes a template and a checker check); `prop.rs`

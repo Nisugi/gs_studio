@@ -366,3 +366,27 @@ fn a_normal_sheet_leans_the_skin_where_the_map_leans() {
     assert!(n > 100.0);
     assert!(x1 / n > x0 / n + 0.04, "the leaning sheet turns the skin toward +x: {} vs {}", x1 / n, x0 / n);
 }
+
+/// Rasterised in bands on several threads, a skin is the same, pixel for
+/// pixel, as on one -- wounds, nerves and a kept surface included.
+#[test]
+fn a_skin_on_many_threads_is_the_skin_on_one() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let cam = camera(&p);
+    let project = |q| cam.project(q);
+    let wounds = [("chest", 2u8), ("nsys", 3), ("back", 2), ("leftArm", 3)];
+    let look = Look { yaw: 30.0, wounds: &wounds, ..Look::default() };
+    let on = |threads: usize| {
+        crate::skin::THREADS_FOR_TEST.with(|t| t.set(Some(threads)));
+        let (skin, surface) = posed.skin_surface(&project, &look, None, crate::Effects::default());
+        crate::skin::THREADS_FOR_TEST.with(|t| t.set(None));
+        (skin, surface.glow().to_vec())
+    };
+    let (one, glow_one) = on(1);
+    let (many, glow_many) = on(7);
+    assert!(!one.is_empty());
+    assert_eq!((one.w, one.h, one.origin), (many.w, many.h, many.origin));
+    assert!(one.rgba == many.rgba, "the pixels differ");
+    assert!(glow_one == glow_many, "the glow differs");
+}

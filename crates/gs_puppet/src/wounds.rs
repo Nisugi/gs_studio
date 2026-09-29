@@ -92,7 +92,7 @@ fn lines_at(at: [f32; 2], angle: f32, seed: u32, spacing: f32, keep: f32, half: 
 
 /// What one segment's skin carries: its own wound and scar, the back's
 /// when it is split front from back, and the back's blood run over it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub(crate) struct Marks {
     pub rank: u8,
     pub scar: u8,
@@ -220,6 +220,101 @@ fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, mi
     c
 }
 
+/// A body's marks drawn once onto its surface layout (feet, the 1
+/// px-per-foot `UvLayout` scaled by `per_ft`): per texel, the marks as an
+/// affine change of whatever colour is under them -- `colour * k + b` (every
+/// mark is a blend toward a fixed colour, or a darkening, so their stack is
+/// one of these) -- and the glow. The rasteriser reads it instead of working
+/// every mark out per sample; it does not change with the pose.
+pub(crate) struct MarksSheet {
+    per_ft: f32,
+    w: usize,
+    h: usize,
+    /// b (rgb) and k, 0..255.
+    bk: Vec<[u8; 4]>,
+    glow: Vec<u8>,
+}
+
+impl MarksSheet {
+    /// Bake: `address` turns a layout point (feet) into its segment, the
+    /// facing there and the edge fade (None off the body); `marks` are per
+    /// segment. Rows are baked on `threads` threads.
+    pub(crate) fn bake(
+        layout_w: usize,
+        layout_h: usize,
+        per_ft: f32,
+        marks: &[Marks],
+        address: &(dyn Fn([f32; 2]) -> Option<(usize, f32, f32)> + Sync),
+        min_half: f32,
+        threads: usize,
+    ) -> MarksSheet {
+        let (w, h) = (((layout_w as f32 * per_ft).ceil() as usize).max(1), ((layout_h as f32 * per_ft).ceil() as usize).max(1));
+        let mut bk = vec![[0u8, 0, 0, 255]; w * h];
+        let mut glow = vec![0u8; w * h];
+        let rows = h.div_ceil(threads.max(1)).max(1);
+        std::thread::scope(|scope| {
+            for (band, (bk, glow)) in bk.chunks_mut(rows * w).zip(glow.chunks_mut(rows * w)).enumerate() {
+                scope.spawn(move || {
+                    for (i, (t, g)) in bk.iter_mut().zip(glow.iter_mut()).enumerate() {
+                        let (x, y) = (i % w, band * rows + i / w);
+                        let at = [(x as f32 + 0.5) / per_ft, (y as f32 + 0.5) / per_ft];
+                        let Some((seg, front, edge)) = address(at) else { continue };
+                        let Some(m) = marks.get(seg).filter(|m| m.any()) else { continue };
+                        let (b, g0) = self::marks([0.0; 3], at, seg as u32, m, front, edge, min_half);
+                        let (top, _) = self::marks([255.0; 3], at, seg as u32, m, front, edge, min_half);
+                        let k = (0..3).map(|c| (top[c] - b[c]) / 255.0).sum::<f32>() / 3.0;
+                        let q = |v: f32| v.round().clamp(0.0, 255.0) as u8;
+                        *t = [q(b[0]), q(b[1]), q(b[2]), q(k * 255.0)];
+                        *g = q(g0 * 255.0);
+                    }
+                });
+            }
+        });
+        MarksSheet { per_ft, w, h, bk, glow }
+    }
+
+    /// `col` with the marks at layout point `at` (feet) on it, and the glow
+    /// there: bilinear between texels.
+    pub(crate) fn apply(&self, col: [f32; 3], at: [f32; 2]) -> ([f32; 3], f32) {
+        let fx = (at[0] * self.per_ft - 0.5).clamp(0.0, (self.w - 1) as f32);
+        let fy = (at[1] * self.per_ft - 0.5).clamp(0.0, (self.h - 1) as f32);
+        let (x0, y0) = (fx as usize, fy as usize);
+        let (x1, y1) = ((x0 + 1).min(self.w - 1), (y0 + 1).min(self.h - 1));
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        let mut acc = [0.0f32; 5];
+        for (i, wgt) in [(y0 * self.w + x0, (1.0 - tx) * (1.0 - ty)), (y0 * self.w + x1, tx * (1.0 - ty)), (y1 * self.w + x0, (1.0 - tx) * ty), (y1 * self.w + x1, tx * ty)] {
+            let t = self.bk[i];
+            for c in 0..4 {
+                acc[c] += t[c] as f32 * wgt;
+            }
+            acc[4] += self.glow[i] as f32 * wgt;
+        }
+        let k = acc[3] / 255.0;
+        ([0, 1, 2].map(|c| col[c] * k + acc[c]), acc[4] / 255.0)
+    }
+}
+
+/// Baked sheets kept, newest last: a figure's marks change with its
+/// wounds, not every frame.
+const SHEETS_KEPT: usize = 12;
+
+/// The baked sheet for `key`, baking it with `make` on a miss.
+pub(crate) fn sheet(key: u64, make: impl FnOnce() -> MarksSheet) -> std::sync::Arc<MarksSheet> {
+    use std::sync::{Arc, Mutex, OnceLock};
+    static SHEETS: OnceLock<Mutex<Vec<(u64, Arc<MarksSheet>)>>> = OnceLock::new();
+    let sheets = SHEETS.get_or_init(Default::default);
+    if let Some((_, s)) = sheets.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key) {
+        return s.clone();
+    }
+    let made = Arc::new(make());
+    let mut list = sheets.lock().unwrap_or_else(|e| e.into_inner());
+    if list.len() >= SHEETS_KEPT {
+        list.remove(0);
+    }
+    list.push((key, made.clone()));
+    made
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +377,28 @@ mod tests {
         assert_eq!(glow(Marks { rank: 3, scar: 3, ..Marks::default() }), 0.0);
         let (g1, g3) = (glow(Marks { nerve: 1, ..Marks::default() }), glow(Marks { nerve: 3, ..Marks::default() }));
         assert!(g1 > 1.0 && g3 > g1 * 2.0, "{g1} {g3}");
+    }
+
+    /// The baked sheet gives what the marks give, near enough, for any
+    /// colour under them.
+    #[test]
+    fn the_baked_sheet_matches_the_marks() {
+        let m = [Marks { rank: 3, scar: 2, nerve: 2, ..Marks::default() }];
+        let address = |at: [f32; 2]| (at[0] < 3.0 && at[1] < 3.0).then_some((0usize, 0.2f32, 1.0f32));
+        let sheet = MarksSheet::bake(4, 4, 60.0, &m, &address, 0.01, 3);
+        let mut worst = 0.0f32;
+        for col in [[200.0, 170.0, 150.0], [40.0, 60.0, 90.0]] {
+            for i in 0..400 {
+                // texel centres, where no blending between texels happens
+                let at = [((i % 20) as f32 * 7.0 + 0.5) / 60.0, ((i / 20) as f32 * 7.0 + 0.5) / 60.0];
+                let (want, _) = marks(col, at, 0, &m[0], 0.2, 1.0, 0.01);
+                let (got, _) = sheet.apply(col, at);
+                worst = worst.max((0..3).map(|c| (want[c] - got[c]).abs()).fold(0.0, f32::max));
+            }
+        }
+        assert!(worst < 3.0, "worst {worst}");
+        // off the body: nothing
+        assert_eq!(sheet.apply([10.0, 20.0, 30.0], [3.6, 3.6]).0, [10.0, 20.0, 30.0]);
     }
 
     #[test]

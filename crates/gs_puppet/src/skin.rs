@@ -175,14 +175,16 @@ struct Paint<'a> {
     tex: Option<&'a Texture>,
     /// A rest-space direction on segment `seg`, as posed and turned: what
     /// the normal sheet's deviations go through.
-    rot: &'a dyn Fn(usize, V3) -> V3,
+    rot: &'a (dyn Fn(usize, V3) -> V3 + Sync),
     /// A 1 px-per-foot layout of the surface, for effects measured in feet.
     surface: Option<&'a UvLayout>,
     effects: Effects,
     /// Half a web strand's width, feet.
     strand_ft: f32,
-    /// Per segment: its wound and scar marks ([`crate::wounds`]).
+    /// Per segment: its wound and scar marks ([`crate::wounds`]), and
+    /// them baked onto the surface layout, which the samples read.
     marks: &'a [crate::wounds::Marks],
+    marks_sheet: Option<&'a crate::wounds::MarksSheet>,
 }
 
 /// Every segment's wound marks: its own part's wound and scar; on a form
@@ -212,6 +214,97 @@ fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface],
         };
     }
     marks
+}
+
+/// `marks` baked onto `layout` (the 1 px-per-foot surface layout), at a
+/// resolution for lines no thinner than `min_half` feet -- cached, so a
+/// figure bakes once per set of wounds and size, not per frame.
+fn marks_sheet(
+    puppet: &crate::puppet::Puppet,
+    layout: &UvLayout,
+    surfs: &[crate::draw::Surface],
+    marks: &[crate::wounds::Marks],
+    min_half: f32,
+) -> std::sync::Arc<crate::wounds::MarksSheet> {
+    use std::hash::{Hash, Hasher};
+    // sizes in half-octave steps, so a figure growing a pixel does not rebake
+    let half = 2f32.powf((min_half.max(1e-4).log2() * 2.0).round() / 2.0);
+    let per_ft = (0.9 / half).clamp(24.0, 128.0);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&puppet.family, puppet.segments.len(), puppet.height.to_bits(), layout.w, layout.h, marks, per_ft.to_bits(), half.to_bits()).hash(&mut h);
+    let key = h.finish();
+    crate::wounds::sheet(key, || {
+        // the edge fade per ring, per segment, as the mesh has them
+        let mut tints: Vec<Vec<f32>> = vec![Vec::new(); puppet.segments.len()];
+        for surf in surfs {
+            if let Some(t) = tints.get_mut(surf.index) {
+                *t = surf.rings.iter().map(|r| r.tint).collect();
+            }
+        }
+        let address = |at: [f32; 2]| {
+            let (seg, station, theta) = layout.address(at)?;
+            let s = puppet.segments.get(seg)?;
+            let ring_tints = tints.get(seg).filter(|t| !t.is_empty())?;
+            let at_station = |f: &dyn Fn(usize) -> f32, n: usize| {
+                let k = (station.max(0.0).floor() as usize).min(n - 1);
+                let k1 = (k + 1).min(n - 1);
+                let t = (station - k as f32).clamp(0.0, 1.0);
+                f(k) + (f(k1) - f(k)) * t
+            };
+            let edge = at_station(&|k| ring_tints[k.min(ring_tints.len() - 1)], ring_tints.len());
+            let n = s.stations.len().max(1);
+            let (w, d) = (at_station(&|k| s.stations[k.min(n - 1)].w, n), at_station(&|k| s.stations[k.min(n - 1)].d, n));
+            let (sn, cs) = theta.sin_cos();
+            let rest = add(scale(s.axis_w, cs * w), scale(s.axis_d, sn * d));
+            let front = if len(rest) > 1e-5 { rest[2] / len(rest) } else { 0.0 };
+            Some((seg, front, edge))
+        };
+        let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(16);
+        crate::wounds::MarksSheet::bake(layout.w, layout.h, per_ft, marks, &address, half, threads)
+    })
+}
+
+thread_local! {
+    /// A test's thread count, over [`raster_threads`].
+    pub(crate) static THREADS_FOR_TEST: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// Fill `out` (rows of `w`) row by row with `row(y, the row)`, the rows
+/// split across [`raster_threads`] threads.
+fn par_rows<T: Send>(out: &mut [T], w: usize, row: &(dyn Fn(usize, &mut [T]) + Sync)) {
+    let h = out.len() / w.max(1);
+    let threads = raster_threads().min(h / 8).max(1);
+    let rows = h.div_ceil(threads).max(1);
+    let run = |band: usize, chunk: &mut [T]| {
+        for (k, r) in chunk.chunks_mut(w).enumerate() {
+            row(band * rows + k, r);
+        }
+    };
+    if threads == 1 {
+        run(0, out);
+        return;
+    }
+    std::thread::scope(|scope| {
+        for (band, chunk) in out.chunks_mut(rows * w).enumerate() {
+            scope.spawn(move || run(band, chunk));
+        }
+    });
+}
+
+/// Threads a skin is rasterised on: `GS_PUPPET_THREADS` (1 = one), else
+/// the machine's cores, at most 16.
+fn raster_threads() -> usize {
+    if let Some(n) = THREADS_FOR_TEST.with(|t| t.get()) {
+        return n;
+    }
+    static THREADS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THREADS.get_or_init(|| {
+        std::env::var("GS_PUPPET_THREADS")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, |n| n.get()))
+            .clamp(1, 16)
+    })
 }
 
 /// A rendered figure.
@@ -248,12 +341,6 @@ struct Vert {
     addr: [f32; 2],
     /// A wound's colour and how strongly it shows over a texture here.
     wound: [f32; 4],
-    /// How much of its part's wound marks show here (fading where the part
-    /// meets another).
-    edge: f32,
-    /// Which way the surface faces at rest: -1 straight back .. 1 straight
-    /// forward (the back's marks go on the rear of a split trunk).
-    front: f32,
 }
 
 /// Samples round a ring for a figure whose largest ring is `px` across.
@@ -293,6 +380,70 @@ impl Samples {
         }
     }
 
+    /// Rasterise `tris` over `threads` bands of rows, each thread running
+    /// every triangle clipped to its own rows, in order -- the same result
+    /// as one thread, sooner.
+    fn rasterise(&mut self, verts: &[Vert], tris: &[[u32; 3]], paint: &Paint, threads: usize) {
+        let w = self.w;
+        let rows = self.h.div_ceil(threads.max(1)).max(8);
+        let keep_pos = !self.pos.is_empty();
+        let chunk = rows * w;
+        let mut pos = self.pos.chunks_mut(chunk.max(1));
+        let bands: Vec<Band> = self
+            .z
+            .chunks_mut(chunk)
+            .zip(self.n.chunks_mut(chunk))
+            .zip(self.col.chunks_mut(chunk))
+            .zip(self.seg.chunks_mut(chunk))
+            .zip(self.dev.chunks_mut(chunk))
+            .zip(self.glow.chunks_mut(chunk))
+            .enumerate()
+            .map(|(k, (((((z, n), col), seg), dev), glow))| Band {
+                y0: k * rows,
+                w,
+                z,
+                n,
+                col,
+                seg,
+                pos: if keep_pos { pos.next().unwrap_or_default() } else { &mut [] },
+                dev,
+                glow,
+            })
+            .collect();
+        let run = |mut band: Band| {
+            for t in tris {
+                let v = t.map(|i| &verts[i as usize]);
+                if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
+                    band.tri(v, paint);
+                }
+            }
+        };
+        if bands.len() <= 1 {
+            bands.into_iter().for_each(run);
+        } else {
+            std::thread::scope(|scope| {
+                for band in bands {
+                    scope.spawn(|| run(band));
+                }
+            });
+        }
+    }
+}
+
+/// One band of sample rows, from `y0`, for one rasterising thread.
+struct Band<'a> {
+    y0: usize,
+    w: usize,
+    z: &'a mut [f32],
+    n: &'a mut [V3],
+    col: &'a mut [[f32; 3]],
+    seg: &'a mut [u32],
+    pos: &'a mut [V3],
+    dev: &'a mut [V3],
+    glow: &'a mut [f32],
+}
+
+impl Band<'_> {
     fn tri(&mut self, v: [&Vert; 3], paint: &Paint) {
         // A textured triangle interpolates its corners' ADDRESSES and looks
         // each sample up on the sheet (effects do the same on a feet-scaled
@@ -319,15 +470,17 @@ impl Samples {
         let max = [p[0][0].max(p[1][0]).max(p[2][0]), p[0][1].max(p[1][1]).max(p[2][1])];
         let x0 = (min[0] - 0.5).ceil().max(0.0) as usize;
         let y0 = (min[1] - 0.5).ceil().max(0.0) as usize;
+        let rows = self.z.len() / self.w.max(1);
         let x1 = ((max[0] - 0.5).floor() as isize).min(self.w as isize - 1);
-        let y1 = ((max[1] - 0.5).floor() as isize).min(self.h as isize - 1);
+        let y0 = y0.max(self.y0);
+        let y1 = ((max[1] - 0.5).floor() as isize).min((self.y0 + rows) as isize - 1);
         if x1 < x0 as isize || y1 < y0 as isize {
             return;
         }
         let inv = 1.0 / area;
         let edge = |a: [f32; 2], b: [f32; 2], q: [f32; 2]| (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
         for y in y0..=y1 as usize {
-            let row = y * self.w;
+            let row = (y - self.y0) * self.w;
             for x in x0..=x1 as usize {
                 let q = [x as f32 + 0.5, y as f32 + 0.5];
                 let w0 = edge(p[1], p[2], q) * inv;
@@ -365,9 +518,9 @@ impl Samples {
                 };
                 let feet = surface.and_then(|l| l.locate(seg, station, angle));
                 let mut glow = 0.0;
-                if let (Some(at), Some(m)) = (feet, paint.marks.get(seg)) {
+                if let (Some(at), Some(sheet), Some(m)) = (feet, paint.marks_sheet, paint.marks.get(seg)) {
                     if m.any() {
-                        (col, glow) = crate::wounds::marks(col, at, seg as u32, m, lerp(|c| c.front), lerp(|c| c.edge), paint.strand_ft * 0.8);
+                        (col, glow) = sheet.apply(col, at);
                     }
                 }
                 self.glow[i] = glow;
@@ -412,22 +565,13 @@ struct Pixels {
 
 impl Pixels {
     fn resolve(s: &Samples, w: usize, h: usize) -> Pixels {
-        let len = w * h;
-        let mut out = Pixels {
-            w,
-            h,
-            cov: vec![0.0; len],
-            z: vec![f32::INFINITY; len],
-            seg: vec![u32::MAX; len],
-            n: vec![[0.0; 3]; len],
-            col: vec![[0.0; 3]; len],
-            pos: if s.pos.is_empty() { Vec::new() } else { vec![[0.0; 3]; len] },
-            dev: vec![[0.0; 3]; len],
-            glow: vec![0.0; len],
-        };
-        for y in 0..h {
-            for x in 0..w {
-                let i = y * w + x;
+        /// One pixel's resolve: cov, z, seg, n, col, pos, dev, glow.
+        type Px = (f32, f32, u32, V3, [f32; 3], V3, V3, f32);
+        let empty: Px = (0.0, f32::INFINITY, u32::MAX, [0.0; 3], [0.0; 3], [0.0; 3], [0.0; 3], 0.0);
+        let mut px: Vec<Px> = vec![empty; w * h];
+        let keep_pos = !s.pos.is_empty();
+        par_rows(&mut px, w, &|y, row| {
+            for (x, out) in row.iter_mut().enumerate() {
                 let mut hits = 0;
                 let (mut n, mut col, mut dev, mut glow) = ([0.0f32; 3], [0.0f32; 3], [0.0f32; 3], 0.0f32);
                 for sy in 0..SS {
@@ -443,69 +587,83 @@ impl Pixels {
                         for k in 0..3 {
                             col[k] += s.col[j][k];
                         }
-                        if s.z[j] < out.z[i] {
-                            out.z[i] = s.z[j];
-                            out.seg[i] = s.seg[j];
-                            if !s.pos.is_empty() {
-                                out.pos[i] = s.pos[j];
+                        if s.z[j] < out.1 {
+                            out.1 = s.z[j];
+                            out.2 = s.seg[j];
+                            if keep_pos {
+                                out.5 = s.pos[j];
                             }
                         }
                     }
                 }
                 if hits > 0 {
-                    out.cov[i] = hits as f32 / (SS * SS) as f32;
-                    out.n[i] = norm_or(n, [0.0, 0.0, 1.0]);
-                    out.col[i] = col.map(|c| c / hits as f32);
-                    out.dev[i] = scale(dev, 1.0 / hits as f32);
-                    out.glow[i] = glow / hits as f32;
+                    out.0 = hits as f32 / (SS * SS) as f32;
+                    out.3 = norm_or(n, [0.0, 0.0, 1.0]);
+                    out.4 = col.map(|c| c / hits as f32);
+                    out.6 = scale(dev, 1.0 / hits as f32);
+                    out.7 = glow / hits as f32;
                 }
             }
+        });
+        Pixels {
+            w,
+            h,
+            cov: px.iter().map(|p| p.0).collect(),
+            z: px.iter().map(|p| p.1).collect(),
+            seg: px.iter().map(|p| p.2).collect(),
+            n: px.iter().map(|p| p.3).collect(),
+            col: px.iter().map(|p| p.4).collect(),
+            pos: if keep_pos { px.iter().map(|p| p.5).collect() } else { Vec::new() },
+            dev: px.iter().map(|p| p.6).collect(),
+            glow: px.iter().map(|p| p.7).collect(),
         }
-        out
     }
 
     /// Average normals (and, with `colours`, colours) over a `2r + 1`
     /// window (one axis per pass), only between pixels whose depths are
     /// within `tol`. A texture's colours are left sharp: blending is for
     /// the shape, and for softening flat wound tints.
-    fn smooth(&mut self, r: usize, tol: f32, colours: bool, joined: &dyn Fn(u32, u32) -> bool) {
+    fn smooth(&mut self, r: usize, tol: f32, colours: bool, joined: &(dyn Fn(u32, u32) -> bool + Sync)) {
         if r == 0 {
             return;
         }
         for (dx, dy) in [(1isize, 0isize), (0, 1)] {
-            let (mut n2, mut c2) = (self.n.clone(), self.col.clone());
-            for y in 0..self.h {
-                for x in 0..self.w {
-                    let i = y * self.w + x;
-                    let (z0, s0) = (self.z[i], self.seg[i]);
+            let mut out: Vec<(V3, [f32; 3])> = self.n.iter().copied().zip(self.col.iter().copied()).collect();
+            let this = &*self;
+            par_rows(&mut out, this.w, &|y, row| {
+                for (x, slot) in row.iter_mut().enumerate() {
+                    let i = y * this.w + x;
+                    let (z0, s0) = (this.z[i], this.seg[i]);
                     if !z0.is_finite() {
                         continue;
                     }
                     let (mut n, mut col, mut k) = ([0.0f32; 3], [0.0f32; 3], 0.0f32);
                     for t in -(r as isize)..=r as isize {
                         let (qx, qy) = (x as isize + dx * t, y as isize + dy * t);
-                        if qx < 0 || qy < 0 || qx >= self.w as isize || qy >= self.h as isize {
+                        if qx < 0 || qy < 0 || qx >= this.w as isize || qy >= this.h as isize {
                             continue;
                         }
-                        let j = qy as usize * self.w + qx as usize;
-                        let dz = (self.z[j] - z0).abs();
-                        if dz > tol && !(dz <= tol * JOINED_BLEND && joined(s0, self.seg[j])) {
+                        let j = qy as usize * this.w + qx as usize;
+                        let dz = (this.z[j] - z0).abs();
+                        if dz > tol && !(dz <= tol * JOINED_BLEND && joined(s0, this.seg[j])) {
                             continue;
                         }
-                        n = add(n, self.n[j]);
+                        n = add(n, this.n[j]);
                         for c in 0..3 {
-                            col[c] += self.col[j][c];
+                            col[c] += this.col[j][c];
                         }
                         k += 1.0;
                     }
-                    n2[i] = norm_or(n, self.n[i]);
+                    slot.0 = norm_or(n, this.n[i]);
                     if colours {
-                        c2[i] = col.map(|c| c / k.max(1.0));
+                        slot.1 = col.map(|c| c / k.max(1.0));
                     }
                 }
+            });
+            for (i, (n, c)) in out.into_iter().enumerate() {
+                self.n[i] = n;
+                self.col[i] = c;
             }
-            self.n = n2;
-            self.col = c2;
         }
     }
 
@@ -558,14 +716,14 @@ impl Pixels {
 
     /// Strength (0..=1) of an interior contour at every pixel: how close a
     /// pixel of ANOTHER segment is that sits nearer by more than `tol`.
-    fn inner_contour(&self, width: f32, tol: f32, joined: &dyn Fn(u32, u32) -> bool) -> Vec<f32> {
+    fn inner_contour(&self, width: f32, tol: f32, joined: &(dyn Fn(u32, u32) -> bool + Sync)) -> Vec<f32> {
         let mut out = vec![0.0; self.w * self.h];
         if width <= 0.0 {
             return out;
         }
         let r = (width + 1.0).ceil() as isize;
-        for y in 0..self.h {
-            for x in 0..self.w {
+        par_rows(&mut out, self.w, &|y, row| {
+            for (x, slot) in row.iter_mut().enumerate() {
                 let i = y * self.w + x;
                 let (z0, s0) = (self.z[i], self.seg[i]);
                 if !z0.is_finite() {
@@ -589,9 +747,9 @@ impl Pixels {
                         best = best.max(step * near);
                     }
                 }
-                out[i] = best;
+                *slot = best;
             }
-        }
+        });
         out
     }
 }
@@ -709,7 +867,6 @@ impl Posed<'_> {
             let middle = scale(surf.rings.iter().fold([0.0; 3], |acc, r| add(acc, r.c)), 1.0 / n as f32);
             let base = verts.len() as u32;
             let measured = puppet.segments[surf.index].stations.len();
-            let seg_axes = (puppet.segments[surf.index].axis_w, puppet.segments[surf.index].axis_d);
             for (k, ring) in surf.rings.iter().enumerate() {
                 // A wounded part keeps its own colour: its marks are the
                 // wound (`wounds::mark`), not a tint over the whole part.
@@ -739,10 +896,7 @@ impl Posed<'_> {
                     let (sp, z) = project(p);
                     let theta = j as f32 / m as f32 * std::f32::consts::TAU;
                     let addr = if addressed { [k as f32, theta] } else { [f32::NAN; 2] };
-                                        let (c, s) = angles[j];
-                    let rest = add(scale(seg_axes.0, c * len(ring.a)), scale(seg_axes.1, s * len(ring.b)));
-                    let front = if len(rest) > 1e-5 { rest[2] / len(rest) } else { 0.0 };
-                    verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound, edge: ring.tint, front });
+                                        verts.push(Vert { p: [sp[0] * ss, sp[1] * ss], z, n: nrm, w: p, col, seg: surf.index as u32, addr, wound });
                 }
             }
             let at = |k: usize, j: usize| base + (k * m + j % m) as u32;
@@ -767,8 +921,6 @@ impl Posed<'_> {
                     seg: surf.index as u32,
                     addr: [f32::NAN; 2],
                     wound: [0.0; 4],
-                    edge: ring.tint,
-                    front: 0.0,
                 });
                 for j in 0..m {
                     tris.push([centre, at(k, j), at(k, j + 1)]);
@@ -810,22 +962,20 @@ impl Posed<'_> {
         let surface = (effects.any() || marked).then(|| UvLayout::new(puppet, 1.0));
         let turn = rot_y(look.yaw);
         let rot = |seg: usize, v: V3| mul_mv(&turn, self.xf[seg].dir(v));
+        let strand_ft = (0.9 / px_per_ft.max(1e-3)).max(0.018);
+        let marks_sheet = surface.as_ref().filter(|_| marked).map(|layout| marks_sheet(puppet, layout, &surfs, &marks, strand_ft * 0.8));
         let paint = Paint {
             tex: texture,
             rot: &rot,
             surface: surface.as_ref(),
             effects,
             // At least about a pixel wide, however small the figure.
-            strand_ft: (0.9 / px_per_ft.max(1e-3)).max(0.018),
+            strand_ft,
             marks: &marks,
+            marks_sheet: marks_sheet.as_deref(),
         };
         let mut samples = Samples::new(w * SS, h * SS, keep_surface);
-        for t in &tris {
-            let v = t.map(|i| &verts[i as usize]);
-            if v.iter().all(|c| c.p[0].is_finite() && c.p[1].is_finite() && c.z.is_finite()) {
-                samples.tri(v, &paint);
-            }
-        }
+        samples.rasterise(&verts, &tris, &paint, raster_threads());
         let mut px = Pixels::resolve(&samples, w, h);
         drop(samples);
         let radius = (SMOOTH_OF_HEIGHT * height * px_per_ft).round().clamp(0.0, 16.0) as usize;
