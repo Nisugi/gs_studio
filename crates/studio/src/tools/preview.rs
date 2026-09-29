@@ -152,9 +152,9 @@ impl StageTool {
         if std::env::var_os("GS_STUDIO_SPLATS").is_some() {
             stage.show_splats = true;
         }
-        // GS_STUDIO_GPU_SKINS=1: the puppets' skins on the GPU (GPU skins)
-        if std::env::var("GS_STUDIO_GPU_SKINS").is_ok_and(|v| v.trim() == "1") {
-            stage.gpu_skins = true;
+        // GS_STUDIO_GPU_SKINS=0: the puppets' skins on the CPU (GPU skins off)
+        if let Ok(v) = std::env::var("GS_STUDIO_GPU_SKINS") {
+            stage.gpu_skins = v.trim() != "0";
         }
         // A lighting check with no one at the slider: GS_STUDIO_LIGHT_HOUR
         // holds the stage at that game hour (23 = night).

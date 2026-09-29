@@ -257,7 +257,7 @@ impl StageState {
             show_props: true,
             show_breath: true,
             sun_lit_skins: false,
-            gpu_skins: false,
+            gpu_skins: true,
             show_splats: false,
             splat_params: gs_puppet::splat::SplatParams::default(),
             selected_prop: None,

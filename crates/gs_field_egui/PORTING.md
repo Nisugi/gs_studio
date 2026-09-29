@@ -1101,8 +1101,8 @@ Two more `creature_field.rs` regions (twenty-two in all,
   first when the clock is sun-lit (`SkinSurface::scene_lit` in the final
   pass).
 * `field_gpu_stage::StageGpu::paint_mesh` (**a new method**), and
-  `creature_puppet::set_puppet_gpu_skin` / `puppet_gpu_skin` (**new**,
-  off by default). `PuppetCache::posed_cached` and the `posed_*_as`
+  `creature_puppet::set_puppet_gpu_skin` / `puppet_gpu_skin` (**new**;
+  off unless the host turns it on -- gs-studio does, by default). `PuppetCache::posed_cached` and the `posed_*_as`
   builders are public, taking a `Bare`.
 * `src/creature_field.rs`: inside the marked puppet region only -- the
   figure is built as a mesh (`Bare::Mesh`) when GPU skins are on, the v2

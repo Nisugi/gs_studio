@@ -40,7 +40,7 @@ calendar (*The game's moons*), `=<unix seconds>` at that instant, and
 `GS_STUDIO_LORNONS_EVE=1` shows them on Lornon's Eve, `GS_STUDIO_FACING=<n|ne|..|w|nw>`
 faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
-*Splats* checkbox; `GS_STUDIO_GPU_SKINS=1` draws their skins on the GPU (*GPU skins*;
+*Splats* checkbox; `GS_STUDIO_FRAME_TIMES=1` prints every frame's UI-thread time; their skins are drawn on the GPU (*GPU skins*, on by default, `GS_STUDIO_GPU_SKINS=0` for the CPU's;
 `gs_field_egui::skin_gpu` + `relight_gpu`, needs the v2 pass and a lit scene;
 `cargo run --release -p gs_field_egui --example relight_golden` holds the GPU relight to vellum_light's goldens); `GS_STUDIO_DOLL=<hour>[,<n|ne|..>][,indoor][,new][,field]` (`field`: under the stage's sky) opens the
 *Doll* window (the injury doll, `tools/doll.rs` over `gs_field_egui::doll_view`)

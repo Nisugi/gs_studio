@@ -567,6 +567,10 @@ impl eframe::App for StudioApp {
         let tab = self.active;
         self.frame(ui, frame);
         let label = TOOLS.iter().find(|t| t.id == tab).map_or("?", |t| t.label);
+        // GS_STUDIO_FRAME_TIMES=1: every frame's time on the UI thread
+        if std::env::var_os("GS_STUDIO_FRAME_TIMES").is_some() {
+            eprintln!("frame {:.2} ms", started.elapsed().as_secs_f64() * 1000.0);
+        }
         if let Some(line) = crate::perf_log::slow_frame_line(started.elapsed(), label, &crate::perf_log::spans_detail()) {
             crate::perf_log::log(&line);
         }
