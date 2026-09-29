@@ -542,7 +542,7 @@ mod tests {
     /// a GPU. (WGSL is otherwise only checked when a device compiles it.)
     #[test]
     fn the_shaders_validate() {
-        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl"))] {
+        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl")), ("relight_gpu.wgsl", include_str!("relight_gpu.wgsl"))] {
             let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)

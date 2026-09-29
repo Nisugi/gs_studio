@@ -46,6 +46,9 @@ pub mod field_gpu_stage;
 /// Addition since the port (not in VellumFE): the puppet's smooth skin
 /// drawn on the GPU into a [`field_gpu`] layer.
 pub mod skin_gpu;
+/// Addition since the port (not in VellumFE): vellum_light's relight on the
+/// GPU, for [`skin_gpu`]'s skins on the stage.
+pub mod relight_gpu;
 pub mod field_lights;
 pub mod field_occluders;
 pub mod field_weather;
