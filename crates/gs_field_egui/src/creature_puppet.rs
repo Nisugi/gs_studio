@@ -551,6 +551,9 @@ pub struct PosedPuppet {
     /// Built with [`Bare::Mesh`]: the figure as a mesh, and its paint, for
     /// the GPU skin (`skin_gpu`) -- and then no `skin`.
     pub mesh: Option<(Arc<gs_puppet::SkinMesh>, Option<Arc<gs_puppet::Texture>>)>,
+    /// Built with [`Bare::Mesh`] as a splat cloud: it projected and sorted,
+    /// for the GPU to draw -- and then no `skin`.
+    pub splats: Option<Arc<gs_puppet::splat::SplatFrame>>,
     lamp_layers: LampLayers,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
@@ -902,14 +905,22 @@ fn pose_puppet_inner(
     let mut surface = None;
     let mut caster = None;
     // For the GPU skin: the figure as a mesh, and no CPU skin at all.
-    let mesh = (skin && bare == Bare::Mesh && light.is_none())
+    let gpu = skin && bare == Bare::Mesh && light.is_none();
+    let mesh = (gpu && !key.splats)
         .then(|| {
             let tex = texture_arc.clone();
             let m = posed.skin_mesh(&project, &look, tex.as_deref(), key.effects)?;
             Some((Arc::new(m), tex))
         })
         .flatten();
-    let skin = skin && mesh.is_none();
+    // a splat cloud: projected and sorted here, drawn on the GPU
+    let splats = (gpu && key.splats)
+        .then(|| {
+            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params());
+            gs_puppet::splat::prepare(&cloud, &project, look.yaw).map(Arc::new)
+        })
+        .flatten();
+    let skin = skin && mesh.is_none() && splats.is_none();
     let skin = skin.then(|| {
         if key.splats {
             // The splat look: the same image slot as the skin, lit by the
@@ -959,6 +970,7 @@ fn pose_puppet_inner(
         surface,
         caster,
         mesh,
+        splats,
         lamp_layers: LampLayers::default(),
         bounds,
         standing_ft: puppet.height.max(0.01),

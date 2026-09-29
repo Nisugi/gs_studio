@@ -1106,4 +1106,12 @@ Two more `creature_field.rs` regions (twenty-two in all,
   builders are public, taking a `Bare`.
 * `src/creature_field.rs`: inside the marked puppet region only -- the
   figure is built as a mesh (`Bare::Mesh`) when GPU skins are on, the v2
-  pass is drawing and the scene is lit, and drawn by `paint_mesh`.
+  pass is drawing and the scene is lit, and drawn by `paint_figure`.
+* Splat clouds too: `src/splat_gpu.wgsl` (**a new file**) draws a
+  `gs_puppet::splat::SplatFrame` (`splat::prepare`, **new**: the cloud
+  projected, shaded and sorted -- what `splat::render` rasterises) --
+  front surface, blend, resolve -- into the same layer; `skin_gpu::Figure`
+  (**a new type**) is a skin or splats, `SkinJob::figure` replaces its
+  mesh and texture, `PosedPuppet::splats` (**a new field**) carries the
+  frame, and `StageGpu::paint_mesh` is `paint_figure`. On the GPU a splat
+  puppet is a v2 layer, lit by the lamps; on the CPU it never was.

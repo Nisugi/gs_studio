@@ -10,15 +10,32 @@ use std::sync::{Arc, Mutex};
 
 use egui_wgpu::wgpu;
 
-/// One skin to draw into the atlas: its mesh, its paint, how its lit base
-/// is lit, and metres per foot.
+/// One figure to draw into the atlas: its skin or its splat cloud, how its
+/// lit base is lit, and metres per foot.
 #[derive(Debug)]
 pub struct SkinJob {
-    pub mesh: Arc<gs_puppet::SkinMesh>,
-    /// Its paint; None = unpainted (the mesh's own colours).
-    pub texture: Option<Arc<gs_puppet::Texture>>,
+    pub figure: Figure,
     pub lit: SkinLit,
     pub m_per_ft: f32,
+}
+
+/// What a job draws.
+#[derive(Debug, Clone)]
+pub enum Figure {
+    /// The smooth skin: its mesh, and its paint (None = unpainted).
+    Skin { mesh: Arc<gs_puppet::SkinMesh>, texture: Option<Arc<gs_puppet::Texture>> },
+    /// A splat cloud, projected and sorted (`gs_puppet::splat::prepare`).
+    Splats(Arc<gs_puppet::splat::SplatFrame>),
+}
+
+impl Figure {
+    /// The image's size.
+    pub fn size(&self) -> (usize, usize) {
+        match self {
+            Figure::Skin { mesh, .. } => (mesh.w, mesh.h),
+            Figure::Splats(f) => (f.w, f.h),
+        }
+    }
 }
 
 /// How a GPU skin's lit base -- what shows where no lamp reaches -- is lit.
@@ -38,9 +55,12 @@ impl SkinJob {
     /// `field_gpu::depth_span` finds it in a CPU skin's pixels: its surface
     /// points' depth along the view (the layer's geo depth).
     pub fn depth_span(&self) -> [f32; 2] {
-        let back = self.mesh.to_cam;
-        let (lo, hi) = self.mesh.corners.iter().fold((f32::MAX, f32::MIN), |(lo, hi), c| {
-            let d = -(c.pos[0] * back[0] + c.pos[1] * back[1] + c.pos[2] * back[2]) * self.m_per_ft;
+        let (back, points): (_, Box<dyn Iterator<Item = [f32; 3]>>) = match &self.figure {
+            Figure::Skin { mesh, .. } => (mesh.to_cam, Box::new(mesh.corners.iter().map(|c| c.pos))),
+            Figure::Splats(f) => (f.to_cam, Box::new(f.flats.iter().map(|s| s.pos))),
+        };
+        let (lo, hi) = points.fold((f32::MAX, f32::MIN), |(lo, hi), p| {
+            let d = -(p[0] * back[0] + p[1] * back[1] + p[2] * back[2]) * self.m_per_ft;
             (lo.min(d), hi.max(d))
         });
         [lo, hi]
@@ -49,6 +69,9 @@ impl SkinJob {
 
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Bytes per splat (`Inst` in splat_gpu.wgsl).
+const SPLAT_BYTES: u64 = 80;
+
 /// Floats in the uniform block (`U` in the shader).
 const UNIFORM_FLOATS: usize = 84;
 /// The threads' spans (`fs_threads`): one texel each.
@@ -66,6 +89,10 @@ pub(crate) struct SkinGpu {
     finish: wgpu::RenderPipeline,
     compose: wgpu::RenderPipeline,
     compose_layout: wgpu::BindGroupLayout,
+    splat_front: wgpu::RenderPipeline,
+    splat_blend: wgpu::RenderPipeline,
+    splat_final: wgpu::RenderPipeline,
+    splat_layout: wgpu::BindGroupLayout,
     relight: crate::relight_gpu::RelightGpu,
     layout0: wgpu::BindGroupLayout,
     layout1: wgpu::BindGroupLayout,
@@ -252,7 +279,84 @@ impl SkinGpu {
             multiview_mask: None,
             cache: None,
         });
-        SkinGpu { raster, resolve, smooth, threads, finish, compose, compose_layout, relight: crate::relight_gpu::RelightGpu::new(device), layout0, layout1, sheets: Mutex::new(Sheets::default()) }
+        // ---- the splats (splat_gpu.wgsl)
+        let splat_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("splat_gpu"), source: wgpu::ShaderSource::Wgsl(include_str!("splat_gpu.wgsl").into()) });
+        let splat_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("splat_gpu"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                texture_entry(1, frag),
+                texture_entry(2, frag),
+                texture_entry(3, frag),
+            ],
+        });
+        let splat_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("splat_gpu"), bind_group_layouts: &[Some(&splat_layout)], immediate_size: 0 });
+        let inst_attrs = [
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 0, shader_location: 0 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 8, shader_location: 1 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 32, shader_location: 3 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 36, shader_location: 4 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 48, shader_location: 5 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 52, shader_location: 6 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 64, shader_location: 7 },
+        ];
+        let splat_pipe = |entry: &str, vs: &str, targets: &[Option<wgpu::ColorTargetState>], depth: bool, instanced: bool| {
+            let inst = [wgpu::VertexBufferLayout { array_stride: SPLAT_BYTES, step_mode: wgpu::VertexStepMode::Instance, attributes: &inst_attrs }];
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&splat_pl),
+                vertex: wgpu::VertexState { module: &splat_shader, entry_point: Some(vs), buffers: if instanced { &inst } else { &[] }, compilation_options: wgpu::PipelineCompilationOptions::default() },
+                fragment: Some(wgpu::FragmentState { module: &splat_shader, entry_point: Some(entry), targets, compilation_options: wgpu::PipelineCompilationOptions::default() }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: depth.then_some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        // back to front, premultiplied "over"
+        let over = wgpu::BlendState {
+            color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+            alpha: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add },
+        };
+        let splat_front = splat_pipe("fs_front", "vs_splat", &[target(COLOR), target(COLOR)], true, true);
+        let splat_blend = splat_pipe("fs_blend", "vs_splat", &[Some(wgpu::ColorTargetState { format: COLOR, blend: Some(over), write_mask: wgpu::ColorWrites::ALL })], false, true);
+        let splat_final = splat_pipe(
+            "fs_final",
+            "vs_full",
+            &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float), target(wgpu::TextureFormat::Rgba8Unorm)],
+            false,
+            false,
+        );
+        SkinGpu {
+            raster,
+            resolve,
+            smooth,
+            threads,
+            finish,
+            compose,
+            compose_layout,
+            splat_front,
+            splat_blend,
+            splat_final,
+            splat_layout,
+            relight: crate::relight_gpu::RelightGpu::new(device),
+            layout0,
+            layout1,
+            sheets: Mutex::new(Sheets::default()),
+        }
     }
 
     /// Draw `job` into the atlas `albedo` / `lit` / `geo` with its image's
@@ -269,7 +373,10 @@ impl SkinGpu {
         at: [u32; 2],
         pad: u32,
     ) {
-        let m = &job.mesh;
+        let (m, texture) = match &job.figure {
+            Figure::Skin { mesh, texture } => (mesh, texture),
+            Figure::Splats(frame) => return self.draw_splats(device, queue, encoder, job, frame, atlas, at, pad),
+        };
         let (w, h) = (m.w as u32, m.h as u32);
         let ss = gs_puppet::SKIN_SS as u32;
         if w == 0 || h == 0 || m.corners.is_empty() {
@@ -283,7 +390,7 @@ impl SkinGpu {
             sheets.blank = Some((rgba, r, span));
         }
         // the paint and its normal sheet, uploaded once per texture
-        if let Some(tex) = &job.texture {
+        if let Some(tex) = &texture {
             let paint_key = (tex.rgba.as_ptr() as usize, tex.rgba.len());
             if sheets.paint.as_ref().is_none_or(|(k, _, _)| *k != paint_key) {
             let (pw, ph) = (tex.layout.w as u32, tex.layout.h as u32);
@@ -307,12 +414,12 @@ impl SkinGpu {
             }
         }
         let blank = sheets.blank.as_ref().expect("made above");
-        let has_normal = job.texture.as_ref().is_some_and(|t| t.normal.as_ref().is_some_and(|n| n.len() == t.rgba.len()));
-        let (paint, normal) = match (&job.texture, &sheets.paint) {
+        let has_normal = texture.as_ref().is_some_and(|t| t.normal.as_ref().is_some_and(|n| n.len() == t.rgba.len()));
+        let (paint, normal) = match (&texture, &sheets.paint) {
             (Some(_), Some((_, p, n))) => (p, n),
             _ => (&blank.0, &blank.0),
         };
-        let paint_size = job.texture.as_ref().map_or([1, 1], |t| [t.layout.w, t.layout.h]);
+        let paint_size = texture.as_ref().map_or([1, 1], |t| [t.layout.w, t.layout.h]);
         let (marks_bk, marks_glow, marks_size, marks_per_ft) = match (&m.marks, &sheets.marks) {
             (Some((sheet, _)), Some((_, bk, glow))) => (bk, glow, sheet.size(), sheet.per_ft()),
             _ => (&blank.0, &blank.1, [1, 1], 1.0),
@@ -340,7 +447,7 @@ impl SkinGpu {
         u.extend(flags(0.0, 0.0));
         u.extend([paint_size[0] as f32, paint_size[1] as f32, marks_size[0] as f32, marks_size[1] as f32]);
         let flag = |b: bool| if b { 1.0 } else { 0.0 };
-        u.extend([flag(job.texture.is_some()), flag(m.effects.frozen), flag(m.effects.webbed), m.strand_ft]);
+        u.extend([flag(texture.is_some()), flag(m.effects.frozen), flag(m.effects.webbed), m.strand_ft]);
         u.extend([m.thread_half, m.threads.len() as f32, flag(m.smooth_colours), m.eyes.len() as f32]);
         u.extend(v3(s.web_rgb.map(|c| c / 255.0), s.web_spacing_ft));
         u.extend(v3(s.frost_rgb.map(|c| c / 255.0), 0.0));
@@ -555,9 +662,160 @@ impl SkinGpu {
             pass.set_bind_group(1, &g1, &[]);
             pass.draw(0..3, 0..1);
         }
+        self.finish(device, queue, encoder, &job.lit, &outs, ow, oh, atlas, at, pad);
+    }
+
+    /// A splat cloud into the atlas, as `draw` a skin: front, blend, final,
+    /// then `finish`.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_splats(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        job: &SkinJob,
+        frame: &gs_puppet::splat::SplatFrame,
+        atlas: [&wgpu::Texture; 3],
+        at: [u32; 2],
+        pad: u32,
+    ) {
+        let (w, h) = (frame.w as u32, frame.h as u32);
+        if w == 0 || h == 0 || frame.flats.is_empty() {
+            return;
+        }
+        let blank = {
+            let mut sheets = self.sheets.lock().unwrap_or_else(|e| e.into_inner());
+            if sheets.blank.is_none() {
+                let rgba = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::Rgba8Unorm, &[0, 0, 0, 255], 4, "skin_gpu blank");
+                let r = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::R8Unorm, &[0; 4][..1], 1, "skin_gpu blank r");
+                let span = upload_rgba(device, queue, 1, 1, SPANS, &[0; 16], 16, "skin_gpu blank span");
+                sheets.blank = Some((rgba, r, span));
+            }
+            sheets.blank.as_ref().expect("made above").0.clone()
+        };
+        let (near, far) = frame.flats.iter().fold((f32::MAX, f32::MIN), |(n, f), s| (n.min(s.z), f.max(s.z)));
+        let floor = match &job.lit {
+            SkinLit::Floor(f) => *f,
+            SkinLit::Scene { .. } => [1.0; 3],
+        };
+        let uniform = |reach: f32| {
+            let u: [f32; 16] = [
+                w as f32, h as f32, pad as f32, job.m_per_ft,
+                near, (far - near).max(1e-3), gs_puppet::splat::SURFACE_BAND, reach,
+                frame.to_cam[0], frame.to_cam[1], frame.to_cam[2], 0.0,
+                floor[0], floor[1], floor[2], 0.0,
+            ];
+            let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("splat_gpu uniforms"), size: 64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            queue.write_buffer(&buf, 0, &floats(&u));
+            buf
+        };
+        let mut inst: Vec<u8> = Vec::with_capacity(frame.flats.len() * SPLAT_BYTES as usize);
+        for s in &frame.flats {
+            let v: [f32; 20] = [
+                s.c[0], s.c[1], s.inv[0], s.inv[1], s.inv[2], s.inv[3], s.r[0], s.r[1], s.z, s.rgb[0], s.rgb[1], s.rgb[2], s.alpha, s.pos[0], s.pos[1], s.pos[2], s.n[0], s.n[1], s.n[2], 0.0,
+            ];
+            inst.extend(floats(&v));
+        }
+        let instances = device.create_buffer(&wgpu::BufferDescriptor { label: Some("splat_gpu splats"), size: inst.len() as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&instances, 0, &inst);
+        let rt = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let view = |t: wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+        let front_n = view(make_texture(device, w, h, COLOR, rt, "splat_gpu front normal"));
+        let front_pos = view(make_texture(device, w, h, COLOR, rt, "splat_gpu front point"));
+        let acc = view(make_texture(device, w, h, COLOR, rt, "splat_gpu blend"));
+        let depth = view(make_texture(device, w, h, DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, "splat_gpu depth"));
+        let group = |u: &wgpu::Buffer, a: &wgpu::TextureView, b: &wgpu::TextureView, c: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("splat_gpu"),
+                layout: &self.splat_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: u.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(a) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(b) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(c) },
+                ],
+            })
+        };
+        let none = wgpu::Color::TRANSPARENT;
+        let far_c = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 60000.0 };
+        let n = frame.flats.len() as u32;
+        // the front surface: each core
+        {
+            let u = uniform(0.5);
+            let g = group(&u, &blank, &blank, &blank);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("splat_gpu front"),
+                color_attachments: &[attach(&front_n, none), attach(&front_pos, far_c)],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.splat_front);
+            pass.set_bind_group(0, &g, &[]);
+            pass.set_vertex_buffer(0, instances.slice(..));
+            pass.draw(0..6, 0..n);
+        }
+        // the splats, back to front
+        {
+            let u = uniform(1.0);
+            let g = group(&u, &front_n, &front_pos, &blank);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("splat_gpu blend"), color_attachments: &[attach(&acc, none)], ..Default::default() });
+            pass.set_pipeline(&self.splat_blend);
+            pass.set_bind_group(0, &g, &[]);
+            pass.set_vertex_buffer(0, instances.slice(..));
+            pass.draw(0..6, 0..n);
+        }
+        // resolved into the layer
+        let (ow, oh) = (w + 2 * pad, h + 2 * pad);
+        let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING;
+        let outs = [
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "splat_gpu albedo"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "splat_gpu lit"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba16Float, out_usage, "splat_gpu geo"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "splat_gpu rgba"),
+        ];
+        {
+            let out_views: Vec<wgpu::TextureView> = outs.iter().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default())).collect();
+            let u = uniform(1.0);
+            let g = group(&u, &front_n, &front_pos, &acc);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("splat_gpu final"),
+                color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none), attach(&out_views[3], none)],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.splat_final);
+            pass.set_bind_group(0, &g, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.finish(device, queue, encoder, &job.lit, &outs, ow, oh, atlas, at, pad);
+    }
+
+    /// A figure's four outputs -- albedo, lit, geo, and its plain colours --
+    /// into the atlas at `at` (gutter `pad`): the lit base relit first when
+    /// `lit` is the stage's.
+    #[allow(clippy::too_many_arguments)]
+    fn finish(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        lit: &SkinLit,
+        outs: &[wgpu::Texture; 4],
+        ow: u32,
+        oh: u32,
+        atlas: [&wgpu::Texture; 3],
+        at: [u32; 2],
+        pad: u32,
+    ) {
+        let none = wgpu::Color::TRANSPARENT;
+        let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING;
+        let lit_view = outs[1].create_view(&wgpu::TextureViewDescriptor::default());
         // the stage's: the skin relit by the scene and the time of day, its
         // glow kept, as the lit base
-        let relit_lit = match &job.lit {
+        let relit_lit = match lit {
             SkinLit::Floor(_) => None,
             SkinLit::Scene { plan, .. } => {
                 let relit = self.relight.run(device, queue, encoder, &outs[3], ow, oh, plan);
@@ -568,7 +826,7 @@ impl SkinGpu {
                     layout: &self.compose_layout,
                     entries: &[
                         wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&relit.create_view(&wgpu::TextureViewDescriptor::default())) },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&out_views[1]) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&lit_view) },
                     ],
                 });
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("skin_gpu compose"), color_attachments: &[attach(&view, none)], ..Default::default() });
@@ -625,7 +883,7 @@ mod tests {
     /// a GPU. (WGSL is otherwise only checked when a device compiles it.)
     #[test]
     fn the_shaders_validate() {
-        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl")), ("relight_gpu.wgsl", include_str!("relight_gpu.wgsl"))] {
+        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl")), ("relight_gpu.wgsl", include_str!("relight_gpu.wgsl")), ("splat_gpu.wgsl", include_str!("splat_gpu.wgsl"))] {
             let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)

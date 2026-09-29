@@ -1486,13 +1486,21 @@ fn paint_creature_puppet(
     // The v2 pass lights the skin itself (lamps, the shadows it casts and
     // takes), when on and the surface was kept (scene lighting is up).
     let m_per_ft = unit.standing.h * crate::field_gpu_stage::METRES_PER_CARD_UNIT / posed.standing_ft.max(1e-3);
-    let gpu_drawn = crate::field_gpu_stage::with_current(|g| match (posed.mesh.as_ref(), light.as_deref(), posed.skin.as_ref(), posed.surface.as_ref()) {
-        (Some((mesh, texture)), Some(light), _, _) => {
-            let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
-            g.paint_mesh(painter, mesh, texture, light, place.skin_rect(&frame), view.field.ground_z(unit), m_per_ft)
+    let gpu_drawn = crate::field_gpu_stage::with_current(|g| {
+        // a figure the GPU draws: its skin's mesh, or its splat cloud
+        let figure = match (&posed.mesh, &posed.splats) {
+            (Some((mesh, texture)), _) => Some((crate::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, mesh.origin, mesh.w, mesh.h)),
+            (_, Some(f)) => Some((crate::skin_gpu::Figure::Splats(f.clone()), f.origin, f.w, f.h)),
+            _ => None,
+        };
+        match (figure, light.as_deref(), posed.skin.as_ref(), posed.surface.as_ref()) {
+            (Some((figure, origin, w, h)), Some(light), _, _) => {
+                let frame = gs_puppet::Skin { origin, w, h, rgba: Vec::new() };
+                g.paint_figure(painter, figure, light, place.skin_rect(&frame), view.field.ground_z(unit), m_per_ft)
+            }
+            (_, _, Some(skin), Some(surface)) if !skin.is_empty() => g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft),
+            _ => false,
         }
-        (_, _, Some(skin), Some(surface)) if !skin.is_empty() => g.paint_skin(painter, skin, surface, place.skin_rect(skin), view.field.ground_z(unit), m_per_ft),
-        _ => false,
     })
     .unwrap_or(false);
     if !gpu_drawn {

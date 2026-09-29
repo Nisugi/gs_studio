@@ -879,7 +879,11 @@ an *x* to put it back:
   of day as the CPU relights them (`relight_gpu`: vellum_light's kernel,
   frame and cross-fade, held to its golden cases by
   `examples/relight_golden`) -- with *Light on the GPU (v2)* and a lit
-  scene; the CPU skin otherwise. A nerve wound
+  scene; the CPU skin otherwise. Splat-cloud puppets (*Splats*) go too:
+  projected and sorted on the CPU (`gs_puppet::splat::prepare`), their
+  front surface, blend and resolve on the GPU (`splat_gpu.wgsl`) -- and so
+  into the v2 pass, lit by its lamps and casting shadows, which on the CPU
+  they never were. A nerve wound
   (`nsys`) is on the whole body: violet lines branching along every part,
   more and brighter by rank, that GLOW -- the v2 pass keeps them showing
   where no light reaches (`SkinSurface::glow`, the layer's glow channel) --

@@ -342,9 +342,49 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
 /// above and in front. The image covers the cloud's projected extent (plus
 /// its blur) and is placed at `origin` in the projection's pixel space,
 /// straight RGBA, transparent where nothing landed.
-pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: f32) -> Skin {
+/// One splat projected, for a host that rasterises the cloud itself (the
+/// GPU splats): its screen centre and inverse 2D covariance (pixels of the
+/// image's own frame), how far it reaches, its depth, its colour (0..255,
+/// the cel shade in) and peak opacity, and where it is and faces (the
+/// turned world, for the lights).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SplatFlat {
+    pub c: [f32; 2],
+    pub inv: [f32; 4],
+    pub r: [f32; 2],
+    pub z: f32,
+    pub rgb: [f32; 3],
+    pub alpha: f32,
+    pub pos: V3,
+    pub n: V3,
+}
+
+/// A cloud projected and sorted back to front, and the image it fills: what
+/// [`render`] rasterises, and what a GPU host does (ADDITION).
+#[derive(Debug, Clone)]
+pub struct SplatFrame {
+    /// As [`Skin`]'s.
+    pub origin: [f32; 2],
+    pub w: usize,
+    pub h: usize,
+    pub flats: Vec<SplatFlat>,
+    /// Toward the viewer, in the turned world.
+    pub to_cam: V3,
+    /// Identifies these pixels.
+    pub key: u64,
+}
+
+/// A splat further behind a pixel's front-most core than [`SURFACE_BAND`]
+/// is inside; a pixel under a core is opaque; a core is `CORE_M` in the
+/// Gaussian's own distance, its reach `REACH_M` (see [`render`]).
+pub const CORE_M: f32 = 2.25;
+pub const REACH_M: f32 = 9.0;
+
+/// Project `cloud` through `project` turned by `yaw`, shade it, and sort it
+/// back to front: what [`render`] draws. None when nothing shows.
+pub fn prepare(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: f32) -> Option<SplatFrame> {
     if cloud.is_empty() {
-        return Skin { origin: [0.0, 0.0], w: 0, h: 0, rgba: Vec::new() };
+        return None;
     }
     let rot = rot_y(yaw);
     let turned = |v: V3| mul_mv(&rot, v);
@@ -406,7 +446,7 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         flats.push(Flat { c: centre, inv, r, z, shade, i });
     }
     if flats.is_empty() || !(lo[0].is_finite() && hi[0].is_finite()) {
-        return Skin { origin: [0.0, 0.0], w: 0, h: 0, rgba: Vec::new() };
+        return None;
     }
     let (near, far) = flats.iter().fold((f32::MAX, f32::MIN), |(n, f), x| (n.min(x.z), f.max(x.z)));
     let range = (far - near).max(2.0);
@@ -416,6 +456,39 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
     let origin = [lo[0].floor(), lo[1].floor()];
     let w = ((hi[0] - origin[0]).ceil() as usize + 1).min(4096);
     let h = ((hi[1] - origin[1]).ceil() as usize + 1).min(4096);
+    flats.sort_by(|a, b| b.z.total_cmp(&a.z));
+    let flats: Vec<SplatFlat> = flats
+        .iter()
+        .map(|f| {
+            let g = &cloud[f.i];
+            SplatFlat {
+                c: [f.c[0] - origin[0], f.c[1] - origin[1]],
+                inv: [f.inv[0][0], f.inv[0][1], f.inv[1][0], f.inv[1][1]],
+                r: f.r,
+                z: f.z,
+                rgb: g.rgb.map(|c| c * f.shade),
+                alpha: g.alpha,
+                pos: turned(g.c),
+                n: turned(g.n),
+            }
+        })
+        .collect();
+    let key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (w, h, origin.map(f32::to_bits), flats.len()).hash(&mut hasher);
+        for f in flats.iter().step_by(97) {
+            (f.c.map(f32::to_bits), f.z.to_bits(), f.rgb.map(f32::to_bits)).hash(&mut hasher);
+        }
+        hasher.finish()
+    };
+    Some(SplatFrame { origin, w, h, flats, to_cam: view.to_cam, key })
+}
+
+pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: f32) -> Skin {
+    let Some(SplatFrame { origin, w, h, flats, .. }) = prepare(cloud, project, yaw) else {
+        return Skin { origin: [0.0, 0.0], w: 0, h: 0, rgba: Vec::new() };
+    };
     // The front surface's depth per pixel, from every splat's core: a
     // splat further behind it than SURFACE_BAND is inside or beyond the
     // body and is not drawn. Between neighbouring splats a Gaussian
@@ -424,7 +497,7 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
     // zoomed in; culling them by geometry instead tore joints open.
     let mut front = vec![f32::MAX; w * h];
     for f in &flats {
-        let (cx, cy) = (f.c[0] - origin[0], f.c[1] - origin[1]);
+        let (cx, cy) = (f.c[0], f.c[1]);
         let xa = ((cx - f.r[0] * 0.5).floor() as i64).max(0);
         let xb = ((cx + f.r[0] * 0.5).ceil() as i64).min(w as i64 - 1);
         let ya = ((cy - f.r[1] * 0.5).floor() as i64).max(0);
@@ -432,20 +505,18 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         for py in ya..=yb {
             for px in xa..=xb {
                 let d = [px as f32 + 0.5 - cx, py as f32 + 0.5 - cy];
-                let m = d[0] * (f.inv[0][0] * d[0] + f.inv[0][1] * d[1]) + d[1] * (f.inv[1][0] * d[0] + f.inv[1][1] * d[1]);
-                if m <= 2.25 {
+                let m = d[0] * (f.inv[0] * d[0] + f.inv[1] * d[1]) + d[1] * (f.inv[2] * d[0] + f.inv[3] * d[1]);
+                if m <= CORE_M {
                     let at = &mut front[py as usize * w + px as usize];
                     *at = at.min(f.z);
                 }
             }
         }
     }
-    // Back to front, premultiplied over transparent.
-    flats.sort_by(|a, b| b.z.total_cmp(&a.z));
+    // Back to front, premultiplied over transparent (sorted so already).
     let mut fb = vec![[0.0f32; 4]; w * h];
     for f in &flats {
-        let g = &cloud[f.i];
-        let (cx, cy) = (f.c[0] - origin[0], f.c[1] - origin[1]);
+        let (cx, cy) = (f.c[0], f.c[1]);
         let xa = ((cx - f.r[0]).floor() as i64).max(0);
         let xb = ((cx + f.r[0]).ceil() as i64).min(w as i64 - 1);
         let ya = ((cy - f.r[1]).floor() as i64).max(0);
@@ -453,14 +524,14 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         for py in ya..=yb {
             for px in xa..=xb {
                 let d = [px as f32 + 0.5 - cx, py as f32 + 0.5 - cy];
-                let m = d[0] * (f.inv[0][0] * d[0] + f.inv[0][1] * d[1]) + d[1] * (f.inv[1][0] * d[0] + f.inv[1][1] * d[1]);
-                if m > 9.0 || f.z > front[py as usize * w + px as usize] + SURFACE_BAND {
+                let m = d[0] * (f.inv[0] * d[0] + f.inv[1] * d[1]) + d[1] * (f.inv[2] * d[0] + f.inv[3] * d[1]);
+                if m > REACH_M || f.z > front[py as usize * w + px as usize] + SURFACE_BAND {
                     continue;
                 }
-                let a = (g.alpha * (-0.5 * m).exp()).min(0.99);
+                let a = (f.alpha * (-0.5 * m).exp()).min(0.99);
                 let dst = &mut fb[py as usize * w + px as usize];
                 for c in 0..3 {
-                    dst[c] = g.rgb[c] * f.shade * a + dst[c] * (1.0 - a);
+                    dst[c] = f.rgb[c] * a + dst[c] * (1.0 - a);
                 }
                 dst[3] = a + dst[3] * (1.0 - a);
             }

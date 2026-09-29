@@ -1274,28 +1274,24 @@ impl StageGpu {
 }
 
 impl StageGpu {
-    /// Draw a puppet's skin on the GPU (ADDITION: `skin_gpu`) as a lit
-    /// layer at `screen` (where its image goes), standing at solver depth
-    /// `ground_z`, its lit base relit by `light` as a CPU skin is
-    /// (`relight_gpu`: the scene and the time of day, or with a sun, the
-    /// sun and then the time of day). False = not drawn.
-    #[allow(clippy::too_many_arguments)]
-    pub fn paint_mesh(
-        &self,
-        painter: &egui::Painter,
-        mesh: &Arc<gs_puppet::SkinMesh>,
-        texture: &Option<Arc<gs_puppet::Texture>>,
-        light: &crate::creature_light::ResolvedLight,
-        screen: egui::Rect,
-        ground_z: f32,
-        m_per_ft: f32,
-    ) -> bool {
-        if mesh.w == 0 || mesh.h == 0 {
+    /// Draw a puppet's skin or splat cloud on the GPU (ADDITION:
+    /// `skin_gpu`) as a lit layer at `screen` (where its image goes),
+    /// standing at solver depth `ground_z`, its lit base relit by `light` as
+    /// a CPU skin is (`relight_gpu`: the scene and the time of day, or with a
+    /// sun, the sun and then the time of day). False = not drawn.
+    pub fn paint_figure(&self, painter: &egui::Painter, figure: crate::skin_gpu::Figure, light: &crate::creature_light::ResolvedLight, screen: egui::Rect, ground_z: f32, m_per_ft: f32) -> bool {
+        let ((w, h), fkey, to_cam) = match &figure {
+            crate::skin_gpu::Figure::Skin { mesh, .. } => (figure.size(), mesh.key, mesh.to_cam),
+            crate::skin_gpu::Figure::Splats(f) => (figure.size(), f.key, f.to_cam),
+        };
+        if w == 0 || h == 0 {
             return false;
         }
-        // the sun is given toward it on the SCREEN: into the skin's frame
-        let sun = light.sun.map(|sun| {
-            let back = mesh.to_cam;
+        // the sun is given toward it on the SCREEN: into the figure's frame
+        // (a splat cloud is shaded by its own cel light: the sun only tints
+        // the relight's scene there)
+        let sun = light.sun.filter(|_| matches!(figure, crate::skin_gpu::Figure::Skin { .. })).map(|sun| {
+            let back = to_cam;
             let up = [0.0f32, 1.0, 0.0];
             let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
             let unit = |v: [f32; 3]| {
@@ -1308,10 +1304,10 @@ impl StageGpu {
             gs_puppet::SceneLight { toward: [0, 1, 2].map(|i| right[i] * t[0] + up[i] * t[1] + back[i] * t[2]), ..sun }
         });
         let plan = crate::relight_gpu::Plan::of(if sun.is_some() { None } else { Some(&light.scene) }, &light.keyframes);
-        let key = key_of(("gpu skin", mesh.key, light.key, m_per_ft.to_bits()));
-        let job = crate::skin_gpu::SkinJob { mesh: mesh.clone(), texture: texture.clone(), lit: crate::skin_gpu::SkinLit::Scene { plan, sun }, m_per_ft };
+        let key = key_of(("gpu figure", fkey, light.key, m_per_ft.to_bits()));
+        let job = crate::skin_gpu::SkinJob { figure, lit: crate::skin_gpu::SkinLit::Scene { plan, sun }, m_per_ft };
         crate::skin_gpu::submit(key, Arc::new(job));
-        let image = Arc::new(LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) });
+        let image = Arc::new(LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) });
         self.push(painter, image, screen, ground_z, 1.0)
     }
 }
