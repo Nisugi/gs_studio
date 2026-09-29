@@ -1166,8 +1166,10 @@ Two more `creature_field.rs` regions (twenty-two in all,
 * A layer's geo normal carries it in its length
   (`field_gpu::wet_normal`, `WET_DRY_LEN`, `WET_SPAN`, **new**): shorter
   than 0.9 is wet, a unit normal -- every other layer's -- dry. The pass
-  renormalises before lighting and adds `WET_SHEEN` of sheen, toward a
-  `WET_SHINE` highlight, from every light, lamp and moon alike.
+  renormalises before lighting and adds a broad glint off every light, lamp
+  and moon alike (`WET_GLINT`, `WET_GLINT_SHINE`; `light_term` and
+  `moon_term` take a `glint`): no Fresnel falloff, since the ordinary
+  sheen is all but gone on a surface facing the viewer.
 * `field_gpu_stage::skin_image` (the CPU skin's layer) and the GPU skin's
   final pass write it; in the GPU skin glow and wetness share the colour
   target's alpha, signed (a glowing nerve is not bleeding), and the sheet's

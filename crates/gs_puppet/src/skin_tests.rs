@@ -390,3 +390,23 @@ fn a_skin_on_many_threads_is_the_skin_on_one() {
     assert!(one.rgba == many.rgba, "the pixels differ");
     assert!(glow_one == glow_many, "the glow differs");
 }
+
+/// Fresh blood reaches the kept surface as wetness -- a rank-3 wound's
+/// pooled blood, a bleeding part's run -- and a bruise alone stays dry.
+#[test]
+fn wet_blood_reaches_the_surface() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let cam = camera(&p);
+    let project = |q| cam.project(q);
+    let wet = |wounds: &[(&str, u8)], effects: crate::Effects| {
+        let look = Look { wounds, ..Look::default() };
+        let (_, surface) = posed.skin_surface(&project, &look, None, effects);
+        surface.wet().iter().filter(|w| **w > 8).count()
+    };
+    assert_eq!(wet(&[("chest", 1)], crate::Effects::default()), 0, "a bruise is dry");
+    let pooled = wet(&[("chest", 3), ("abdomen", 3)], crate::Effects::default());
+    assert!(pooled > 20, "a rank-3 wound's pool is wet: {pooled}");
+    let bleeding = wet(&[("chest", 3), ("abdomen", 3)], crate::Effects { bleeding: true, ..Default::default() });
+    assert!(bleeding > pooled, "bleeding runs wet: {bleeding} vs {pooled}");
+}

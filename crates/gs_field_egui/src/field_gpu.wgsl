@@ -198,12 +198,14 @@ fn normal_of(g: vec3<f32>) -> vec3<f32> {
     return select(vec3<f32>(0.0, 0.0, -1.0), g / max(l, 1e-6), l > 0.5);
 }
 // How wet a layer's surface is: a normal stored shorter than WET_DRY_LEN
-// (field_gpu::wet_normal); a unit one is dry. Wet shines: WET_SHEEN more
-// sheen, toward WET_SHINE's tight highlight.
+// (field_gpu::wet_normal); a unit one is dry. Wet shines: a broad glint off
+// every light (WET_GLINT of it, lobe WET_GLINT_SHINE) with no Fresnel
+// falloff -- the ordinary sheen is all but gone facing the viewer, and wet
+// blood must read wet from the front.
 const WET_DRY_LEN: f32 = 0.88;
 const WET_SPAN: f32 = 0.3;
-const WET_SHEEN: f32 = 1.6;
-const WET_SHINE: f32 = 70.0;
+const WET_GLINT: f32 = 0.9;
+const WET_GLINT_SHINE: f32 = 10.0;
 fn wet_of(g: vec3<f32>) -> f32 {
     let l = length(g);
     if (l <= 0.5 || l >= 0.9) { return 0.0; }
@@ -316,7 +318,7 @@ fn beam_gain(P: vec3<f32>, Lt: Light) -> f32 {
 // is marched only where it can matter: within the light's range, on a
 // surface facing it -- most of a frame's pixels, for a lamp, are neither.
 fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: vec3<f32>, pw: f32, r0: f32,
-              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, start: f32, light_r: f32, shadowed: bool) -> vec3<f32> {
+              range: f32, wrap: f32, bounce: f32, sheen: f32, shin: f32, start: f32, light_r: f32, shadowed: bool, glint: f32) -> vec3<f32> {
     let Lv = LP - P;
     let d2 = dot(Lv, Lv);
     let dd = sqrt(d2);
@@ -338,6 +340,10 @@ fn light_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, LP: vec3<f32>, col: ve
         let vdh = max(dot(v, h), 0.0);
         let fres = 0.04 + 0.96 * pow(1.0 - vdh, 5.0);
         o = o + col * fall * sheen * fres * pow(ndh, shin) * (shin + 8.0) / 8.0 * max(ndl, 0.0) * sh;
+    }
+    if (glint > 0.0) {
+        let h = normalize(l + normalize(-P));
+        o = o + col * fall * glint * pow(max(dot(n, h), 0.0), WET_GLINT_SHINE) * max(ndl, 0.0) * sh;
     }
     return o;
 }
@@ -371,7 +377,7 @@ fn cloud_mask(P: vec3<f32>, Lt: Light) -> f32 {
     // sky past the flat ground takes, so the two meet without a seam
     return mix(smoothstep(thr - 0.05, thr + 0.05, n), 1.0 - 0.9 * c, smoothstep(25.0, 60.0, P.z));
 }
-fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, sheen: f32, shin: f32, start: f32) -> vec3<f32> {
+fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, sheen: f32, shin: f32, start: f32, glint: f32) -> vec3<f32> {
     let l = Lt.pos.xyz;
     let ndl = dot(n, l);
     let shade = max((ndl + wrap) / (1.0 + wrap), 0.0);
@@ -387,6 +393,10 @@ fn moon_term(P: vec3<f32>, n: vec3<f32>, alb: vec3<f32>, Lt: Light, wrap: f32, s
         let h = normalize(l + v);
         let fres = 0.04 + 0.96 * pow(1.0 - max(dot(v, h), 0.0), 5.0);
         o = o + Lt.col.rgb * Lt.col.w * sheen * fres * pow(max(dot(n, h), 0.0), shin) * (shin + 8.0) / 8.0 * max(ndl, 0.0) * lit;
+    }
+    if (glint > 0.0 && lit > 0.0) {
+        let h = normalize(l + normalize(-P));
+        o = o + Lt.col.rgb * Lt.col.w * glint * pow(max(dot(n, h), 0.0), WET_GLINT_SHINE) * max(ndl, 0.0) * lit;
     }
     return o;
 }
@@ -1042,13 +1052,13 @@ fn backdrop_at(px: vec2<f32>, light_only: bool) -> Surf {
             let Lt = U.lights[li];
             if (Lt.flags.y < 0.5) { continue; }
             if (Lt.pos.w > 1.5) {
-                col = col + moon_term(bg_p, bg_n, alb_bg, Lt, Lt.surf.y, wet * Lt.surf.w, Lt.shine.y, 0.08);
+                col = col + moon_term(bg_p, bg_n, alb_bg, Lt, Lt.surf.y, wet * Lt.surf.w, Lt.shine.y, 0.08, 0.0);
                 continue;
             }
             let gain = beam_gain(bg_p, Lt);
             if (gain <= 0.0) { continue; }
             col = col + light_term(bg_p, bg_n, alb_bg, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z, Lt.flags.x > 0.5);
+                                   Lt.surf.y, Lt.fall.w, wet * Lt.surf.w, Lt.shine.y, 0.08, Lt.fall.z, Lt.flags.x > 0.5, 0.0);
         }
         col = col + alb_bg * bounce_at(bg_p, bg_n, px);
     } else {
@@ -1142,17 +1152,16 @@ fn layer_at(i: u32, px: vec2<f32>, light_only: bool) -> Surf {
     for (var li = 0u; li < n_lights; li = li + 1u) {
         let Lt = U.lights[li];
         if (Lt.flags.z < 0.5) { continue; }
-        // fresh blood shines more, and tighter
-        let sheen = Lt.surf.z * sheen_k + WET_SHEEN * wet;
-        let shin = mix(Lt.shine.x, WET_SHINE, wet);
+        // fresh blood glints
+        let glint = WET_GLINT * wet;
         if (Lt.pos.w > 1.5) {
-            c = c + moon_term(P, n, alb, Lt, Lt.surf.x, sheen, shin, 0.15);
+            c = c + moon_term(P, n, alb, Lt, Lt.surf.x, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, glint);
             continue;
         }
         let gain = beam_gain(P, Lt);
         if (gain <= 0.0) { continue; }
         c = c + light_term(P, n, alb, Lt.pos.xyz, Lt.col.rgb, Lt.col.w * gain, Lt.fall.x, Lt.fall.y,
-                           Lt.surf.x, Lt.fall.w, sheen, shin, 0.15, Lt.fall.z, Lt.flags.x > 0.5);
+                           Lt.surf.x, Lt.fall.w, Lt.surf.z * sheen_k, Lt.shine.x, 0.15, Lt.fall.z, Lt.flags.x > 0.5, glint);
     }
     c = c + alb * bounce_at(P, n, px);
     if (W.a.x > 0.0 && !light_only) {
