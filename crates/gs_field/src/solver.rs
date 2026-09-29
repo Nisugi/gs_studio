@@ -323,6 +323,9 @@ pub struct CreatureField {
     next_id: UnitId,
     /// Scene-prop exclusion spans; arrivals only (see [`Obstacle`]).
     obstacles: Vec<Obstacle>,
+    /// Where on a painted backdrop a creature may stand; arrivals only
+    /// (see [`CreatureField::set_walk`]).
+    walk: Option<std::sync::Arc<crate::walk::WalkMask>>,
     /// Bumped on every placement-affecting change; renderers cache quads
     /// against it instead of re-reading per frame.
     pub generation: u64,
@@ -606,6 +609,7 @@ impl CreatureField {
             units: Vec::new(),
             next_id: 1,
             obstacles: Vec::new(),
+            walk: None,
             generation: 0,
             extra_rows: 0,
         }
@@ -825,6 +829,24 @@ impl CreatureField {
     /// nobody moves, nothing redraws, so the generation stays put.
     pub fn set_obstacles(&mut self, obstacles: Vec<Obstacle>) {
         self.obstacles = obstacles;
+    }
+
+    /// Where creatures may stand on the backdrop (`scenes/<stem>.walk.png`,
+    /// decoded by the host), or None: anywhere on the floor. A placement
+    /// input like the obstacles: arrivals keep off the dark of it, nobody
+    /// already placed moves.
+    pub fn set_walk(&mut self, walk: Option<std::sync::Arc<crate::walk::WalkMask>>) {
+        self.walk = walk;
+    }
+
+    pub fn walk(&self) -> Option<&crate::walk::WalkMask> {
+        self.walk.as_deref()
+    }
+
+    /// A foot at stage point (`sx`, `sy`) is on ground the walk mask allows
+    /// (always, with none).
+    fn walkable(&self, sx: f32, sy: f32) -> bool {
+        self.walk.as_ref().is_none_or(|m| m.walkable(sx, sy))
     }
 
     /// The authored exclusion metadata (for overlays/tests).
@@ -1466,7 +1488,8 @@ impl CreatureField {
             let blocked = self
                 .projected_obstacles()
                 .iter()
-                .any(|&(x0, x1, z)| r.z > z && r.center_x() >= x0 && r.center_x() <= x1);
+                .any(|&(x0, x1, z)| r.z > z && r.center_x() >= x0 && r.center_x() <= x1)
+                || !self.walkable(r.center_x(), r.y1);
             if !blocked {
                 return Placement {
                     ci: mid,
@@ -1533,6 +1556,11 @@ impl CreatureField {
                     .iter()
                     .any(|&(x0, x1, z)| r.z > z && r.center_x() >= x0 && r.center_x() <= x1)
                 {
+                    continue;
+                }
+                // The walk mask: never on a wall, in the river or on a roof
+                // of the painting. Hard at every notch, like the props.
+                if !self.walkable(r.center_x(), r.y1) {
                     continue;
                 }
 
@@ -1913,6 +1941,27 @@ mod tests {
         // not panic and must still place the unit.
         f.arrive("#1", CardSize::default(), CardSize::default());
         assert_eq!(f.units().len(), 1);
+    }
+
+    /// A walk mask dark over the right half of the stage: every arrival,
+    /// the front-and-centre seed included, stands on the left half.
+    #[test]
+    fn arrivals_keep_to_the_walkable_ground() {
+        let mask = crate::walk::WalkMask::new(2, 1, vec![255, 0], [STAGE_W, STAGE_H]).unwrap();
+        let mut f = CreatureField::default();
+        f.set_walk(Some(std::sync::Arc::new(mask)));
+        for k in 0..6 {
+            f.arrive(&format!("#{k}"), CardSize::default(), CardSize::default());
+        }
+        assert_eq!(f.units().len(), 6);
+        for u in f.units() {
+            let (x, _) = f.foot(u);
+            assert!(x < STAGE_W / 2.0, "{} stands on the dark half at x = {x}", u.members[0]);
+        }
+        // without the mask the centre seed stands dead centre
+        let mut open = CreatureField::default();
+        open.arrive("#0", CardSize::default(), CardSize::default());
+        assert!((open.foot(&open.units()[0]).0 - STAGE_W / 2.0).abs() < 1.0);
     }
 
     /// The proposal's worked example (finding 3): a unit-height prop at

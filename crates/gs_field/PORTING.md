@@ -528,3 +528,16 @@ the painting, and every creature's foot, no longer change with the crowd.
 when none): an aurora over the scene, which gs_field_egui's v2 pass draws
 on the sky by night (gs_field_egui PORTING 7.32). The Hinterwilds' scenes
 set one; every room there names the aurora overhead.
+
+### 6.22 `src/walk.rs`, `src/solver.rs`: where creatures may stand
+
+* `walk` (**a new module**): `WalkMask`, a backdrop's walk mask
+  (`scenes/<stem>.walk.png`, `walk_path`; white = ground) as luminance the
+  host decodes -- this crate still decodes no images -- placed by the
+  backdrop's cover-fit (`cover_rect`, the renderer's placement).
+* `CreatureField::set_walk` / `walk` (**new methods**, and a new private
+  field): with a mask, the candidate search refuses a spot whose foot falls
+  on its dark, at every relaxation notch (as a prop's exclusion span), and
+  the front-and-centre seed falls through to the search when its foot
+  would. A placement input like the obstacles: no generation bump, nobody
+  already placed moves. None (the default, and VellumFE's) changes nothing.
