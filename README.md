@@ -869,7 +869,7 @@ an *x* to put it back:
   wet blood, rank 3 takes an arm, hand or leg off (a raw stump); on a part
   that cannot be lost (head, neck, trunk) rank 3 is worse again -- torn
   open, the gashes wide and many, the blood pooled. A scar -- a hero's
-  healed wound, `PuppetKey::scars` -- is a pale ridged line, wider and more
+  healed wound, `PuppetKey::scars` -- is a rosy ridged line in a dark outline (so it reads on pale skin and painted cloth alike), wider and more
   with rank; a rank-3 scar on a limb is the limb healed off (a closed
   stump). An eye's wound marks round it on the head: bruised and
   bloodshot, gashed across, gone (a bloody socket); its scars cross it, and
