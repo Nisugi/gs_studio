@@ -26,7 +26,14 @@
 //! and worn as `<family>_projected.png`. `--demo` paints a test outfit onto
 //! the three templates itself and does the same. `UV_SHEET_SHOTS=<pose>[@<yaw>],...`
 //! picks the tiles of the worn strip (`rest` = as clicked; default: rest
-//! from four sides, then kneel, sit).
+//! from four sides, then kneel, sit). `--grid` wears a plain grid instead of
+//! the checker (muted slate, pale 0.25 ft lines, measured from each patch's
+//! centre line) and writes it as `<family>_grid_sheet.png`, the size of a
+//! creature's `sheet.png`: a skin that shows the figure's form and nothing
+//! else, for the injury doll. `--tone <grey|blue|slate|black>` wears one
+//! colour, lighter down the middle of the front and of the back and darker
+//! round the sides, like the featureless figures of Wrayth's injury dolls
+//! (`<family>_<tone>_sheet.png`): the light and the wounds are all it shows.
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +46,15 @@ const BACKGROUND: [u8; 3] = [0x2b, 0x30, 0x36];
 const TILE: usize = 360;
 const SHEET_SIDE: usize = 1024;
 const GRID_FT: f32 = 0.25;
+/// The one-colour skins: name, the colour down the middle, the colour round the sides.
+const TONES: [(&str, [f32; 3], [f32; 3]); 4] = [
+    ("grey", [150.0, 146.0, 142.0], [72.0, 68.0, 66.0]),
+    ("blue", [96.0, 186.0, 236.0], [22.0, 92.0, 188.0]),
+    ("slate", [84.0, 96.0, 108.0], [30.0, 36.0, 44.0]),
+    ("black", [46.0, 46.0, 50.0], [10.0, 10.0, 12.0]),
+];
+const GRID_BASE: [f32; 3] = [58.0, 66.0, 74.0];
+const GRID_LINE: [f32; 3] = [158.0, 176.0, 184.0];
 
 fn data_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data")
@@ -199,8 +215,14 @@ fn main() {
         })
     };
     let paint_path = flag("--paint");
+    let tone = flag("--tone").map(|t| {
+        let name = t.to_string_lossy().into_owned();
+        let (_, mid, edge) = *TONES.iter().find(|(n, ..)| *n == name).unwrap_or_else(|| panic!("no tone '{name}'"));
+        (name, mid, edge)
+    });
     let views = [flag("--front"), flag("--side"), flag("--back")];
     let demo = args.iter().position(|a| a == "--demo").map(|i| args.remove(i)).is_some();
+    let grid_skin = args.iter().position(|a| a == "--grid").map(|i| args.remove(i)).is_some();
     let out = PathBuf::from(args.first().expect("usage: uv_sheet <out_dir> [family] [--paint <sheet.png>]"));
     let family = args.get(1).cloned().unwrap_or_else(|| "humanoid".into());
     std::fs::create_dir_all(&out).expect("out dir");
@@ -306,6 +328,30 @@ fn main() {
             let (w, h, rgba) = read_png(p);
             assert_eq!((w, h), (layout.w, layout.h), "the painted sheet must be the template's size");
             (rgba, "painted")
+        }
+        (None, None) if tone.is_some() => {
+            let (name, mid, edge) = tone.as_ref().expect("checked");
+            // u is 0.5 down the front's middle and 0 / 1 at the seam, down the back's
+            let flat = sheet(&layout, |_, u, _, _| {
+                let t = 0.5 + 0.5 * (4.0 * std::f32::consts::PI * (u - 0.5)).cos();
+                [0, 1, 2].map(|k| edge[k] + (mid[k] - edge[k]) * t)
+            });
+            write_png(&out.join(format!("{family}_{name}_sheet.png")), layout.w, layout.h, &flat);
+            (flat, name.as_str())
+        }
+        (None, None) if grid_skin => {
+            let lines = sheet(&layout, |_, u, along, circ| {
+                // how far, in sheet pixels, from the nearest line either way
+                let off = |v: f32| {
+                    let m = (v / GRID_FT).rem_euclid(1.0);
+                    m.min(1.0 - m) * grid
+                };
+                let d = off(along).min(off((u - 0.5) * circ));
+                let t = (1.6 - d).clamp(0.0, 1.0);
+                [0, 1, 2].map(|k| GRID_BASE[k] + (GRID_LINE[k] - GRID_BASE[k]) * t)
+            });
+            write_png(&out.join(format!("{family}_grid_sheet.png")), layout.w, layout.h, &lines);
+            (lines, "grid")
         }
         (None, None) => {
             let checker = sheet(&layout, |i, u, along, circ| {
