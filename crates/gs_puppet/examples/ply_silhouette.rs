@@ -35,7 +35,7 @@ fn main() {
     let out_dir = std::path::Path::new(out_dir);
     std::fs::create_dir_all(out_dir).expect("out dir");
 
-    let mut cloud = splat::load_ply(std::path::Path::new(path)).unwrap_or_else(|e| {
+    let mut cloud = splat::load_cloud(std::path::Path::new(path)).unwrap_or_else(|e| {
         eprintln!("{path}: {e}");
         std::process::exit(1);
     });

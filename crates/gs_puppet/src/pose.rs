@@ -886,9 +886,93 @@ pub struct Posed<'a> {
     pub xf: Vec<Xf>,
     /// How far the figure was moved up (negative: down) to rest on y = 0.
     pub lift: f32,
+    /// Whether arms drawn raised were hung first ([`Puppet::arm_hang`]: so
+    /// in [`Puppet::pose`], not as drawn), and their hands turned with them.
+    pub hung: bool,
 }
 
 impl Puppet {
+    /// `pose` with each arm turned in at the shoulder, its elbow straight,
+    /// until its wrist lies against the side of the hips (ADDITION): how a
+    /// status that binds the figure (webbed, bound) holds it tight against
+    /// itself, whatever the rig's own hang leaves its arms at. A short
+    /// search on the arm's own angles (`arm_l`, `arm_r`), the rest of the
+    /// pose as it was.
+    pub fn pin_arms(&self, pose: &Pose) -> Pose {
+        let mut out = pose.clone();
+        for side in ["arm_l", "arm_r"] {
+            let arm: Vec<usize> = (0..self.segments.len()).filter(|&i| self.segments[i].bone == side).collect();
+            let (Some(&first), Some(&last)) = (arm.first(), arm.last()) else { continue };
+            let base = out.bone(side);
+            let straight = vec![0.0; base.bend.len()];
+            let with = |deg: [f32; 3]| {
+                let mut p = out.clone();
+                p.set_euler(side, deg);
+                if let Some(b) = p.bones.get_mut(side) {
+                    b.bend = straight.clone();
+                }
+                p
+            };
+            // how far the wrist is from where it should lie: by the side of
+            // the hips at its own height, as far out as the body is there
+            let miss = |p: &Pose| -> f32 {
+                let posed = self.pose(p);
+                let wrist = posed.xf[last].point(self.segments[last].tail);
+                let shoulder = posed.xf[first].point(self.segments[first].head);
+                let r = self.segments[last].stations.last().map_or(0.1, |s| s.w.max(s.d));
+                let (mut out_x, mut z, mut n) = (0.0f32, 0.0f32, 0u32);
+                let outward = |x: f32| if shoulder[0] >= 0.0 { x } else { -x };
+                for (i, seg) in self.segments.iter().enumerate() {
+                    let held_part = seg.part.as_deref().is_some_and(|q| matches!(q, "abdomen" | "chest") || q.contains("Leg"));
+                    if !held_part || !matches!(seg.kind, crate::Kind::Trunk | crate::Kind::Limb) {
+                        continue;
+                    }
+                    let (dw, dd) = (posed.xf[i].dir(seg.axis_w), posed.xf[i].dir(seg.axis_d));
+                    for st in &seg.stations {
+                        let c = posed.xf[i].point(st.c);
+                        if (c[1] - wrist[1]).abs() > 0.3 {
+                            continue;
+                        }
+                        let reach = outward(c[0]) + dw[0].abs() * st.w + dd[0].abs() * st.d;
+                        if n == 0 || reach > out_x {
+                            out_x = reach;
+                        }
+                        z += c[2];
+                        n += 1;
+                    }
+                }
+                if n == 0 {
+                    return 0.0;
+                }
+                let want = [outward(out_x + r), wrist[1], z / n as f32];
+                let d = sub(wrist, want);
+                (d[0] * d[0] + d[2] * d[2]).sqrt()
+            };
+            let mut deg = base.deg;
+            let mut best = miss(&with(deg));
+            for step in [8.0f32, 4.0, 2.0, 1.0, 0.5] {
+                for _ in 0..40 {
+                    let mut moved = false;
+                    for (axis, sign) in [(2usize, 1.0f32), (2, -1.0), (0, 1.0), (0, -1.0)] {
+                        let mut d = deg;
+                        d[axis] += sign * step;
+                        let m = miss(&with(d));
+                        if m < best - 1e-5 {
+                            best = m;
+                            deg = d;
+                            moved = true;
+                        }
+                    }
+                    if !moved {
+                        break;
+                    }
+                }
+            }
+            out = with(deg);
+        }
+        out
+    }
+
     /// Forward kinematics, then drop (or raise) the figure so its lowest
     /// station surface touches y = 0. Only the body counts: a staff's butt
     /// may reach the ground, a robe's hem may sweep it, neither lifts the
@@ -966,7 +1050,7 @@ impl Puppet {
             let parent = s.parent.map(|p| xf[p]).unwrap_or(root);
             xf.push(parent.then_inner(&local));
         }
-        let mut posed = Posed { puppet: self, xf, lift: 0.0 };
+        let mut posed = Posed { puppet: self, xf, lift: 0.0, hung: hang };
         let low = posed.bounds_where(|s| s.kind.is_body())[0][1];
         if low.is_finite() {
             posed.lift = -low;

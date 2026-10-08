@@ -20,7 +20,9 @@ pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publi
     \x20      gs-studio [--data <dir>] --import-chart <scale-chart.html>\n\
     \x20                (headless: the chart's silhouettes into <data>/outlines.json, then exit)\n\
     \x20      gs-studio [--data <dir>] --export-jobs\n\
-    \x20                (headless: every template and textures/jobs.json for the generator, then exit)";
+    \x20                (headless: every template and textures/jobs.json for the generator, then exit)\n\
+    \x20      gs-studio [--data <dir>] --install-doll <pool dir>\n\
+    \x20                (headless: the playable races' figures -- puppets and bodies -- into a client's pool, then exit)";
 
 /// Environment fallback for `--tab`.
 pub const TAB_ENV_VAR: &str = "GS_STUDIO_TAB";
@@ -62,13 +64,16 @@ pub struct Cli {
     /// `--export-jobs`: write every template and `textures/jobs.json`
     /// (`editor::texture::export_jobs`) and exit, no window.
     pub export_jobs: bool,
+    /// `--install-doll <pool dir>`: the playable races' figures into a
+    /// game client's pool (`bodies::install_doll`) and exit, no window.
+    pub install_doll: Option<PathBuf>,
 }
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 13] = [
+    const OPTIONS: [&str; 14] = [
         "--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet", "--import-chart", "--save",
-        "--scene-report",
+        "--scene-report", "--install-doll",
     ];
     let mut cli = Cli::default();
     let mut it = args.iter();
@@ -102,6 +107,7 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "--save" => cli.save = Some(value),
             "--scene-report" => cli.scene_report = Some(value),
             "--import-chart" => cli.import_chart = Some(PathBuf::from(value)),
+            "--install-doll" => cli.install_doll = Some(PathBuf::from(value)),
             "--grazing" => {
                 cli.grazing = Some(value.parse().map_err(|_| format!("--grazing needs a number, got '{value}'"))?);
             }
@@ -138,6 +144,7 @@ mod tests {
         assert!(parse_args(&args(&["--export-jobs", "--data", "d"])).unwrap().export_jobs);
         assert_eq!(parse_args(&args(&["--build-sheet", "troll/cave_troll"])).unwrap().build_sheet.as_deref(), Some("troll/cave_troll"));
         assert_eq!(parse_args(&args(&["--save", "humanoid,troll"])).unwrap().save.as_deref(), Some("humanoid,troll"));
+        assert_eq!(parse_args(&args(&["--install-doll", "G:/hydra/data"])).unwrap().install_doll, Some("G:/hydra/data".into()));
         assert_eq!(parse_args(&args(&["--scene-report=7503305 - Bonfire"])).unwrap().scene_report.as_deref(), Some("7503305 - Bonfire"));
         assert_eq!(parse_args(&args(&["--import-chart", "x/scale-chart.html"])).unwrap().import_chart, Some(PathBuf::from("x/scale-chart.html")));
     }

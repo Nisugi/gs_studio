@@ -32,7 +32,7 @@ fn main() {
     let tile: usize = std::env::var("PLY_TILE").ok().and_then(|v| v.parse().ok()).unwrap_or(400);
     let min_alpha: f32 = std::env::var("PLY_MIN_ALPHA").ok().and_then(|v| v.parse().ok()).unwrap_or(0.02);
 
-    let mut cloud = splat::load_ply(std::path::Path::new(path)).unwrap_or_else(|e| {
+    let mut cloud = splat::load_cloud(std::path::Path::new(path)).unwrap_or_else(|e| {
         eprintln!("{path}: {e}");
         std::process::exit(1);
     });

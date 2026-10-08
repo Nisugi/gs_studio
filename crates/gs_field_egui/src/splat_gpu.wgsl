@@ -3,7 +3,8 @@
 // (projected, cel-shaded, sorted back to front on the CPU).
 //
 //   front   each splat's core: the front-most core per pixel -- its depth,
-//           normal and point (the surface; a splat far behind it is inside)
+//           normal, glow and point (the surface; a splat far behind it is
+//           inside)
 //   blend   each splat's reach, back to front, premultiplied "over"
 //   final   un-premultiplied; under a core, opaque; the layer the v2 pass
 //           reads (albedo, lit, geo) and the plain colours
@@ -34,6 +35,8 @@ struct Inst {
     @location(5) alpha: f32,
     @location(6) pos: vec3<f32>,
     @location(7) n: vec3<f32>,
+    @location(8) glow: f32,
+    @location(9) film: f32,   // 1: a film (ice, a web), never the surface
 };
 
 struct VOut {
@@ -45,6 +48,8 @@ struct VOut {
     @location(4) @interpolate(flat) alpha: f32,
     @location(5) @interpolate(flat) pos: vec3<f32>,
     @location(6) @interpolate(flat) n: vec3<f32>,
+    @location(7) @interpolate(flat) glow: f32,
+    @location(8) @interpolate(flat) film: f32,
 };
 
 @vertex fn vs_splat(@builtin(vertex_index) k: u32, i: Inst) -> VOut {
@@ -61,6 +66,8 @@ struct VOut {
     o.alpha = i.alpha;
     o.pos = i.pos;
     o.n = i.n;
+    o.glow = i.glow;
+    o.film = i.film;
     return o;
 }
 
@@ -75,10 +82,10 @@ struct Front {
 };
 
 @fragment fn fs_front(v: VOut) -> Front {
-    if (gauss_m(v.local, v.inv) > CORE_M) { discard; }
+    if (v.film > 0.5 || gauss_m(v.local, v.inv) > CORE_M) { discard; }
     var o: Front;
     o.depth = clamp((v.z - u.depth.x) / max(u.depth.y, 1e-3) * 0.9 + 0.05, 0.0, 1.0);
-    o.n = vec4<f32>(v.n, 1.0);
+    o.n = vec4<f32>(v.n, v.glow);
     o.pos = vec4<f32>(v.pos, v.z);
     return o;
 }
@@ -130,7 +137,9 @@ struct Layer {
     let rgb = round(clamp(acc.rgb / acc.a, vec3<f32>(0.0), vec3<f32>(1.0)) * 255.0) / 255.0;
     let a = select(acc.a, 1.0, covered);
     o.albedo = vec4<f32>(rgb, a);
-    o.lit = vec4<f32>(l2s(s2l(rgb) * u.floor.rgb), 0.0);
+    // glow in alpha, as the skin's layer: its own light, kept in the dark
+    let glow = select(0.0, clamp(textureLoad(t_front_n, px, 0).w, 0.0, 1.0), covered);
+    o.lit = vec4<f32>(l2s(s2l(rgb) * u.floor.rgb), glow);
     o.rgba = vec4<f32>(rgb, a);
     let back = u.to_cam.xyz;
     let fwd = -back;

@@ -17,6 +17,14 @@ pub struct SkinJob {
     pub figure: Figure,
     pub lit: SkinLit,
     pub m_per_ft: f32,
+    /// A modelled body's hit arriving: its age in seconds, which the GPU
+    /// plays the body's arrival frames and thrown dots at
+    /// (`gs_puppet::mesh::SplatBody::frame`, `particles`); < 0: none.
+    pub arrival_age: f32,
+    /// Seconds on a running clock (wrapped), for what moves on its own: an
+    /// invisible figure's glints and shimmer (`Particle::loops`,
+    /// `Gaussian::rim`). Held at 0 they stand still.
+    pub clock: f32,
 }
 
 /// What a job draws.
@@ -26,6 +34,9 @@ pub enum Figure {
     Skin { mesh: Arc<gs_puppet::SkinMesh>, texture: Option<Arc<gs_puppet::Texture>> },
     /// A splat cloud, projected and sorted (`gs_puppet::splat::prepare`).
     Splats(Arc<gs_puppet::splat::SplatFrame>),
+    /// A modelled body in a pose: its mesh is uploaded once and posed by
+    /// the shader (`mesh_gpu.wgsl`).
+    Body(Arc<gs_puppet::mesh::BodyFrame>),
 }
 
 impl Figure {
@@ -34,6 +45,7 @@ impl Figure {
         match self {
             Figure::Skin { mesh, .. } => (mesh.w, mesh.h),
             Figure::Splats(f) => (f.w, f.h),
+            Figure::Body(f) => (f.w, f.h),
         }
     }
 }
@@ -58,6 +70,8 @@ impl SkinJob {
         let (back, points): (_, Box<dyn Iterator<Item = [f32; 3]>>) = match &self.figure {
             Figure::Skin { mesh, .. } => (mesh.to_cam, Box::new(mesh.corners.iter().map(|c| c.pos))),
             Figure::Splats(f) => (f.to_cam, Box::new(f.flats.iter().map(|s| s.pos))),
+            // its box: the vertices are only posed on the GPU
+            Figure::Body(f) => (f.to_cam, Box::new(f.corners.iter().copied())),
         };
         let (lo, hi) = points.fold((f32::MAX, f32::MIN), |(lo, hi), p| {
             let d = -(p[0] * back[0] + p[1] * back[1] + p[2] * back[2]) * self.m_per_ft;
@@ -69,8 +83,27 @@ impl SkinJob {
 
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Bytes per body vertex (`VIn` in mesh_gpu.wgsl): place, facing, sheet
+/// place, four segments, their shares.
+const BODY_VERTEX_BYTES: u64 = 64;
+/// Segments a body's shader has room for (`U.bones`: three rows each).
+const BODY_BONES: usize = 64;
+/// Floats in the body's uniform block (`U` in mesh_gpu.wgsl).
+const BODY_UNIFORM_FLOATS: usize = 20 + 12 + BODY_BONES * 12 + ARRIVE_FLOATS;
+/// cloud_gpu.wgsl's `arrive`: twelve frame ages, the hit's age, the frames.
+const ARRIVE_FLOATS: usize = 16;
+/// Samples a pixel side the body is rasterised at.
+const BODY_SS: u32 = 2;
+/// Bytes per splat of a body's cloud (`Inst` in cloud_gpu.wgsl): nine
+/// 16-byte rows -- centre + glow, three axes, colour and alpha, facing,
+/// four segments, their shares, and its rim.
+const CLOUD_SPLAT_BYTES: u64 = 144;
+/// Splat clouds that stay uploaded (a body's own, and it with its wounds).
+const CLOUDS_KEPT: usize = 4;
+/// Bodies whose buffers and sheets stay uploaded.
+const BODIES_KEPT: usize = 4;
 /// Bytes per splat (`Inst` in splat_gpu.wgsl).
-const SPLAT_BYTES: u64 = 80;
+const SPLAT_BYTES: u64 = 84;
 
 /// Floats in the uniform block (`U` in the shader).
 const UNIFORM_FLOATS: usize = 84;
@@ -93,10 +126,33 @@ pub(crate) struct SkinGpu {
     splat_blend: wgpu::RenderPipeline,
     splat_final: wgpu::RenderPipeline,
     splat_layout: wgpu::BindGroupLayout,
+    body_raster: wgpu::RenderPipeline,
+    body_final: wgpu::RenderPipeline,
+    body_layout: wgpu::BindGroupLayout,
+    body_sampler: wgpu::Sampler,
+    cloud_front: wgpu::RenderPipeline,
+    cloud_blend: wgpu::RenderPipeline,
+    cloud_final: wgpu::RenderPipeline,
+    cloud_layout: wgpu::BindGroupLayout,
+    /// The bodies uploaded, by their mesh (its address): newest last.
+    bodies: Mutex<Vec<(usize, Arc<BodyGpu>)>>,
+    /// The splat clouds uploaded (at rest), by their address, and how many
+    /// splats: newest last.
+    clouds: Mutex<Vec<(usize, Arc<(wgpu::Buffer, u32)>)>>,
     relight: crate::relight_gpu::RelightGpu,
     layout0: wgpu::BindGroupLayout,
     layout1: wgpu::BindGroupLayout,
     sheets: Mutex<Sheets>,
+}
+
+/// A body on the card: its vertices and triangles, and its sheets.
+struct BodyGpu {
+    vertices: wgpu::Buffer,
+    indices: wgpu::Buffer,
+    count: u32,
+    paint: wgpu::TextureView,
+    /// Its normal sheet (None: the surface's own facing).
+    normal: Option<wgpu::TextureView>,
 }
 
 #[derive(Default)]
@@ -152,6 +208,44 @@ fn upload_rgba(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, forma
         wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(bpp * w), rows_per_image: Some(h) },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
+    tex.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// An RGBA8 sheet with every smaller size of it (each the mean of the four
+/// pixels under it), for a sampler: a body's sheet is far larger than the
+/// figure is drawn, and one sample of it a pixel sparkles.
+fn upload_mipped(device: &wgpu::Device, queue: &wgpu::Queue, w: u32, h: u32, rgba: &[u8], label: &str) -> wgpu::TextureView {
+    let levels = 32 - w.max(h).max(1).leading_zeros();
+    let tex = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+        mip_level_count: levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let (mut lw, mut lh, mut level) = (w.max(1) as usize, h.max(1) as usize, rgba.to_vec());
+    for mip in 0..levels {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &tex, mip_level: mip, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &level,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4 * lw as u32), rows_per_image: Some(lh as u32) },
+            wgpu::Extent3d { width: lw as u32, height: lh as u32, depth_or_array_layers: 1 },
+        );
+        let (nw, nh) = ((lw / 2).max(1), (lh / 2).max(1));
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                for c in 0..4 {
+                    let at = |dx: usize, dy: usize| level[(((y * 2 + dy).min(lh - 1)) * lw + (x * 2 + dx).min(lw - 1)) * 4 + c] as u32;
+                    next[(y * nw + x) * 4 + c] = ((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4) as u8;
+                }
+            }
+        }
+        (lw, lh, level) = (nw, nh, next);
+    }
     tex.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
@@ -305,6 +399,8 @@ impl SkinGpu {
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 48, shader_location: 5 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 52, shader_location: 6 },
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 64, shader_location: 7 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 76, shader_location: 8 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32, offset: 80, shader_location: 9 },
         ];
         let splat_pipe = |entry: &str, vs: &str, targets: &[Option<wgpu::ColorTargetState>], depth: bool, instanced: bool| {
             let inst = [wgpu::VertexBufferLayout { array_stride: SPLAT_BYTES, step_mode: wgpu::VertexStepMode::Instance, attributes: &inst_attrs }];
@@ -340,7 +436,153 @@ impl SkinGpu {
             false,
             false,
         );
+        // ---- a modelled body (mesh_gpu.wgsl)
+        let body_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("mesh_gpu"), source: wgpu::ShaderSource::Wgsl(include_str!("mesh_gpu.wgsl").into()) });
+        let sheet_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: frag,
+            ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+            count: None,
+        };
+        let body_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mesh_gpu"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                sheet_entry(1),
+                sheet_entry(2),
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: frag, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                texture_entry(4, frag),
+                texture_entry(5, frag),
+                texture_entry(6, frag),
+            ],
+        });
+        let body_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("mesh_gpu"), bind_group_layouts: &[Some(&body_layout)], immediate_size: 0 });
+        let body_attrs = [
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint32x4, offset: 32, shader_location: 3 },
+            wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 48, shader_location: 4 },
+        ];
+        let body_raster = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mesh_gpu raster"),
+            layout: Some(&body_pl),
+            vertex: wgpu::VertexState {
+                module: &body_shader,
+                entry_point: Some("vs_body"),
+                buffers: &[wgpu::VertexBufferLayout { array_stride: BODY_VERTEX_BYTES, step_mode: wgpu::VertexStepMode::Vertex, attributes: &body_attrs }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &body_shader,
+                entry_point: Some("fs_body"),
+                targets: &[target(wgpu::TextureFormat::Rgba8Unorm), target(COLOR), target(COLOR)],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            // both sides: a generated mesh has thin, open parts
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let body_final = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mesh_gpu final"),
+            layout: Some(&body_pl),
+            vertex: wgpu::VertexState { module: &body_shader, entry_point: Some("vs_full"), buffers: &[], compilation_options: wgpu::PipelineCompilationOptions::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &body_shader,
+                entry_point: Some("fs_final"),
+                targets: &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float), target(wgpu::TextureFormat::Rgba8Unorm)],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        let body_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mesh_gpu sheet"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        // ---- a body's splat cloud (cloud_gpu.wgsl): the splats' layout and passes
+        let cloud_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("cloud_gpu"), source: wgpu::ShaderSource::Wgsl(include_str!("cloud_gpu.wgsl").into()) });
+        let vertex_storage = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+            count: None,
+        };
+        let cloud_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("cloud_gpu"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                    count: None,
+                },
+                texture_entry(1, frag),
+                texture_entry(2, frag),
+                texture_entry(3, frag),
+                vertex_storage(4),
+                vertex_storage(5),
+            ],
+        });
+        let cloud_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("cloud_gpu"), bind_group_layouts: &[Some(&cloud_layout)], immediate_size: 0 });
+        let cloud_pipe = |entry: &str, vs: &str, targets: &[Option<wgpu::ColorTargetState>], depth: bool| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&cloud_pl),
+                vertex: wgpu::VertexState { module: &cloud_shader, entry_point: Some(vs), buffers: &[], compilation_options: wgpu::PipelineCompilationOptions::default() },
+                fragment: Some(wgpu::FragmentState { module: &cloud_shader, entry_point: Some(entry), targets, compilation_options: wgpu::PipelineCompilationOptions::default() }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: depth.then_some(wgpu::DepthStencilState {
+                    format: DEPTH,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let cloud_front = cloud_pipe("fs_front", "vs_cloud", &[target(COLOR), target(COLOR)], true);
+        let cloud_blend = cloud_pipe("fs_blend", "vs_cloud", &[Some(wgpu::ColorTargetState { format: COLOR, blend: Some(over), write_mask: wgpu::ColorWrites::ALL })], false);
+        let cloud_final = cloud_pipe(
+            "fs_final",
+            "vs_full",
+            &[target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba8Unorm), target(wgpu::TextureFormat::Rgba16Float), target(wgpu::TextureFormat::Rgba8Unorm)],
+            false,
+        );
         SkinGpu {
+            cloud_front,
+            cloud_blend,
+            cloud_final,
+            cloud_layout,
+            body_raster,
+            body_final,
+            body_layout,
+            body_sampler,
+            bodies: Mutex::new(Vec::new()),
+            clouds: Mutex::new(Vec::new()),
             raster,
             resolve,
             smooth,
@@ -376,6 +618,7 @@ impl SkinGpu {
         let (m, texture) = match &job.figure {
             Figure::Skin { mesh, texture } => (mesh, texture),
             Figure::Splats(frame) => return self.draw_splats(device, queue, encoder, job, frame, atlas, at, pad),
+            Figure::Body(frame) => return self.draw_body(device, queue, encoder, job, frame, atlas, at, pad),
         };
         let (w, h) = (m.w as u32, m.h as u32);
         let ss = gs_puppet::SKIN_SS as u32;
@@ -713,8 +956,9 @@ impl SkinGpu {
         };
         let mut inst: Vec<u8> = Vec::with_capacity(frame.flats.len() * SPLAT_BYTES as usize);
         for s in &frame.flats {
-            let v: [f32; 20] = [
-                s.c[0], s.c[1], s.inv[0], s.inv[1], s.inv[2], s.inv[3], s.r[0], s.r[1], s.z, s.rgb[0], s.rgb[1], s.rgb[2], s.alpha, s.pos[0], s.pos[1], s.pos[2], s.n[0], s.n[1], s.n[2], 0.0,
+            let v: [f32; 21] = [
+                s.c[0], s.c[1], s.inv[0], s.inv[1], s.inv[2], s.inv[3], s.r[0], s.r[1], s.z, s.rgb[0], s.rgb[1], s.rgb[2], s.alpha, s.pos[0], s.pos[1], s.pos[2], s.n[0], s.n[1], s.n[2], s.glow,
+                if s.film { 1.0 } else { 0.0 },
             ];
             inst.extend(floats(&v));
         }
@@ -789,6 +1033,341 @@ impl SkinGpu {
                 ..Default::default()
             });
             pass.set_pipeline(&self.splat_final);
+            pass.set_bind_group(0, &g, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.finish(device, queue, encoder, &job.lit, &outs, ow, oh, atlas, at, pad);
+    }
+
+    /// A body's buffers and sheets on the card: uploaded the first time it
+    /// is drawn, then found by its mesh.
+    fn body_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue, body: &Arc<gs_puppet::mesh::BodyMesh>) -> Arc<BodyGpu> {
+        let key = Arc::as_ptr(body) as usize;
+        let mut bodies = self.bodies.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = bodies.iter().position(|(k, _)| *k == key) {
+            let found = bodies.remove(at);
+            bodies.push(found);
+            return bodies.last().expect("just pushed").1.clone();
+        }
+        let (mesh, weights) = (&body.bound.mesh, &body.bound.weights);
+        let mut bytes: Vec<u8> = Vec::with_capacity(mesh.pos.len() * BODY_VERTEX_BYTES as usize);
+        for i in 0..mesh.pos.len() {
+            let (p, n, uv, w) = (mesh.pos[i], mesh.nrm[i], mesh.uv[i], weights[i]);
+            bytes.extend(floats(&[p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1]]));
+            for (seg, _) in w {
+                bytes.extend((seg.min(BODY_BONES - 1) as u32).to_le_bytes());
+            }
+            bytes.extend(floats(&w.map(|s| s.1)));
+        }
+        let vertices = device.create_buffer(&wgpu::BufferDescriptor { label: Some("mesh_gpu vertices"), size: bytes.len().max(4) as u64, usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&vertices, 0, &bytes);
+        let index_bytes: Vec<u8> = mesh.tris.iter().flatten().flat_map(|i| i.to_le_bytes()).collect();
+        let indices = device.create_buffer(&wgpu::BufferDescriptor { label: Some("mesh_gpu triangles"), size: index_bytes.len().max(4) as u64, usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&indices, 0, &index_bytes);
+        let sheet = |p: &gs_puppet::mesh::Paint, label: &str| upload_mipped(device, queue, p.w as u32, p.h as u32, &p.rgba, label);
+        let made = Arc::new(BodyGpu {
+            vertices,
+            indices,
+            count: mesh.tris.len() as u32 * 3,
+            paint: sheet(&body.paint, "mesh_gpu paint"),
+            normal: body.normal.as_ref().map(|n| sheet(n, "mesh_gpu normals")),
+        });
+        if bodies.len() >= BODIES_KEPT {
+            bodies.remove(0);
+        }
+        bodies.push((key, made.clone()));
+        made
+    }
+
+    /// A splat cloud's buffer on the card: uploaded the first time it is
+    /// drawn, then found by its address.
+    fn cloud_gpu(&self, device: &wgpu::Device, queue: &wgpu::Queue, cloud: &Arc<gs_puppet::mesh::SplatBody>) -> Arc<(wgpu::Buffer, u32)> {
+        let key = Arc::as_ptr(cloud) as usize;
+        let mut clouds = self.clouds.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = clouds.iter().position(|(k, _)| *k == key) {
+            let found = clouds.remove(at);
+            clouds.push(found);
+            return clouds.last().expect("just pushed").1.clone();
+        }
+        let mut bytes: Vec<u8> = Vec::with_capacity(cloud.len() * CLOUD_SPLAT_BYTES as usize);
+        // a hit's thrown dots, by index: drawn by their motion, not as placed
+        let mut thrown: Vec<Option<&gs_puppet::layers::Particle>> = Vec::new();
+        if !cloud.particles.is_empty() {
+            thrown = vec![None; cloud.len()];
+            for (i, p) in &cloud.particles {
+                if let Some(at) = thrown.get_mut(*i as usize) {
+                    *at = Some(p);
+                }
+            }
+        }
+        for (idx, (g, w)) in cloud.rest.iter().zip(&cloud.weights).enumerate() {
+            if let Some(p) = thrown.get(idx).copied().flatten() {
+                // cloud_gpu.wgsl's `thrown`: where from, how fast, size and
+                // timing, glow and the ground, colour and opacity
+                use gs_puppet::layers::ParticleGlow;
+                let glow = match p.glow {
+                    ParticleGlow::None => 0.0,
+                    ParticleGlow::Ember => 1.0,
+                    ParticleGlow::Spark => 2.0,
+                };
+                bytes.extend(floats(&[p.from[0], p.from[1], p.from[2], 0.0]));
+                bytes.extend(floats(&[p.v[0], p.v[1], p.v[2], 0.0]));
+                // (-1 thrown, -2 rising after the hit, -3 a glint on a loop: `mote`)
+                let tag = match (p.rises, p.loops) {
+                    (Some(_), true) => -3.0,
+                    (Some(_), false) => -2.0,
+                    (None, _) => -1.0,
+                };
+                bytes.extend(floats(&[p.r, p.delay, p.rises.unwrap_or(p.land), tag]));
+                bytes.extend(floats(&[glow, p.ground, 0.0, 0.0]));
+                bytes.extend(floats(&[p.rgb[0] / 255.0, p.rgb[1] / 255.0, p.rgb[2] / 255.0, p.alpha, 0.0, 0.0, 0.0, 0.0]));
+                for (seg, _) in w {
+                    bytes.extend(((*seg).min(BODY_BONES - 1) as u32).to_le_bytes());
+                }
+                bytes.extend(floats(&w.map(|s| s.1)));
+                bytes.extend(floats(&[0.0; 4]));
+                continue;
+            }
+            bytes.extend(floats(&[g.c[0], g.c[1], g.c[2], g.glow]));
+            // the first axis's w: a film (ice, a web), never the surface; the
+            // second's: 0 always shown, k + 1 a hit's arrival frame k; the
+            // third's: 1 lit by its own facing (built on the body), 0 skin
+            let frame = cloud.frame.get(idx).copied().unwrap_or(0) as f32;
+            let own = cloud.own_facing.get(idx).copied().unwrap_or(false);
+            for (k, a) in g.axes.iter().enumerate() {
+                let w = match k {
+                    0 if g.film => 1.0,
+                    1 => frame,
+                    2 if own => 1.0,
+                    _ => 0.0,
+                };
+                bytes.extend(floats(&[a[0], a[1], a[2], w]));
+            }
+            bytes.extend(floats(&[g.rgb[0] / 255.0, g.rgb[1] / 255.0, g.rgb[2] / 255.0, g.alpha, g.n[0], g.n[1], g.n[2], g.wet]));
+            for (seg, _) in w {
+                bytes.extend(((*seg).min(BODY_BONES - 1) as u32).to_le_bytes());
+            }
+            bytes.extend(floats(&w.map(|s| s.1)));
+            // its rim (an invisible figure's skin: shown as much as it is edge-on)
+            bytes.extend(floats(&[g.rim, 0.0, 0.0, 0.0]));
+        }
+        let buf = storage(device, queue, &bytes, "cloud_gpu splats");
+        let made = Arc::new((buf, cloud.len() as u32));
+        if clouds.len() >= CLOUDS_KEPT {
+            clouds.remove(0);
+        }
+        clouds.push((key, made.clone()));
+        made
+    }
+
+    /// A modelled body into the atlas, as `draw` a skin: raster (posed by
+    /// the shader), final, then `finish`.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_body(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        job: &SkinJob,
+        frame: &gs_puppet::mesh::BodyFrame,
+        atlas: [&wgpu::Texture; 3],
+        at: [u32; 2],
+        pad: u32,
+    ) {
+        let (w, h) = (frame.w as u32, frame.h as u32);
+        if w == 0 || h == 0 || frame.body.bound.mesh.tris.is_empty() {
+            return;
+        }
+        let gpu = self.body_gpu(device, queue, &frame.body);
+        let blank = {
+            let mut sheets = self.sheets.lock().unwrap_or_else(|e| e.into_inner());
+            if sheets.blank.is_none() {
+                let rgba = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::Rgba8Unorm, &[0, 0, 0, 255], 4, "skin_gpu blank");
+                let r = upload_rgba(device, queue, 1, 1, wgpu::TextureFormat::R8Unorm, &[0; 4][..1], 1, "skin_gpu blank r");
+                let span = upload_rgba(device, queue, 1, 1, SPANS, &[0; 16], 16, "skin_gpu blank span");
+                sheets.blank = Some((rgba, r, span));
+            }
+            sheets.blank.as_ref().expect("made above").0.clone()
+        };
+        let floor = match &job.lit {
+            SkinLit::Floor(f) => *f,
+            SkinLit::Scene { .. } => [1.0; 3],
+        };
+        let mut u = vec![0.0f32; BODY_UNIFORM_FLOATS];
+        u[..20].copy_from_slice(&[
+            w as f32, h as f32, pad as f32, job.m_per_ft,
+            frame.origin[0], frame.origin[1], frame.depth[0], (frame.depth[1] - frame.depth[0]).max(1e-3),
+            frame.to_cam[0], frame.to_cam[1], frame.to_cam[2], BODY_SS as f32,
+            frame.light[0], frame.light[1], frame.light[2], if gpu.normal.is_some() { 1.0 } else { 0.0 },
+            floor[0], floor[1], floor[2], 0.0,
+        ]);
+        let cloud = frame.cloud.as_ref().map(|c| self.cloud_gpu(device, queue, c));
+        if cloud.is_some() {
+            // cloud_gpu.wgsl's block: the surface band where the mesh's has its sheet flag,
+            // and the samples a pixel side beside the floor
+            u[15] = gs_puppet::splat::SURFACE_BAND;
+            u[19] = BODY_SS as f32;
+        }
+        for (k, row) in frame.proj.iter().enumerate() {
+            u[20 + k * 4..24 + k * 4].copy_from_slice(row);
+        }
+        for (b, bone) in frame.bones.iter().take(BODY_BONES).enumerate() {
+            for (k, row) in bone.iter().enumerate() {
+                let o = 32 + (b * 3 + k) * 4;
+                u[o..o + 4].copy_from_slice(row);
+            }
+        }
+        // a hit arriving: its frames' ages, its age now, how many frames
+        {
+            let o = 32 + BODY_BONES * 12;
+            let ages = gs_puppet::layers::ARRIVAL_AGES;
+            u[o..o + ages.len()].copy_from_slice(&ages);
+            u[o + 12] = job.arrival_age;
+            u[o + 13] = ages.len() as f32;
+            u[o + 14] = job.clock;
+        }
+        let uniforms = device.create_buffer(&wgpu::BufferDescriptor { label: Some("mesh_gpu uniforms"), size: (BODY_UNIFORM_FLOATS * 4) as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&uniforms, 0, &floats(&u));
+        let rt = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let view = |t: wgpu::Texture| t.create_view(&wgpu::TextureViewDescriptor::default());
+        if let Some((instances, n)) = cloud.as_deref().filter(|c| c.1 as usize == frame.order.len()) {
+            let order_bytes: Vec<u8> = frame.order.iter().flat_map(|i| i.to_le_bytes()).collect();
+            let order = storage(device, queue, &order_bytes, "cloud_gpu order");
+            // its splat cloud: front, blend, final (cloud_gpu.wgsl)
+            let uniform = |reach: f32| {
+                u[11] = reach;
+                let buf = device.create_buffer(&wgpu::BufferDescriptor { label: Some("cloud_gpu uniforms"), size: (BODY_UNIFORM_FLOATS * 4) as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+                queue.write_buffer(&buf, 0, &floats(&u));
+                buf
+            };
+            let mut uniform = uniform;
+            // the splats at BODY_SS x BODY_SS samples a pixel: a fitted cloud's
+            // dots are near a pixel across at doll size, and one sample each smears them
+            let (sw, sh) = (w * BODY_SS, h * BODY_SS);
+            let front_n = view(make_texture(device, sw, sh, COLOR, rt, "cloud_gpu front normal"));
+            let front_pos = view(make_texture(device, sw, sh, COLOR, rt, "cloud_gpu front point"));
+            let acc = view(make_texture(device, sw, sh, COLOR, rt, "cloud_gpu blend"));
+            let depth = view(make_texture(device, sw, sh, DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, "cloud_gpu depth"));
+            let group = |u: &wgpu::Buffer, a: &wgpu::TextureView, b: &wgpu::TextureView, c: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("cloud_gpu"),
+                    layout: &self.cloud_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: u.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(a) },
+                        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(b) },
+                        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(c) },
+                        wgpu::BindGroupEntry { binding: 4, resource: instances.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 5, resource: order.as_entire_binding() },
+                    ],
+                })
+            };
+            let none = wgpu::Color::TRANSPARENT;
+            let far_c = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 60000.0 };
+            {
+                let ub = uniform(0.5);
+                let g = group(&ub, &blank, &blank, &blank);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("cloud_gpu front"),
+                    color_attachments: &[attach(&front_n, none), attach(&front_pos, far_c)],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.cloud_front);
+                pass.set_bind_group(0, &g, &[]);
+                pass.draw(0..6, 0..*n);
+            }
+            let ub = uniform(1.0);
+            {
+                let g = group(&ub, &front_n, &front_pos, &blank);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("cloud_gpu blend"), color_attachments: &[attach(&acc, none)], ..Default::default() });
+                pass.set_pipeline(&self.cloud_blend);
+                pass.set_bind_group(0, &g, &[]);
+                pass.draw(0..6, 0..*n);
+            }
+            let (ow, oh) = (w + 2 * pad, h + 2 * pad);
+            let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING;
+            let outs = [
+                make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "cloud_gpu albedo"),
+                make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "cloud_gpu lit"),
+                make_texture(device, ow, oh, wgpu::TextureFormat::Rgba16Float, out_usage, "cloud_gpu geo"),
+                make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "cloud_gpu rgba"),
+            ];
+            {
+                let out_views: Vec<wgpu::TextureView> = outs.iter().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default())).collect();
+                let g = group(&ub, &front_n, &front_pos, &acc);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("cloud_gpu final"),
+                    color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none), attach(&out_views[3], none)],
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.cloud_final);
+                pass.set_bind_group(0, &g, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            return self.finish(device, queue, encoder, &job.lit, &outs, ow, oh, atlas, at, pad);
+        }
+        let (sw, sh) = (w * BODY_SS, h * BODY_SS);
+        let color = view(make_texture(device, sw, sh, wgpu::TextureFormat::Rgba8Unorm, rt, "mesh_gpu colour"));
+        let normal = view(make_texture(device, sw, sh, COLOR, rt, "mesh_gpu normal"));
+        let point = view(make_texture(device, sw, sh, COLOR, rt, "mesh_gpu point"));
+        let depth = view(make_texture(device, sw, sh, DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, "mesh_gpu depth"));
+        let group = |a: &wgpu::TextureView, b: &wgpu::TextureView, c: &wgpu::TextureView| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mesh_gpu"),
+                layout: &self.body_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&gpu.paint) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(gpu.normal.as_ref().unwrap_or(&blank)) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&self.body_sampler) },
+                    wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(a) },
+                    wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(b) },
+                    wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(c) },
+                ],
+            })
+        };
+        let none = wgpu::Color::TRANSPARENT;
+        let far_c = wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 60000.0 };
+        {
+            let g = group(&blank, &blank, &blank);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mesh_gpu raster"),
+                color_attachments: &[attach(&color, none), attach(&normal, none), attach(&point, far_c)],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.body_raster);
+            pass.set_bind_group(0, &g, &[]);
+            pass.set_vertex_buffer(0, gpu.vertices.slice(..));
+            pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..gpu.count, 0, 0..1);
+        }
+        let (ow, oh) = (w + 2 * pad, h + 2 * pad);
+        let out_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING;
+        let outs = [
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "mesh_gpu albedo"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "mesh_gpu lit"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba16Float, out_usage, "mesh_gpu geo"),
+            make_texture(device, ow, oh, wgpu::TextureFormat::Rgba8Unorm, out_usage, "mesh_gpu rgba"),
+        ];
+        {
+            let out_views: Vec<wgpu::TextureView> = outs.iter().map(|t| t.create_view(&wgpu::TextureViewDescriptor::default())).collect();
+            let g = group(&color, &normal, &point);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mesh_gpu final"),
+                color_attachments: &[attach(&out_views[0], none), attach(&out_views[1], none), attach(&out_views[2], none), attach(&out_views[3], none)],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.body_final);
             pass.set_bind_group(0, &g, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -881,11 +1460,18 @@ pub fn job(key: u64) -> Option<Arc<SkinJob>> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_cloud_shader_reads_wetness_as_the_lamp_pass_does() {
+        let wgsl = include_str!("cloud_gpu.wgsl");
+        assert!(wgsl.contains(&format!("const WET_DRY_LEN: f32 = {:?};", crate::field_gpu::WET_DRY_LEN)), "cloud_gpu.wgsl's WET_DRY_LEN");
+        assert!(wgsl.contains(&format!("const WET_SPAN: f32 = {:?};", crate::field_gpu::WET_SPAN)), "cloud_gpu.wgsl's WET_SPAN");
+    }
     /// The shaders parse and validate, as wgpu would load them -- without
     /// a GPU. (WGSL is otherwise only checked when a device compiles it.)
     #[test]
     fn the_shaders_validate() {
-        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl")), ("relight_gpu.wgsl", include_str!("relight_gpu.wgsl")), ("splat_gpu.wgsl", include_str!("splat_gpu.wgsl"))] {
+        for (name, src) in [("skin_gpu.wgsl", include_str!("skin_gpu.wgsl")), ("field_gpu.wgsl", include_str!("field_gpu.wgsl")), ("relight_gpu.wgsl", include_str!("relight_gpu.wgsl")), ("splat_gpu.wgsl", include_str!("splat_gpu.wgsl")), ("mesh_gpu.wgsl", include_str!("mesh_gpu.wgsl")), ("cloud_gpu.wgsl", include_str!("cloud_gpu.wgsl"))] {
             let module = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(src)));
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
                 .validate(&module)

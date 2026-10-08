@@ -147,6 +147,7 @@ struct Import {
 impl StudioApp {
     pub fn new(startup: Startup) -> StudioApp {
         let Startup { data, pool, publish, chart, settings_note, tab, room, exit_after_secs } = startup;
+        let doll = crate::tools::doll::DollWindow::from_env().with_bodies(&data.path);
         let mut rigs = RigTool::open(&data.path, publish.clone(), Some(pool.path.clone()));
         if let (Ok(tool), Ok(spec)) = (&mut rigs, std::env::var("GS_STUDIO_POSE_EDIT")) {
             tool.open_pose_editor(&spec);
@@ -180,7 +181,7 @@ impl StudioApp {
             report: std::env::var_os("GS_STUDIO_REPORT").filter(|p| !p.is_empty()).map(PathBuf::from),
             import: Import::default(),
             closing: CloseSequence::default(),
-            doll: crate::tools::doll::DollWindow::from_env(),
+            doll,
         }
     }
 
@@ -581,7 +582,12 @@ impl StudioApp {
     /// One frame of the app (timed by [`eframe::App::ui`]).
     fn frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if let Some(shot) = &mut self.shot {
-            shot.frames += 1;
+            // a modelled body loading on a worker: not counted, the shot is of it
+            if !gs_field_egui::creature_puppet::bodies_loading() {
+                shot.frames += 1;
+            } else {
+                ui.ctx().request_repaint();
+            }
             // GS_STUDIO_SHOT_FRAMES waits longer, for work done off the UI
             // thread (scene lighting) to arrive.
             let wait = std::env::var("GS_STUDIO_SHOT_FRAMES").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(30);

@@ -51,7 +51,7 @@ fn main() {
     };
 
     let height_ft: f32 = std::env::var("PLY_HEIGHT_FT").ok().and_then(|v| v.parse().ok()).unwrap_or(puppet.height);
-    let mut cloud = splat::load_ply(Path::new(path)).unwrap_or_else(|e| {
+    let mut cloud = splat::load_cloud(Path::new(path)).unwrap_or_else(|e| {
         eprintln!("{path}: {e}");
         std::process::exit(1);
     });

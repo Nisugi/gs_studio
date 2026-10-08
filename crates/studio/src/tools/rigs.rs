@@ -56,7 +56,7 @@ pub struct RigTool {
     sheet: Option<SheetFile>,
     sheet_serial: u64,
     sheet_texture: Option<(u64, u64, Result<Option<std::sync::Arc<gs_puppet::Texture>>, String>)>,
-    /// The family's fitted cloud (`<data>/clouds/<family>.ply`), read once
+    /// The family's fitted cloud (`<data>/clouds/<family>.spz` or `.ply`), read once
     /// per family and file time; None inside = the family has none.
     cloud: Option<CloudFile>,
     /// That cloud bound to the puppet of a rig revision.
@@ -1297,7 +1297,7 @@ impl RigTool {
                     Ok(None)
                 } else {
                     let _t = crate::perf_log::span("rigs: read cloud");
-                    gs_puppet::splat::load_ply(&path).map(|mut g| {
+                    gs_puppet::splat::load_cloud(&path).map(|mut g| {
                         g.retain(|x| x.alpha >= 0.02);
                         Some(std::sync::Arc::new(g))
                     }).map_err(|e| e.to_string())

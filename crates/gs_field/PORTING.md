@@ -601,3 +601,21 @@ active. Egui-free.
 `doll_sky::display()` (**new**) is the doll lit as a display -- a key light
 from the front left, a fill, a floor, a dark backdrop, no hour -- which a
 client uses by default, and `doll_sky` when it wants the room's own light.
+
+`doll_roster` (**new**, 2026-10-07): the injury doll's figures -- the
+playable races and a few extras -- are the modelled bodies in the pool's
+`global/bodies/<form>/` (`puppets::bodies_dir`, also new), each with an
+optional `doll.toml` (`label`, `kind = "race" | "extra"`, `draw = "splats"
+| "mesh" | "made"`, `order`). `roster()` lists them, races first, kept until
+the puppet set's generation changes; `figure(form)` finds one. The doll is
+separate from the creature field: a creature form such as `humanoid` is not
+in it. A client shows `roster()` as its figure picker and paints the doll
+with `figure.form` as the family; `doll_view` draws it as its body by
+itself. Egui-free.
+
+## The doll's races (2026-10-08)
+
+- `doll_roster`: `DollFigure::race` and `variant` (a figure's `doll.toml`
+  `race` and `variant`), `DollRace`, and `races()` / `races_of`: the
+  playable races' figures, grouped by race -- what a game client's doll
+  offers (Hydra's Infinite doll).
