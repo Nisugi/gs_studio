@@ -42,7 +42,7 @@
 
 use crate::skin::smoothstep;
 
-fn hash(a: i32, b: u32) -> f32 {
+pub(crate) fn hash(a: i32, b: u32) -> f32 {
     let mut x = (a as u32).wrapping_mul(0x9E37_79B9) ^ b.wrapping_mul(0x85EB_CA6B);
     x ^= x >> 15;
     x = x.wrapping_mul(0x2C1B_3C6D);
@@ -51,7 +51,7 @@ fn hash(a: i32, b: u32) -> f32 {
 }
 
 /// Value noise over the surface, 0..1, smooth between whole cells.
-fn noise(p: [f32; 2], seed: u32) -> f32 {
+pub(crate) fn noise(p: [f32; 2], seed: u32) -> f32 {
     let (fx, fy) = (p[0].floor(), p[1].floor());
     let (ux, uy) = (p[0] - fx, p[1] - fy);
     let (ux, uy) = (ux * ux * (3.0 - 2.0 * ux), uy * uy * (3.0 - 2.0 * uy));
@@ -62,11 +62,11 @@ fn noise(p: [f32; 2], seed: u32) -> f32 {
     top + (bottom - top) * uy
 }
 
-fn fbm(p: [f32; 2], seed: u32) -> f32 {
+pub(crate) fn fbm(p: [f32; 2], seed: u32) -> f32 {
     0.65 * noise(p, seed) + 0.35 * noise([p[0] * 2.3 + 5.1, p[1] * 2.3 - 1.7], seed ^ 0x55)
 }
 
-fn mix(c: [f32; 3], to: [f32; 3], a: f32) -> [f32; 3] {
+pub(crate) fn mix(c: [f32; 3], to: [f32; 3], a: f32) -> [f32; 3] {
     let a = a.clamp(0.0, 1.0);
     [0, 1, 2].map(|k| c[k] + (to[k] - c[k]) * a)
 }
@@ -77,11 +77,23 @@ const BLOOD_RGB: [f32; 3] = [132.0, 18.0, 20.0];
 const WET_BLOOD_RGB: [f32; 3] = [96.0, 8.0, 10.0];
 const CUT_CORE_RGB: [f32; 3] = [58.0, 6.0, 8.0];
 const SCAR_RGB: [f32; 3] = [236.0, 196.0, 190.0];
+/// A scar is drawn to read on any surface -- pale skin, dark skin, painted
+/// cloth: a dark outline, a rosy core, a pale raised ridge down its middle.
+const SCAR_EDGE_RGB: [f32; 3] = [52.0, 30.0, 32.0];
+const SCAR_CORE_RGB: [f32; 3] = [200.0, 116.0, 114.0];
+
+/// `c` with a scar over it: `rim` how much of its outline covers here,
+/// `core` how much of the scar itself, `mid` how near its middle (0..1).
+fn scar_over(c: [f32; 3], rim: f32, core: f32, mid: f32) -> [f32; 3] {
+    let c = mix(c, SCAR_EDGE_RGB, rim * 0.9);
+    let c = mix(c, SCAR_CORE_RGB, core * 0.95);
+    mix(c, SCAR_RGB, core * smoothstep(0.5, 0.9, mid) * 0.85)
+}
 pub(crate) const NERVE_RGB: [f32; 3] = [132.0, 96.0, 255.0];
 const NERVE_CORE_RGB: [f32; 3] = [214.0, 200.0, 255.0];
-const POISON_TINT_RGB: [f32; 3] = [118.0, 168.0, 84.0];
+pub(crate) const POISON_TINT_RGB: [f32; 3] = [118.0, 168.0, 84.0];
 const POISON_VEIN_RGB: [f32; 3] = [40.0, 92.0, 26.0];
-const DISEASE_PALE_RGB: [f32; 3] = [188.0, 184.0, 158.0];
+pub(crate) const DISEASE_PALE_RGB: [f32; 3] = [188.0, 184.0, 158.0];
 const DISEASE_BLOT_RGB: [f32; 3] = [138.0, 92.0, 78.0];
 const DISEASE_SORE_RGB: [f32; 3] = [168.0, 56.0, 46.0];
 const DISEASE_RIM_RGB: [f32; 3] = [226.0, 206.0, 150.0];
@@ -218,19 +230,24 @@ fn eye_marks(col: [f32; 3], at: [f32; 2], e: &EyeMark, min_half: f32) -> ([f32; 
     let (mut c, mut wet) = (col, 0.0f32);
     if e.scar > 0 {
         if e.scar >= 3 {
-            // healed shut: a pale lid, a dark seam across it
-            c = mix(c, SCAR_RGB, (1.0 - smoothstep(r * 0.9, r * 1.3, d)) * 0.7);
+            // healed shut: a scarred lid, outlined, a dark seam across it
+            let lid = 1.0 - smoothstep(r * 0.9, r * 1.2, d);
+            let rim = 1.0 - smoothstep(r * 1.2, r * 1.45, d);
+            c = scar_over(c, rim, lid, 1.0 - d / (r * 1.2));
             let (seam, _) = stroke(at, c0, [1.0, 0.0], r * 1.4, (r * 0.18).max(min_half));
-            c = mix(c, c.map(|v| v * 0.45), seam);
+            c = mix(c, SCAR_EDGE_RGB, seam);
         }
-        // pale scars across it, brow to cheek
+        // scars across it, brow to cheek, outlined
         let long = [2.6, 4.2, 4.2][e.scar.min(3) as usize - 1];
-        let (a, mid) = stroke(at, c0, [0.45, 0.89], r * long, (r * 0.3).max(min_half));
-        c = mix(c, c.map(|v| v * 0.62), a * (1.0 - mid) * 0.8);
-        c = mix(c, SCAR_RGB, a * smoothstep(0.2, 0.6, mid) * 0.9);
+        let half = (r * 0.3).max(min_half);
+        let (a, mid) = stroke(at, c0, [0.45, 0.89], r * long, half);
+        let (a_rim, _) = stroke(at, c0, [0.45, 0.89], r * long * 1.05, half * 1.8);
+        c = scar_over(c, a_rim, a, mid);
         if e.scar >= 2 {
-            let (b, bm) = stroke(at, [c0[0] + r * 0.6, c0[1] - r * 0.4], [0.93, -0.37], r * 1.8, (r * 0.24).max(min_half));
-            c = mix(c, SCAR_RGB, b * smoothstep(0.2, 0.6, bm) * 0.85);
+            let (b0, half) = ([c0[0] + r * 0.6, c0[1] - r * 0.4], (r * 0.24).max(min_half));
+            let (b, bm) = stroke(at, b0, [0.93, -0.37], r * 1.8, half);
+            let (b_rim, _) = stroke(at, b0, [0.93, -0.37], r * 1.9, half * 1.8);
+            c = scar_over(c, b_rim, b, bm);
         }
     }
     if e.wound > 0 {
@@ -469,10 +486,11 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
         let r = scar.min(3) as usize - 1;
         let seed = seg.wrapping_mul(977) ^ 0x5CA2;
         let half = ([0.03, 0.048, 0.068][r] as f32).max(min_half);
-        let (cover, mid) = lines(at, seed, [0.5, 0.42, 0.34][r], [0.65, 0.72, 0.82][r], half, [0.6, 0.8, 1.05][r]);
-        // pale in the middle, a faint darker seam at its edges
-        c = mix(c, c.map(|v| v * 0.62), cover * (1.0 - mid) * 0.8 * edge);
-        c = mix(c, SCAR_RGB, cover * smoothstep(0.2, 0.6, mid) * 0.9 * edge);
+        let (spacing, keep, length) = ([0.5, 0.42, 0.34][r], [0.65, 0.72, 0.82][r], [0.6, 0.8, 1.05][r]);
+        let (cover, mid) = lines(at, seed, spacing, keep, half, length);
+        // the same lines, wider: a dark outline round each
+        let (rim, _) = lines(at, seed, spacing, keep, half * 1.8, length);
+        c = scar_over(c, rim * edge, cover * edge, mid);
     }
     if rank == 0 {
         return (c, 0.0);
@@ -487,8 +505,7 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
     c = mix(c, tone, bruise * [0.66, 0.74, 0.82][r]);
     // cuts, with blood run into the skin round them: longer, wider and
     // more with rank
-    let half = ([0.034, 0.058, 0.08][r] as f32).max(min_half);
-    let (spacing, keep, length) = ([0.5, 0.4, 0.32][r], [0.58, 0.78, 0.9][r], [0.5, 0.7, 0.95][r]);
+    let (half, spacing, keep, length) = cut_shape(r, min_half);
     let (cover, mid) = lines(at, seed ^ 0xC07, spacing, keep, half, length);
     // the blood round a cut: no wider than a third of the gap between cuts
     let (halo, _) = lines(at, seed ^ 0xC07, spacing, keep, (half * 3.5).min(spacing * 0.3), length);
@@ -509,6 +526,31 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
         wet = wet.max(torn);
     }
     (c, wet)
+}
+
+/// A rank's cuts (`r` = rank - 1): a line's half width, the spacing between
+/// lines, the share drawn and a run's length, feet.
+fn cut_shape(r: usize, min_half: f32) -> (f32, f32, f32, f32) {
+    (([0.034, 0.058, 0.08][r] as f32).max(min_half), [0.5, 0.4, 0.32][r], [0.58, 0.78, 0.9][r], [0.5, 0.7, 0.95][r])
+}
+
+/// What lies under opened skin (the layered cloud's inner layers,
+/// `layers.rs`): fat under the skin, raw flesh under that, then bone.
+pub(crate) fn fat(at: [f32; 2], seg: u32) -> [f32; 3] {
+    mix([226.0, 178.0, 122.0], [204.0, 120.0, 96.0], fbm([at[0] / 0.03, at[1] / 0.03], seg ^ 0xFA7))
+}
+
+pub(crate) const BLOOD: [f32; 3] = BLOOD_RGB;
+pub(crate) const CLOT: [f32; 3] = CUT_CORE_RGB;
+pub(crate) const BRUISE: [f32; 3] = FRESH_BRUISE_RGB;
+pub(crate) const OLD_BRUISE: [f32; 3] = BRUISE_RGB;
+
+pub(crate) fn flesh(at: [f32; 2], seg: u32) -> [f32; 3] {
+    mix([206.0, 84.0, 82.0], [150.0, 38.0, 42.0], fbm([at[0] / 0.05, at[1] / 0.05], seg ^ 0xF1E5))
+}
+
+pub(crate) fn bone(at: [f32; 2], seg: u32) -> [f32; 3] {
+    mix([214.0, 202.0, 176.0], [160.0, 136.0, 116.0], noise([at[0] / 0.04, at[1] / 0.04], seg ^ 0xB0E) * 0.6)
 }
 
 /// A body's marks drawn once onto its surface layout (feet, the 1

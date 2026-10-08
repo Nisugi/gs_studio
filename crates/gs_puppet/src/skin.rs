@@ -153,7 +153,7 @@ impl Effects {
     }
 }
 
-const WEB_RGB: [f32; 3] = [236.0, 236.0, 226.0];
+pub(crate) const WEB_RGB: [f32; 3] = [236.0, 236.0, 226.0];
 const FROST_RGB: [f32; 3] = [138.0, 190.0, 240.0];
 /// Strand spacing on the surface, feet.
 const WEB_SPACING_FT: f32 = 0.42;
@@ -174,20 +174,34 @@ fn hash(a: i32, b: u32) -> f32 {
 /// How much web covers a surface point (surface feet, from a 1 px-per-foot
 /// layout): three families of wavering strands, some missing, crossing.
 fn web_alpha(at: [f32; 2], half_width: f32) -> f32 {
-    let mut a = 0.0f32;
-    for (k, (dx, dy, sp)) in [(0.8f32, 0.6f32, 1.0f32), (-0.6, 0.8, 1.13), (0.0, 1.0, 1.7)].into_iter().enumerate() {
+    web_strands(at).map(|(d, _)| 1.0 - smoothstep(half_width * 0.5, half_width, d.abs())).fold(0.0f32, f32::max)
+}
+
+/// The web's strands at surface point `at` (feet, a surface layout's): per
+/// family of strands that has one here, how far `at` is from its middle
+/// (feet, signed, across it) and the direction across it in the layout --
+/// what [`web_alpha`] paints from, for a host that lays the strands as
+/// dots (`layers`).
+pub(crate) fn web_strands(at: [f32; 2]) -> impl Iterator<Item = (f32, [f32; 2])> {
+    [(0.8f32, 0.6f32, 1.0f32), (-0.6, 0.8, 1.13), (0.0, 1.0, 1.7)].into_iter().enumerate().filter_map(move |(k, (dx, dy, sp))| {
         let sp = sp * WEB_SPACING_FT;
         let across = (at[0] * dx + at[1] * dy) / sp;
         let along = (-at[0] * dy + at[1] * dx) / sp;
         let cell = across.floor();
         if hash(cell as i32, k as u32 + 11) < 0.22 {
-            continue;
+            return None;
         }
         let wobble = 0.18 * (along * 1.9 + hash(cell as i32, k as u32) * std::f32::consts::TAU).sin();
-        let d = (across - cell - 0.5 - wobble).abs() * sp;
-        a = a.max(1.0 - smoothstep(half_width * 0.5, half_width, d));
-    }
-    a
+        Some(((across - cell - 0.5 - wobble) * sp, [dx, dy]))
+    })
+}
+
+/// Threads bridging limb to body on a webbed figure (`layers` lays them too).
+pub(crate) const BIND_THREAD_COUNT: u32 = BIND_THREADS;
+
+/// [`hash`], for a host that places what the skin places (`layers`).
+pub(crate) fn web_hash(a: i32, b: u32) -> f32 {
+    hash(a, b)
 }
 
 /// A glint on frost: sparse bright cells.
@@ -217,7 +231,7 @@ struct Paint<'a> {
 /// with no `back` part, its chest and abdomen split front from back, the
 /// back's wound on their rear, and the back's blood (rank 2 and up) run down
 /// their sides and the backs of the legs.
-fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look, effects: Effects) -> Vec<crate::wounds::Marks> {
+pub(crate) fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look, effects: Effects) -> Vec<crate::wounds::Marks> {
     use crate::wounds::status;
     let mut marks = vec![crate::wounds::Marks::default(); puppet.segments.len()];
     let has_back = puppet.segments.iter().any(|s| s.part.as_deref() == Some("back"));
@@ -305,7 +319,7 @@ fn eye_marks(puppet: &crate::puppet::Puppet, seg: usize, look: &Look) -> [crate:
 /// `marks` baked onto `layout` (the 1 px-per-foot surface layout), at a
 /// resolution for lines no thinner than `min_half` feet -- cached, so a
 /// figure bakes once per set of wounds and size, not per frame.
-fn marks_sheet(
+pub(crate) fn marks_sheet(
     puppet: &crate::puppet::Puppet,
     layout: &UvLayout,
     surfs: &[crate::draw::Surface],
@@ -531,6 +545,13 @@ pub struct SkinMesh {
     pub key: u64,
 }
 
+impl SkinMesh {
+    /// Bytes this mesh holds on the heap: its corners, mostly.
+    pub fn heap_bytes(&self) -> usize {
+        self.corners.capacity() * std::mem::size_of::<SkinCorner>() + self.seg_rot.capacity() * std::mem::size_of::<[V3; 3]>() + self.joined.capacity()
+    }
+}
+
 /// What [`Posed::build_mesh`] makes: the mesh and what it was made with.
 struct Mesh<'t> {
     texture: Option<&'t Texture>,
@@ -561,6 +582,11 @@ pub struct Skin {
 impl Skin {
     pub fn is_empty(&self) -> bool {
         self.w == 0 || self.h == 0
+    }
+
+    /// Bytes this skin holds on the heap (its pixels).
+    pub fn heap_bytes(&self) -> usize {
+        self.rgba.capacity()
     }
 }
 
@@ -1663,6 +1689,17 @@ impl SkinSurface {
     /// Toward the viewer, in the skin's frame.
     pub fn to_cam(&self) -> V3 {
         self.to_cam
+    }
+
+    /// Bytes this surface holds on the heap: its per-pixel position,
+    /// normal, albedo, coverage, glow and wetness.
+    pub fn heap_bytes(&self) -> usize {
+        self.pos.capacity() * std::mem::size_of::<V3>()
+            + self.normal.capacity() * 3
+            + self.albedo.capacity() * 3
+            + self.cov.capacity()
+            + self.glow.capacity()
+            + self.wet.capacity()
     }
 
     /// Everything pixel `i` (row-major) shows, for a host that lights the

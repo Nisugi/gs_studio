@@ -38,6 +38,7 @@
 //! Licence: GPL-3.0-or-later (the stage is ported from VellumFE).
 
 mod app;
+mod bodies;
 mod bundle;
 mod calib;
 mod cli;
@@ -150,6 +151,15 @@ fn main() -> eframe::Result {
                 std::process::exit(0);
             }
             Err(e) => fail(&format!("gs-studio: --build-sheet: {e}")),
+        }
+    }
+    if let Some(pool) = &cli.install_doll {
+        match bodies::install_doll(&data.path, pool) {
+            Ok(forms) => {
+                println!("{}: {}", pool.display(), if forms.is_empty() { "nothing changed".to_owned() } else { forms.join(", ") });
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --install-doll: {e}")),
         }
     }
     if cli.export_jobs {

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use gs_field::doll_sky::DollSky;
 use gs_field::doll_state::{DollState, Status, Statuses};
 
-use crate::creature_puppet::{size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use crate::creature_puppet::{body_size_step, has_body, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
 fn sky_id() -> egui::Id {
@@ -44,11 +44,16 @@ pub const DOLL_VIEW: u64 = 0xD011;
 /// feet are (from the top).
 const FIGURE_SHARE: f32 = 0.78;
 const FEET_AT: f32 = 0.9;
+/// The most of the window's width a figure takes (lying down, drawn smaller).
+const FIT_WIDTH: f32 = 0.92;
 /// The camera: this many figure heights away, its eye this share of the
 /// figure's height up.
 const DISTANCE_HEIGHTS: f32 = 3.5;
 const EYE_SHARE: f32 = 0.6;
 const M_PER_FT: f32 = 0.3048;
+/// An invisible modelled body's glints and shimmer move on a clock this
+/// many seconds a tick (a new image each).
+const GHOST_TICK_S: f64 = 1.0 / 30.0;
 /// The backdrop is made at this share of the window's size: it is only a
 /// gradient.
 const BACKDROP_SHARE: f32 = 0.5;
@@ -159,16 +164,17 @@ fn sky_light(cam: &FieldCamera, azimuth: f32, elevation: f32, colour: [f32; 3], 
 /// The background: the sky from its top to the horizon (a wall indoors),
 /// the ground below, as a backdrop the pass lights like any other. Where
 /// the doll stands the ground is darkened a little (`contact`: its feet at
-/// that point, its standing height): the sky's own shadow under it, which
-/// no one light casts, so it stands on the ground and not in front of it.
-fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32)) -> Arc<LitImage> {
+/// that point, its standing height, half its width, and how dark: 0 for an
+/// invisible figure): the sky's own shadow under it, which no one light
+/// casts, so it stands on the ground and not in front of it.
+fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32, f32)) -> Arc<LitImage> {
     let [sw, sh] = cam.size;
     let (w, h) = (((sw * BACKDROP_SHARE).round() as usize).max(8), ((sh * BACKDROP_SHARE).round() as usize).max(8));
     let bits = |c: [f32; 3]| c.map(f32::to_bits);
-    let (feet, tall, half_w) = contact;
+    let (feet, tall, half_w, dark) = contact;
     // quantized, so a breathing figure does not remake it
     let half_w = (half_w / 4.0).round() * 4.0;
-    let key = key_of(("doll backdrop", w, h, cam.cy.to_bits(), cam.f.to_bits(), bits(sky.sky_top), bits(sky.sky_horizon), bits(sky.ground), bits(sky.floor), (feet.x.to_bits(), feet.y.to_bits(), tall.to_bits(), half_w.to_bits())));
+    let key = key_of(("doll backdrop", w, h, cam.cy.to_bits(), cam.f.to_bits(), bits(sky.sky_top), bits(sky.sky_horizon), bits(sky.ground), bits(sky.floor), (feet.x.to_bits(), feet.y.to_bits(), tall.to_bits(), half_w.to_bits(), dark.to_bits())));
     cached(key, || {
         let mut albedo = Vec::with_capacity(w * h * 4);
         let mut lit = Vec::with_capacity(w * h * 4);
@@ -191,7 +197,7 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32)) -
                 let sx = (i as f32 + 0.5) * sw / w as f32;
                 let k = if ground {
                     let d = ((sx - feet.x) / rx).powi(2) + ((sy - feet.y) / ry).powi(2);
-                    1.0 - CONTACT_DARK * (-1.6 * d).exp()
+                    1.0 - dark * (-1.6 * d).exp()
                 } else {
                     1.0
                 };
@@ -255,6 +261,18 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     let standing_px = rect.height() * FIGURE_SHARE;
     let mut key = key;
     key.height_px = size_step(standing_px * ctx.pixels_per_point());
+    // a form with a modelled body is drawn as it, its trained splats,
+    // unless the host said otherwise; hurt, scarred, coated or under a
+    // status that marks the body, as the layered cloud
+    if key.auto_body && has_body(family) {
+        let draw = gs_field::doll_roster::figure(family).map_or(1, |f| f.draw.body_cloud());
+        key = key.with_modelled(true, draw);
+    }
+    // a body's pose is bones, not pixels: drawn at the window's own size
+    if key.modelled {
+        key.height_px = body_size_step(standing_px * ctx.pixels_per_point());
+    }
+    key = layered_if_marked(key);
     // hit on the back: turned round to show it, a moment
     let back = gs_field::dolls::part_label("back");
     let turning = id.and_then(|id| cache.last_hit(id)).filter(|(label, _)| Some(*label) == back).and_then(|(_, at)| show_back(now - at));
@@ -268,10 +286,36 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         key = key.with_breath(step);
         ctx.request_repaint_after(std::time::Duration::from_secs_f64(until));
     }
+    // a layered figure's wound arrives: opening, flashing, throwing dots off.
+    // A modelled body's arrival is played from when its build is in (it is
+    // made on a worker), so it is seen from the start, a moment late
+    let mut arrival_age = -1.0f32;
+    let mut arrival_from: Option<(egui::Id, Option<f64>)> = None;
+    if let Some((label, at)) = id.and_then(|id| cache.last_hit(id)).filter(|_| key.layers) {
+        key = key.with_fresh(label, now - at);
+        if key.fresh.is_some() {
+            ctx.request_repaint();
+            let started = egui::Id::new(("gs_field_egui::doll_arrival", id, at.to_bits()));
+            let since = ctx.data(|d| d.get_temp::<f64>(started));
+            arrival_age = since.map_or(0.0, |t| (now - t) as f32);
+            arrival_from = Some((started, since));
+        }
+    }
     let gpu = field_gpu::available(ctx);
+    // a modelled body's arrival is built once a hit and played by the GPU
+    // at its age, frame by frame (`arrival_age`): its pose is the same
+    // all through it
+    if gpu && key.modelled && key.layers {
+        key.fresh = key.fresh.map(|(label, _)| (label, 0));
+    }
     let (posed, moving) = match (gpu, id) {
-        (true, Some(id)) => match cache.posed_live(family, &key, id, now, if gpu_skin { Bare::Mesh } else { Bare::Surface }) {
+        // layered splats (`PuppetKey::with_layers`) are the GPU's to draw
+        (true, Some(id)) => match cache.posed_live(family, &key, id, now, if gpu_skin || key.layers || key.modelled { Bare::Mesh } else { Bare::Surface }) {
             Some(p) => p,
+            None => return false,
+        },
+        (true, None) if key.layers || key.modelled => match cache.posed_cached(family, &key, true, Bare::Mesh) {
+            Some(p) => (p, false),
             None => return false,
         },
         (true, None) => match cache.posed_surface(family, &key) {
@@ -284,6 +328,17 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         },
     };
     let moving = moving || turning.is_some();
+    // a hit's arrival is in: it plays from now
+    if let Some((started, None)) = arrival_from {
+        if !posed.pending {
+            ctx.data_mut(|d| d.insert_temp(started, now));
+        }
+    }
+    // its modelled body still loading, or its layered cloud being made:
+    // this is a stand-in, look again soon
+    if posed.pending {
+        ctx.request_repaint_after(std::time::Duration::from_millis(40));
+    }
     // a rank-3 nerve wound twitches every few seconds: look again soon
     if id.is_some() && crate::creature_puppet::nerve_rank(&key) >= 3 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -291,9 +346,12 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     if moving {
         ctx.request_repaint();
     }
-    // its box centred in the window, so a figure lying down stays in it
-    let px_ft = standing_px / posed.standing_ft.max(0.1);
+    // its box centred in the window, so a figure lying down stays in it --
+    // drawn smaller where, lying down, it would be wider than the window
     let [lo, hi] = posed.bounds;
+    let wide = (hi[0] - lo[0]) * standing_px / posed.standing_ft.max(0.1);
+    let standing_px = if wide > rect.width() * FIT_WIDTH { standing_px * rect.width() * FIT_WIDTH / wide } else { standing_px };
+    let px_ft = standing_px / posed.standing_ft.max(0.1);
     let foot = egui::pos2(rect.center().x - (lo[0] + hi[0]) * 0.5 * px_ft, rect.top() + rect.height() * FEET_AT);
     let half_w = (hi[0] - lo[0]) * 0.5 * px_ft;
     let place = PuppetPlacement::fit(&posed, foot, standing_px);
@@ -303,9 +361,31 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         None
     } else if let Some((mesh, texture)) = &posed.mesh {
         let key = key_of(("doll gpu skin", mesh.key, sky.floor.map(f32::to_bits)));
-        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT }));
+        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
         let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
         let image = LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
+        Some((Arc::new(image), place.skin_rect(&frame)))
+    } else if let Some(body) = &posed.body {
+        // its modelled body, posed and rasterised by the GPU
+        // (a hit arriving: a new image every frame, at its age; invisible,
+        // its glints and shimmer on a running clock, a new image a tick)
+        let clock = if key.layers && key.effects.invisible {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(GHOST_TICK_S));
+            ((now / GHOST_TICK_S).floor() * GHOST_TICK_S % 3600.0) as f32
+        } else {
+            0.0
+        };
+        let key = key_of(("doll gpu body", body.key, sky.floor.map(f32::to_bits), arrival_age.to_bits(), clock.to_bits()));
+        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Body(body.clone()), lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age, clock }));
+        let frame = gs_puppet::Skin { origin: body.origin, w: body.w, h: body.h, rgba: Vec::new() };
+        let image = LitImage { key, w: body.w as u32, h: body.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
+        Some((Arc::new(image), place.skin_rect(&frame)))
+    } else if let Some(cloud) = &posed.splats {
+        // its splat cloud (the layered one), rasterised by the same pass
+        let key = key_of(("doll gpu splats", cloud.key, sky.floor.map(f32::to_bits)));
+        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Splats(cloud.clone()), lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
+        let frame = gs_puppet::Skin { origin: cloud.origin, w: cloud.w, h: cloud.h, rgba: Vec::new() };
+        let image = LitImage { key, w: cloud.w as u32, h: cloud.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
     } else {
         figure(&posed, sky, moving).zip(posed.skin.as_ref().map(|s| place.skin_rect(s)))
@@ -314,10 +394,11 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         // unlit, on a plain ground
         painter.rect_filled(rect, 0.0, egui::Color32::from_rgb(40, 42, 46));
         place.paint_figure(&painter, &posed);
-        signs(ctx, &painter, key.statuses, &posed, foot, standing_px, now);
+        signs(ctx, &painter, key.statuses, key.layers, &posed, foot, standing_px, now);
         return true;
     };
     let (w, h) = (rect.width().max(1.0), rect.height().max(1.0));
+    let unseen = key.effects.invisible;
     let fig_m = posed.standing_ft.max(0.1) * M_PER_FT;
     let z = DISTANCE_HEIGHTS * fig_m;
     let f = standing_px * DISTANCE_HEIGHTS;
@@ -332,13 +413,14 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     let frame = FieldFrame {
         id: FieldFrame::next_id(),
         camera,
-        backdrop: backdrop(sky, &camera, (egui::pos2(rect.center().x, foot.y) - rect.min.to_vec2(), standing_px, half_w)),
+        // (an invisible figure throws no shadow, nor darkens the ground)
+        backdrop: backdrop(sky, &camera, (egui::pos2(rect.center().x, foot.y) - rect.min.to_vec2(), standing_px, half_w, if unseen { 0.0 } else { CONTACT_DARK })),
         backdrop_rect: [0.0, 0.0, w, h],
         layers: vec![layer],
         lights,
         time: now as f32,
         water: 0.0,
-        shadows: true,
+        shadows: !unseen,
         view: FieldView::Lit,
         weather: Default::default(),
         // every pixel: one small window, and the backdrop is made small
@@ -347,7 +429,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         stars: Default::default(),
     };
     field_gpu::paint_view(&painter, &Arc::new(Mutex::new(frame)), Placement { origin: rect.min, scale: 1.0 }, Piece::Everything, view);
-    signs(ctx, &painter, key.statuses, &posed, foot, standing_px, now);
+    signs(ctx, &painter, key.statuses, key.layers, &posed, foot, standing_px, now);
     true
 }
 
@@ -368,6 +450,31 @@ pub const DOLL_TURN_DEG: f32 = 20.0;
 
 /// The body colour of a figure the host gives none.
 pub const DOLL_BODY: [u8; 3] = [150, 140, 130];
+
+/// The layered cloud's spacing for the doll (feet): finer than the
+/// stage's cloud, one figure seen close.
+pub const LAYERS_SPACING_FT: f32 = 0.015;
+
+/// Whether `key` has anything on the body a modelled body's plain cloud
+/// cannot show: a wound, a scar, a coating, death, or a status drawn on
+/// the body (poison, disease, bleeding..., a web, ice).
+pub fn body_marked(key: &PuppetKey) -> bool {
+    key.ranks.iter().chain(&key.scars).any(|r| *r > 0) || key.coat.material > 0 || key.dead || key.effects.any()
+}
+
+/// `key` as the doll draws it when it is a modelled body's splats
+/// ([`PuppetKey::with_modelled`], cloud 1 or 2) and [`body_marked`]: the
+/// LAYERED cloud ([`PuppetKey::with_layers`]), which wears the wounds,
+/// marks and coating; its causes and crits stay as the host set them. Any
+/// other key comes back as it was. The studio's doll and a game client
+/// share this rule, so they draw the same doll.
+pub fn layered_if_marked(key: PuppetKey) -> PuppetKey {
+    if key.layers || !key.modelled || key.body_cloud == 0 || !body_marked(&key) {
+        return key;
+    }
+    let params = gs_puppet::splat::SplatParams { spacing: LAYERS_SPACING_FT, ..Default::default() };
+    key.with_layers(true, params.into(), key.coat.coating())
+}
 
 /// The key a game state draws the doll with (ADDITION): its wounds, scars
 /// and statuses -- the pose they ask for, what they draw on the body, how
@@ -395,9 +502,12 @@ pub fn paint_state(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, fam
 /// confused one's question marks, a bleeder's falling drops, a poisoned
 /// one's rising bubbles, a haze over blinded eyes, a hush by a silenced
 /// mouth, a red ring round the feet of the vulnerable, pale motes round
-/// the calmed. Asks for the next frame while any shows.
+/// the calmed. Asks for the next frame while any shows. `built`: the
+/// figure is layered splats, which build its blood and its poison on it
+/// (`gs_puppet`'s `blood`, `afflict`), so it has no drops or bubbles
+/// floated over it.
 #[allow(clippy::too_many_arguments)]
-fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &PosedPuppet, foot: egui::Pos2, standing_px: f32, now: f64) {
+fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool, posed: &PosedPuppet, foot: egui::Pos2, standing_px: f32, now: f64) {
     use egui::{pos2, vec2, Color32, Shape, Stroke};
     if s.is_empty() || s.has(Status::Dead) {
         return;
@@ -456,7 +566,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
             shadowed_text(painter, at, "?", u * 0.09, rgba(222, 200, 255, 0.75 + 0.25 * a.sin()));
         }
     }
-    if s.has(Status::Bleeding) {
+    if s.has(Status::Bleeding) && !built {
         shown = true;
         for k in 0..5 {
             let seed = k as f32 * 0.618;
@@ -472,7 +582,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
         // a pool gathering under it
         painter.add(Shape::ellipse_filled(foot, vec2(u * 0.07, u * 0.012), rgba(110, 8, 12, 0.7)));
     }
-    if s.has(Status::Poisoned) {
+    if s.has(Status::Poisoned) && !built {
         shown = true;
         for k in 0..6 {
             let seed = k as f32 * 0.37;
@@ -529,6 +639,30 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, posed: &Pose
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_modelled_body_is_layered_only_once_something_is_on_it() {
+        let healthy = DollState { wounds: vec![], scars: vec![], statuses: Statuses::NONE };
+        let key = key_for(&healthy);
+        assert!(key.auto_body && !key.modelled, "the doll decides");
+        assert_eq!(layered_if_marked(key), key, "not modelled: untouched");
+        let body = key.with_modelled(true, 1);
+        assert!(!body.auto_body);
+        assert_eq!(layered_if_marked(body), body, "nothing on it: the plain cloud");
+        assert_eq!(layered_if_marked(key.with_modelled(true, 0)), key.with_modelled(true, 0), "its mesh: never layered");
+        let hurt = DollState { wounds: vec![("chest".to_string(), 2)], scars: vec![], statuses: Statuses::NONE };
+        let layered = layered_if_marked(key_for(&hurt).with_modelled(true, 1));
+        assert!(layered.layers && layered.splats && layered.modelled);
+        assert_eq!(layered_if_marked(layered), layered, "applied twice is the same key");
+        let scarred = DollState { wounds: vec![], scars: vec![("head".to_string(), 1)], statuses: Statuses::NONE };
+        assert!(layered_if_marked(key_for(&scarred).with_modelled(true, 1)).layers);
+        let sick = DollState { wounds: vec![], scars: vec![], statuses: Statuses::NONE.with(Status::Poisoned) };
+        assert!(layered_if_marked(key_for(&sick).with_modelled(true, 1)).layers, "a status drawn as marks");
+        for status in [Status::Webbed, Status::Frozen] {
+            let held = DollState { wounds: vec![], scars: vec![], statuses: Statuses::NONE.with(status) };
+            assert!(layered_if_marked(key_for(&held).with_modelled(true, 1)).layers, "{status:?}: a web and ice are layers");
+        }
+    }
 
     #[test]
     fn a_game_state_keys_its_pose_marks_and_breath() {

@@ -40,16 +40,22 @@
 //!
 //! Plain data and functions throughout; everything but `paint` is egui-free.
 
+mod afflict;
 pub mod baked;
+mod blood;
 pub mod camera;
 pub mod depth;
 pub mod draw;
 pub mod fall;
 pub mod fit;
+mod frost;
+mod ghost;
 pub mod hang;
 pub mod joints;
+pub mod layers;
 pub mod math;
 pub mod measure;
+pub mod mesh;
 pub mod outfit;
 pub mod paint;
 pub mod pose;
@@ -59,7 +65,10 @@ pub mod puppet;
 pub mod raster;
 pub mod shadow;
 pub mod skin;
+mod skin_field;
 pub mod splat;
+mod status_layers;
+mod wraps;
 pub mod uv;
 mod wounds;
 pub use wounds::MarksSheet;

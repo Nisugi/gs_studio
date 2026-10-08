@@ -59,6 +59,38 @@ pub struct Gaussian {
     pub n: V3,
     pub rgb: [f32; 3],
     pub alpha: f32,
+    /// How much it gives off its own light, 0..1 (an ember, a flash): that
+    /// much of it is not shaded, and a lit host keeps it bright in the dark.
+    pub glow: f32,
+    /// How wet it is, 0..1 (fresh blood, from the marks sheet): a lit host
+    /// shines its lights off it, as off the smooth skin's wet texels.
+    pub wet: f32,
+    /// A see-through film over the body (ice, a web's strand): it tints
+    /// what is under it but is never taken for the surface -- its core
+    /// does not make a pixel opaque, so the body shows through it and,
+    /// past the body's edge, the backdrop does.
+    pub film: bool,
+    /// How much of it shows only seen edge-on, 0..1 (ADDITION): turned to
+    /// the viewer it is that much fainter ([`rim_fade`]), so a body of such
+    /// splats is a bright rim round a nearly empty middle -- an invisible
+    /// figure's skin. Needs a facing (`n`). [`prepare`] fades each splat by
+    /// its own facing, and never takes one for the surface; a GPU host
+    /// (`cloud_gpu.wgsl`) keeps them as the surface and fades that by its
+    /// smoothed facing, pixel by pixel -- a trained cloud's splats are round
+    /// blobs, and one edge-on still covers a limb's middle.
+    pub rim: f32,
+}
+
+/// Where a splat with a [`Gaussian::rim`] shows: from this far edge-on (1
+/// less how much it faces the viewer) it starts to, and from this it is
+/// whole. cloud_gpu.wgsl's RIM_FROM, RIM_TO.
+pub const RIM_FROM: f32 = 0.3;
+pub const RIM_TO: f32 = 0.8;
+
+/// How much of a splat with `rim` shows, facing the viewer by `facing`
+/// (|its unit facing . toward the viewer|, 1 square on, 0 edge-on).
+pub fn rim_fade(rim: f32, facing: f32) -> f32 {
+    1.0 - rim.clamp(0.0, 1.0) * (1.0 - crate::skin::smoothstep(RIM_FROM, RIM_TO, 1.0 - facing.abs()))
 }
 
 /// A fitted cloud from a 3D Gaussian Splatting `.ply` (binary little
@@ -115,14 +147,168 @@ pub fn load_ply(path: &std::path::Path) -> std::io::Result<Vec<Gaussian>> {
         let axes = [0, 1, 2].map(|k| [rot[0][k] * sc[k], rot[1][k] * sc[k], rot[2][k] * sc[k]]);
         let rgb = [g(r0), g(r1), g(r2)].map(|c| ((0.5 + SH_C0 * c).clamp(0.0, 1.0)) * 255.0);
         let alpha = 1.0 / (1.0 + (-g(iop)).exp());
-        out.push(Gaussian { c: [g(ix), g(iy), g(iz)], axes, n: [0.0; 3], rgb, alpha });
+        out.push(Gaussian { c: [g(ix), g(iy), g(iz)], axes, n: [0.0; 3], rgb, alpha, glow: 0.0, wet: 0.0, film: false, rim: 0.0 });
     }
     Ok(out)
 }
 
-/// Where a family's fitted cloud lives: `<data>/clouds/<family>.ply`.
+/// A fitted cloud from a Niantic `.spz` file, version 4 (`NGSP`: a 32
+/// byte header, six zstd streams -- positions, alphas, colours, scales,
+/// rotations, harmonics -- each with its sizes in a table of contents),
+/// decoded as the reference `load-spz.cc` does: positions 24-bit fixed
+/// point with `fractional_bits`, scales `b / 16 - 10` (log), rotations
+/// "smallest three" (2 bits name the largest component, three 10-bit
+/// signed magnitudes over sqrt(1/2)), alphas straight opacity bytes,
+/// colours `(b / 255 - 0.5) / 0.15` as zeroth-order harmonics. Higher
+/// harmonics are skipped, as [`load_ply`] skips them. An `.spz` holds its
+/// cloud right-up-back (y up, z toward the viewer: the OpenGL frame),
+/// where a trainer's `.ply` is right-down-front, and the reference packer
+/// converts between them; this turns it back, so a cloud comes out as
+/// [`load_ply`] would hand the `.ply` it was packed from: y and z
+/// negated, and the rotation's y and z with them. (Scales come back
+/// clamped to e^-10 at the small end: the packer's floor, far below any
+/// pixel.) The gzip versions 1..3 are not read. zstd is decoded in pure
+/// Rust, so this builds for Android too.
+pub fn load_spz(path: &std::path::Path) -> std::io::Result<Vec<Gaussian>> {
+    let bytes = std::fs::read(path)?;
+    decode_spz(&bytes)
+}
+
+/// [`load_spz`] on bytes already read.
+pub fn decode_spz(bytes: &[u8]) -> std::io::Result<Vec<Gaussian>> {
+    let bad = |what: &str| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("spz: {what}"));
+    if bytes.len() < 32 {
+        return Err(bad("too short for a header"));
+    }
+    let u32_at = |i: usize| u32::from_le_bytes(bytes[i..i + 4].try_into().expect("4 bytes"));
+    let u64_at = |i: usize| -> std::io::Result<u64> { bytes.get(i..i + 8).map(|b| u64::from_le_bytes(b.try_into().expect("8 bytes"))).ok_or_else(|| bad("table of contents past the end")) };
+    if u32_at(0) != 0x5053_474e {
+        return Err(bad(if bytes[0] == 0x1f && bytes[1] == 0x8b { "a gzip spz (version 1..3) is not read" } else { "not an spz file (no NGSP magic)" }));
+    }
+    let version = u32_at(4);
+    if version != 4 {
+        return Err(bad(&format!("version {version} is not read, only 4")));
+    }
+    let count = u32_at(8) as usize;
+    let sh_degree = bytes[12];
+    let frac_bits = bytes[13];
+    let streams = bytes[15] as usize;
+    let toc = u32_at(16) as usize;
+    let sh_dim: usize = match sh_degree {
+        0 => 0,
+        1 => 3,
+        2 => 8,
+        3 => 15,
+        4 => 24,
+        d => return Err(bad(&format!("harmonics degree {d}"))),
+    };
+    // What each stream must hold, in the order the writer writes them;
+    // an empty one (no harmonics) is left out of the file.
+    let wanted = [count * 9, count, count * 3, count * 3, count * 4, count * sh_dim * 3];
+    let present: Vec<usize> = (0..6).filter(|i| wanted[*i] > 0).collect();
+    if present.len() != streams {
+        return Err(bad(&format!("{streams} streams, expected {}", present.len())));
+    }
+    let mut at = toc + streams * 16;
+    let mut decoded: [Vec<u8>; 6] = Default::default();
+    for (n, i) in present.iter().enumerate() {
+        let comp = u64_at(toc + n * 16)? as usize;
+        let uncomp = u64_at(toc + n * 16 + 8)? as usize;
+        if uncomp != wanted[*i] {
+            return Err(bad(&format!("stream {n} holds {uncomp} bytes, expected {}", wanted[*i])));
+        }
+        let packed = bytes.get(at..at + comp).ok_or_else(|| bad("stream past the end"))?;
+        at += comp;
+        if *i == 5 {
+            continue; // the harmonics: not read
+        }
+        let mut out = Vec::with_capacity(uncomp);
+        ruzstd::decoding::FrameDecoder::new().decode_all_to_vec(packed, &mut out).map_err(|e| bad(&format!("stream {n}: {e}")))?;
+        if out.len() != uncomp {
+            return Err(bad(&format!("stream {n} decoded to {} bytes, expected {uncomp}", out.len())));
+        }
+        decoded[*i] = out;
+    }
+    let [pos, alphas, colors, scales, rots, _] = decoded;
+    let pos_scale = 1.0 / (1u32 << frac_bits.min(31)) as f32;
+    const SH_C0: f32 = 0.282_094_79;
+    const COLOR_SCALE: f32 = 0.15;
+    let mut out = Vec::with_capacity(count);
+    for v in 0..count {
+        let p = |k: usize| {
+            let i = (v * 3 + k) * 3;
+            let fixed = (pos[i] as u32) | ((pos[i + 1] as u32) << 8) | ((pos[i + 2] as u32) << 16);
+            let fixed = if fixed & 0x80_0000 != 0 { fixed | 0xff00_0000 } else { fixed } as i32;
+            fixed as f32 * pos_scale
+        };
+        let sc = [0, 1, 2].map(|k| (scales[v * 3 + k] as f32 / 16.0 - 10.0).exp());
+        let quat = unpack_smallest_three(rots[v * 4..v * 4 + 4].try_into().expect("4 bytes"));
+        // the file's quaternion is x y z w; `quat_to_m3` takes w first.
+        // Right-up-back to right-down-front: y and z negated, which turns
+        // the rotation's y and z too (a 180 degree turn about x).
+        let rot = crate::math::quat_to_m3(crate::math::quat_norm([quat[3], quat[0], -quat[1], -quat[2]]));
+        let axes = [0, 1, 2].map(|k| [rot[0][k] * sc[k], rot[1][k] * sc[k], rot[2][k] * sc[k]]);
+        let rgb = [0, 1, 2].map(|k| {
+            let dc = (colors[v * 3 + k] as f32 / 255.0 - 0.5) / COLOR_SCALE;
+            ((0.5 + SH_C0 * dc).clamp(0.0, 1.0)) * 255.0
+        });
+        let alpha = alphas[v] as f32 / 255.0;
+        out.push(Gaussian { c: [p(0), -p(1), -p(2)], axes, n: [0.0; 3], rgb, alpha, glow: 0.0, wet: 0.0, film: false, rim: 0.0 });
+    }
+    Ok(out)
+}
+
+/// The spz "smallest three" rotation: 2 bits say which component is
+/// largest, the other three come as 10-bit sign-and-magnitude over
+/// sqrt(1/2), from the top of the word down; the largest is what unit
+/// length leaves. Returned x, y, z, w.
+fn unpack_smallest_three(r: [u8; 4]) -> [f32; 4] {
+    let mut comp = u32::from_le_bytes(r);
+    let largest = (comp >> 30) as usize;
+    let mut q = [0.0f32; 4];
+    let mut sum = 0.0;
+    for i in (0..4).rev() {
+        if i == largest {
+            continue;
+        }
+        let mag = (comp & 0x1ff) as f32;
+        let neg = (comp >> 9) & 1 == 1;
+        comp >>= 10;
+        let mut v = std::f32::consts::FRAC_1_SQRT_2 * mag / 511.0;
+        if neg {
+            v = -v;
+        }
+        q[i] = v;
+        sum += v * v;
+    }
+    q[largest] = (1.0 - sum).max(0.0).sqrt();
+    q
+}
+
+/// [`load_spz`] for a `.spz` path, [`load_ply`] for anything else.
+pub fn load_cloud(path: &std::path::Path) -> std::io::Result<Vec<Gaussian>> {
+    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("spz")) {
+        load_spz(path)
+    } else {
+        load_ply(path)
+    }
+}
+
+/// Where a family's fitted cloud lives: `<data>/clouds/<family>.spz`, or
+/// `.ply` where there is no `.spz` (the path is the `.ply`'s when neither
+/// exists).
 pub fn cloud_path(data_root: &std::path::Path, family: &str) -> std::path::PathBuf {
-    data_root.join("clouds").join(format!("{family}.ply"))
+    cloud_file(&data_root.join("clouds"), family)
+}
+
+/// `<dir>/<stem>.spz` when it exists, else `<dir>/<stem>.ply`: a cloud
+/// kept beside other files, by whichever name it has.
+pub fn cloud_file(dir: &std::path::Path, stem: &str) -> std::path::PathBuf {
+    let spz = dir.join(format!("{stem}.spz"));
+    if spz.is_file() {
+        return spz;
+    }
+    dir.join(format!("{stem}.ply"))
 }
 
 /// How far from its nearest segment's surface a Gaussian still takes a
@@ -151,10 +337,57 @@ pub struct BoundCloud {
     /// Per Gaussian, up to three (segment, weight) shares summing to one;
     /// unused slots have weight 0.
     pub weights: Vec<[(usize, f32); 3]>,
+    /// It rides a modelled mesh (`mesh::SplatBody`): moved by the mesh's
+    /// segment transforms (`mesh::BoundMesh::bone_xfs`: a hanging hand is
+    /// not turned), not the puppet's own.
+    pub modelled: bool,
 }
 
 impl BoundCloud {
     pub fn bind(puppet: &crate::puppet::Puppet, rest: Vec<Gaussian>) -> BoundCloud {
+        let (seg, weights) = skin_weights(puppet, rest.iter().map(|g| g.c));
+        BoundCloud { rest, seg, weights, modelled: false }
+    }
+
+    /// The cloud moved into `posed`'s pose: each Gaussian's centre and axes
+    /// are the weighted blend of its segments' transforms.
+    pub fn posed(&self, posed: &Posed<'_>) -> Vec<Gaussian> {
+        let xfs = if self.modelled { crate::mesh::BoundMesh::bone_xfs(posed) } else { posed.xf.clone() };
+        self.rest
+            .iter()
+            .zip(&self.weights)
+            .map(|(g, w)| {
+                let mut c = [0.0f32; 3];
+                let mut axes = [[0.0f32; 3]; 3];
+                for &(s, share) in w {
+                    if share <= 0.0 {
+                        continue;
+                    }
+                    let xf = &xfs[s];
+                    c = add(c, scale(xf.point(g.c), share));
+                    for k in 0..3 {
+                        axes[k] = add(axes[k], scale(xf.dir(g.axes[k]), share));
+                    }
+                }
+                Gaussian { c, axes, n: g.n, rgb: g.rgb, alpha: g.alpha, glow: g.glow, wet: g.wet, film: g.film, rim: g.rim }
+            })
+            .collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.rest.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rest.is_empty()
+    }
+}
+
+/// What [`BoundCloud::bind`] gives each of `points` (in the puppet's rest
+/// space): the segment it sits nearest, and its shares. A mesh's vertices
+/// are bound by it too (`mesh::BoundMesh`).
+pub fn skin_weights(puppet: &crate::puppet::Puppet, points: impl Iterator<Item = V3>) -> (Vec<usize>, Vec<[(usize, f32); 3]>) {
+    {
         let bodies: Vec<(usize, &crate::puppet::Segment, V3)> = puppet
             .segments
             .iter()
@@ -176,10 +409,10 @@ impl BoundCloud {
             best.sqrt()
         };
         let adjoins = |a: usize, b: usize| puppet.segments[a].parent == Some(b) || puppet.segments[b].parent == Some(a);
-        let mut seg = Vec::with_capacity(rest.len());
-        let mut weights = Vec::with_capacity(rest.len());
-        for g in &rest {
-            let dists: Vec<(usize, f32)> = bodies.iter().map(|(i, s, axis)| (*i, surface(s, *axis, g.c))).collect();
+        let mut seg = Vec::new();
+        let mut weights = Vec::new();
+        for p in points {
+            let dists: Vec<(usize, f32)> = bodies.iter().map(|(i, s, axis)| (*i, surface(s, *axis, p))).collect();
             let &(near, d0) = dists.iter().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or(&(0, 0.0));
             // Shares: the nearest segment, and those adjoining it in the
             // tree within the blend band, each falling off with how much
@@ -201,39 +434,7 @@ impl BoundCloud {
             seg.push(near);
             weights.push(w);
         }
-        BoundCloud { rest, seg, weights }
-    }
-
-    /// The cloud moved into `posed`'s pose: each Gaussian's centre and axes
-    /// are the weighted blend of its segments' transforms.
-    pub fn posed(&self, posed: &Posed<'_>) -> Vec<Gaussian> {
-        self.rest
-            .iter()
-            .zip(&self.weights)
-            .map(|(g, w)| {
-                let mut c = [0.0f32; 3];
-                let mut axes = [[0.0f32; 3]; 3];
-                for &(s, share) in w {
-                    if share <= 0.0 {
-                        continue;
-                    }
-                    let xf = &posed.xf[s];
-                    c = add(c, scale(xf.point(g.c), share));
-                    for k in 0..3 {
-                        axes[k] = add(axes[k], scale(xf.dir(g.axes[k]), share));
-                    }
-                }
-                Gaussian { c, axes, n: g.n, rgb: g.rgb, alpha: g.alpha }
-            })
-            .collect()
-    }
-
-    pub fn len(&self) -> usize {
-        self.rest.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.rest.is_empty()
+        (seg, weights)
     }
 }
 
@@ -329,7 +530,7 @@ pub fn cloud(posed: &Posed<'_>, texture: Option<&Texture>, body: [u8; 3], params
                         .or_else(|| texture.and_then(|tx| tx.layout.locate(i, k as f32 + t, theta).and_then(|at| tx.sample(at))))
                         .unwrap_or(body);
                     let half_ring = scale(norm_or(tangent, [1.0, 0.0, 0.0]), circ / m as f32 * overlap);
-                    out.push(Gaussian { c: p, axes: [half_ring, scale(along, 2.0 * overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha });
+                    out.push(Gaussian { c: p, axes: [half_ring, scale(along, 2.0 * overlap), scale(nrm, spacing * 0.15)], n: nrm, rgb, alpha, glow: 0.0, wet: 0.0, film: false, rim: 0.0 });
                 }
             }
         }
@@ -357,6 +558,10 @@ pub struct SplatFlat {
     pub alpha: f32,
     pub pos: V3,
     pub n: V3,
+    /// As [`Gaussian::glow`].
+    pub glow: f32,
+    /// As [`Gaussian::film`].
+    pub film: bool,
 }
 
 /// A cloud projected and sorted back to front, and the image it fills: what
@@ -372,6 +577,13 @@ pub struct SplatFrame {
     pub to_cam: V3,
     /// Identifies these pixels.
     pub key: u64,
+}
+
+impl SplatFrame {
+    /// Bytes this frame holds on the heap (its flattened splats).
+    pub fn heap_bytes(&self) -> usize {
+        self.flats.capacity() * std::mem::size_of::<SplatFlat>()
+    }
 }
 
 /// A splat further behind a pixel's front-most core than [`SURFACE_BAND`]
@@ -466,10 +678,15 @@ pub fn prepare(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw:
                 inv: [f.inv[0][0], f.inv[0][1], f.inv[1][0], f.inv[1][1]],
                 r: f.r,
                 z: f.z,
-                rgb: g.rgb.map(|c| c * f.shade),
-                alpha: g.alpha,
+                // what glows is not shaded
+                rgb: g.rgb.map(|c| c * (f.shade + (1.0 - f.shade) * g.glow.clamp(0.0, 1.0))),
+                // (a rim splat: as much as it is edge-on)
+                alpha: if g.rim > 0.0 && g.n != [0.0; 3] { g.alpha * rim_fade(g.rim, dot(norm_or(g.n, [0.0; 3]), view.to_cam)) } else { g.alpha },
                 pos: turned(g.c),
                 n: turned(g.n),
+                glow: g.glow.clamp(0.0, 1.0),
+                // (a rim splat, faded by itself, is never the surface)
+                film: g.film || g.rim > 0.0,
             }
         })
         .collect();
@@ -496,7 +713,8 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
     // trunk (a neck in a chest) showed through it as a moire, worst when
     // zoomed in; culling them by geometry instead tore joints open.
     let mut front = vec![f32::MAX; w * h];
-    for f in &flats {
+    // (a film -- ice, a web -- is never the surface: the body shows through it)
+    for f in flats.iter().filter(|f| !f.film) {
         let (cx, cy) = (f.c[0], f.c[1]);
         let xa = ((cx - f.r[0] * 0.5).floor() as i64).max(0);
         let xb = ((cx + f.r[0] * 0.5).ceil() as i64).min(w as i64 - 1);
@@ -554,4 +772,75 @@ pub fn render(cloud: &[Gaussian], project: &dyn Fn(V3) -> ([f32; 2], f32), yaw: 
         }
     }
     Skin { origin, w, h, rgba }
+}
+
+#[cfg(test)]
+mod rim_tests {
+    use super::*;
+
+    /// A rim splat is gone turned to the viewer, whole edge-on; one with no
+    /// rim is whole either way.
+    #[test]
+    fn a_rim_shows_edge_on() {
+        assert!(rim_fade(1.0, 1.0) < 1e-6);
+        assert!((rim_fade(1.0, 0.0) - 1.0).abs() < 1e-6);
+        assert!((rim_fade(0.95, 1.0) - 0.05).abs() < 1e-4);
+        assert!((rim_fade(0.0, 0.7) - 1.0).abs() < 1e-6);
+        assert!(rim_fade(1.0, 0.6) < rim_fade(1.0, 0.3), "the more edge-on, the more of it");
+    }
+}
+
+#[cfg(test)]
+mod spz_tests {
+    use super::*;
+
+    /// `SPZ_PAIR=<dir>` names a folder holding `export_30000.ply` and
+    /// `.spz` of the same cloud (Brush's export, Niantic's packer): the
+    /// two decode to the same cloud within the packing's precision.
+    #[test]
+    fn spz_decodes_to_the_ply_it_was_packed_from() {
+        let Ok(dir) = std::env::var("SPZ_PAIR") else { return };
+        let dir = std::path::Path::new(&dir);
+        let ply = load_ply(&dir.join("export_30000.ply")).unwrap();
+        let spz = load_spz(&dir.join("export_30000.spz")).unwrap();
+        assert_eq!(ply.len(), spz.len());
+        let (mut dc, mut dr, mut da, mut dax, mut n) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0usize);
+        let (mut worst_c, mut worst_ax) = (0.0f32, 0.0f32);
+        let extent = {
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for g in &ply { for k in 0..3 { lo[k] = lo[k].min(g.c[k]); hi[k] = hi[k].max(g.c[k]); } }
+            (0..3).map(|k| hi[k] - lo[k]).fold(0.0f32, f32::max)
+        };
+        for (a, b) in ply.iter().zip(&spz) {
+            let c = (0..3).map(|k| (a.c[k] - b.c[k]).abs()).fold(0.0f32, f32::max);
+            let r = (0..3).map(|k| (a.rgb[k] - b.rgb[k]).abs()).fold(0.0f32, f32::max);
+            // axis k against axis k (the same ellipsoid, the same order), either
+            // way round, as a share of the figure: the packer floors tiny
+            // scales at e^-10, which no pixel sees
+            let ax = (0..3).map(|k| { let d = |sgn: f32| (0..3).map(|j| (a.axes[k][j] - sgn * b.axes[k][j]).abs()).fold(0.0f32, f32::max); d(1.0).min(d(-1.0)) / extent }).fold(0.0f32, f32::max);
+            dc += c as f64; dr += r as f64; da += (a.alpha - b.alpha).abs() as f64; dax += ax as f64; n += 1;
+            worst_c = worst_c.max(c); worst_ax = worst_ax.max(ax);
+        }
+        let n = n as f64;
+        println!("{} splats, extent {extent:.3}: position mean {:.5} worst {worst_c:.5}; colour mean {:.2}/255; alpha mean {:.4}; axes mean {:.5} worst {worst_ax:.5} of the extent", ply.len(), dc / n, dr / n, da / n, dax / n);
+        assert!(worst_c <= 1.0 / 4096.0 * 1.01, "positions within a fixed-point step: {worst_c}");
+        assert!(dr / n < 2.0, "colours within quantization: {}", dr / n);
+        assert!(da / n < 0.01, "alphas within a byte: {}", da / n);
+        assert!(worst_ax < 0.02, "axes within the rotation's and log scale's steps: {worst_ax}");
+    }
+
+    #[test]
+    fn smallest_three_unpacks_the_identity_and_a_turn() {
+        // the identity: w largest (index 3), the other three zero
+        let q = unpack_smallest_three((3u32 << 30).to_le_bytes());
+        assert_eq!(q, [0.0, 0.0, 0.0, 1.0]);
+        // x = y = sqrt(1/2), z = w = 0: largest is x (index 0); the components
+        // after it in the word are, from the top, y then z then w
+        let word = 511u32 << 20;
+        let q = unpack_smallest_three(word.to_le_bytes());
+        assert!((q[1] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5, "{q:?}");
+        assert!((q[0] - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-5, "{q:?}");
+        assert_eq!(q[2], 0.0);
+        assert_eq!(q[3], 0.0);
+    }
 }

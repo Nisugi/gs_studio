@@ -74,6 +74,11 @@ impl Posed<'_> {
 }
 
 impl ShadowCaster {
+    /// Bytes this caster holds on the heap (its bands' points).
+    pub fn heap_bytes(&self) -> usize {
+        self.bands.iter().map(|b| b.capacity() * std::mem::size_of::<V3>()).sum::<usize>() + self.bands.capacity() * std::mem::size_of::<Vec<V3>>()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.bands.is_empty()
     }

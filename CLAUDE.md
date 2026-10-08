@@ -45,7 +45,7 @@ Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the p
 `cargo run --release -p gs_field_egui --example relight_golden` holds the GPU relight to vellum_light's goldens); `GS_STUDIO_DOLL=[<hour>][,<n|ne|..>][,indoor][,new][,sky][,field]` opens the
 *Doll* window (the injury doll, `tools/doll.rs` over `gs_field_egui::doll_view`),
 lit as a display (`gs_field::doll_sky::display`, the default: a steady key and fill on a dark backdrop) unless `sky`
-(then at that hour and facing) or `field` (under the stage's sky), `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, its skin is drawn on the GPU (`gs_field_egui::skin_gpu`, the window's *GPU skin*), `GS_STUDIO_DOLL_GPU=0` draws the CPU one, `GS_STUDIO_DOLL_FIGURE=<form>` / `GS_STUDIO_DOLL_FX=webbed,poisoned,Major Bleed,...` (any status or effect name the game uses: `gs_field::doll_state::Status::from_name`) set its figure; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
+(then at that hour and facing) or `field` (under the stage's sky), `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, its skin is drawn on the GPU (`gs_field_egui::skin_gpu`, the window's *GPU skin*), `GS_STUDIO_DOLL_GPU=0` draws the CPU one, `GS_STUDIO_DOLL_LAYERS=1` draws it as layered splats (`gs_puppet::layers`: flesh and bone under opened wounds, a coating built on it, `GS_STUDIO_DOLL_COAT=ice:0.6` or `stone`; `GS_STUDIO_DOLL_CAUSE=fire` or `chest:fire,leftArm:puncture` says what made the wounds: slash, puncture, crush, fire, cold, lightning; with `GS_STUDIO_DOLL_HIT` the wound arrives -- flash, glow, loose dots -- so shoot a few frames after it), `GS_STUDIO_DOLL_BODY=<size|folder>` draws its form's modelled body (`gs_puppet::mesh`, `<data>/meshes/<form>/[<size>/]`: a mesh and, unless `GS_STUDIO_DOLL_BODY_AS=mesh`, its splat cloud, posed on the GPU), `GS_STUDIO_DOLL_FIGURE=<form>` / `GS_STUDIO_DOLL_FX=webbed,poisoned,Major Bleed,...` (any status or effect name the game uses: `gs_field::doll_state::Status::from_name`) set its figure; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
 lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
@@ -55,7 +55,7 @@ Headless texture-generator commands: `--project <family>[/<creature>]:front|side
 (projection-first renders, in the family's order: `projection_order` in
 `<data>/generator.toml`, quadrupeds side-first) `--build-sheet <family>[/<creature>]` (sheet.png + normal.png from a folder's paintings),
 `--save <family>[,...]` (the Rigs tab's Save headless: bake, puppet, skins into the pool, publish --
-the republish after a builder change: rebuild the painted sheets with `--build-sheet` first), `--import-chart <scale-chart.html>` (the Rigs tab's Import: chart -> `<data>/outlines.json`) and `--export-jobs` (every template + `textures/jobs.json`),
+the republish after a builder change: rebuild the painted sheets with `--build-sheet` first), `--import-chart <scale-chart.html>` (the Rigs tab's Import: chart -> `<data>/outlines.json`), `--install-doll <pool dir>` (the playable races' figures -- `race` in their `doll.toml` -- into a game client's pool, e.g. Hydra's `data`: `studio::bodies::install_doll`) and `--export-jobs` (every template + `textures/jobs.json`),
 both in `editor/texture.rs`.
 Visual check of the app: `GS_STUDIO_SHOT=<path.png>` saves one frame and
 closes (read the PNG; `GS_STUDIO_REPORT=<path.md>` writes the scene report
@@ -91,7 +91,12 @@ fresh-built stations, by segment -- a builder change by numbers),
 IoU per view and the segments that moved most -- run it before
 republishing after a builder change), `splat_preview` (a puppet as a
 Gaussian splat cloud beside its skin, CPU-rendered: the look of splats
-before any GPU work), `ply_preview` (a fitted 3DGS `.ply` cloud drawn by
+before any GPU work), `layers_preview` (the layered cloud, CPU-rendered: `LAYERS_WOUNDS=chest:3,leftArm:3`, `LAYERS_COAT=ice:0,0.45,1` a row per step, `LAYERS_CAUSE=fire`, `LAYERS_FX=bleeding,rooted` statuses on it, `LAYERS_FRESH=chest:0.05,0.3,1.5` a row per age of a hit, `LAYERS_ZOOM` / `LAYERS_LOOK_Y` for a close look), `mesh_pose` (a modelled mesh bound to a family's rig and posed, CPU-rendered: `<mesh dir>` holds `body.obj` + `color.png`; it writes the rig's `bones.txt` there, `tools/mesh_weights.py` (Blender) makes `weights.txt` from it, `MESH_MEASURE=1` writes the puppet with its rings measured from the mesh; `image-gen/mesh_views.sh` + `mesh_pack.sh` make a form's body from a painted front: views, mesh at each size, weights, puppet, pictures, splat),
+`grid_body` (the injury doll's grid figure: a race's mesh painted with
+the grid skin's lines in the body's own space, written as a form of its
+own, `data/meshes/grid_figure`; the doll's figures are the pool's bodies,
+`gs_field::doll_roster`, not the creature forms),
+`ply_preview` (a fitted 3DGS `.spz` or `.ply` cloud drawn by
 the same renderer, scaled to a height and grounded) and `ply_pose` (that
 cloud bound to a family's rig by nearest segment and posed by it, beside
 the puppet's skin in the same pose), `ply_silhouette` (its front and side
@@ -99,7 +104,8 @@ masks; `tools/cloud_outlines.py` traces them into `outlines.json` and
 `tools/fit_biped.py` places a biped rig on a front outline,
 `tools/frames_to_paintings.py` makes its paintings from the orbit frames
 -- how a fitted cloud becomes a form: the lurk; its cloud lives at
-`<data>/clouds/<family>.ply`, which the Rigs tab's *Splats* draws bound
+`<data>/clouds/<family>.spz` (or `.ply`: `gs_puppet::splat::load_cloud`
+reads either, the `.spz` a tenth the size), which the Rigs tab's *Splats* draws bound
 to the puppet),
 `rig_check` (one rig's editor warnings, build result and rest IoU, plus
 overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
@@ -170,7 +176,8 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   and `field_lights` do the drawing. Built at `opt-level = 3` in dev too.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must
-  stay Android-safe): it embeds baked artefacts via `include_dir!` and hands
+  stay free of them, a layering rule: Android is no longer a target -- the
+  field and the doll are for a desktop with a GPU, decided 2026-10-07): it embeds baked artefacts via `include_dir!` and hands
   their text to the frontend.
 - `gs_field_egui` -- the renderer game clients use (art cache, stage,
   puppet/doll fallback draw).

@@ -33,6 +33,7 @@ pub mod cards;
 pub mod condition;
 pub mod creature;
 pub mod data_dirs;
+pub mod doll_roster;
 pub mod doll_sky;
 pub mod doll_state;
 pub mod dolls;

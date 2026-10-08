@@ -251,8 +251,11 @@ zoom the splat look; the spacing is the cloud's resolution, so it starts
 finer here, 0.02 ft, than on the stage, and while the view turns or a
 bone drags the cloud is drawn at twice the spacing, a quarter of the
 splats, then sharp when it stops. A family with a FITTED cloud,
-`<data>/clouds/<family>.ply` (a 3D Gaussian Splatting export), is drawn
-from that instead: each Gaussian bound to the puppet's nearest segment
+`<data>/clouds/<family>.spz` (Niantic's compressed splat file, version 4,
+about a tenth of the `.ply` it was packed from -- `pip install spz` packs
+one; the loader turns its right-up-back frame back to the trainer's) or
+`.ply` (a 3D Gaussian Splatting export; the `.spz` is taken when both
+exist, `gs_puppet::splat::cloud_path`), is drawn from that instead: each Gaussian bound to the puppet's nearest segment
 and moved by the pose, `gs_puppet::splat::BoundCloud`; the status line
 says "fitted cloud") and **Hold** (a weapon or shield for each hand, from the props file -- see
 *Held props* below), each row led by its label in small capitals, then the
@@ -869,7 +872,7 @@ an *x* to put it back:
   wet blood, rank 3 takes an arm, hand or leg off (a raw stump); on a part
   that cannot be lost (head, neck, trunk) rank 3 is worse again -- torn
   open, the gashes wide and many, the blood pooled. A scar -- a hero's
-  healed wound, `PuppetKey::scars` -- is a pale ridged line, wider and more
+  healed wound, `PuppetKey::scars` -- is a rosy ridged line in a dark outline (so it reads on pale skin and painted cloth alike), wider and more
   with rank; a rank-3 scar on a limb is the limb healed off (a closed
   stump). An eye's wound marks round it on the head: bruised and
   bloodshot, gashed across, gone (a bloody socket); its scars cross it, and
@@ -921,7 +924,7 @@ an *x* to put it back:
   | on the skin (marks, baked with the wounds, `gs_puppet::wounds::status`) | poisoned (green veins, sickly tint), diseased (pallor, lesions, sores), bleeding (blood running from every wound), rooted (roots winding up the legs), bound (glowing bands round trunk and arms), hidden (in shadow), invisible (ghost-pale, shimmering), possessed (a dark cast, dark veins); frozen keeps its frost, webbed its web; a cut throat is a neck wound |
   | how it holds itself (`[posture.<name>]` in the pose files) | terrified cowers and trembles, demoralized slumps (feeble, less), crippled limps, staggered is off balance; dazed, confused and staggered sway |
   | how it breathes | frenzied and overexerted fast and deep, terrified quick, slowed slow; immobile, bound, rooted, frozen and unconscious hold still |
-  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed |
+  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding, unless the figure is layered splats, which build their blood), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed |
 
   The game's names fold into these (`Status::from_name`: `thorned` and
   *Major Poison* are poisoned, *Sheer Fear* and *Horrify* terrified, *Mind
@@ -941,6 +944,140 @@ an *x* to put it back:
   2-3 ms of CPU instead of 20-26, eyes, web and frost included. On by
   default; off draws the same figure on the CPU. *The field's sky* stands it under the stage's own scene, hour and
   facing instead of the window's sliders.
+  The doll's *Figure* is one of its roster (`gs_field::doll_roster`): the
+  playable races, then a few extras -- the modelled bodies in the pool's
+  `global/bodies/`, each told how to show by a `doll.toml` beside it
+  (`label`, `kind = "race" | "extra"`, `draw = "splats" | "mesh" | "made"`,
+  `order`, `made_splats`: how many splats "made" makes, 800k unless it
+  says -- every wound is rebuilt over them; `race` and `variant`: the
+  playable race it is a figure of and which, `race = "Half-elf"`,
+  `variant = "Male - grid"`), copied from `<data>/meshes/<form>/doll.toml` with the body.
+  A game client's doll offers only the figures that say their race, by
+  race (`doll_roster::races`): Hydra's *Race* and *Figure*, for the
+  half-elf male painted and on a grid so far. `gs-studio --install-doll
+  <client data folder>` puts just those into a client's pool
+  (`bodies::install_doll`): each figure's puppet, thin mesh, weights and
+  one cloud, no sheets -- a client draws it as its cloud, so a body with
+  no `color.png` loads (grey paint) and "made" splats, which read the
+  sheet through the mesh, fall back to its trained cloud wherever the paint
+  does not land (a thin mesh, no sheet). A
+  creature's form (`humanoid`, `canine`...) is the creature field's, not
+  the doll's; `GS_STUDIO_DOLL_FIGURE=<form>` still names any form, for a
+  look at one. The first extra is the grid figure (`data/meshes/
+  grid_figure`, made by `examples/grid_body` from a race's mesh: the grid
+  skin's slate and pale 0.25 ft lines, laid in the body's own space so
+  they run unbroken across the sheet's islands, drawn as its own trained
+  splats like every other body: `image-gen/grid_pack.sh` makes them).
+  *Modelled body* draws the figure as its form's modelled body where it
+  has one (`gs_puppet::mesh`): a triangle mesh made from four painted
+  views by a multi-view image-to-3D model, with its sheets and its
+  skeleton shares, and *as splats* a Gaussian cloud trained from pictures
+  of that mesh (Brush), riding it. Both are uploaded to the card once and
+  posed there from the puppet's segment transforms (`mesh_gpu.wgsl`,
+  `cloud_gpu.wgsl`): a frame's CPU share is some 0.02 ms. Bodies live in
+  `<data>/meshes/<form>/[<size>/]` (`body.obj`, `color.png`, `normal.png`,
+  `weights.txt`, `splat.spz` or `splat.ply`; *size* picks among `master`, `40k`...), and
+  a form's own puppet -- its rings measured from the mesh -- in
+  `<data>/meshes/<form>/puppet.toml`, installed into the pool as that
+  form when the app starts. A form that brings its own puppet has its
+  largest body installed too, into `<pool>/global/bodies/<form>/`
+  (`bodies::install_bodies`; the pool keeps only the source's one cloud, `.spz` or `.ply`, so a retrain's new cloud is never shadowed by an old one), and
+  any doll -- this window's or a game client's (`doll_view`) -- draws such
+  a form as its trained splats by itself (`creature_puppet::has_body`):
+  the plan is `docs/gpu-doll-plan.md`. A body's pose is bones and a draw
+  order, not pixels, so it is drawn at the window's own size, up to
+  760 px tall (`BODY_SIZE_STEPS`; the smooth skin stops at 360), and a
+  small figure draws a thinned share of its cloud, the most opaque and
+  widest splats (a third under 240 px, an eighth under 110:
+  `gs_puppet::mesh::TIERS`). `GS_STUDIO_DOLL_BODY=<size>` (or a folder,
+  for the humanoid) turns it on, `GS_STUDIO_DOLL_BODY_AS=mesh` draws the
+  mesh. Hurt, scarred, coated, dead or under a status drawn as marks
+  (poisoned, diseased, bleeding...), a splat body is the layered cloud
+  below wearing its splats (`doll_view::layered_if_marked`, one rule for
+  every doll): made once when what is on the body changes, on a worker --
+  the last one stands in until it is in, so a wound never stalls the
+  frame -- then posed on the GPU like the rest. A hit's arrival is built
+  once (about 0.1 s on a race's 36k splats, each dot bound as its splat or
+  its anchor already is, not searched for): the hit part at a dozen ages,
+  which the GPU blends by the hit's age, and what it throws off, which the
+  GPU moves -- flying, falling, lying where it lands -- frame by frame. Its
+  Gaussians face as the mesh does there, hurt or whole, and the marks
+  sheet's glow (nerves) and wetness (fresh blood, and an open wound's
+  pit) ride along to the GPU, so the lamps shine off wet blood on a body
+  as on the smooth skin.
+  The statuses that change the body are BUILT on it, in layers of splats
+  over its own (`gs_puppet::status_layers`, `wraps`), not painted into its
+  colour. Webbed and bound hold the figure tight first (the pose set's
+  `webbed`: arms pinned, legs together) and wrap it whole in that pose,
+  round its outline at each height, so a wrap crosses the gaps between
+  arm and trunk and between the legs: bound in coils of thick twisted rope
+  at the ankles, knees, hips and wrists, waist and elbows, chest; webbed
+  in orb webs, spokes and spiral, laid over it, most on its front, and a
+  few threads of silk wound round it. Rooted grows thick bark vines up
+  the legs from roots spread on the ground; bleeding (`blood`) fills each
+  open wound's lower part with a glossy pool, soaks the skin or cloth round
+  it dark, most of it below, and runs raised, beaded wet blood down the
+  figure AS IT STANDS -- off the wounded part onto the parts joined below
+  it, not across the gap from a hanging arm to a thigh, never onto a hand
+  (the modelled fingers are not the puppet's) -- to a drip hanging off an
+  overhang and pools on the ground; while a hit arrives it wells, runs and
+  pools in turn, and the doll floats no drops over a layered figure;
+  poisoned (`afflict`) raises dark veins, aglow down their middle, that
+  run out a foot or more across the body and branch well apart, from the
+  biggest open wound (another only where it lies well away from it; else
+  from a bite low on the neck and on the forearm), turning aside round the
+  lumps of a trained body's skin and never onto the face, with blisters
+  clustered where they start, a sweat's sheen and
+  a sickly cast; diseased raises a dozen clusters of boils, mostly on the
+  front, each in a dark blotch with a crusted sore or two, under a pallor
+  (not on the face, nor below the knee); hidden wraps it in a veil of shadow; possessed, in a violet
+  pall with wisps rising off the head and shoulders; invisible makes its
+  skin a pale film seen only edge-on, a glassy rim round a nearly empty
+  middle, its wounds and whatever is built on it hanging in the air, and
+  it throws no shadow (on a modelled body the rim is an outline drawn
+  where the figure ends or one part of it lies well in front of another,
+  shimmering, and specks of light drift up off it and wink out); dead turns its skin a waxy grey-blue -- on a trained body
+  only what is skin (judged by the colour of its face and hands, part by
+  part, so a shirt the same tan keeps its colour), its clothes dulled --
+  and its open wounds' blood has run out of it as it lies and pooled,
+  dark and drying; lying down, the doll draws it smaller where it would be
+  wider than the window. What a status builds holds to the part it wraps
+  (`mesh::BindAs::Rigid`), not to whatever skin is nearest it. Frozen, it
+  is iced over head to foot, over its wounds (the ice coating,
+  `layers::Material::Ice`, two films deep so the body shows through ice
+  with depth), and the surface under the ice shines as wet does; icicles
+  hang off whatever of it faces down, as long as they hang clear of the
+  body, frost needles stand off it, thickest on what faces up, and its feet
+  are locked in a lumpy block of ice with rime on the ground round them
+  (`frost`, built as it stands). Both are FILMS (`splat::Gaussian::film`): a film
+  tints what is under it but is never taken for the surface, so the body
+  shows through the ice and, past its edge, so does the backdrop -- on the
+  GPU (`cloud_gpu.wgsl`, `splat_gpu.wgsl`) as on the CPU (`splat::render`).
+  *Layered splats* (`GS_STUDIO_DOLL_LAYERS=1`) draws it as dots anchored
+  to the skin, in layers (`gs_puppet::layers`, a first test): the skin's
+  dots wear the sheet and the baked marks; a wound is a few gashes placed
+  on its part (scratches at rank 1, to the flesh at rank 2, wider and to
+  the bone at rank 3), each a pit the dots sink into -- skin, fat, flesh
+  and bone in bands down its walls, lit by its slope, the skin round it
+  bruised and raised -- and a severed limb's stump ends in a
+  cross-section, flesh round bone. What made a wound shapes it (*hits
+  are*: the kind a part's wound becomes when its rank is raised;
+  `GS_STUDIO_DOLL_CAUSE=fire` or `chest:fire,leftArm:puncture`): a slash
+  gashes, a puncture bores a hole, a crush dents and bruises, fire chars
+  a crater whose cracks glow, cold leaves a crust of frost, lightning a
+  branching burn. A hit ARRIVES: for four seconds after a wound's rank
+  rises the wound opens in a flash, a burn cools from white hot to
+  embers, and dots leave the body -- blood, embers, ice, sparks -- fly,
+  fall and lie on the ground (a cloud rebuilt each twentieth of a second
+  meanwhile, some 60 ms a frame); a coating (*ice* or *stone*, the
+  *built* slider, `GS_STUDIO_DOLL_COAT=ice:0.6`) climbs the body from the
+  ground and stands off it, thickening behind its front, so the outline
+  grows. The cloud goes through the stage's splat rasteriser
+  (`skin_gpu::Figure::Splats`) into the same lit pass. Web, frost, eyes
+  and the contour are not drawn in this mode yet.
+  `cargo run --release -p gs_puppet --example layers_preview -- <out.png> humanoid`
+  draws it on the CPU (`LAYERS_WOUNDS=chest:3,leftArm:3`,
+  `LAYERS_COAT=ice:0,0.45,1`: a row per step).
 
 **What a creature draws as**, first that it has
 (`CreatureArtCache::prepare_creature_art`):

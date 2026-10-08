@@ -1195,3 +1195,392 @@ Two more `creature_field.rs` regions (twenty-two in all,
   drawn (`draw::eye_lost`).
 * Every status draws over the wounds (poison, disease, possession and
   roots used to go under them).
+
+### 7.43 Layered splats on the doll (a first test)
+
+* `gs_puppet::layers` (**a new file**): `LayerCloud::build` lays a puppet's
+  surface out once as anchors (segment, station, ring angle, its place on
+  the surface layout); `LayerCloud::dots` poses them through
+  `draw::surfaces` (so joints share their bend as the skin's do) into
+  Gaussians by layer -- skin (the sheet and the baked marks, the wounds'
+  own paint left off), a wound as a few placed gashes per part
+  (`layers::Gash`: scratches at rank 1, pits to the flesh at 2 and the
+  bone at 3) whose dots sink to the pit's depth and are fat, flesh or
+  bone by it, stacked up steep walls, facing as the pit's surface does and
+  darker the deeper, the skin round them bruised, bloodied and raised; a
+  severed stump's cross-section; and a `Coating` (`Material::Ice`,
+  `Stone`) standing off the surface. Each dot keeps its anchor.
+  `skin::segment_marks` / `marks_sheet` and the wounds' noise are
+  `pub(crate)` for it. Example `layers_preview`.
+* `PuppetKey::with_layers(on, params, coat)` (**new**; fields `layers`,
+  `coat: CoatKey`): sets `splats` too, and `pose_puppet_inner` builds the
+  layered cloud in place of `splat::cloud` (anchors cached per puppet and
+  spacing, `layer_cloud`).
+* `doll_view::paint_in_view` draws a figure's `splats` (**new**:
+  `skin_gpu::Figure::Splats` under `SkinLit::Floor`, as the stage does),
+  and asks for `Bare::Mesh` when the key is layered, whatever `gpu_skin`
+  says. Without the pass it is the CPU-rendered cloud, unlit.
+* Not drawn in this mode: web, frost, eyes, the contour, wetness and glow.
+* Causes and arrival (**new**): `layers::Cause` (slash, puncture, crush,
+  fire, cold, lightning) shapes a part's wound; `layers::Fresh` (a part,
+  seconds since it was hit) opens it in a flash, cools a burn and throws
+  `Layer::Loose` dots off it, which fall and lie on the ground until
+  `FRESH_SECS`. `PuppetKey::with_causes` / `with_fresh` (fields `causes`,
+  `fresh`, the age in `FRESH_STEP_S` steps); `doll_view` sets `fresh` from
+  `PuppetCache::last_hit` for a layered key and repaints while it lasts.
+* `splat::Gaussian::glow` / `SplatFlat::glow` (**new**): that much of a
+  splat is not cel-shaded; the GPU splats carry it per instance (the 20th
+  float, location 8), the front pass keeps the front-most core's in its
+  normal target's alpha, and the final pass writes it as the lit layer's
+  alpha, as the skin's glow.
+* Finer near a wound (`layers::DETAIL`): an anchor within `DETAIL_REACH` of a
+  mark is drawn as 2 x 2 smaller dots (`Anchor::split`), so a wound's edge
+  is not a dot wide; marks keep to the middle of a part's length; a burn
+  lights the skin round it; `LayerCloud::dots` builds a segment at a time
+  on every core.
+* A fitted cloud worn as the skin (**new**): `LayerCloud::fit` binds a
+  `.ply` cloud to the anchors (each Gaussian its own surface address) and
+  `LayerLook::fitted` draws its Gaussians in place of the made skin dots,
+  wounds, coatings and hits applied to them as to a made dot.
+  `layers_preview` with `LAYERS_CLOUD=1`. Also: the game's 19 damage types
+  (`Cause`, by the critical tables' names), `PuppetKey::with_hits` (part,
+  type, critical rank), a wound sized by its critical rank, a chest wound
+  that comes out of the back, and a coating that goes with the skin under
+  it (cut over an open wound) and is left off skin buried in another part.
+
+### 7.44 Modelled bodies: a mesh and its splats, posed on the GPU
+
+* `gs_puppet::mesh` (**a new file**): `Mesh` (an OBJ of triangles with one
+  sheet), `BoundMesh` (each vertex's shares of the puppet's segments: the
+  nearest segment's, or Blender's automatic weights read by `load_weights`
+  -- `bones_text` writes the skeleton out, `tools/mesh_weights.py` works
+  them out, a bone of one side keeping to its side), `BoundMesh::measured`
+  (the puppet's rings measured from the mesh), `SplatBody` (a cloud trained
+  from pictures of the mesh, each Gaussian taking the shares and facing of
+  the vertex nearest it), `BodyMesh` (the two with their sheets) and
+  `BodyFrame`: one pose of a body with nothing per vertex in it -- the
+  segments' transforms, a projection as three rows, the image's box.
+  `Posed::hung` says whether the arms were hung; a modelled hand is not
+  given the mitten's quarter turn (`BoundMesh::bone_xfs`).
+* `skin_gpu::Figure::Body`: the body's vertices, triangles, sheets (with
+  their smaller sizes, for a sampler) and splats are uploaded once and kept
+  by mesh; a draw sends one uniform block. `mesh_gpu.wgsl` moves each vertex
+  by its shares, rasterises at 2 x 2 samples and resolves to the layer's
+  albedo, lit base and geometry; `cloud_gpu.wgsl` does the same for the
+  splats, read from a storage buffer in the frame's ORDER (far to near:
+  `SplatBody::far_to_near`, each splat's depth from the segments'
+  transforms alone, counted into 65536 steps) and blended "over" -- a
+  fitted cloud is many faint Gaussians over each other and is only right
+  in order. A splat smaller than a pixel is faded as it is widened to one,
+  a pixel no core covers takes its neighbour's facing, and a facing
+  turned from the viewer is turned round (a generated mesh has an inner
+  shell): each of those was a speckle of dark pixels.
+* A body's splats hurt, scarred or coated (`creature_puppet::marked_body`):
+  the layered cloud wearing them, made at REST once per state of the body
+  and bound to its mesh (`SplatBody::bind_facing`), so the GPU poses it
+  like the body's own -- a wounded frame costs what an unwounded one does.
+* `creature_puppet`: `set_body_dir(family, dir)`, `PuppetKey::with_modelled`,
+  `PosedPuppet::body`; a key that is modelled AND layered is the layered
+  cloud wearing the body's splats (`LayerCloud::fit_bound`), posed on the
+  CPU as before. `doll_view` submits `Figure::Body`.
+* studio: `bodies.rs` finds `<data>/meshes/<form>/[<size>/]` and installs
+  a form's own puppet into the pool; the Doll window's *Modelled body*,
+  *as splats* and size.
+
+## Pose cache byte budget (2026-10-07)
+
+`POSE_CACHE_CAP` (256 poses) was the only bound on `PuppetCache`'s posed
+display lists, and a pose built for the GPU skin (`Bare::Mesh`, the injury
+doll's default when the GPU is up) weighs about 3.5 MB at the 360 px size
+step (measured: `a_pose_weighs_what_its_pixels_do`, `--nocapture`), the
+surface build 1.2 MB, the plain skin 0.2 MB. Breathing (16 steps), facing,
+each injury and status all key their own pose, so one doll could fill the
+cache to near a gigabyte. The cache now also keeps to `POSE_CACHE_BYTES`
+(192 MB), least recently used first; a host sets its own with
+`PuppetCache::set_pose_budget` and reads the weight with `posed_bytes()`.
+`PosedPuppet::heap_bytes` (and `heap_bytes` on gs_puppet's `Skin`,
+`SkinSurface`, `SkinMesh`, `ShadowCaster`, `SplatFrame`, `BodyFrame`) is
+what it counts.
+
+## `.spz` splat clouds (2026-10-07)
+
+`gs_puppet::splat::load_spz` reads Niantic's SPZ version 4 (`NGSP` header,
+six zstd streams, decoded with the pure-Rust `ruzstd`, so Android builds
+too); `load_cloud` picks it or `load_ply` by extension, `cloud_path` /
+`cloud_file` prefer a `.spz` beside a `.ply`. A modelled body's cloud may
+be `splat.spz` (`modelled_body`). SPZ holds right-up-back; the loader turns
+it back to the trainer's right-down-front (y, z and the rotation's y, z
+negated), so a packed `.ply` decodes to what `load_ply` gave: checked
+against Brush's `export_30000.ply` / `.spz` pair (35k splats): positions
+and axes within 1/700 of the figure, colour within 0.7/255. Higher
+harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
+0.7 MB).
+
+## The doll draws a form's modelled body by itself (2026-10-07)
+
+`docs/gpu-doll-plan.md` is the plan. What landed:
+
+- Bodies travel through the pool: `gs_field::puppets::bodies_dir()` is
+  `global/bodies/<form>/`; gs-studio installs a form's largest body there
+  when the form brings its own puppet. `creature_puppet::body_of` finds a
+  form's body there by itself (`set_body_dir` still overrides);
+  `has_body(family)` says whether there is one (looked up once per puppet
+  set, the answer kept, skin and arms suffixes stripped). Loaded bodies
+  are dropped when the puppet set's generation changes.
+- `PuppetKey::auto_body` (true from `PuppetKey::new`, cleared by
+  `with_modelled`): `doll_view::paint_in_view` turns `modelled` on, as the
+  trained cloud (`body_cloud = 1`), when the form has a body and the host
+  did not say.
+- `doll_view::layered_if_marked` / `body_marked` / `LAYERS_SPACING_FT`:
+  the rule that makes a modelled body's splats the layered cloud once a
+  wound, scar, coating, death or a marks-drawn status is on it, moved
+  from gs-studio's Doll window so every doll draws alike.
+- `BODY_SIZE_STEPS = [520, 760]` and `body_size_step`: a modelled body is
+  built at the window's own size above 360 (`SIZE_STEPS` is unchanged:
+  the smooth skin stays capped).
+- `gs_puppet::mesh::TIERS`, `BodyMesh::splats_at`, `SplatBody::thinned`:
+  a trained cloud thinned by opacity times footprint, a third under
+  240 px and an eighth under 110, made once per tier.
+- `gs_puppet::splat::Gaussian::wet` (0..1): the layered cloud keeps the
+  marks sheet's glow and wetness (fresh blood; an open pit is at least
+  half wet); `cloud_gpu.wgsl` carries wetness in `n.w`, through the front
+  pass in the stored normal's length, into the geo normal as
+  `field_gpu::wet_normal` encodes it (constants checked by
+  `the_cloud_shader_reads_wetness_as_the_lamp_pass_does`).
+- `SplatBody::bind_facing(.., keep_facing)`: a Gaussian with no facing
+  that lies on the surface takes the mesh's normal, so a hurt body's
+  fitted Gaussians are lit as an unhurt body's are (they were flat).
+- A body loads on a worker thread (`body_now`: `BodyNow::Loading` until
+  it is in, a ticket so a load that outlives a reset is dropped, a panic
+  in the loader counted as no body). Meanwhile the figure is drawn some
+  other way as a stand-in, `PosedPuppet::pending`, which the pose cache
+  never keeps; `doll_view` repaints every 100 ms while one shows, and
+  `bodies_loading()` holds a gs-studio shot until the body is in.
+
+## Webbed and frozen on a body; the doll's roster (2026-10-07)
+
+- `gs_puppet::splat::Gaussian::film` / `SplatFlat::film`: a see-through
+  film (ice, a web) is never a core, so it never makes a pixel opaque.
+  `cloud_gpu.wgsl` reads it in `ax0.w` and gives a film no `solid`;
+  `splat_gpu.wgsl` takes it as instance attribute 9 (`SPLAT_BYTES` 80 ->
+  84) and discards it from the front pass; `splat::render` leaves films
+  out of its front.
+- `gs_puppet::layers`: a webbed figure's layered cloud wears strands of
+  film (`Layer::Web`, laid an anchor at a time along `skin::web_strands`,
+  the smooth skin's own pattern) and a few bind threads, limb to trunk or
+  leg to leg; a frozen one wears an ice coating, head to foot, over its
+  wounds, its dots films, the skin under it at least `ICE_SHINE` wet. Over
+  a fitted cloud the coat is laid once an anchor on the cloud's surface,
+  not once a Gaussian. `doll_view::body_marked` counts web and ice, so a
+  webbed or frozen body is drawn layered.
+- The doll's figures are `gs_field::doll_roster`'s: `doll_view` draws a
+  figure as its `doll.toml`'s `draw` says. A client's picker should list
+  `doll_roster::roster()` (races, then extras) instead of a creature
+  form's skins.
+- `a_hit_on_a_modelled_body_costs` (`DOLL_BODY_TIMING=<form dir>[:<size>]`,
+  `--release --nocapture`) times the layered rebuild. On the half-elf's
+  40k body: 357 ms for a first wound and 70-130 ms for each fresh-hit step
+  with its trained 57k splats; 2.9 s and ~1.4 s with 800k made splats.
+
+## A hit no longer stalls the doll (2026-10-07)
+
+- `marked_body` is made on a worker (`Marked::{Ready, Failed, Building}`):
+  one build at a time a body, the newest state next, the body's last
+  cloud standing in meanwhile (`PosedPuppet::pending`, not cached;
+  `doll_view` repaints every 40 ms while one shows; `bodies_loading()`
+  also waits for these, so a shot is of the arrived cloud).
+- `build_marked` binds without searching: `gs_puppet::layers::Dot::source`
+  (the fitted Gaussian a dot wears) binds `BindAs::Like` the worn cloud,
+  so a hurt body's own splats ride and face as an unhurt one's; a dot on
+  an anchor binds `BindAs::Vertex` its anchor's vertex
+  (`anchor_vertices`, found once a body and cloud with
+  `mesh::nearest_vertices`); only loose dots, threads and stump ends are
+  searched (`SplatBody::bind_as`).
+- While a hit arrives only its part is rebuilt
+  (`LayerCloud::fresh_segments`, `dots_in`); the rest of the body is made
+  once a hit, open, and kept (`still part`, two kept), and the two are
+  `SplatBody::joined`.
+- `BodyMesh::made_count` (from a figure's `doll.toml` `made_splats`, else
+  `MADE_SPLATS`): the grid figure's made cloud is 300k.
+- Measured: see `docs/gpu-doll-plan.md`. Tests:
+  `a_hurt_body_is_made_off_the_frame`, gs_puppet's
+  `a_hit_part_rebuilt_alone_completes_the_rest` and
+  `bind_as_reuses_what_is_known_and_searches_the_rest`.
+
+## A hit's arrival played on the GPU (2026-10-07)
+
+- `gs_puppet::layers::Particle` (+ `ParticleGlow`, `Particle::at`): what a
+  hit throws, as launch point, velocity and timing; `loose` makes these
+  and the CPU path moves them with `at`, so it is unchanged.
+  `LayerCloud::arrival` builds the hit part at each of `ARRIVAL_AGES`
+  (twelve, 0 to `FRESH_SECS`) with nothing thrown, and the particles.
+- `gs_puppet::mesh::SplatBody::frame` (0 always, k + 1 arrival frame k)
+  and `particles`; `joined` carries both.
+- `marked_state` drops a hit's step: one build a hit (`build_marked`
+  joins the rest of the body, the frames and the particles).
+- `skin_gpu`: `SkinJob::arrival_age` (< 0 none); the body's uniform block
+  gains `arrive` (the frames' ages, the age now, how many;
+  `ARRIVE_FLOATS`); a splat's `ax1.w` tags its frame, and a particle is
+  packed as `cloud_gpu.wgsl`'s `thrown` reads it (-1 thrown, -2 rising).
+  The shader blends the two frames either side of the age (no age: the
+  last, the wound as it stays) and moves the particles.
+- `doll_view`: a GPU modelled body's key keeps a hit's label at step 0,
+  so its pose is one through the hit; the age is counted from when the
+  build is in (`arrival_from`), so the arrival is seen from its start.
+- `gs_puppet::layers::Hollows` and `LayerCloud::dots_and_hollows`: the
+  still part keeps the rest of the body's pits, and `arrival(.., around)`
+  clears the hit part's frames out of them, so the frames are the whole
+  build's hit part dot for dot.
+
+## Statuses built on the body (2026-10-07)
+
+- `gs_puppet::status_layers` (new, crate-private): per segment, what a
+  status builds as dots (`Layer::Status`) on the layered cloud -- rooted's
+  bark vines and ground roots, bleeding's raised rivulets and drips,
+  diseased's boils, poisoned's blisters, hidden's veil, possessed's pall
+  and wisps, and bound's per-part rope loops where no held pose is given.
+  The layered path no longer paints rooted and bound into the marks sheet.
+- `gs_puppet::wraps` (new): webbed and bound wrap the whole figure in the
+  pose a status holds it in (`LayerLook::held`; `Layer::Wrap`), round its
+  envelope (per height, the convex hull of its skin points), carried back
+  into the build pose part by part. `PoseChoice::of_statuses` holds bound
+  as webbed is; `build_marked` resolves the held pose itself
+  (`pose_set_of`) and keeps it in the marked state; the still part keeps a
+  wrap whatever segment it rides.
+- `layers`: invisible makes the skin a faint film; dead greys a body's
+  own splats under the marks; `mesh::BindAs::Rigid(seg)`: status, web and
+  wrap dots hold to their part.
+- `creature_puppet::load_body` scales a body sheet over 8192 px down to
+  fit (wgpu's texture limit), saying so on stderr.
+
+## Thin runtime meshes; held figures pinned (2026-10-08)
+
+- `load_body` takes `body_thin.obj` + `weights_thin.txt` where they are
+  (else `body.obj` + `weights.txt`); gs-studio installs the thin pair into
+  the pool under the plain names. Every doll figure is drawn as splats, so a
+  body's mesh only binds them, and its paint need not survive thinning.
+  `tools/decimate_mesh.py` thins by merging close vertices (never Blender's
+  collapse decimate, which deleted half_elf_male's hands and forearms) and
+  turns every face outward; image-gen's `pack_figure.sh` runs it with
+  THIN=1 into `body_thin.obj` beside the full mesh. half_elf_male: 2.4M ->
+  33,880 triangles, 32,978 of 32,985 splats bound, load 0.73 s (5.0 s
+  full), a hit's arrival built in 83-136 ms.
+- `gs_puppet::Puppet::pin_arms`: a held figure's arms turned in at the
+  shoulder, elbows straight, until each wrist lies against the side of the
+  hips -- whatever the rig's own hang leaves them at. `creature_puppet`
+  pins the doll's pose, a flinch while held and the pose the wraps are
+  wound in (`pinned`).
+- `wraps::Envelope::smooth`: the outline eased round each band and between
+  bands, so a web laid on a trained body's lumpy surface does not zigzag.
+
+## Blood built down the figure (2026-10-08)
+
+- `gs_puppet::blood` (new, crate-private): a bleeding figure's open wounds
+  (`Well`: each gash that opens, its lips at rest) pour out what is built
+  on the layered cloud as `Layer::Blood { from }` (`from`: the wound's
+  segment): a glossy pool in the wound's lower part, a soak round it, runs
+  walked down the skin of the pose the figure is shown in
+  (`LayerLook::stands`, else `held`, else as built) -- from part to joined
+  part, stopping at a hand -- to drips, beads and pools on the ground,
+  carried back part by part as wraps are. `Layer` is ordered now (it has
+  a variant with a field). A fresh wound's blood grows with its age
+  (welled, run, pooled), so the arrival frames play it.
+- `status_layers` no longer builds bleeding (its per-part rivulets went),
+  and the layered path no longer paints it into the marks sheet.
+- `creature_puppet::build_marked` gives the blood the standing pose (or
+  the held one) to run down, binds it rigid to its part, and takes the hit
+  wound's blood out of the kept still part wherever it ran (`from`).
+- `doll_view::signs` floats no drops over a layered figure (`key.layers`).
+- `wraps::SkinPoint` carries the skin's facing and whether it lies inside
+  another part.
+- `gs_puppet::skin_field` (new): the figure's skin as shown, filed by place
+  (`Field::surface`: the outermost sheet about a point), its `Parts` (hands
+  rough; parent, grandparent or both trunk: joined), and `carry`/`turn`
+  back part by part -- what `blood`, `frost` and `afflict` build on.
+- `gs_puppet::frost` (new): frozen's icicles, frost needles, the ice block
+  at the feet and rime on the ground (`Layer::Wrap`, once a build); the
+  ice coating is two films deep (`layers::ice_under`) and fainter (0.3).
+- `gs_puppet::afflict` (new): poisoned's branching veins and blisters from
+  each open wound (or a bite), diseased's boil clusters, blotches and
+  crusted sores (`Layer::Wrap`); the layered path tints for them in place
+  of the marks sheet's veins and sores, and a poisoned skin is wet with
+  sweat. `status_layers` no longer builds boils and blisters.
+- `doll_view::signs` floats no poison bubbles over a layered figure either.
+
+## Modelled bodies lit smooth (2026-10-08)
+
+- `cloud_gpu.wgsl` `fs_final`: the skin's facing is averaged over the cores
+  within a few pixels that lie on the same sheet of surface (`SMOOTH_PX`,
+  `SMOOTH_FT`). Lit core by core, a trained cloud's big splats showed as a
+  patchwork with dark flecks (half_elf_male's shirt), though the cloud and
+  its training pictures were clean. What is built on the body keeps its own
+  facing: `mesh::SplatBody::own_facing` (set by `build_marked` for every
+  dot but the skin, and for what a hit throws), uploaded in the third
+  axis's w, carried to the final pass on the core's glow (`OWN_FACING`).
+- `gs_puppet::mesh`: a bound splat's facing is blended from the mesh's
+  vertices round it (`VertexGrid::facing_at`, `FACING_REACH_FT`), not
+  taken whole from the nearest one; and binding turns a vertex's facing
+  out where it plainly faces into the part it rides (`BoundMesh::face_out`:
+  a thinned mesh merges a garment's layers and leaves patches facing in).
+- `studio::bodies::install_bodies` keeps only the source's one cloud in the
+  pool: an old `splat.spz` left beside a retrain's `splat.ply` was loaded
+  first.
+
+## Invisible: a rim, shimmering, glinting (2026-10-08)
+
+- `gs_puppet::splat::Gaussian::rim` (0..1): how much of a splat shows only
+  edge-on (`rim_fade`, `RIM_FROM`, `RIM_TO`). `splat::prepare` fades its
+  opacity by its facing; `cloud_gpu.wgsl` does in `vs_cloud`, from a new
+  row of the splat (`Inst::fx`, 144 bytes a splat now), and makes it
+  shimmer -- brighter bands wandering up the figure -- on a running clock.
+  `layers`: an invisible figure's skin is a pale film with a rim of 0.99,
+  a little aglow; its wounds and what is built on it stay whole.
+- Glints: `layers::Particle::loops`, a particle that rises on a loop of
+  its own for as long as it is built, its age a running clock;
+  `LayerCloud::glints` gives an invisible figure's (`gs_puppet::ghost`:
+  ~170 specks off its skin as shown, none off a hand). `build_marked` binds
+  them as it binds a hit's thrown dots (one `loose` helper for both);
+  `skin_gpu` uploads them tagged -3 and `cloud_gpu.wgsl`'s `mote` plays
+  them, risen in the world (`mote_rise`), as `Particle::at` does.
+- `skin_gpu::SkinJob::clock` carries the clock (`arrive[3].z`); the doll
+  runs it for an invisible modelled body, a new image every
+  `GHOST_TICK_S` (1/30 s), and holds it at 0 otherwise.
+
+## Dead: pale skin, old blood; the doll's body as named (2026-10-08)
+
+- `gs_puppet::layers`: dead greys only what is skin on a fitted cloud --
+  `dead_skin` judges it per anchor against the face's and hands' own colour
+  (`skin_tone`): loosely on the head, neck and hands (not hair, which is
+  darker), closely elsewhere and only on a part that is mostly skin -- and
+  mixes it toward `DEAD_SKIN`; the rest is dulled. Without a fitted cloud
+  all of it is skin, as before. A dead figure's open wounds make wells
+  without bleeding, and their blood is built (`blood`) darkened toward
+  `OLD_BLOOD` and barely wet.
+- `build_marked`: what runs on a dead figure runs as it lies -- its whole
+  builds use the doll's own dead pose (`PoseChoice::Dead { variant }`),
+  not the standing one.
+- `doll_view`: a figure wider than `FIT_WIDTH` of the window (lying down)
+  is drawn smaller; a dead one ran off its left edge.
+- `studio::tools::doll`: `GS_STUDIO_DOLL_BODY_AS` is applied whether or
+  not `GS_STUDIO_DOLL_BODY` is set. Named alone, it made the window ignore
+  the figure's `doll.toml` and fall back to made splats -- which read the
+  sheet through the thin mesh, whose paint is invalid: the grid figure's
+  tie-dye. "As made splats" is wrong for any body with a thin pair.
+
+## A client's doll: the playable races alone (2026-10-08)
+
+- `gs_field::doll_roster`: a figure's `doll.toml` may say `race` and
+  `variant`; `races()` / `races_of` group the figures that say their race,
+  by race, each race's by `order` then variant. A game client's doll
+  offers only these (Hydra's Infinite style: *Race* and *Figure*, in
+  place of its humanoid skins).
+- `gs_puppet::mesh::BodyMesh::paint_lands`: its paint lands on its mesh
+  (a full mesh with a sheet). `creature_puppet::load_body` loads a body
+  with no `color.png` (grey paint); `body_cloud` gives a body whose paint
+  does not land its trained cloud when made splats are asked for.
+- `doll_view`: an invisible figure throws no shadow (`shadows: false`)
+  and leaves no contact patch on the ground (`backdrop`'s `dark`).
+- `cloud_gpu.wgsl` `fs_final`: an invisible figure's outline is found on
+  the screen -- the share of samples 2 and 4 px round a pixel (`RIM_PX`)
+  past the figure or on a surface over `RIM_GAP_FT` away -- with a faint
+  turned-away term over it; by the smoothed facing alone it was ragged.

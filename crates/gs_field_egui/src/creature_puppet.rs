@@ -217,6 +217,606 @@ impl SplatKey {
     }
 }
 
+/// One hit as the game reports it: see [`PuppetKey::with_hits`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit<'a> {
+    pub part: &'a str,
+    pub kind: &'a str,
+    pub crit: u8,
+}
+
+/// A fresh hit's age is kept in steps this long, seconds: one cloud per
+/// step while a wound arrives.
+pub const FRESH_STEP_S: f64 = 1.0 / 20.0;
+
+/// A [`gs_puppet::layers::Coating`] quantized for the cache key: the
+/// material (0 = none), its progress in hundredths and its thickness in
+/// thousandths of a foot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct CoatKey {
+    pub material: u8,
+    pub progress_pct: u8,
+    pub thick_mil: u16,
+    pub over_wounds: bool,
+}
+
+impl From<gs_puppet::layers::Coating> for CoatKey {
+    fn from(c: gs_puppet::layers::Coating) -> Self {
+        let material = gs_puppet::layers::Material::ALL.iter().position(|m| *m == c.material).map_or(0, |i| i as u8 + 1);
+        CoatKey { material, progress_pct: (c.progress * 100.0).round().clamp(0.0, 100.0) as u8, thick_mil: (c.thickness_ft * 1000.0).round().clamp(0.0, 2000.0) as u16, over_wounds: c.over_wounds }
+    }
+}
+
+impl CoatKey {
+    pub fn coating(self) -> Option<gs_puppet::layers::Coating> {
+        let material = *gs_puppet::layers::Material::ALL.get((self.material as usize).checked_sub(1)?)?;
+        Some(gs_puppet::layers::Coating { material, progress: self.progress_pct as f32 / 100.0, thickness_ft: self.thick_mil as f32 / 1000.0, over_wounds: self.over_wounds })
+    }
+}
+
+/// A form's body: where it is, whether a host named it ([`set_body_dir`])
+/// or the pool holds it, and the body once loaded (inner None: it would
+/// not load).
+struct BodyEntry {
+    family: String,
+    /// None: the pool has no body for it (looked once per puppet set).
+    dir: Option<std::path::PathBuf>,
+    named: bool,
+    loaded: Option<Option<Arc<gs_puppet::mesh::BodyMesh>>>,
+    /// Being loaded on a worker ([`body_now`]).
+    loading: bool,
+    /// Which load this entry waits for: a load that finishes after the
+    /// entry was reset (a new folder, a new puppet set) is thrown away.
+    ticket: u64,
+}
+
+fn next_ticket() -> u64 {
+    static TICKETS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    TICKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `family`'s entry, the pool looked in for it the first time.
+fn body_entry<'a>(list: &'a mut Vec<BodyEntry>, family: &str) -> &'a mut BodyEntry {
+    if let Some(at) = list.iter().position(|e| e.family == family) {
+        return &mut list[at];
+    }
+    list.push(BodyEntry { family: family.to_string(), dir: pool_body_dir(family), named: false, loaded: None, loading: false, ticket: next_ticket() });
+    list.last_mut().expect("just pushed")
+}
+
+/// A form's modelled body as things stand ([`body_now`]).
+#[derive(Clone)]
+enum BodyNow {
+    /// It has none, or it would not load.
+    None,
+    /// It is being loaded on a worker: draw the figure some other way for
+    /// now, and look again soon.
+    Loading,
+    Ready(Arc<gs_puppet::mesh::BodyMesh>),
+}
+
+/// Whether any body is being loaded, or a hurt body's layered cloud made
+/// (a host taking a screenshot waits).
+pub fn bodies_loading() -> bool {
+    bodies().lock().unwrap_or_else(|e| e.into_inner()).iter().any(|e| e.loading) || marked_building()
+}
+
+type Bodies = std::sync::Mutex<Vec<BodyEntry>>;
+
+fn bodies() -> &'static Bodies {
+    static BODIES: std::sync::OnceLock<Bodies> = std::sync::OnceLock::new();
+    BODIES.get_or_init(Default::default)
+}
+
+/// The pool's body for `family` (`<pool>/global/bodies/<family>/body.obj`,
+/// `gs_field::puppets::bodies_dir`), when it is there.
+fn pool_body_dir(family: &str) -> Option<std::path::PathBuf> {
+    let dir = gs_field::puppets::bodies_dir().ok()?.join(family);
+    dir.join("body.obj").is_file().then_some(dir)
+}
+
+/// The form `family` (a pool key: `humanoid`, `humanoid#lay_figure`,
+/// `half_elf@sword` -- the skin and arms are not the form's) as its body
+/// is filed under.
+fn body_family(family: &str) -> &str {
+    family.split(['#', '@']).next().unwrap_or(family)
+}
+
+/// Whether `family`'s form has a modelled body to be drawn as: one a host
+/// named ([`set_body_dir`]) or one in the pool. What makes the doll draw
+/// a form as its body by itself (`doll_view`).
+pub fn has_body(family: &str) -> bool {
+    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+    body_entry(&mut list, body_family(family)).dir.is_some()
+}
+
+/// Forget every loaded body (the pool changed: a Save installed one): the
+/// next pose loads it again. Named folders stay named.
+fn drop_loaded_bodies() {
+    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|e| e.named);
+    for e in list.iter_mut() {
+        e.loaded = None;
+        e.loading = false;
+        e.ticket = next_ticket();
+    }
+}
+
+/// Where `family`'s modelled body is (ADDITION): a folder holding
+/// `body.obj` (y up, facing +z, standing as the rig was drawn), `color.png`,
+/// and optionally `normal.png`, `weights.txt` (`tools/mesh_weights.py`) and
+/// `splat.spz` or `splat.ply` (a cloud trained from pictures of the mesh, z up as Blender
+/// holds a GLB: `image-gen/mesh_orbit.py` + Brush).
+/// None forgets it. It is loaded the first time a key
+/// [`with_modelled`](PuppetKey::with_modelled) is posed.
+pub fn set_body_dir(family: &str, dir: Option<std::path::PathBuf>) {
+    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+    list.retain(|e| e.family != family);
+    if let Some(dir) = dir {
+        list.push(BodyEntry { family: family.to_string(), dir: Some(dir), named: true, loaded: None, loading: false, ticket: next_ticket() });
+    }
+}
+
+/// `puppet`'s modelled body -- the folder a host named, else the pool's
+/// (`global/bodies/<form>/`) -- loaded and bound to it on a worker thread
+/// the first time it is asked for: a master body's OBJ is hundreds of MB,
+/// seconds of parsing that must not stall the frame. [`BodyNow::Loading`]
+/// until it is in; [`BodyNow::None`] when its form has none or it would
+/// not load (said once, on stderr).
+fn body_now(puppet: &Puppet) -> BodyNow {
+    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+    let entry = body_entry(&mut list, &puppet.family);
+    let Some(dir) = entry.dir.clone() else { return BodyNow::None };
+    match &entry.loaded {
+        Some(Some(b)) => return BodyNow::Ready(b.clone()),
+        Some(None) => return BodyNow::None,
+        None if entry.loading => return BodyNow::Loading,
+        None => {}
+    }
+    entry.loading = true;
+    let (family, ticket, puppet) = (entry.family.clone(), entry.ticket, puppet.clone());
+    drop(list);
+    let name = format!("body {}", puppet_family_short(&family));
+    let load = move || {
+        let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_body(&dir, &puppet))).unwrap_or_else(|_| Err(std::io::Error::other("the loader panicked")));
+        if let Err(e) = &loaded {
+            eprintln!("modelled body {}: {e}", dir.display());
+        }
+        let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(e) = list.iter_mut().find(|e| e.family == family && e.ticket == ticket) {
+            e.loaded = Some(loaded.ok().map(Arc::new));
+            e.loading = false;
+        }
+    };
+    if std::thread::Builder::new().name(name).spawn(load).is_err() {
+        // no thread to be had: say it has none rather than wait forever
+        let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(e) = list.iter_mut().find(|e| e.ticket == ticket) {
+            e.loaded = Some(None);
+            e.loading = false;
+        }
+        return BodyNow::None;
+    }
+    BodyNow::Loading
+}
+
+fn puppet_family_short(family: &str) -> &str {
+    &family[..family.len().min(12)]
+}
+
+/// [`body_now`] when it is in.
+fn body_of(puppet: &Puppet) -> Option<Arc<gs_puppet::mesh::BodyMesh>> {
+    match body_now(puppet) {
+        BodyNow::Ready(b) => Some(b),
+        _ => None,
+    }
+}
+
+/// The largest side a body's sheet keeps (wgpu's default texture limit).
+const MAX_SHEET_PX: u32 = 8192;
+
+fn load_body(dir: &std::path::Path, puppet: &Puppet) -> std::io::Result<gs_puppet::mesh::BodyMesh> {
+    use gs_puppet::mesh::{BoundMesh, Mesh, Paint};
+    let sheet = |name: &str| -> std::io::Result<Paint> {
+        let mut img = image::open(dir.join(name)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{name}: {e}")))?.to_rgba8();
+        // a sheet past what a GPU texture may be (a pack that widened it,
+        // hands spliced on) is scaled down to fit: its places are fractions
+        // of it, so the paint lands where it did
+        let (w, h) = img.dimensions();
+        if w.max(h) > MAX_SHEET_PX {
+            let k = MAX_SHEET_PX as f32 / w.max(h) as f32;
+            let (nw, nh) = (((w as f32 * k).round() as u32).clamp(1, MAX_SHEET_PX), ((h as f32 * k).round() as u32).clamp(1, MAX_SHEET_PX));
+            eprintln!("modelled body {}: {name} is {w}x{h}, past {MAX_SHEET_PX}: scaled to {nw}x{nh}", dir.display());
+            img = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Triangle);
+        }
+        Ok(Paint { w: img.width() as usize, h: img.height() as usize, rgba: img.into_raw() })
+    };
+    // the thin mesh where there is one (tools/decimate_mesh.py): a body is
+    // drawn as its splats, and the mesh only binds them, so its runtime one
+    // is thin -- the full one is for the tools that draw it
+    let (obj, weights) = if dir.join("body_thin.obj").is_file() { ("body_thin.obj", "weights_thin.txt") } else { ("body.obj", "weights.txt") };
+    let mut mesh = Mesh::load_obj(&dir.join(obj))?;
+    let placed = mesh.fit_to_height(puppet.height);
+    let file_verts = mesh.source.iter().max().map_or(0, |m| *m as usize + 1);
+    // shares a tool worked out, when they are this mesh's
+    let given = gs_puppet::mesh::load_weights(&dir.join(weights), puppet).ok().filter(|w| w.len() == file_verts).unwrap_or_default();
+    // its sheet: none in a client's install, which draws the body as its
+    // cloud (`studio::bodies::install_doll`)
+    let has_sheet = dir.join("color.png").exists();
+    let paint = if has_sheet { sheet("color.png")? } else { Paint { w: 1, h: 1, rgba: vec![150, 150, 150, 255] } };
+    let normal = dir.join("normal.png").exists().then(|| sheet("normal.png")).transpose()?;
+    let bound = BoundMesh::with_weights(puppet, mesh, &given);
+    // its splat cloud, put where the mesh was put
+    let splats = match (gs_puppet::splat::cloud_file(dir, "splat"), placed) {
+        (path, Some((centre, s))) if path.exists() => {
+            let mut cloud = gs_puppet::splat::load_cloud(&path)?;
+            cloud.retain(|g| g.alpha >= 0.02);
+            // Blender's z up, facing -y -> y up, facing +z
+            let turn = |v: [f32; 3]| [v[0], v[2], -v[1]];
+            for g in &mut cloud {
+                let c = turn(g.c);
+                g.c = [(c[0] - centre[0]) * s, (c[1] - centre[1]) * s, (c[2] - centre[2]) * s];
+                g.axes = g.axes.map(|a| turn(a).map(|v| v * s));
+            }
+            Some(Arc::new(gs_puppet::mesh::SplatBody::bind(&bound, cloud)))
+        }
+        _ => None,
+    };
+    // its figure's made cloud size (`doll.toml`, beside it or in its form's folder)
+    let made_count = [Some(dir.to_path_buf()), dir.parent().map(|p| p.to_path_buf())]
+        .into_iter()
+        .flatten()
+        .find(|d| d.join("doll.toml").is_file())
+        .and_then(|d| gs_field::doll_roster::read_figure("", &d).made_splats)
+        .unwrap_or(gs_puppet::mesh::MADE_SPLATS);
+    let paint_lands = has_sheet && obj == "body.obj";
+    Ok(gs_puppet::mesh::BodyMesh { bound, paint, normal, splats, made: Default::default(), thinned: Default::default(), made_count, paint_lands })
+}
+
+/// A modelled body's splat cloud as the layered doll wears it
+/// (`LayerCloud::fit_bound`): bound to the layered cloud's anchors once
+/// (a few kept, by the body and the cloud's shape).
+fn fitted_body(puppet: &Puppet, splats: &Arc<gs_puppet::mesh::SplatBody>, params: &gs_puppet::splat::SplatParams) -> Option<Arc<gs_puppet::layers::FittedSkin>> {
+    type Kept = std::sync::Mutex<Vec<((usize, usize), Arc<gs_puppet::layers::FittedSkin>)>>;
+    static FITTED: std::sync::OnceLock<Kept> = std::sync::OnceLock::new();
+    if splats.is_empty() {
+        return None;
+    }
+    let cloud = layer_cloud(puppet, params);
+    let key = (Arc::as_ptr(splats) as usize, Arc::as_ptr(&cloud) as usize);
+    let mut kept = FITTED.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, f)) = kept.iter().find(|(k, _)| *k == key) {
+        return Some(f.clone());
+    }
+    let fitted = Arc::new(cloud.fit_bound(puppet, splats.bound_cloud()));
+    if kept.len() >= 2 {
+        kept.remove(0);
+    }
+    kept.push((key, fitted.clone()));
+    Some(fitted)
+}
+
+/// A modelled body's layered cloud as things stand ([`marked_body`]).
+#[derive(Clone)]
+enum Marked {
+    Ready(Arc<gs_puppet::mesh::SplatBody>),
+    /// It could not be made (no cloud to wear): draw the body some other way.
+    Failed,
+    /// It is being made on a worker: draw this meanwhile (the last one this
+    /// body wore; None: its plain cloud), and look again soon.
+    Building(Option<Arc<gs_puppet::mesh::SplatBody>>),
+}
+
+/// What is on the body that decides its layered cloud: not how it stands,
+/// turns or breathes, nor how far a hit's arrival has got (the GPU plays
+/// that, from one build a hit).
+fn marked_state(key: &PuppetKey) -> PuppetKey {
+    // (held -- webbed, bound -- it is wrapped in that pose: that stays)
+    let pose = if key.pose == PoseChoice::Webbed { PoseChoice::Webbed } else { PoseChoice::Standing };
+    PuppetKey { facing: None, breath: 0, pose, fresh: key.fresh.map(|(label, _)| (label, 0)), ..*key }
+}
+
+/// `pose`, its arms pinned to its sides when `key` is held (webbed, bound:
+/// `Puppet::pin_arms`), as the layered cloud's wrap was wound round it.
+fn pinned(puppet: &Puppet, key: &PuppetKey, pose: gs_puppet::Pose) -> gs_puppet::Pose {
+    if key.pose == PoseChoice::Webbed {
+        puppet.pin_arms(&pose)
+    } else {
+        pose
+    }
+}
+
+/// The pose set `puppet` is posed by (its body type's), parsed afresh: what
+/// a worker making its layered cloud resolves a held pose from.
+fn pose_set_of(puppet: &Puppet) -> Option<PoseSet> {
+    let rigs = gs_field::puppets::puppets();
+    let rig = rigs.get(base_family(&puppet.family))?;
+    PoseSet::from_toml(&rigs.pose_file(&rig.body_type)?.toml).ok()
+}
+
+/// The layered clouds made (by body and state), the bodies one is being
+/// made for, and each body's last.
+#[derive(Default)]
+struct MarkedJobs {
+    kept: Vec<((usize, PuppetKey), Option<Arc<gs_puppet::mesh::SplatBody>>)>,
+    building: Vec<usize>,
+    last: Vec<(usize, Arc<gs_puppet::mesh::SplatBody>)>,
+}
+
+fn marked_jobs() -> &'static std::sync::Mutex<MarkedJobs> {
+    static JOBS: std::sync::OnceLock<std::sync::Mutex<MarkedJobs>> = std::sync::OnceLock::new();
+    JOBS.get_or_init(Default::default)
+}
+
+/// How many layered clouds are kept (a hit's arrival makes one a step).
+const MARKED_KEPT: usize = 6;
+
+/// A modelled body's splats with the key's wounds, scars and coating: the
+/// layered cloud wearing them, made at REST and bound to the body's mesh,
+/// so the GPU poses it as it does the body's own splats -- made again only
+/// when what is ON the body changes, not when it moves. Made on a worker
+/// ([`build_marked`]): one at a time a body, the newest state asked for
+/// next, so a hit's arrival skips steps rather than stalls the frame; until
+/// it is in, [`Marked::Building`] hands over the last one.
+fn marked_body(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Marked {
+    let id = Arc::as_ptr(body) as usize;
+    let at = (id, marked_state(key));
+    let mut jobs = marked_jobs().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, made)) = jobs.kept.iter().find(|(k, _)| *k == at) {
+        return made.clone().map_or(Marked::Failed, Marked::Ready);
+    }
+    let last = jobs.last.iter().find(|(b, _)| *b == id).map(|(_, c)| c.clone());
+    if jobs.building.contains(&id) {
+        return Marked::Building(last);
+    }
+    jobs.building.push(id);
+    drop(jobs);
+    let (puppet, body, key) = (puppet.clone(), body.clone(), *key);
+    let job = move || {
+        let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_marked(&puppet, &body, &key))).ok().flatten();
+        let mut jobs = marked_jobs().lock().unwrap_or_else(|e| e.into_inner());
+        jobs.building.retain(|b| *b != id);
+        if jobs.kept.len() >= MARKED_KEPT {
+            jobs.kept.remove(0);
+        }
+        if let Some(m) = &made {
+            jobs.last.retain(|(b, _)| *b != id);
+            jobs.last.push((id, m.clone()));
+            if jobs.last.len() > MARKED_KEPT {
+                jobs.last.remove(0);
+            }
+        }
+        jobs.kept.push((at, made));
+    };
+    match std::thread::Builder::new().name("marked body".into()).spawn(job) {
+        Ok(_) => Marked::Building(last),
+        // no thread to be had: never mind, it is ours to wait for
+        Err(_) => {
+            marked_jobs().lock().unwrap_or_else(|e| e.into_inner()).building.retain(|b| *b != id);
+            Marked::Failed
+        }
+    }
+}
+
+/// Whether a layered cloud is being made on a worker.
+fn marked_building() -> bool {
+    !marked_jobs().lock().unwrap_or_else(|e| e.into_inner()).building.is_empty()
+}
+
+/// The cloud a modelled body's layered doll wears (its trained splats,
+/// thinned for the key's size, else made from its mesh): what its fitted
+/// skin is fitted from, and what its dots are bound like.
+fn worn_cloud(body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Arc<gs_puppet::mesh::SplatBody> {
+    body_cloud(body, key).or_else(|| body.splats.clone()).unwrap_or_else(|| body.made_splats())
+}
+
+/// Each anchor of `cloud` bound to its vertex of `body`'s mesh, found once
+/// (a few kept): the anchors are fixed at rest, and so is the vertex
+/// nearest each, so a dot made on an anchor is bound without a search.
+fn anchor_vertices(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, cloud: &Arc<gs_puppet::layers::LayerCloud>) -> Arc<Vec<Option<u32>>> {
+    type Kept = std::sync::Mutex<Vec<((usize, usize), Arc<Vec<Option<u32>>>)>>;
+    static KEPT: std::sync::OnceLock<Kept> = std::sync::OnceLock::new();
+    let at = (Arc::as_ptr(body) as usize, Arc::as_ptr(cloud) as usize);
+    if let Some((_, v)) = KEPT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == at) {
+        return v.clone();
+    }
+    // each anchor's skin at rest, as the layered cloud is made (lift taken off)
+    let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
+    let lift = rest.xf.first().map_or([0.0; 3], |x| x.t);
+    let mut points = vec![[f32::NAN; 3]; cloud.len()];
+    for d in cloud.dots(&rest, &gs_puppet::layers::LayerLook::default()) {
+        if let Some(a) = d.anchor.filter(|a| (*a as usize) < points.len()) {
+            points[a as usize] = [d.g.c[0] - lift[0], d.g.c[1] - lift[1], d.g.c[2] - lift[2]];
+        }
+    }
+    let found = gs_puppet::mesh::nearest_vertices(&body.bound, &points);
+    let v = Arc::new(points.iter().zip(found).map(|(p, v)| v.filter(|_| p[0].is_finite())).collect::<Vec<_>>());
+    let mut kept = KEPT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if kept.len() >= 4 {
+        kept.remove(0);
+    }
+    kept.push((at, v.clone()));
+    v
+}
+
+/// [`marked_body`]'s work, on the caller's thread. Every dot is bound as
+/// it can be without a search: a Gaussian of the worn cloud as that cloud
+/// is bound (so a hurt body's own splats ride and face as an unhurt one's),
+/// a dot made on an anchor to the anchor's vertex ([`anchor_vertices`]);
+/// only what flew off is searched for. A hit arriving is built once for the
+/// GPU to play: the rest of the body (made once a hit, kept), the hit part
+/// at each of `layers::ARRIVAL_AGES` (`SplatBody::frame`), and what it
+/// throws off as particles (`SplatBody::particles`).
+fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Option<Arc<gs_puppet::mesh::SplatBody>> {
+    use gs_puppet::layers::{Cause, Fresh, LayerLook};
+    let worn = worn_cloud(body, key);
+    let params = key.splat.params();
+    let fitted = fitted_body(puppet, &worn, &params)?;
+    let cloud = layer_cloud(puppet, &params);
+    let anchors = anchor_vertices(puppet, body, &cloud);
+    let wounds = key.wounds();
+    let scars = key.scar_list();
+    let look = Look { body: key.body, wounds: &wounds, scars: &scars, dead: key.dead, boss_outline: key.boss, yaw: 0.0, outline_px: 1.0, min_station_px: 1.0 };
+    let causes: Vec<(&str, Cause)> = key
+        .causes
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| **c > 0)
+        .filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *Cause::ALL.get(*c as usize)?)))
+        .collect();
+    let fresh = key.fresh.and_then(|(label, step)| Some(Fresh { part: gs_field::dolls::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+    let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *c))).collect();
+    // webbed, bound: held tight, and wrapped whole in that pose
+    let held_pose = (key.pose == PoseChoice::Webbed).then(|| pose_set_of(puppet)).flatten().and_then(|set| PoseChoice::Webbed.resolve(&set, 0).map(|(_, p)| puppet.pin_arms(&set.clamp(p))));
+    let held = held_pose.as_ref().map(|p| puppet.pose(p));
+    // what runs on it (blood) runs down as it stands: held, or standing --
+    // or dead, as it lies (the doll's own pick of its dead poses)
+    let shown_as = match key.pose {
+        PoseChoice::Dead { variant } => (key.pose, variant as u64),
+        _ => (PoseChoice::Standing, 0),
+    };
+    let standing = held.is_none().then(|| pose_set_of(puppet)).flatten().and_then(|set| shown_as.0.resolve(&set, shown_as.1).map(|(_, p)| puppet.pose(&set.clamp(p))));
+    let still = LayerLook { look, effects: key.effects, texture: None, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh: None, fitted: Some(&fitted), held: held.as_ref(), stands: standing.as_ref() };
+    // as drawn, unposed: every segment only lifted to the ground, which is taken back off
+    let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
+    let lift = rest.xf.first().map_or([0.0; 3], |x| x.t);
+    let bind = |dots: Vec<gs_puppet::layers::Dot>| {
+        use gs_puppet::mesh::BindAs;
+        // what is built on the body is lit by its own facing (its shape);
+        // the skin's facing the GPU smooths
+        let own_facing: Vec<bool> = dots.iter().map(|d| d.layer != gs_puppet::layers::Layer::Skin).collect();
+        let placed: Vec<(gs_puppet::splat::Gaussian, BindAs)> = dots
+            .into_iter()
+            .map(|d| {
+                let mut g = d.g;
+                g.c = [g.c[0] - lift[0], g.c[1] - lift[1], g.c[2] - lift[2]];
+                // what a status builds round a part, and a web's strands, hold
+                // to that part; the body's own dots ride its skin
+                let built = matches!(d.layer, gs_puppet::layers::Layer::Status | gs_puppet::layers::Layer::Web | gs_puppet::layers::Layer::Wrap | gs_puppet::layers::Layer::Blood { .. });
+                let how = match (d.source, d.anchor) {
+                    (Some(k), _) => BindAs::Like(k),
+                    (None, Some(a)) if built => cloud.anchors().get(a as usize).map_or(BindAs::Near, |a| BindAs::Rigid(a.seg as u32)),
+                    (None, Some(a)) => anchors.get(a as usize).copied().flatten().map_or(BindAs::Near, BindAs::Vertex),
+                    _ => BindAs::Near,
+                };
+                (g, how)
+            })
+            .collect();
+        let mut bound = gs_puppet::mesh::SplatBody::bind_as(&body.bound, Some(&worn), placed);
+        if bound.len() == own_facing.len() {
+            bound.own_facing = own_facing;
+        }
+        bound
+    };
+    // what moves off it by itself, each held where it leaves (bound there)
+    // and moved by the GPU: a hit's thrown dots, an invisible figure's glints
+    let loose = |particles: Vec<gs_puppet::layers::Particle>| {
+        let particles: Vec<gs_puppet::layers::Particle> = particles
+            .into_iter()
+            .map(|p| gs_puppet::layers::Particle { from: [p.from[0] - lift[0], p.from[1] - lift[1], p.from[2] - lift[2]], ground: p.ground - lift[1], ..p })
+            .collect();
+        let held: Vec<(gs_puppet::splat::Gaussian, gs_puppet::mesh::BindAs)> = particles
+            .iter()
+            .map(|p| (gs_puppet::splat::Gaussian { c: p.from, axes: [[p.r, 0.0, 0.0], [0.0, p.r, 0.0], [0.0, 0.0, p.r]], n: [0.0; 3], rgb: p.rgb, alpha: p.alpha, glow: 0.0, wet: 0.0, film: false, rim: 0.0 }, gs_puppet::mesh::BindAs::Near))
+            .collect();
+        let mut thrown = gs_puppet::mesh::SplatBody::bind_as(&body.bound, None, held);
+        thrown.own_facing = vec![true; thrown.len()];
+        (!particles.is_empty() && thrown.len() == particles.len()).then(|| {
+            thrown.particles = particles.into_iter().enumerate().map(|(i, p)| (i as u32, p)).collect();
+            thrown
+        })
+    };
+    let glints = loose(cloud.glints(&rest, &still));
+    let Some(fresh) = fresh else {
+        let made = bind(cloud.dots(&rest, &still));
+        return Some(Arc::new(match glints {
+            Some(g) => made.joined(g),
+            None => made,
+        }));
+    };
+    let arriving = LayerLook { fresh: Some(fresh), ..still };
+    // the body but the hit part, made once a hit (kept), and the hit part now
+    let part = key.fresh.map_or(0, |(label, _)| label);
+    let at = (Arc::as_ptr(body) as usize, PuppetKey { fresh: None, ..marked_state(key) }, part);
+    type Kept = std::sync::Mutex<Vec<((usize, PuppetKey, u8), Arc<(gs_puppet::mesh::SplatBody, Vec<bool>, gs_puppet::layers::Hollows)>)>>;
+    static STILL: std::sync::OnceLock<Kept> = std::sync::OnceLock::new();
+    let kept = STILL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == at).map(|(_, v)| v.clone());
+    let still_part = match kept {
+        Some(v) => v,
+        None => {
+            let only = cloud.fresh_segments(&rest, &arriving);
+            let seg_of = |d: &gs_puppet::layers::Dot| d.anchor.and_then(|a| cloud.anchors().get(a as usize)).map(|a| a.seg);
+            // the whole body, hit part open; kept: the rest, and its pits
+            let (whole, hollows) = cloud.dots_and_hollows(&rest, &still);
+            // (a wrap round the whole figure stays with the rest: a hit does not
+            // move it; blood goes with the wound it runs from, wherever it ran)
+            let hit = |s: usize| only.get(s).copied().unwrap_or(false);
+            let others: Vec<gs_puppet::layers::Dot> = whole
+                .into_iter()
+                .filter(|d| match d.layer {
+                    gs_puppet::layers::Layer::Wrap => true,
+                    gs_puppet::layers::Layer::Blood { from } => !hit(from as usize),
+                    _ => seg_of(d).is_none_or(|s| !hit(s)),
+                })
+                .collect();
+            let made = Arc::new((bind(others), only, hollows));
+            let mut list = STILL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+            if list.len() >= 2 {
+                list.remove(0);
+            }
+            list.push((at, made.clone()));
+            made
+        }
+    };
+    let arrival = cloud.arrival(&rest, &arriving, &still_part.1, &still_part.2);
+    let mut body_now = still_part.0.clone();
+    for (k, frame) in arrival.frames.into_iter().enumerate() {
+        let mut part = bind(frame);
+        part.frame = vec![k as u8 + 1; part.len()];
+        body_now = body_now.joined(part);
+    }
+    // what it throws off, and its glints
+    for more in [loose(arrival.particles), glints].into_iter().flatten() {
+        body_now = body_now.joined(more);
+    }
+    Some(Arc::new(body_now))
+}
+
+/// The splats a modelled body is drawn as for `key` (None: its mesh): the
+/// cloud fitted to it, thinned for the key's drawn size
+/// (`BodyMesh::splats_at`), or the one made from its mesh.
+fn body_cloud(body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Option<Arc<gs_puppet::mesh::SplatBody>> {
+    match key.body_cloud {
+        1 => body.splats_at(key.height_px),
+        // made from a paint that does not land (a thin mesh's, or none):
+        // its trained cloud instead
+        2 if body.paint_lands => Some(body.made_splats()),
+        2 => body.splats_at(key.height_px),
+        _ => None,
+    }
+}
+
+/// A puppet's layered cloud ([`gs_puppet::layers::LayerCloud`]): its anchors
+/// are built once per puppet and spacing, and posed per figure.
+fn layer_cloud(puppet: &Puppet, params: &gs_puppet::splat::SplatParams) -> Arc<gs_puppet::layers::LayerCloud> {
+    use std::hash::{Hash, Hasher};
+    static CLOUDS: std::sync::OnceLock<std::sync::Mutex<Vec<(u64, Arc<gs_puppet::layers::LayerCloud>)>>> = std::sync::OnceLock::new();
+    const KEPT: usize = 6;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&puppet.family, puppet.segments.len(), puppet.height.to_bits(), puppet.segments.iter().map(|s| s.stations.len()).sum::<usize>(), SplatKey::from(*params)).hash(&mut h);
+    let key = h.finish();
+    let mut list = CLOUDS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, c)) = list.iter().find(|(k, _)| *k == key) {
+        return c.clone();
+    }
+    let made = Arc::new(gs_puppet::layers::LayerCloud::build(puppet, params));
+    if list.len() >= KEPT {
+        list.remove(0);
+    }
+    list.push((key, made.clone()));
+    made
+}
+
 fn facing_id() -> egui::Id {
     egui::Id::new("gs_field_egui::puppet_facings")
 }
@@ -225,8 +825,16 @@ fn forced_id() -> egui::Id {
     egui::Id::new("gs_field_egui::forced_puppets")
 }
 
-/// How many posed display lists one context keeps.
+/// How many posed display lists one context keeps, at most.
 pub const POSE_CACHE_CAP: usize = 256;
+
+/// How many bytes of them it keeps, at most ([`PosedPuppet::heap_bytes`]),
+/// unless the host sets its own ([`PuppetCache::set_pose_budget`]). The
+/// count cap alone let the cache grow to the better part of a gigabyte: a
+/// pose for the GPU skin at the largest size step is about 3.5 MB, and
+/// every breath, facing, injury and status is its own pose. The least
+/// recently used go first; one pose over the budget is still kept.
+pub const POSE_CACHE_BYTES: usize = 192 << 20;
 
 /// Camera pitch (degrees, looking down) the field draws puppets at. Small:
 /// the stage is a shallow, nearly eye-level box, and the cards around it are
@@ -311,6 +919,8 @@ impl PoseChoice {
         }
         let has = |name: &str| match name {
             "disoriented" => statuses.has(Status::Confused) || statuses.has(Status::Dazed),
+            // bound is held as webbed is: arms pinned, legs together
+            "webbed" => statuses.has(Status::Webbed) || statuses.has(Status::Bound),
             other => statuses.has_name(other),
         };
         PoseChoice::of(statuses.has(Status::Dead), &has, false, 0)
@@ -401,6 +1011,33 @@ pub struct PuppetKey {
     pub splats: bool,
     /// The cloud's shape when `splats` is set (see [`set_puppet_splat_params`]).
     pub splat: SplatKey,
+    /// The cloud is the LAYERED one (ADDITION, `gs_puppet::layers`): skin
+    /// dots wearing the wounds' marks, flesh and bone under the skin where
+    /// a wound has opened it, and `coat` standing off it. Set with `splats`
+    /// ([`with_layers`](Self::with_layers)).
+    pub layers: bool,
+    pub coat: CoatKey,
+    /// Drawn as its modelled body (ADDITION, `gs_puppet::mesh`: a mesh
+    /// posed on the GPU), where its form has one ([`set_body_dir`], or the
+    /// pool's `global/bodies/<form>/`).
+    pub modelled: bool,
+    /// Nobody said whether to draw it as its body: the doll decides from
+    /// whether its form has one ([`has_body`]; `doll_view::paint_in_view`).
+    /// [`with_modelled`](Self::with_modelled) clears it: the host decided.
+    pub auto_body: bool,
+    /// ... as that body's splats: 0 its mesh, 1 the cloud fitted to it
+    /// (`splat.ply`; its mesh where it has none), 2 splats made from the
+    /// mesh itself (`BodyMesh::made_splats`).
+    pub body_cloud: u8,
+    /// What made each part's wound, per doll label as `ranks` (an index
+    /// into `gs_puppet::layers::Cause::ALL`; 0, a slash, where the host
+    /// does not say), and the part just hit: its label and how long ago,
+    /// in [`FRESH_STEP_S`] steps -- the layered cloud's
+    /// ([`with_causes`](Self::with_causes), [`with_fresh`](Self::with_fresh)).
+    pub causes: [u8; PARTS],
+    /// The game's critical rank of each part's wound (1..=9, 0 unknown).
+    pub crits: [u8; PARTS],
+    pub fresh: Option<(u8, u8)>,
     /// The statuses it is under (ADDITION, the doll's: `gs_field::doll_state`):
     /// how it holds itself, sways, trembles and breathes. What they draw on
     /// the body is in `effects` ([`with_statuses`](Self::with_statuses) sets both).
@@ -419,6 +1056,22 @@ pub const FACING_STEP_DEG: f32 = 5.0;
 /// nearest step at or above its real height and scaled down to fit, so the
 /// error is never more than one step and never upsamples.
 pub const SIZE_STEPS: [u16; 8] = [24, 36, 52, 76, 110, 160, 240, 360];
+
+/// Steps above [`SIZE_STEPS`]' last for a modelled body (ADDITION): its
+/// pose is bones and a draw order whatever its size, so a doll window
+/// taller than 360 px gets a body drawn at its own size, not magnified. The
+/// smooth skin stays capped at 360: its pose is pixels (a 760 px one is
+/// some 15 MB).
+pub const BODY_SIZE_STEPS: [u16; 2] = [520, 760];
+
+/// [`size_step`] for a modelled body: up to [`BODY_SIZE_STEPS`]' last.
+pub fn body_size_step(height_px: f32) -> u16 {
+    let h = if height_px.is_finite() { height_px.max(1.0) } else { 64.0 };
+    if h <= SIZE_STEPS[SIZE_STEPS.len() - 1] as f32 {
+        return size_step(h);
+    }
+    BODY_SIZE_STEPS.iter().copied().find(|s| *s as f32 >= h).unwrap_or(BODY_SIZE_STEPS[BODY_SIZE_STEPS.len() - 1])
+}
 
 /// The step a drawn height lands on.
 pub fn size_step(height_px: f32) -> u16 {
@@ -461,6 +1114,14 @@ impl PuppetKey {
             breath: 0,
             splats: false,
             splat: SplatKey::default(),
+            layers: false,
+            coat: CoatKey::default(),
+            modelled: false,
+            auto_body: true,
+            body_cloud: 0,
+            causes: [0; PARTS],
+            crits: [0; PARTS],
+            fresh: None,
             statuses: Statuses::NONE,
         }
     }
@@ -523,6 +1184,59 @@ impl PuppetKey {
     pub fn with_splats(mut self, on: bool, params: SplatKey) -> Self {
         self.splats = on;
         self.splat = if on { params } else { SplatKey::default() };
+        self
+    }
+
+    /// The same key drawn as its form's modelled body (or not): `cloud` 0
+    /// its mesh, 1 its fitted splats, 2 splats made from the mesh.
+    pub fn with_modelled(mut self, on: bool, cloud: u8) -> Self {
+        self.modelled = on;
+        self.auto_body = false;
+        self.body_cloud = if on { cloud.min(2) } else { 0 };
+        self
+    }
+
+    /// The same key drawn as layered splats (or not): a cloud shaped by
+    /// `params`, under `coat`.
+    pub fn with_layers(mut self, on: bool, params: SplatKey, coat: Option<gs_puppet::layers::Coating>) -> Self {
+        self = self.with_splats(on, params);
+        self.layers = on;
+        self.coat = if on { coat.map(CoatKey::from).unwrap_or_default() } else { CoatKey::default() };
+        self
+    }
+
+    /// The same key, its wounds made as `causes` say (part, cause).
+    pub fn with_causes(mut self, causes: &[(String, gs_puppet::layers::Cause)]) -> Self {
+        for (part, cause) in causes {
+            if let Some(label) = gs_field::dolls::part_label(part) {
+                self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| c == cause).unwrap_or(0) as u8;
+            }
+        }
+        self
+    }
+
+    /// The same key after these hits (ADDITION): what a game client knows of
+    /// each wound from the game's critical tables -- the part, the damage
+    /// type by the game's name for it (`slash`, `fire`, `ucs_kick`...; an
+    /// unknown one is left a slash) and the critical rank (1..=9, 0 if
+    /// unknown). The wound ranks themselves are the key's own
+    /// ([`PuppetKey::new`]); a later hit on a part replaces an earlier one.
+    pub fn with_hits(mut self, hits: &[Hit<'_>]) -> Self {
+        for hit in hits {
+            let Some(label) = gs_field::dolls::part_label(hit.part) else { continue };
+            if let Some(cause) = gs_puppet::layers::Cause::from_name(hit.kind) {
+                self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| *c == cause).unwrap_or(0) as u8;
+            }
+            self.crits[label as usize - 1] = hit.crit.min(9);
+        }
+        self
+    }
+
+    /// The same key with part `label` hit `age_s` seconds ago: a layered
+    /// figure's wound there arrives. Nothing once the hit is stale.
+    pub fn with_fresh(mut self, label: u8, age_s: f64) -> Self {
+        let fresh = self.layers && (0.0..gs_puppet::layers::FRESH_SECS as f64).contains(&age_s);
+        self.fresh = fresh.then(|| (label, (age_s / FRESH_STEP_S) as u8));
         self
     }
 
@@ -642,6 +1356,10 @@ pub struct PosedPuppet {
     /// Built with [`Bare::Mesh`] as a splat cloud: it projected and sorted,
     /// for the GPU to draw -- and then no `skin`.
     pub splats: Option<Arc<gs_puppet::splat::SplatFrame>>,
+    /// Built with [`Bare::Mesh`] from a key [`with_modelled`](PuppetKey::with_modelled)
+    /// whose form has a body: its pose, for the GPU to draw -- and then no
+    /// `skin`, `mesh` or `splats`.
+    pub body: Option<Arc<gs_puppet::mesh::BodyFrame>>,
     lamp_layers: LampLayers,
     /// World AABB `[min, max]` in feet, y up, ground at y = 0.
     pub bounds: [[f32; 3]; 2],
@@ -655,6 +1373,10 @@ pub struct PosedPuppet {
     /// size over `standing_ft`). Placement divides by this to get back to
     /// feet before scaling to the card.
     pub px_per_ft: f32,
+    /// Built while the figure's modelled body was still loading (ADDITION):
+    /// a stand-in drawn some other way. Never cached; a host draws again
+    /// soon, when the body may be in.
+    pub pending: bool,
 }
 
 /// A skin's texture, shared by every clone of its `PosedPuppet`.
@@ -707,6 +1429,20 @@ fn lamps_key(lamps: &[gs_puppet::Lamp]) -> u64 {
 }
 
 impl PosedPuppet {
+    /// Bytes this pose holds on the heap: its shapes and shadow, its skin
+    /// and surface, its mesh, splats or body frame. Shared textures and
+    /// bodies are not counted.
+    pub fn heap_bytes(&self) -> usize {
+        let prims = (self.prims.len() + self.shadow.len()) * std::mem::size_of::<Prim>();
+        prims
+            + self.skin.as_ref().map_or(0, |s| s.heap_bytes())
+            + self.surface.as_ref().map_or(0, |s| s.heap_bytes())
+            + self.caster.as_ref().map_or(0, |c| c.heap_bytes())
+            + self.mesh.as_ref().map_or(0, |(m, _)| m.heap_bytes())
+            + self.splats.as_ref().map_or(0, |f| f.heap_bytes())
+            + self.body.as_ref().map_or(0, |b| b.heap_bytes())
+    }
+
     /// What `lamps` do to this figure (its added light and cast shadow),
     /// worked out on first use and kept per lamp set. None when it was
     /// posed without scene lighting or no lamp is near.
@@ -1002,6 +1738,31 @@ fn pose_puppet_inner(
     let mut caster = None;
     // For the GPU skin: the figure as a mesh, and no CPU skin at all.
     let gpu = skin && bare == Bare::Mesh && light.is_none();
+    // its modelled body still loading: this is a stand-in
+    let mut pending = key.modelled && matches!(body_now(puppet), BodyNow::Loading);
+    // its modelled body: only its pose is worked out here
+    // (hurt, scarred or coated: its splats as the layered cloud wears them,
+    // made on a worker -- meanwhile the last one, and this is a stand-in)
+    let body = (gpu && key.modelled)
+        .then(|| {
+            let b = body_of(puppet)?;
+            let cloud = if key.layers {
+                match marked_body(puppet, &b, key) {
+                    Marked::Ready(c) => Some(c),
+                    Marked::Failed => return None,
+                    Marked::Building(last) => {
+                        pending = true;
+                        last.or_else(|| body_cloud(&b, key))
+                    }
+                }
+            } else {
+                body_cloud(&b, key)
+            };
+            gs_puppet::mesh::BodyFrame::new(&b, &posed, &project, look.yaw, cloud).map(Arc::new)
+        })
+        .flatten();
+    let gpu = gpu && body.is_none();
+    let skin = skin && body.is_none();
     let mesh = (gpu && !key.splats)
         .then(|| {
             let tex = texture_arc.clone();
@@ -1009,10 +1770,33 @@ fn pose_puppet_inner(
             Some((Arc::new(m), tex))
         })
         .flatten();
+    // the splat cloud: the look test's, or the layered one with its wounds
+    // and coating
+    let cloud = || {
+        if key.layers {
+            let causes: Vec<(&str, gs_puppet::layers::Cause)> = key
+                .causes
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| **c > 0)
+                .filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *gs_puppet::layers::Cause::ALL.get(*c as usize)?)))
+                .collect();
+            let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_field::dolls::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+            let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *c))).collect();
+            // a modelled body's splat cloud is worn as the skin
+            let fitted = key.modelled.then(|| body_of(puppet).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
+            // held (webbed, bound), it is wrapped as it stands
+            let held = (key.pose == PoseChoice::Webbed).then_some(&posed);
+            let look = gs_puppet::layers::LayerLook { look, effects: key.effects, texture, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh, fitted: fitted.as_deref(), held, stands: None };
+            layer_cloud(puppet, &key.splat.params()).posed(&posed, &look)
+        } else {
+            gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params())
+        }
+    };
     // a splat cloud: projected and sorted here, drawn on the GPU
     let splats = (gpu && key.splats)
         .then(|| {
-            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params());
+            let cloud = cloud();
             gs_puppet::splat::prepare(&cloud, &project, look.yaw).map(Arc::new)
         })
         .flatten();
@@ -1020,8 +1804,9 @@ fn pose_puppet_inner(
     let skin = skin.then(|| {
         if key.splats {
             // The splat look: the same image slot as the skin, lit by the
-            // scene the same way; no wounds, effects or contour.
-            let cloud = gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params());
+            // scene the same way; no wounds, effects or contour (the
+            // layered cloud has its wounds).
+            let cloud = cloud();
             let mut image = gs_puppet::splat::render(&cloud, &project, look.yaw);
             if let (Some(light), false) = (light, image.is_empty()) {
                 light.light_image(&mut image.rgba, image.w);
@@ -1067,11 +1852,13 @@ fn pose_puppet_inner(
         caster,
         mesh,
         splats,
+        body,
         lamp_layers: LampLayers::default(),
         bounds,
         head,
         standing_ft: puppet.height.max(0.01),
         px_per_ft,
+        pending,
     }
 }
 
@@ -1191,6 +1978,10 @@ pub struct PuppetCache {
     pose_sets: HashMap<Arc<str>, Option<Arc<PoseSet>>>,
     resolved: HashMap<u64, Option<Arc<str>>>,
     posed: HashMap<PosedKey, (Arc<PosedPuppet>, u64)>,
+    /// What `posed` weighs ([`PosedPuppet::heap_bytes`], summed), and the
+    /// most it may (None: [`POSE_CACHE_BYTES`]).
+    posed_bytes: usize,
+    pose_budget: Option<usize>,
     /// The held-props file of this puppet set, parsed once (inner None:
     /// none, or it did not parse).
     props: Option<Option<Arc<gs_puppet::PropSet>>>,
@@ -1412,8 +2203,10 @@ impl PuppetCache {
             self.pose_sets.clear();
             self.resolved.clear();
             self.posed.clear();
+            self.posed_bytes = 0;
             self.props = None;
             self.outfits = None;
+            drop_loaded_bodies();
         }
         self.rigs = Some(rigs);
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
@@ -1616,6 +2409,7 @@ impl PuppetCache {
         if self.texture_side != texture_detail() {
             self.textures.clear();
             self.posed.clear();
+            self.posed_bytes = 0;
             self.texture_side = texture_detail();
         }
     }
@@ -1851,21 +2645,25 @@ impl PuppetCache {
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
         let pose = held(&set, &breathe(&set, pose, key, 1.0), key);
-        // Inside the body type's joint limits, whatever the file says.
-        let pose = &set.clamp(&pose);
+        // Inside the body type's joint limits, whatever the file says --
+        // and held (webbed, bound), its arms pinned to its sides
+        let pose = &pinned(&puppet, key, set.clamp(&pose));
         let texture = if skin { self.texture(family) } else { None };
         let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare));
         self.builds += 1;
-        if self.posed.len() >= POSE_CACHE_CAP {
-            if let Some(oldest) = self
-                .posed
-                .iter()
-                .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, _)| k.clone())
-            {
-                self.posed.remove(&oldest);
+        // a stand-in for a body still loading: drawn, not kept
+        if posed.pending {
+            return Some(posed);
+        }
+        let bytes = posed.heap_bytes();
+        let budget = self.pose_budget();
+        while !self.posed.is_empty() && (self.posed.len() >= POSE_CACHE_CAP || self.posed_bytes + bytes > budget) {
+            let Some(oldest) = self.posed.iter().min_by_key(|(_, (_, used))| *used).map(|(k, _)| k.clone()) else { break };
+            if let Some((gone, _)) = self.posed.remove(&oldest) {
+                self.posed_bytes = self.posed_bytes.saturating_sub(gone.heap_bytes());
             }
         }
+        self.posed_bytes += bytes;
         self.posed.insert(cache_key, (posed.clone(), tick));
         Some(posed)
     }
@@ -2050,7 +2848,7 @@ impl PuppetCache {
             _ => 0,
         };
         let (_, pose) = key.pose.resolve(&set, variant)?;
-        let pose = set.clamp(&flinched(&set, &held(&set, &breathe(&set, pose, key, 1.0), key), Some(flinch)));
+        let pose = pinned(&puppet, key, set.clamp(&flinched(&set, &held(&set, &breathe(&set, pose, key, 1.0), key), Some(flinch))));
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
@@ -2117,6 +2915,25 @@ impl PuppetCache {
 
     pub fn posed_count(&self) -> usize {
         self.posed.len()
+    }
+
+    /// Bytes the posed display lists hold on the heap, all together
+    /// ([`PosedPuppet::heap_bytes`]): the cache's weight, for a host's
+    /// memory report.
+    pub fn posed_bytes(&self) -> usize {
+        self.posed_bytes
+    }
+
+    /// The most bytes of posed display lists this cache keeps
+    /// ([`POSE_CACHE_BYTES`] unless the host set its own).
+    pub fn pose_budget(&self) -> usize {
+        self.pose_budget.unwrap_or(POSE_CACHE_BYTES)
+    }
+
+    /// Keep at most `bytes` of posed display lists from now on (None: the
+    /// default again). What is over the budget goes at the next pose.
+    pub fn set_pose_budget(&mut self, bytes: Option<usize>) {
+        self.pose_budget = bytes;
     }
 }
 
@@ -2880,6 +3697,213 @@ mod tests {
         let builds = cache.builds;
         cache.posed(&family, &healthy).unwrap();
         assert_eq!(cache.builds, builds, "the hot entry was never evicted");
+    }
+
+    /// What one pose weighs, the doll's way: `cargo test -p gs_field_egui
+    /// a_pose_weighs -- --nocapture` prints it per size step and build.
+    #[test]
+    fn a_pose_weighs_what_its_pixels_do() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = cache();
+        let family: Arc<str> = "humanoid".into();
+        for step in [160u16, 240, 360] {
+            let mut k = key(PoseChoice::Standing, &[("chest", 2), ("left_arm", 3)]);
+            k.height_px = step;
+            let shapes = cache.posed(&family, &k).unwrap();
+            let skin = cache.posed_with(&family, &k, true).unwrap();
+            let surface = cache.posed_surface(&family, &k).unwrap();
+            let mesh = cache.posed_cached(&family, &k, true, Bare::Mesh).unwrap();
+            let w = surface.surface.as_ref().map_or(0, |s| s.w);
+            let h = surface.surface.as_ref().map_or(0, |s| s.h);
+            println!("{step}px ({w}x{h}): shapes {} KB, skin {} KB, surface {} KB, mesh {} KB", shapes.heap_bytes() / 1024, skin.heap_bytes() / 1024, surface.heap_bytes() / 1024, mesh.heap_bytes() / 1024);
+            assert!(surface.heap_bytes() > skin.heap_bytes(), "the surface is the heavier build");
+        }
+        println!("cache: {} poses, {} KB", cache.posed_count(), cache.posed_bytes() / 1024);
+    }
+
+    /// What a hit costs a modelled body: `DOLL_BODY_TIMING=<form dir>[:<size>]`
+    /// (a `<data>/meshes/<form>` folder) times the layered cloud's rebuild
+    /// for a wound, and for each step of a fresh hit's arrival, with
+    /// `--nocapture`. Without it, nothing runs.
+    #[test]
+    fn a_hit_on_a_modelled_body_costs() {
+        let Ok(spec) = std::env::var("DOLL_BODY_TIMING") else { return };
+        // the last colon, and not a drive's: `G:/data/meshes/half_elf:40k`
+        let (form_dir, size) = spec.rsplit_once(':').filter(|(_, s)| !s.contains(['/', '\\'])).map_or((spec.as_str(), None), |(d, s)| (d, Some(s)));
+        let form_dir = std::path::Path::new(form_dir);
+        let puppet = Puppet::from_baked_toml(&std::fs::read_to_string(form_dir.join("puppet.toml")).unwrap()).unwrap();
+        let dir = size.map_or(form_dir.to_path_buf(), |s| form_dir.join(s));
+        let t = std::time::Instant::now();
+        let body = Arc::new(load_body(&dir, &puppet).unwrap());
+        println!("{}: loaded in {:.2} s, {} trained splats", dir.display(), t.elapsed().as_secs_f64(), body.splats.as_ref().map_or(0, |c| c.len()));
+        let chest = gs_field::dolls::part_label("chest").unwrap();
+        for (what, cloud) in [("trained", 1u8), ("made", 2)] {
+            if cloud == 1 && body.splats.is_none() {
+                continue;
+            }
+            let wounded = vec![("chest".to_string(), 2u8)];
+            let key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, cloud));
+            let t = std::time::Instant::now();
+            let first = build_marked(&puppet, &body, &key).expect("a marked body");
+            println!("{what}: first wound {:.0} ms ({} dots, {:.1} MB to upload)", t.elapsed().as_secs_f64() * 1e3, first.len(), first.len() as f64 * 144.0 / 1e6);
+            for n in 0..2 {
+                let t = std::time::Instant::now();
+                let arrival = build_marked(&puppet, &body, &key.with_fresh(chest, 0.0)).expect("an arrival");
+                println!(
+                    "{what}: a hit's arrival built in {:.0} ms{} ({} dots, {} thrown, {:.1} MB to upload once)",
+                    t.elapsed().as_secs_f64() * 1e3,
+                    if n == 0 { " with the rest of the body" } else { "" },
+                    arrival.len(),
+                    arrival.particles.len(),
+                    arrival.len() as f64 * 144.0 / 1e6
+                );
+            }
+        }
+    }
+
+    /// An invisible modelled body: `DOLL_BODY_INVISIBLE=<form dir>[:<size>]`
+    /// builds it and checks its own splats are seen only edge-on, each with
+    /// a facing to be edge-on by, and that it gives off glints. Without it,
+    /// nothing runs.
+    #[test]
+    fn an_invisible_body_is_a_rim() {
+        let Ok(spec) = std::env::var("DOLL_BODY_INVISIBLE") else { return };
+        let (form_dir, size) = spec.rsplit_once(':').filter(|(_, s)| !s.contains(['/', '\\'])).map_or((spec.as_str(), None), |(d, s)| (d, Some(s)));
+        let form_dir = std::path::Path::new(form_dir);
+        let puppet = Puppet::from_baked_toml(&std::fs::read_to_string(form_dir.join("puppet.toml")).unwrap()).unwrap();
+        let dir = size.map_or(form_dir.to_path_buf(), |s| form_dir.join(s));
+        let body = Arc::new(load_body(&dir, &puppet).unwrap());
+        let wounded = vec![("chest".to_string(), 2u8)];
+        let mut key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
+        key.effects.invisible = true;
+        let made = build_marked(&puppet, &body, &key).expect("a marked body");
+        let count = |f: &dyn Fn(&gs_puppet::splat::Gaussian) -> bool| made.rest.iter().filter(|g| f(g)).count();
+        let (all, rim) = (made.len(), count(&|g| g.rim > 0.0));
+        let rim_unfaced = count(&|g| g.rim > 0.0 && g.n == [0.0; 3]);
+        println!("{all} splats: {rim} rim, {rim_unfaced} rim without a facing; {} glints", made.particles.len());
+        assert!(rim * 10 > all * 8, "most of it is rim");
+        assert_eq!(rim_unfaced, 0, "a rim needs a facing");
+        assert!(made.particles.iter().all(|(_, p)| p.loops) && made.particles.len() > 80);
+    }
+
+    /// A hurt modelled body's layered cloud is made on a worker: first asked
+    /// for, it is being made with nothing to stand in; it arrives; a hit's
+    /// step then hands over that one while the step is made, and arrives
+    /// in turn.
+    #[test]
+    fn a_hurt_body_is_made_off_the_frame() {
+        use gs_puppet::mesh::{BodyMesh, BoundMesh, Mesh, Paint, SplatBody};
+        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).unwrap();
+        // a stand-in body: its mesh and its trained cloud are the made skin's dots
+        let cloud = layer_cloud(&puppet, &gs_puppet::splat::SplatParams::default());
+        let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
+        let lift = rest.xf.first().map_or([0.0; 3], |x| x.t);
+        let skin: Vec<gs_puppet::splat::Gaussian> = cloud
+            .dots(&rest, &gs_puppet::layers::LayerLook::default())
+            .into_iter()
+            .map(|d| gs_puppet::splat::Gaussian { c: [d.g.c[0] - lift[0], d.g.c[1] - lift[1], d.g.c[2] - lift[2]], ..d.g })
+            .collect();
+        let points: Vec<&gs_puppet::splat::Gaussian> = skin.iter().step_by(3).collect();
+        let mesh = Mesh { pos: points.iter().map(|g| g.c).collect(), nrm: points.iter().map(|g| g.n).collect(), uv: vec![[0.0; 2]; points.len()], tris: vec![], source: vec![] };
+        let bound = BoundMesh::bind(&puppet, mesh);
+        let splats = SplatBody::bind(&bound, skin.iter().step_by(2).cloned().collect());
+        let body = Arc::new(BodyMesh { bound, paint: Paint { w: 1, h: 1, rgba: vec![200; 4] }, normal: None, splats: Some(Arc::new(splats)), made: Default::default(), thinned: Default::default(), made_count: gs_puppet::mesh::MADE_SPLATS, paint_lands: true });
+        let wounded = vec![("chest".to_string(), 2u8)];
+        let key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
+        assert!(key.layers);
+        let ready = |k: &PuppetKey| {
+            let start = std::time::Instant::now();
+            loop {
+                match marked_body(&puppet, &body, k) {
+                    Marked::Ready(c) => break c,
+                    Marked::Failed => panic!("could not be made"),
+                    Marked::Building(_) if start.elapsed().as_secs() < 60 => std::thread::sleep(std::time::Duration::from_millis(5)),
+                    Marked::Building(_) => panic!("never arrived"),
+                }
+            }
+        };
+        assert!(matches!(marked_body(&puppet, &body, &key), Marked::Building(None)), "first asked: being made, nothing to stand in");
+        let hurt = ready(&key);
+        let chest = gs_field::dolls::part_label("chest").unwrap();
+        // a second on: the wound is open, and what it threw off is in the air
+        let step = key.with_fresh(chest, 1.0);
+        match marked_body(&puppet, &body, &step) {
+            Marked::Building(Some(last)) => assert!(Arc::ptr_eq(&last, &hurt), "the last one stands in"),
+            _ => panic!("a step is made on the worker too"),
+        }
+        let arriving = ready(&step);
+        assert!(arriving.len() > hurt.len(), "the hurt body and what the hit threw off: {} dots arriving, {} hurt", arriving.len(), hurt.len());
+        // built once for the GPU to play: its frames, and what it throws
+        assert_eq!(arriving.frame.len(), arriving.len());
+        assert_eq!(arriving.frame.iter().copied().max(), Some(gs_puppet::layers::ARRIVAL_AGES.len() as u8));
+        assert!(!arriving.particles.is_empty());
+        match marked_body(&puppet, &body, &key.with_fresh(chest, 2.5)) {
+            Marked::Ready(later) => assert!(Arc::ptr_eq(&later, &arriving), "later in the hit: the same build"),
+            _ => panic!("a hit is built once"),
+        }
+        assert!(matches!(marked_body(&puppet, &body, &key), Marked::Ready(_)), "the hurt one is kept");
+    }
+
+    /// A body loads on a worker: first asked for, it is loading; it
+    /// arrives without the asker waiting on it; a folder that holds no
+    /// body ends as none, not loading forever.
+    #[test]
+    fn a_body_loads_off_the_frame() {
+        let dir = std::env::temp_dir().join(format!("gs_field_egui_body_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("body.obj"), "v -0.5 0 0\nv 0.5 0 0\nv 0 6 0\nvt 0 0\nvt 1 0\nvt 0.5 1\nf 1/1 2/2 3/3\n").unwrap();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([200, 150, 120, 255])).save(dir.join("color.png")).unwrap();
+        let mut puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).unwrap();
+        puppet.family = format!("body_load_test_{}", std::process::id());
+        set_body_dir(&puppet.family, Some(dir.clone()));
+        assert!(matches!(body_now(&puppet), BodyNow::Loading), "first asked: loading");
+        let start = std::time::Instant::now();
+        let got = loop {
+            match body_now(&puppet) {
+                BodyNow::Loading if start.elapsed().as_secs() < 30 => std::thread::sleep(std::time::Duration::from_millis(10)),
+                other => break other,
+            }
+        };
+        assert!(matches!(got, BodyNow::Ready(_)), "it arrives");
+        // nothing there: none, once tried
+        let mut empty = puppet.clone();
+        empty.family = format!("{}_empty", puppet.family);
+        set_body_dir(&empty.family, Some(dir.join("nothing")));
+        let start = std::time::Instant::now();
+        while matches!(body_now(&empty), BodyNow::Loading) && start.elapsed().as_secs() < 30 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(matches!(body_now(&empty), BodyNow::None));
+        set_body_dir(&puppet.family, None);
+        set_body_dir(&empty.family, None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_pose_cache_keeps_to_its_byte_budget() {
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = cache();
+        let family: Arc<str> = "humanoid".into();
+        let mut k = key(PoseChoice::Standing, &[]);
+        k.height_px = 360;
+        let one = cache.posed_cached(&family, &k, true, Bare::Mesh).unwrap().heap_bytes();
+        assert!(one > 1 << 20, "a GPU-skin pose at the largest step is megabytes: {one}");
+        assert_eq!(cache.posed_bytes(), one);
+        // room for three of them, and a bit
+        cache.set_pose_budget(Some(one * 3 + one / 2));
+        for n in 1..=BREATH_STEPS {
+            cache.posed_cached(&family, &k.with_breath(n), true, Bare::Mesh).unwrap();
+            assert!(cache.posed_bytes() <= cache.pose_budget(), "{} over {}", cache.posed_bytes(), cache.pose_budget());
+        }
+        assert!(cache.posed_count() >= 2 && cache.posed_count() <= 4, "{}", cache.posed_count());
+        // the sum stays true to what is held
+        let held: usize = (1..=BREATH_STEPS).filter_map(|n| { let key = k.with_breath(n); cache.posed.get(&PosedKey { family: family.clone(), key, skin: true, light: BARE_MESH }).map(|(p, _)| p.heap_bytes()) }).sum();
+        assert_eq!(held, cache.posed_bytes());
+        // one pose bigger than the budget is still kept, alone
+        cache.set_pose_budget(Some(1));
+        cache.posed_cached(&family, &k.with_breath(1).with_facing(90.0), true, Bare::Mesh).unwrap();
+        assert_eq!(cache.posed_count(), 1);
     }
 
     /// A hit: a wound rank rising starts a flinch on that part, which runs

@@ -1283,6 +1283,7 @@ impl StageGpu {
         let ((w, h), fkey, to_cam) = match &figure {
             crate::skin_gpu::Figure::Skin { mesh, .. } => (figure.size(), mesh.key, mesh.to_cam),
             crate::skin_gpu::Figure::Splats(f) => (figure.size(), f.key, f.to_cam),
+            crate::skin_gpu::Figure::Body(f) => (figure.size(), f.key, f.to_cam),
         };
         if w == 0 || h == 0 {
             return false;
@@ -1305,7 +1306,7 @@ impl StageGpu {
         });
         let plan = crate::relight_gpu::Plan::of(if sun.is_some() { None } else { Some(&light.scene) }, &light.keyframes);
         let key = key_of(("gpu figure", fkey, light.key, m_per_ft.to_bits()));
-        let job = crate::skin_gpu::SkinJob { figure, lit: crate::skin_gpu::SkinLit::Scene { plan, sun }, m_per_ft };
+        let job = crate::skin_gpu::SkinJob { figure, lit: crate::skin_gpu::SkinLit::Scene { plan, sun }, m_per_ft, arrival_age: -1.0, clock: 0.0 };
         crate::skin_gpu::submit(key, Arc::new(job));
         let image = Arc::new(LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) });
         self.push(painter, image, screen, ground_z, 1.0)
