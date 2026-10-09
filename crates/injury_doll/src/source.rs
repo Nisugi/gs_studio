@@ -13,7 +13,7 @@ use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gs_field_egui::puppet_cache::{PuppetSource, Sheets};
+use gs_render::puppet_cache::{PuppetSource, Sheets};
 
 /// The doll's figures as a [`PuppetSource`]: what [`crate::view::DollCache`]
 /// reads.

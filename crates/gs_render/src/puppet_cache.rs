@@ -38,7 +38,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use gs_field::status::{Status, Statuses};
+use gs_base::status::{Status, Statuses};
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
 
 /// The texture detail, a graphics tier's: the longest side of sheet a
@@ -645,10 +645,10 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
         .iter()
         .enumerate()
         .filter(|(_, c)| **c > 0)
-        .filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *Cause::ALL.get(*c as usize)?)))
+        .filter_map(|(i, c)| Some((gs_base::body::label_part(i as u8 + 1)?, *Cause::ALL.get(*c as usize)?)))
         .collect();
-    let fresh = key.fresh.and_then(|(label, step)| Some(Fresh { part: gs_field::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
-    let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *c))).collect();
+    let fresh = key.fresh.and_then(|(label, step)| Some(Fresh { part: gs_base::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+    let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_base::body::label_part(i as u8 + 1)?, *c))).collect();
     // webbed, bound: held tight, and wrapped whole in that pose
     let held_pose = (key.pose == PoseChoice::Webbed).then_some(set).flatten().and_then(|set| PoseChoice::Webbed.resolve(set, 0).map(|(_, p)| puppet.pin_arms(&set.clamp(p))));
     let held = held_pose.as_ref().map(|p| puppet.pose(p));
@@ -835,7 +835,7 @@ pub const FIELD_DISTANCE_HEIGHTS: f32 = 9.0;
 pub const FIELD_YAW_DEG: f32 = 24.0;
 
 /// Number of wound parts one key records: the doll part table's size.
-pub const PARTS: usize = gs_field::body::PARTS.len();
+pub const PARTS: usize = gs_base::body::PARTS.len();
 
 /// Which pose a creature's state asks for, independent of body type: the
 /// pose SET supplies the actual angles, and a body type that does not
@@ -1079,7 +1079,7 @@ impl PuppetKey {
     ) -> Self {
         let mut ranks = [0u8; PARTS];
         for (part, rank) in injuries {
-            if let Some(label) = gs_field::body::part_label(part) {
+            if let Some(label) = gs_base::body::part_label(part) {
                 let slot = &mut ranks[label as usize - 1];
                 *slot = (*slot).max((*rank).min(3));
             }
@@ -1196,7 +1196,7 @@ impl PuppetKey {
     /// The same key, its wounds made as `causes` say (part, cause).
     pub fn with_causes(mut self, causes: &[(String, gs_puppet::layers::Cause)]) -> Self {
         for (part, cause) in causes {
-            if let Some(label) = gs_field::body::part_label(part) {
+            if let Some(label) = gs_base::body::part_label(part) {
                 self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| c == cause).unwrap_or(0) as u8;
             }
         }
@@ -1211,7 +1211,7 @@ impl PuppetKey {
     /// ([`PuppetKey::new`]); a later hit on a part replaces an earlier one.
     pub fn with_hits(mut self, hits: &[Hit<'_>]) -> Self {
         for hit in hits {
-            let Some(label) = gs_field::body::part_label(hit.part) else { continue };
+            let Some(label) = gs_base::body::part_label(hit.part) else { continue };
             if let Some(cause) = gs_puppet::layers::Cause::from_name(hit.kind) {
                 self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| *c == cause).unwrap_or(0) as u8;
             }
@@ -1238,7 +1238,7 @@ impl PuppetKey {
     pub fn with_scars(mut self, scars: &[(String, u8)]) -> Self {
         self.scars = [0; PARTS];
         for (part, rank) in scars {
-            if let Some(label) = gs_field::body::part_label(part) {
+            if let Some(label) = gs_base::body::part_label(part) {
                 let slot = &mut self.scars[label as usize - 1];
                 *slot = (*slot).max((*rank).min(3));
             }
@@ -1252,7 +1252,7 @@ impl PuppetKey {
             .iter()
             .enumerate()
             .filter(|(_, r)| **r > 0)
-            .filter_map(|(i, r)| Some((gs_field::body::label_part(i as u8 + 1)?, *r)))
+            .filter_map(|(i, r)| Some((gs_base::body::label_part(i as u8 + 1)?, *r)))
             .collect()
     }
 
@@ -1300,7 +1300,7 @@ impl PuppetKey {
             .iter()
             .enumerate()
             .filter(|(_, r)| **r > 0)
-            .filter_map(|(i, r)| Some((gs_field::body::label_part(i as u8 + 1)?, *r)))
+            .filter_map(|(i, r)| Some((gs_base::body::label_part(i as u8 + 1)?, *r)))
             .collect()
     }
 
@@ -1789,10 +1789,10 @@ fn pose_puppet_inner(
                 .iter()
                 .enumerate()
                 .filter(|(_, c)| **c > 0)
-                .filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *gs_puppet::layers::Cause::ALL.get(*c as usize)?)))
+                .filter_map(|(i, c)| Some((gs_base::body::label_part(i as u8 + 1)?, *gs_puppet::layers::Cause::ALL.get(*c as usize)?)))
                 .collect();
-            let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_field::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
-            let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *c))).collect();
+            let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_base::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+            let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_base::body::label_part(i as u8 + 1)?, *c))).collect();
             // a modelled body's splat cloud is worn as the skin
             let fitted = key.modelled.then(|| bodies.and_then(|bs| body_of(bs, puppet)).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
             // held (webbed, bound), it is wrapped as it stands
@@ -1919,8 +1919,8 @@ fn yawed_bounds_where(posed: &Posed<'_>, yaw_deg: f32, keep: impl Fn(&gs_puppet:
 
 /// Where a cache's puppets come from (ADDITION; docs/crate-split-plan.md,
 /// S5): the creature field's published set
-/// ([`crate::field_puppets::FieldSource`]), the injury doll's installed
-/// figures, a host's own. A cache reads one source, and keeps nothing it
+/// (`gs_field_egui::field_puppets::FieldSource`), the injury doll's
+/// installed figures (`injury_doll::source::DollSource`), a host's own. A cache reads one source, and keeps nothing it
 /// made from an older generation of it.
 ///
 /// A key is `<form>[#<creature>][@<arms>]` ([`PuppetCache::puppet`]): the
@@ -1967,13 +1967,46 @@ pub struct Sheets {
     pub normal: Option<Arc<[u8]>>,
 }
 
-/// The source a cache reads: the creature field's published set unless a
-/// host gave it another ([`PuppetCache::over`]).
+/// The source a cache reads: nothing unless a host gave it one
+/// ([`PuppetCache::over`]).
 struct Source(Box<dyn PuppetSource>);
 
 impl Default for Source {
     fn default() -> Self {
-        Source(Box::new(crate::field_puppets::FieldSource::published()))
+        Source(Box::new(NoSource))
+    }
+}
+
+/// A source that serves nothing: what a cache made without one reads.
+struct NoSource;
+
+impl PuppetSource for NoSource {
+    fn refresh(&mut self) -> u64 {
+        0
+    }
+
+    fn generation_now(&self) -> u64 {
+        0
+    }
+
+    fn baked(&self, _form: &str) -> Option<(Arc<str>, String)> {
+        None
+    }
+
+    fn pose_file(&self, _body_type: &str) -> Option<Arc<str>> {
+        None
+    }
+
+    fn sheets(&mut self, _form: &str, _creature: Option<&str>) -> Sheets {
+        Sheets::default()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }
 
@@ -2003,7 +2036,7 @@ pub fn creature_of(key: &str) -> Option<&str> {
 }
 
 /// A puppet key without what it holds: the figure a skin is laid out for.
-fn unarmed(key: &str) -> &str {
+pub fn unarmed(key: &str) -> &str {
     key.split_once('@').map_or(key, |(dressed, _)| dressed)
 }
 
@@ -2122,12 +2155,12 @@ pub fn nerve_twitch(key: &PuppetKey, id: &str, now_s: f64) -> Option<(u8, f32)> 
     let cycle = (now_s + breath_phase(id) as f64 * NERVE_TWITCH_SECS) / NERVE_TWITCH_SECS;
     let t = (cycle.rem_euclid(1.0) * NERVE_TWITCH_SECS) as f32;
     let hand = if cycle.floor() as i64 % 2 == 0 { "rightHand" } else { "leftHand" };
-    (t < gs_puppet::FLINCH_SECS).then(|| gs_field::body::part_label(hand).map(|l| (l, t))).flatten()
+    (t < gs_puppet::FLINCH_SECS).then(|| gs_base::body::part_label(hand).map(|l| (l, t))).flatten()
 }
 
 /// `key`'s nerve wound rank (the `nsys` part), 0 = none.
 pub fn nerve_rank(key: &PuppetKey) -> u8 {
-    gs_field::body::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
+    gs_base::body::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
 }
 
 /// Seconds between a rank-3 nerve wound's twitches.
@@ -2145,7 +2178,7 @@ fn held(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey) -> gs_puppet::Po
     if !up {
         return pose.clone();
     }
-    let back = gs_field::body::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
+    let back = gs_base::body::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
     let mut pose = if back > 0 { set.guarded(pose, "back", back) } else { pose.clone() };
     let s = key.statuses;
     if s.has(Status::Terrified) {
@@ -2195,7 +2228,7 @@ fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey, weight: f32) 
 /// itself). A left-side part mirrors the table.
 fn flinched(set: &PoseSet, pose: &gs_puppet::Pose, flinch: Option<(u8, f32)>) -> gs_puppet::Pose {
     let Some((label, t)) = flinch else { return pose.clone() };
-    let Some((region, left)) = gs_field::body::label_part(label).and_then(flinch_region) else { return pose.clone() };
+    let Some((region, left)) = gs_base::body::label_part(label).and_then(flinch_region) else { return pose.clone() };
     match set.flinch.get(region) {
         Some(offsets) => pose.flinched(offsets, gs_puppet::flinch_envelope(t), left),
         None => pose.clone(),
@@ -2243,16 +2276,6 @@ fn breath_phase(id: &str) -> f32 {
 const LIFE_FRAMES: u64 = 3600;
 
 impl PuppetCache {
-    /// The cache that lives in this egui context (created on first use).
-    pub fn shared(ctx: &egui::Context) -> SharedPuppetCache {
-        ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<SharedPuppetCache>(egui::Id::new(
-                "gs_field_egui::puppets",
-            ))
-            .clone()
-        })
-    }
-
     /// Pick up the current puppet set, dropping everything derived from an
     /// older one. Does the work once per `frame` (pass
     /// `ctx.cumulative_frame_nr()`); further calls that frame are a compare.
@@ -2289,8 +2312,9 @@ impl PuppetCache {
         self.generation.unwrap_or_default()
     }
 
-    /// A cache over `source` (the shared one, [`PuppetCache::shared`],
-    /// reads the creature field's published set).
+    /// A cache over `source` (the creature field's in each egui context:
+    /// `gs_field_egui::field_puppets::FieldCache::shared`; the doll's:
+    /// `injury_doll::view::DollCache`).
     pub fn over(source: impl PuppetSource) -> Self {
         Self { source: Source(Box::new(source)), ..Self::default() }
     }
@@ -2434,7 +2458,7 @@ impl PuppetCache {
                     // A sheet stamped with the layout it was built for must be
                     // this one's (the same size can be laid out differently);
                     // one from before stamps goes by its size.
-                    let built_for_this = |b: &[u8]| gs_field::png_meta::read_text_bytes(b, gs_puppet::LAYOUT_KEYWORD).is_none_or(|sig| layout.matches(&sig));
+                    let built_for_this = |b: &[u8]| gs_base::png_meta::read_text_bytes(b, gs_puppet::LAYOUT_KEYWORD).is_none_or(|sig| layout.matches(&sig));
                     if fitted.is_some() && built_for_this(&bytes[..]) {
                         let normal = normal_bytes.and_then(|bytes| match image::load_from_memory(&bytes) {
                             Ok(n) => {
@@ -2897,8 +2921,55 @@ impl PuppetCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field_puppets::{calibration_for, creature_key, FieldCache, FieldSource};
-    use gs_field::puppets::PuppetRigs;
+
+    /// The creature field's published set (`gs_field`, a dev-dependency):
+    /// its forms, pose sets and sheets as the field serves them, short of
+    /// dressing and arming (`gs_field_egui::field_puppets` tests those).
+    #[derive(Default)]
+    struct Published(Option<Arc<gs_field::puppets::PuppetRigs>>);
+
+    impl Published {
+        fn rigs(&self) -> Arc<gs_field::puppets::PuppetRigs> {
+            self.0.clone().unwrap_or_else(gs_field::puppets::puppets)
+        }
+    }
+
+    impl PuppetSource for Published {
+        fn refresh(&mut self) -> u64 {
+            let rigs = gs_field::puppets::puppets();
+            let generation = rigs.generation();
+            self.0 = Some(rigs);
+            generation
+        }
+
+        fn generation_now(&self) -> u64 {
+            gs_field::puppets::puppets().generation()
+        }
+
+        fn baked(&self, form: &str) -> Option<(Arc<str>, String)> {
+            self.rigs().get(form).map(|rig| (rig.baked.clone(), rig.body_type.clone()))
+        }
+
+        fn pose_file(&self, body_type: &str) -> Option<Arc<str>> {
+            self.rigs().pose_file(body_type).map(|file| file.toml.clone())
+        }
+
+        fn sheets(&mut self, form: &str, creature: Option<&str>) -> Sheets {
+            let rigs = self.rigs();
+            match creature.and_then(|c| rigs.skin(form, c).map(|skin| (skin.clone(), rigs.skin_normal(form, c).cloned()))) {
+                Some((skin, normal)) => Sheets { texture: Some(skin), normal },
+                None => Sheets { texture: rigs.get(form).and_then(|rig| rig.texture.clone()), normal: rigs.get(form).and_then(|rig| rig.normal.clone()) },
+            }
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+    }
 
     /// `key` as the injury doll draws a hurt modelled body: its layered
     /// cloud, at the doll's spacing (`injury_doll::view::layered_if_marked`).
@@ -2913,7 +2984,7 @@ mod tests {
     }
 
     fn cache() -> PuppetCache {
-        let mut cache = PuppetCache::default();
+        let mut cache = PuppetCache::over(Published::default());
         cache.begin_frame(0);
         cache
     }
@@ -2963,195 +3034,6 @@ mod tests {
                 assert!(b.iter().flatten().all(|v| v.is_finite()), "{family} {name}");
             }
         }
-    }
-
-    #[test]
-    fn baked_puppets_load_from_the_embedded_bake_only() {
-        let mut cache = cache();
-        for (name, noun, family, key, body_type) in [
-            // The bestiary's forest troll swings a cudgel: it holds one.
-            ("forest troll", "troll", "troll", "troll@cudgel", "biped"),
-            ("timber wolf", "wolf", "canine", "canine", "quadruped"),
-        ] {
-            let resolved = cache.family_for(name, Some(noun)).expect("a puppet");
-            assert_eq!(&*resolved, key);
-            let puppet = cache.puppet(&resolved).expect("baked toml parses");
-            assert_eq!(puppet.family, family);
-            assert_eq!(puppet.body_type, body_type);
-            assert!(puppet.height > 1.0, "{family} height {}", puppet.height);
-            assert!(!puppet.segments.is_empty());
-            let set = cache.pose_set(&resolved).expect("pose set");
-            assert_eq!(set.body_type, body_type);
-            assert!(set.get("stand").is_some());
-        }
-        assert_eq!(cache.parses, 2, "each family parsed once");
-        // Cached: a second ask is free.
-        let humanoid = cache.family_for("forest troll", Some("troll")).unwrap();
-        cache.puppet(&humanoid);
-        assert_eq!(cache.parses, 2);
-    }
-
-    #[test]
-    fn a_creature_holds_its_weapon_until_props_are_off() {
-        let mut cache = cache();
-        let key = cache.family_for("forest troll", Some("troll")).unwrap();
-        let armed = cache.puppet(&key).unwrap();
-        let bare = cache.puppet(&Arc::from("troll")).unwrap();
-        assert!(armed.segments.len() > bare.segments.len() && armed.segments.iter().any(|s| s.kind.is_prop()));
-        assert_eq!(armed.height, bare.height, "props never change the figure's size");
-        let set = cache.pose_set(&key).unwrap();
-        assert_eq!(set.body_type, bare.body_type, "the armed key poses as its family");
-        cache.set_props(false);
-        assert_eq!(&*cache.family_for("forest troll", Some("troll")).unwrap(), "troll");
-        // A wolf attacks with its teeth: nothing to hold.
-        cache.set_props(true);
-        assert_eq!(&*cache.family_for("timber wolf", Some("wolf")).unwrap(), "canine");
-    }
-
-    /// A cache over `set` instead of the published one.
-    fn cache_over(set: PuppetRigs) -> PuppetCache {
-        let mut cache = PuppetCache::over(FieldSource::fixed(set));
-        cache.begin_frame(0);
-        cache
-    }
-
-    /// A PNG sheet laid out for `puppet`, every pixel `rgba`.
-    fn sheet_for(puppet: &Puppet, rgba: [u8; 4]) -> Vec<u8> {
-        let layout = gs_puppet::UvLayout::fit(puppet, gs_puppet::SHEET_SIDE);
-        let img = image::RgbaImage::from_pixel(layout.w as u32, layout.h as u32, image::Rgba(rgba));
-        let mut png = std::io::Cursor::new(Vec::new());
-        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
-        png.into_inner()
-    }
-
-    #[test]
-    fn keys_name_the_family_the_creature_and_the_arms() {
-        assert_eq!(base_family("giant#grim_gigas_skald@staff"), "giant");
-        assert_eq!(base_family("troll@cudgel"), "troll");
-        assert_eq!(creature_of("giant#grim_gigas_skald@staff"), Some("grim_gigas_skald"));
-        assert_eq!(creature_of("giant#grim_gigas_skald"), Some("grim_gigas_skald"));
-        assert_eq!(creature_of("troll@cudgel"), None);
-        assert_eq!(unarmed("giant#grim_gigas_skald@staff"), "giant#grim_gigas_skald");
-        assert_eq!(creature_key("a Grim Gigas Skald"), "grim_gigas_skald");
-    }
-
-    /// A creature with an outfit (`outfits.toml` ships one for the skald)
-    /// is its family's puppet dressed, posed by the family's poses, and
-    /// wears no texture until it has a skin of its own.
-    #[test]
-    fn a_creature_in_an_outfit_is_dressed_on_the_stage() {
-        let published = gs_field::puppets::puppets();
-        let giant = Puppet::from_baked_toml(&published.get("giant").unwrap().baked).unwrap();
-        // The family's own sheet: the bare giant wears it, the dressed one cannot.
-        let rigs = published.families().map(|f| {
-            let mut rig = (**published.get(f).unwrap()).clone();
-            if f == "giant" {
-                rig.texture = Some(sheet_for(&giant, [9, 9, 9, 255]).into());
-            }
-            rig
-        });
-        let poses = published.body_types().map(|b| (**published.pose_file(b).unwrap()).clone());
-        let set = PuppetRigs::from_rigs(rigs, poses).with_props(published.props()).with_outfits(published.kit(), published.outfits());
-        let mut cache = cache_over(set);
-        cache.set_props(false);
-        let key = cache.family_for("grim gigas skald", Some("skald")).expect("a puppet");
-        assert_eq!(&*key, "giant#grim_gigas_skald");
-        let dressed = cache.puppet(&key).unwrap();
-        assert!(dressed.segments.iter().any(|s| s.kind.is_garment()), "wears its robe and hood");
-        assert_eq!(dressed.height, giant.height);
-        assert!(cache.texture(&Arc::from("giant")).is_some(), "the bare family wears its sheet");
-        assert!(cache.texture(&key).is_none(), "no skin of its own yet");
-        // Somebody with no outfit and no skin shares the bare family key.
-        assert!(!cache.family_for("forest troll", Some("troll")).unwrap().contains('#'));
-    }
-
-    /// A creature's own skin is laid out for its dressed figure; the armed
-    /// key wears it too; a sheet of the wrong size is refused.
-    #[test]
-    fn a_creature_wears_its_own_skin() {
-        let published = gs_field::puppets::puppets();
-        let mut cache = cache();
-        cache.set_props(false);
-        let dressed = cache.puppet(&Arc::from("giant#grim_gigas_skald")).unwrap();
-        let bare = cache.puppet(&Arc::from("giant")).unwrap();
-        let wolf_key = creature_key("timber wolf");
-        let set = (*published)
-            .clone()
-            .with_skin("giant", "grim_gigas_skald", &sheet_for(&dressed, [200, 10, 10, 255]))
-            .with_skin("canine", &wolf_key, &sheet_for(&bare, [1, 2, 3, 255]));
-        let mut cache = cache_over(set);
-        let key = cache.family_for("grim gigas skald", Some("skald")).unwrap();
-        let skin = cache.texture(&Arc::from(unarmed(&key))).expect("its skin");
-        assert_eq!(&skin.rgba[..4], &[200, 10, 10, 255]);
-        assert!(cache.texture(&Arc::from("giant#grim_gigas_skald@staff")).is_some(), "held things wear the same sheet");
-        // A wolf with a skin gets a key of its own; this one was painted
-        // for another figure, so it is refused rather than smeared.
-        let wolf = cache.family_for("timber wolf", Some("wolf")).unwrap();
-        assert_eq!(*wolf, *format!("canine#{wolf_key}"));
-        assert!(cache.texture(&wolf).is_none());
-        assert!(cache.pose_set(&wolf).is_some(), "poses as its family");
-    }
-
-    /// `gs_field` embeds a copy of the workspace's `data/outfits/`.
-    #[test]
-    fn the_embedded_outfits_match_the_workspace_ones() {
-        let norm = |t: &str| t.replace("\r\n", "\n");
-        let workspace = |f: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outfits").join(f)).unwrap();
-        assert!(norm(gs_field::puppets::EMBEDDED_KIT) == norm(&workspace("kit.toml")), "crates/gs_field/data/outfits/kit.toml differs from data/outfits/: re-copy it (or Publish)");
-        assert!(
-            norm(gs_field::puppets::EMBEDDED_OUTFITS) == norm(&workspace("outfits.toml")),
-            "crates/gs_field/data/outfits/outfits.toml differs from data/outfits/: re-copy it (or Publish)"
-        );
-    }
-
-    /// `gs_field` embeds a copy of the workspace's `data/props/weapons.toml`.
-    #[test]
-    fn the_embedded_props_match_the_workspace_ones() {
-        let norm = |t: &str| t.replace("\r\n", "\n");
-        assert!(
-            norm(gs_field::puppets::EMBEDDED_PROPS) == norm(gs_puppet::SHIPPED_PROPS),
-            "crates/gs_field/data/props/weapons.toml differs from data/props/weapons.toml: re-copy it (or Publish)"
-        );
-    }
-
-    /// `gs_field` embeds copies of the workspace's `data/poses/`; they must
-    /// not drift from what `gs_puppet` ships (Publish re-copies them).
-    #[test]
-    fn the_embedded_pose_sets_match_the_workspace_ones() {
-        let norm = |t: &str| t.replace("\r\n", "\n");
-        let embedded: HashMap<&str, &str> = gs_field::puppets::embedded_poses().collect();
-        for (body_type, shipped) in gs_puppet::SHIPPED_POSES {
-            let got = embedded.get(body_type).unwrap_or_else(|| panic!("{body_type}.toml not embedded"));
-            assert!(
-                norm(got) == norm(shipped),
-                "crates/gs_field/data/poses/{body_type}.toml differs from data/poses/{body_type}.toml: re-copy it (or Publish)"
-            );
-        }
-    }
-
-    /// A family's `[family.<name>]` overrides reach the drawn pose; a family
-    /// without a section gets the shared set.
-    #[test]
-    fn a_family_poses_with_its_own_overrides() {
-        use gs_field::puppets::{PoseFile, PuppetRig, PuppetSource};
-        let canine = gs_field::puppets::embedded().find(|(f, _)| *f == "canine").unwrap().1;
-        let quadruped = gs_puppet::SHIPPED_POSES.iter().find(|(b, _)| *b == "quadruped").unwrap().1;
-        let shared = PoseSet::from_toml(quadruped).unwrap();
-        let rig = |family: &str| PuppetRig {
-            family: family.into(),
-            body_type: "quadruped".into(),
-            baked: canine.into(),
-            source: PuppetSource::Embedded,
-            texture: None,
-            normal: None,
-        };
-        let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
-        let mut cache = PuppetCache::over(FieldSource::fixed(PuppetRigs::from_rigs([rig("elephantid"), rig("canine")], [poses])));
-        let elephantid = cache.pose_set(&Arc::from("elephantid")).unwrap();
-        assert_ne!(elephantid.get("sit"), shared.get("sit"), "the elephantid sit override applies");
-        assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
-        let canine = cache.pose_set(&Arc::from("canine")).unwrap();
-        assert_eq!(canine.get("sit"), shared.get("sit"));
     }
 
     #[test]
@@ -3331,7 +3213,7 @@ mod tests {
         // never match it against an injury.
         for part in parts.iter() {
             assert!(
-                gs_field::body::part_label(part).is_some(),
+                gs_base::body::part_label(part).is_some(),
                 "'{part}' is not a doll part"
             );
         }
@@ -3417,40 +3299,6 @@ mod tests {
         assert!(pr < 0.5, "prone is much shorter: {pr}");
         // Lying spreads out along the ground.
         assert!(prone.span().unwrap() > stand.span().unwrap());
-    }
-
-    #[test]
-    fn calibration_is_shape_only_and_matches_the_drawn_poses() {
-        let mut cache = cache();
-        let cal = calibration_for(&mut cache, "forest troll", Some("troll")).expect("humanoid");
-        assert_eq!(cal.standing.size, None, "shape only, never a height");
-        assert!(cal.standing.aspect.unwrap() > 0.0);
-        let prone = cal.prone.expect("a prone pose");
-        assert_eq!(prone.size, None);
-        assert!(prone.aspect.unwrap() > cal.standing.aspect.unwrap());
-        assert!(prone.content_ratio.unwrap() < 1.0);
-
-        // Through the shared contract: a small creature and a large one keep
-        // their own heights, and the prone box is the drawn prone pose.
-        let creature = |name: &str, noun: &str| gs_field::Creature {
-            name: name.into(),
-            noun: Some(noun.into()),
-            id: "1".into(),
-            status: None,
-            flags: None,
-        };
-        for (name, noun, h) in [
-            ("mongrel kobold", "kobold", 0.6),
-            ("agresh troll chieftain", "chieftain", 1.8),
-        ] {
-            let g = gs_field::geometry::resolve_geometry(&creature(name, noun), Some(&cal));
-            assert!((g.world_h - h).abs() < 1e-3, "{name}: {}", g.world_h);
-            assert!(
-                (g.prone.h - h * prone.content_ratio.unwrap()).abs() < 1e-3,
-                "{name}: prone height is the drawn one"
-            );
-            assert!(g.prone.w > g.standing.w, "{name}: prone is wider");
-        }
     }
 
     /// Placement: the figure's ground point lands on the foot point, its
@@ -3564,48 +3412,6 @@ mod tests {
         assert!(cache.falling("a", dead, 21.0).is_some());
     }
 
-    #[test]
-    fn pose_cache_builds_once_per_key_and_is_capped() {
-        // Other tests re-point VELLUM_FE_DIR, which reloads the puppet set.
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let ctx = egui::Context::default();
-        let shared = PuppetCache::shared(&ctx);
-        assert!(
-            Arc::ptr_eq(&shared, &PuppetCache::shared(&ctx)),
-            "one per context"
-        );
-        let mut cache = shared.lock().unwrap();
-        cache.begin_frame(0);
-        let family = cache
-            .family_for("forest troll", Some("troll"))
-            .expect("humanoid");
-
-        let healthy = key(PoseChoice::Standing, &[]);
-        let a = cache.posed(&family, &healthy).unwrap();
-        for frame in 1..=50 {
-            cache.begin_frame(frame);
-            let b = cache.posed(&family, &healthy).unwrap();
-            assert!(Arc::ptr_eq(&a, &b), "the same list, not a rebuild");
-        }
-        assert_eq!(cache.builds, 1);
-        cache.posed(&family, &key(PoseChoice::Standing, &[("head", 1)]));
-        assert_eq!(cache.builds, 2);
-
-        for n in 0..(POSE_CACHE_CAP as u16 + 10) {
-            let mut k = key(PoseChoice::Standing, &[]);
-            k.body = [n as u8, (n >> 8) as u8, 0];
-            cache.posed(&family, &k).unwrap();
-            // Keep the healthy one hot so it survives eviction.
-            cache.posed(&family, &healthy).unwrap();
-        }
-        assert_eq!(cache.posed_count(), POSE_CACHE_CAP);
-        let builds = cache.builds;
-        cache.posed(&family, &healthy).unwrap();
-        assert_eq!(cache.builds, builds, "the hot entry was never evicted");
-    }
-
     /// What one pose weighs, the doll's way: `cargo test -p gs_field_egui
     /// a_pose_weighs -- --nocapture` prints it per size step and build.
     #[test]
@@ -3643,7 +3449,7 @@ mod tests {
         let t = std::time::Instant::now();
         let body = Arc::new(load_body(&dir, &puppet).unwrap());
         println!("{}: loaded in {:.2} s, {} trained splats", dir.display(), t.elapsed().as_secs_f64(), body.splats.as_ref().map_or(0, |c| c.len()));
-        let chest = gs_field::body::part_label("chest").unwrap();
+        let chest = gs_base::body::part_label("chest").unwrap();
         for (what, cloud) in [("trained", 1u8), ("made", 2)] {
             if cloud == 1 && body.splats.is_none() {
                 continue;
@@ -3775,7 +3581,7 @@ mod tests {
         };
         assert!(matches!(marked_body(&puppet, &body, &key, shipped(&puppet).as_ref()), Marked::Building(None)), "first asked: being made, nothing to stand in");
         let hurt = ready(&key);
-        let chest = gs_field::body::part_label("chest").unwrap();
+        let chest = gs_base::body::part_label("chest").unwrap();
         // a second on: the wound is open, and what it threw off is in the air
         let step = key.with_fresh(chest, 1.0);
         match marked_body(&puppet, &body, &step, shipped(&puppet).as_ref()) {
@@ -3864,7 +3670,7 @@ mod tests {
         use gs_puppet::FLINCH_SECS;
         let mut cache = cache();
         cache.begin_frame(0);
-        let family = cache.family_for("forest troll", Some("troll")).expect("humanoid");
+        let family: Arc<str> = Arc::from("troll");
         let ranks = |w: &[(&str, u8)]| key(PoseChoice::Standing, w).ranks;
         let arm = ranks(&[("rightArm", 1)]);
 
@@ -3875,7 +3681,7 @@ mod tests {
         cache.motion("a", PoseChoice::Standing, 1.0);
         let arm2 = ranks(&[("rightArm", 2)]);
         let (label, t) = cache.flinch("a", &arm2, 1.0).expect("flinches");
-        assert_eq!(gs_field::body::label_part(label), Some("rightArm"));
+        assert_eq!(gs_base::body::label_part(label), Some("rightArm"));
         assert_eq!(t, 0.0);
         let (_, t) = cache.flinch("a", &arm2, 1.2).unwrap();
         assert!((t - 0.2).abs() < 1e-5);
@@ -3883,7 +3689,7 @@ mod tests {
         // A new hit elsewhere restarts it on that part.
         let both = ranks(&[("rightArm", 2), ("head", 1)]);
         let (label, _) = cache.flinch("a", &both, 3.0).unwrap();
-        assert_eq!(gs_field::body::label_part(label), Some("head"));
+        assert_eq!(gs_base::body::label_part(label), Some("head"));
         assert!(cache.death_flinch("a").is_none(), "alive");
 
         // The flinched figure differs from the still one, and settles back.
@@ -3903,7 +3709,7 @@ mod tests {
         cache.flinch("a", &ranks(&[("rightArm", 2), ("head", 1), ("chest", 1)]), 10.0);
         assert!(matches!(cache.motion("a", dead, 10.1), Motion::Falling { .. }));
         let (label, t) = cache.death_flinch("a").expect("died mid-flinch");
-        assert_eq!(gs_field::body::label_part(label), Some("chest"));
+        assert_eq!(gs_base::body::label_part(label), Some("chest"));
         assert!((t - 0.1).abs() < 1e-5);
         assert!(cache.flinch("a", &ranks(&[("rightArm", 3), ("head", 1), ("chest", 1)]), 10.2).is_none(), "the dead do not flinch");
         let dk = PuppetKey::new(dead, &[], true, false, body(), false, 160.0);
@@ -3938,7 +3744,7 @@ mod tests {
     fn a_living_puppet_breathes_in_cached_steps() {
         let mut cache = cache();
         cache.begin_frame(0);
-        let family = cache.family_for("forest troll", Some("troll")).expect("humanoid");
+        let family: Arc<str> = Arc::from("troll");
         let period = cache.pose_set(&family).unwrap().idle.as_ref().expect("bipeds breathe").period as f64;
 
         let (s0, until) = cache.breath(&family, "#1", PoseChoice::Standing, 0.0).unwrap();

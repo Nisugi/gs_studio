@@ -1,0 +1,32 @@
+[package]
+name = "gs_render"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "What the injury doll and the creature field both draw with: the puppet cache over a source of puppets, the v2 GPU lighting pass and the GPU skins."
+
+[lib]
+doctest = false
+
+# docs/crate-split-plan.md, S7: the doll (`injury_doll`) and the field
+# (`gs_field_egui`) each depend on this; it depends on neither
+# (`tests/layering.rs` holds it to these).
+[dependencies]
+gs_base = { path = "../gs_base" }
+gs_puppet = { path = "../gs_puppet" }
+# The relight on the GPU is vellum_light's maths.
+vellum_light = { path = "../vellum_light" }
+# MUST be the same egui the host links (one source for the workspace).
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+bytemuck = "1"
+# A skin's sheets and a body's paint are PNGs.
+image = { version = "0.25", default-features = false, features = ["png"] }
+tracing = "0.1"
+
+[dev-dependencies]
+# The cache's tests pose the creature field's published forms.
+gs_field = { path = "../gs_field" }
+gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
+# Validates the WGSL offline (tests): the same naga wgpu builds on.
+naga = { version = "29.0.4", features = ["wgsl-in"] }

@@ -18,11 +18,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::sky::DollSky;
 use crate::state::{DollState, Status, Statuses};
 
-use gs_field_egui::puppet_cache::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
-use gs_field_egui::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
+use gs_render::puppet_cache::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use gs_render::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
 /// The key a doll is drawn by.
-pub use gs_field_egui::puppet_cache::PuppetKey as DollKey;
+pub use gs_render::puppet_cache::PuppetKey as DollKey;
 
 /// The doll's puppet cache: a [`PuppetCache`] over the installed figures
 /// ([`DollSource`](crate::source::DollSource)), one per egui context and
@@ -234,7 +234,7 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32, f3
                 lit.extend_from_slice(&[l[0], l[1], l[2], 0]);
             }
         }
-        let geo = gs_field_egui::figure_image::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
+        let geo = gs_render::figure_image::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
         LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(lit), geo: Arc::new(geo) }
     })
 }
@@ -256,7 +256,7 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
                 p[c] = l2s(s2l(p[c]) * sky.floor[c]);
             }
         }
-        gs_field_egui::figure_image::skin_image(key, &dim, surface, M_PER_FT)
+        gs_render::figure_image::skin_image(key, &dim, surface, M_PER_FT)
     };
     Some(if moving { Arc::new(make()) } else { cached(key, make) })
 }
@@ -320,7 +320,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         key = key.with_fresh(label, now - at);
         if key.fresh.is_some() {
             ctx.request_repaint();
-            let started = egui::Id::new(("gs_field_egui::doll_arrival", id, at.to_bits()));
+            let started = egui::Id::new(("gs_render::doll_arrival", id, at.to_bits()));
             let since = ctx.data(|d| d.get_temp::<f64>(started));
             arrival_age = since.map_or(0.0, |t| (now - t) as f32);
             arrival_from = Some((started, since));
@@ -365,7 +365,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         ctx.request_repaint_after(std::time::Duration::from_millis(40));
     }
     // a rank-3 nerve wound twitches every few seconds: look again soon
-    if id.is_some() && gs_field_egui::puppet_cache::nerve_rank(&key) >= 3 {
+    if id.is_some() && gs_render::puppet_cache::nerve_rank(&key) >= 3 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
     if moving {
@@ -386,7 +386,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         None
     } else if let Some((mesh, texture)) = &posed.mesh {
         let key = key_of(("doll gpu skin", mesh.key, sky.floor.map(f32::to_bits)));
-        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
+        gs_render::skin_gpu::submit(key, Arc::new(gs_render::skin_gpu::SkinJob { figure: gs_render::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: gs_render::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
         let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
         let image = LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
@@ -402,14 +402,14 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
             0.0
         };
         let key = key_of(("doll gpu body", body.key, sky.floor.map(f32::to_bits), arrival_age.to_bits(), clock.to_bits()));
-        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Body(body.clone()), lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age, clock }));
+        gs_render::skin_gpu::submit(key, Arc::new(gs_render::skin_gpu::SkinJob { figure: gs_render::skin_gpu::Figure::Body(body.clone()), lit: gs_render::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age, clock }));
         let frame = gs_puppet::Skin { origin: body.origin, w: body.w, h: body.h, rgba: Vec::new() };
         let image = LitImage { key, w: body.w as u32, h: body.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
     } else if let Some(cloud) = &posed.splats {
         // its splat cloud (the layered one), rasterised by the same pass
         let key = key_of(("doll gpu splats", cloud.key, sky.floor.map(f32::to_bits)));
-        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Splats(cloud.clone()), lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
+        gs_render::skin_gpu::submit(key, Arc::new(gs_render::skin_gpu::SkinJob { figure: gs_render::skin_gpu::Figure::Splats(cloud.clone()), lit: gs_render::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
         let frame = gs_puppet::Skin { origin: cloud.origin, w: cloud.w, h: cloud.h, rgba: Vec::new() };
         let image = LitImage { key, w: cloud.w as u32, h: cloud.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))

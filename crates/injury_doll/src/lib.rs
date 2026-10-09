@@ -10,9 +10,12 @@
 //! cache reads them ([`source`]), its light ([`sky`]), the character's
 //! state ([`state`]) and the view ([`view`]).
 //! What it shares with the creature field is the base (`gs_base`: the data
-//! folder, the clock, the sky, the body's parts, the statuses) and, for
-//! now in `gs_field_egui`, the puppet cache and the GPU pass (they leave
-//! for a crate of their own in the split's S7); the paths here stay.
+//! folder, the clock, the sky, the body's parts, the statuses) and what
+//! both draw with (`gs_render`: the puppet cache, the GPU pass, the GPU
+//! skins); it reaches nothing of the field's.
+
+// The allowances the view had in gs_field_egui.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod roster;
 pub mod sky;
@@ -29,5 +32,5 @@ pub mod base {
 /// The GPU pass the doll is drawn by: set up once as the window opens; a
 /// doll drawn without it is unlit on grey.
 pub mod gpu {
-    pub use gs_field_egui::field_gpu::{available, init};
+    pub use gs_render::field_gpu::{available, init};
 }

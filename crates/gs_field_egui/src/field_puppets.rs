@@ -9,12 +9,12 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use gs_field::puppets::PuppetRigs;
 use gs_puppet::Puppet;
 
-use crate::puppet_cache::{base_family, creature_of, PoseChoice, PuppetCache, PuppetKey, PuppetSource, Sheets};
+use crate::puppet_cache::{base_family, creature_of, PoseChoice, PuppetCache, PuppetKey, PuppetSource, SharedPuppetCache, Sheets};
 
 /// The creature field's puppets: the published set (embedded, with the
 /// pool's over it), taken up again whenever it moves on -- or one set held
@@ -258,6 +258,11 @@ impl PuppetSource for FieldSource {
 /// What the creature field asks of a [`PuppetCache`] over a
 /// [`FieldSource`]; over any other source each finds nothing.
 pub trait FieldCache {
+    /// The field's cache in this egui context, over the published set
+    /// (made on first use).
+    fn shared(ctx: &egui::Context) -> SharedPuppetCache
+    where
+        Self: Sized;
     /// [`FieldSource::family_for`].
     fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>>;
     /// Hold props or not (the host's
@@ -280,6 +285,10 @@ pub trait FieldCache {
 }
 
 impl FieldCache for PuppetCache {
+    fn shared(ctx: &egui::Context) -> SharedPuppetCache {
+        ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("gs_field_egui::puppets"), || Arc::new(Mutex::new(PuppetCache::over(FieldSource::published())))).clone())
+    }
+
     fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>> {
         self.source_mut::<FieldSource>()?.family_for(name, noun)
     }
@@ -376,4 +385,293 @@ pub fn calibration_for(
             content_ratio: p.content_ratio(),
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::puppet_cache::*;
+    use gs_field::puppets::PuppetRigs;
+    use gs_puppet::{PoseSet, Puppet};
+
+    fn cache() -> PuppetCache {
+        let mut cache = PuppetCache::over(FieldSource::published());
+        cache.begin_frame(0);
+        cache
+    }
+
+    fn body() -> [u8; 3] {
+        [100, 120, 140]
+    }
+
+    fn key(pose: PoseChoice, injuries: &[(&str, u8)]) -> PuppetKey {
+        let injuries: Vec<(String, u8)> =
+            injuries.iter().map(|(p, r)| (p.to_string(), *r)).collect();
+        PuppetKey::new(pose, &injuries, false, false, body(), false, 160.0)
+    }
+
+    #[test]
+    fn baked_puppets_load_from_the_embedded_bake_only() {
+        let mut cache = cache();
+        for (name, noun, family, key, body_type) in [
+            // The bestiary's forest troll swings a cudgel: it holds one.
+            ("forest troll", "troll", "troll", "troll@cudgel", "biped"),
+            ("timber wolf", "wolf", "canine", "canine", "quadruped"),
+        ] {
+            let resolved = cache.family_for(name, Some(noun)).expect("a puppet");
+            assert_eq!(&*resolved, key);
+            let puppet = cache.puppet(&resolved).expect("baked toml parses");
+            assert_eq!(puppet.family, family);
+            assert_eq!(puppet.body_type, body_type);
+            assert!(puppet.height > 1.0, "{family} height {}", puppet.height);
+            assert!(!puppet.segments.is_empty());
+            let set = cache.pose_set(&resolved).expect("pose set");
+            assert_eq!(set.body_type, body_type);
+            assert!(set.get("stand").is_some());
+        }
+        assert_eq!(cache.parses, 2, "each family parsed once");
+        // Cached: a second ask is free.
+        let humanoid = cache.family_for("forest troll", Some("troll")).unwrap();
+        cache.puppet(&humanoid);
+        assert_eq!(cache.parses, 2);
+    }
+
+    #[test]
+    fn a_creature_holds_its_weapon_until_props_are_off() {
+        let mut cache = cache();
+        let key = cache.family_for("forest troll", Some("troll")).unwrap();
+        let armed = cache.puppet(&key).unwrap();
+        let bare = cache.puppet(&Arc::from("troll")).unwrap();
+        assert!(armed.segments.len() > bare.segments.len() && armed.segments.iter().any(|s| s.kind.is_prop()));
+        assert_eq!(armed.height, bare.height, "props never change the figure's size");
+        let set = cache.pose_set(&key).unwrap();
+        assert_eq!(set.body_type, bare.body_type, "the armed key poses as its family");
+        cache.set_props(false);
+        assert_eq!(&*cache.family_for("forest troll", Some("troll")).unwrap(), "troll");
+        // A wolf attacks with its teeth: nothing to hold.
+        cache.set_props(true);
+        assert_eq!(&*cache.family_for("timber wolf", Some("wolf")).unwrap(), "canine");
+    }
+
+    #[test]
+    fn keys_name_the_family_the_creature_and_the_arms() {
+        assert_eq!(base_family("giant#grim_gigas_skald@staff"), "giant");
+        assert_eq!(base_family("troll@cudgel"), "troll");
+        assert_eq!(creature_of("giant#grim_gigas_skald@staff"), Some("grim_gigas_skald"));
+        assert_eq!(creature_of("giant#grim_gigas_skald"), Some("grim_gigas_skald"));
+        assert_eq!(creature_of("troll@cudgel"), None);
+        assert_eq!(unarmed("giant#grim_gigas_skald@staff"), "giant#grim_gigas_skald");
+        assert_eq!(creature_key("a Grim Gigas Skald"), "grim_gigas_skald");
+    }
+
+    /// A creature with an outfit (`outfits.toml` ships one for the skald)
+    /// is its family's puppet dressed, posed by the family's poses, and
+    /// wears no texture until it has a skin of its own.
+    #[test]
+    fn a_creature_in_an_outfit_is_dressed_on_the_stage() {
+        let published = gs_field::puppets::puppets();
+        let giant = Puppet::from_baked_toml(&published.get("giant").unwrap().baked).unwrap();
+        // The family's own sheet: the bare giant wears it, the dressed one cannot.
+        let rigs = published.families().map(|f| {
+            let mut rig = (**published.get(f).unwrap()).clone();
+            if f == "giant" {
+                rig.texture = Some(sheet_for(&giant, [9, 9, 9, 255]).into());
+            }
+            rig
+        });
+        let poses = published.body_types().map(|b| (**published.pose_file(b).unwrap()).clone());
+        let set = PuppetRigs::from_rigs(rigs, poses).with_props(published.props()).with_outfits(published.kit(), published.outfits());
+        let mut cache = cache_over(set);
+        cache.set_props(false);
+        let key = cache.family_for("grim gigas skald", Some("skald")).expect("a puppet");
+        assert_eq!(&*key, "giant#grim_gigas_skald");
+        let dressed = cache.puppet(&key).unwrap();
+        assert!(dressed.segments.iter().any(|s| s.kind.is_garment()), "wears its robe and hood");
+        assert_eq!(dressed.height, giant.height);
+        assert!(cache.texture(&Arc::from("giant")).is_some(), "the bare family wears its sheet");
+        assert!(cache.texture(&key).is_none(), "no skin of its own yet");
+        // Somebody with no outfit and no skin shares the bare family key.
+        assert!(!cache.family_for("forest troll", Some("troll")).unwrap().contains('#'));
+    }
+
+    /// A creature's own skin is laid out for its dressed figure; the armed
+    /// key wears it too; a sheet of the wrong size is refused.
+    #[test]
+    fn a_creature_wears_its_own_skin() {
+        let published = gs_field::puppets::puppets();
+        let mut cache = cache();
+        cache.set_props(false);
+        let dressed = cache.puppet(&Arc::from("giant#grim_gigas_skald")).unwrap();
+        let bare = cache.puppet(&Arc::from("giant")).unwrap();
+        let wolf_key = creature_key("timber wolf");
+        let set = (*published)
+            .clone()
+            .with_skin("giant", "grim_gigas_skald", &sheet_for(&dressed, [200, 10, 10, 255]))
+            .with_skin("canine", &wolf_key, &sheet_for(&bare, [1, 2, 3, 255]));
+        let mut cache = cache_over(set);
+        let key = cache.family_for("grim gigas skald", Some("skald")).unwrap();
+        let skin = cache.texture(&Arc::from(unarmed(&key))).expect("its skin");
+        assert_eq!(&skin.rgba[..4], &[200, 10, 10, 255]);
+        assert!(cache.texture(&Arc::from("giant#grim_gigas_skald@staff")).is_some(), "held things wear the same sheet");
+        // A wolf with a skin gets a key of its own; this one was painted
+        // for another figure, so it is refused rather than smeared.
+        let wolf = cache.family_for("timber wolf", Some("wolf")).unwrap();
+        assert_eq!(*wolf, *format!("canine#{wolf_key}"));
+        assert!(cache.texture(&wolf).is_none());
+        assert!(cache.pose_set(&wolf).is_some(), "poses as its family");
+    }
+
+    /// `gs_field` embeds a copy of the workspace's `data/outfits/`.
+    #[test]
+    fn the_embedded_outfits_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        let workspace = |f: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outfits").join(f)).unwrap();
+        assert!(norm(gs_field::puppets::EMBEDDED_KIT) == norm(&workspace("kit.toml")), "crates/gs_field/data/outfits/kit.toml differs from data/outfits/: re-copy it (or Publish)");
+        assert!(
+            norm(gs_field::puppets::EMBEDDED_OUTFITS) == norm(&workspace("outfits.toml")),
+            "crates/gs_field/data/outfits/outfits.toml differs from data/outfits/: re-copy it (or Publish)"
+        );
+    }
+
+    /// `gs_field` embeds a copy of the workspace's `data/props/weapons.toml`.
+    #[test]
+    fn the_embedded_props_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        assert!(
+            norm(gs_field::puppets::EMBEDDED_PROPS) == norm(gs_puppet::SHIPPED_PROPS),
+            "crates/gs_field/data/props/weapons.toml differs from data/props/weapons.toml: re-copy it (or Publish)"
+        );
+    }
+
+    /// `gs_field` embeds copies of the workspace's `data/poses/`; they must
+    /// not drift from what `gs_puppet` ships (Publish re-copies them).
+    #[test]
+    fn the_embedded_pose_sets_match_the_workspace_ones() {
+        let norm = |t: &str| t.replace("\r\n", "\n");
+        let embedded: HashMap<&str, &str> = gs_field::puppets::embedded_poses().collect();
+        for (body_type, shipped) in gs_puppet::SHIPPED_POSES {
+            let got = embedded.get(body_type).unwrap_or_else(|| panic!("{body_type}.toml not embedded"));
+            assert!(
+                norm(got) == norm(shipped),
+                "crates/gs_field/data/poses/{body_type}.toml differs from data/poses/{body_type}.toml: re-copy it (or Publish)"
+            );
+        }
+    }
+
+    /// A family's `[family.<name>]` overrides reach the drawn pose; a family
+    /// without a section gets the shared set.
+    #[test]
+    fn a_family_poses_with_its_own_overrides() {
+        use gs_field::puppets::{PoseFile, PuppetRig, PuppetSource};
+        let canine = gs_field::puppets::embedded().find(|(f, _)| *f == "canine").unwrap().1;
+        let quadruped = gs_puppet::SHIPPED_POSES.iter().find(|(b, _)| *b == "quadruped").unwrap().1;
+        let shared = PoseSet::from_toml(quadruped).unwrap();
+        let rig = |family: &str| PuppetRig {
+            family: family.into(),
+            body_type: "quadruped".into(),
+            baked: canine.into(),
+            source: PuppetSource::Embedded,
+            texture: None,
+            normal: None,
+        };
+        let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
+        let mut cache = PuppetCache::over(FieldSource::fixed(PuppetRigs::from_rigs([rig("elephantid"), rig("canine")], [poses])));
+        let elephantid = cache.pose_set(&Arc::from("elephantid")).unwrap();
+        assert_ne!(elephantid.get("sit"), shared.get("sit"), "the elephantid sit override applies");
+        assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
+        let canine = cache.pose_set(&Arc::from("canine")).unwrap();
+        assert_eq!(canine.get("sit"), shared.get("sit"));
+    }
+
+    #[test]
+    fn calibration_is_shape_only_and_matches_the_drawn_poses() {
+        let mut cache = cache();
+        let cal = calibration_for(&mut cache, "forest troll", Some("troll")).expect("humanoid");
+        assert_eq!(cal.standing.size, None, "shape only, never a height");
+        assert!(cal.standing.aspect.unwrap() > 0.0);
+        let prone = cal.prone.expect("a prone pose");
+        assert_eq!(prone.size, None);
+        assert!(prone.aspect.unwrap() > cal.standing.aspect.unwrap());
+        assert!(prone.content_ratio.unwrap() < 1.0);
+
+        // Through the shared contract: a small creature and a large one keep
+        // their own heights, and the prone box is the drawn prone pose.
+        let creature = |name: &str, noun: &str| gs_field::Creature {
+            name: name.into(),
+            noun: Some(noun.into()),
+            id: "1".into(),
+            status: None,
+            flags: None,
+        };
+        for (name, noun, h) in [
+            ("mongrel kobold", "kobold", 0.6),
+            ("agresh troll chieftain", "chieftain", 1.8),
+        ] {
+            let g = gs_field::geometry::resolve_geometry(&creature(name, noun), Some(&cal));
+            assert!((g.world_h - h).abs() < 1e-3, "{name}: {}", g.world_h);
+            assert!(
+                (g.prone.h - h * prone.content_ratio.unwrap()).abs() < 1e-3,
+                "{name}: prone height is the drawn one"
+            );
+            assert!(g.prone.w > g.standing.w, "{name}: prone is wider");
+        }
+    }
+
+    #[test]
+    fn pose_cache_builds_once_per_key_and_is_capped() {
+        // Other tests re-point VELLUM_FE_DIR, which reloads the puppet set.
+        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let ctx = egui::Context::default();
+        let shared = PuppetCache::shared(&ctx);
+        assert!(
+            Arc::ptr_eq(&shared, &PuppetCache::shared(&ctx)),
+            "one per context"
+        );
+        let mut cache = shared.lock().unwrap();
+        cache.begin_frame(0);
+        let family = cache
+            .family_for("forest troll", Some("troll"))
+            .expect("humanoid");
+
+        let healthy = key(PoseChoice::Standing, &[]);
+        let a = cache.posed(&family, &healthy).unwrap();
+        for frame in 1..=50 {
+            cache.begin_frame(frame);
+            let b = cache.posed(&family, &healthy).unwrap();
+            assert!(Arc::ptr_eq(&a, &b), "the same list, not a rebuild");
+        }
+        assert_eq!(cache.builds, 1);
+        cache.posed(&family, &key(PoseChoice::Standing, &[("head", 1)]));
+        assert_eq!(cache.builds, 2);
+
+        for n in 0..(POSE_CACHE_CAP as u16 + 10) {
+            let mut k = key(PoseChoice::Standing, &[]);
+            k.body = [n as u8, (n >> 8) as u8, 0];
+            cache.posed(&family, &k).unwrap();
+            // Keep the healthy one hot so it survives eviction.
+            cache.posed(&family, &healthy).unwrap();
+        }
+        assert_eq!(cache.posed_count(), POSE_CACHE_CAP);
+        let builds = cache.builds;
+        cache.posed(&family, &healthy).unwrap();
+        assert_eq!(cache.builds, builds, "the hot entry was never evicted");
+    }
+
+    /// A cache over `set` instead of the published one.
+    fn cache_over(set: PuppetRigs) -> PuppetCache {
+        let mut cache = PuppetCache::over(FieldSource::fixed(set));
+        cache.begin_frame(0);
+        cache
+    }
+
+    /// A PNG sheet laid out for `puppet`, every pixel `rgba`.
+    fn sheet_for(puppet: &Puppet, rgba: [u8; 4]) -> Vec<u8> {
+        let layout = gs_puppet::UvLayout::fit(puppet, gs_puppet::SHEET_SIDE);
+        let img = image::RgbaImage::from_pixel(layout.w as u32, layout.h as u32, image::Rgba(rgba));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        png.into_inner()
+    }
 }

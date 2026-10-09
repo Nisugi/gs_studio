@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/gs_puppet_author", "crates/vellum_light", "crates/hydra_contract", "crates/injury_doll", "crates/gs_base"]
+members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/gs_puppet_author", "crates/vellum_light", "crates/hydra_contract", "crates/injury_doll", "crates/gs_base", "crates/gs_render"]
 
 # The egui fork, named once: every crate takes it from here, so contexts and
 # textures cross crate boundaries (one build of egui). Hydra pins the same

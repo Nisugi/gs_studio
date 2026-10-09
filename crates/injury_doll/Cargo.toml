@@ -8,14 +8,15 @@ description = "The 3D injury doll a game client draws: its figures, its sky, the
 [lib]
 doctest = false
 
-# The doll's own code is here (docs/crate-split-plan.md, S6); the puppet
-# cache and the GPU pass it still reaches in gs_field_egui until they leave
-# for a crate of their own (S7).
+# The doll's own code is here (docs/crate-split-plan.md, S6); it stands on
+# the base and the render crates the field stands on too, and on nothing of
+# the field's (S7; tools/check_layers.py holds it to that).
 [dependencies]
 # The base it shares with the field: the data folder, the clock, the sky,
 # the body's parts, the statuses.
 gs_base = { path = "../gs_base" }
-gs_field_egui = { path = "../gs_field_egui" }
+# The puppet cache, the GPU pass and the GPU skins it shares with the field.
+gs_render = { path = "../gs_render" }
 gs_puppet = { path = "../gs_puppet" }
 # MUST be the same egui the host links (one source for the workspace).
 egui = { workspace = true }

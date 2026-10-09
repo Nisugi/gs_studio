@@ -9,6 +9,7 @@
 //! field draws.
 
 use gs_field_egui::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
+use gs_field_egui::field_puppets::FieldCache;
 
 const HEIGHTS: [f32; 4] = [36.0, 64.0, 110.0, 190.0];
 

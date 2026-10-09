@@ -5,8 +5,8 @@ crate's normal dependency tree may not hold.
     python tools/check_layers.py --enforce  and fail (exit 1) when anything does
 
 A crate not in the workspace yet is skipped. Until the split's S7 the
-check only reports (the rules describe where the split is going); from S7
-CI runs it with --enforce.
+check only reported; from S7 it holds: run it with --enforce after any
+change to a manifest (and in CI, once there is one).
 """
 import json
 import subprocess
@@ -15,8 +15,10 @@ import sys
 AUTHORING = ["rig", "rig_bake", "gs_puppet_author", "gs_calibrators", "studio"]
 # what each crate's tree must not hold
 RULES = {
-    # Hydra's dependency: the doll, its base and nothing of the field or of authoring
-    "injury_doll": AUTHORING + ["include_dir", "regex", "toml_edit", "serde_json", "gs_field", "gs_field_egui", "creature_field", "creature_field_egui", "eframe"],
+    # Hydra's dependency: the doll, its base and nothing of the field or of
+    # authoring. (Not toml_edit: toml 0.8 parses through it. The field's
+    # sidecar writer that used it is kept out with the field itself.)
+    "injury_doll": AUTHORING + ["include_dir", "regex", "serde_json", "gs_field", "gs_field_egui", "creature_field", "creature_field_egui", "eframe"],
     # Hydra's calls: what Hydra's doll pulls in, through injury_doll
     "hydra_contract": AUTHORING + ["include_dir", "gs_field", "gs_field_egui"],
     "creature_field_egui": AUTHORING + ["injury_doll"],

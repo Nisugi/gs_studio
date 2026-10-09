@@ -135,8 +135,8 @@ prints timings.
 
 Dependency chain (bottom up; `rig_bake`, `gs_puppet`, `gs_puppet_author` and `vellum_light` are
 `opt-level = 3` in dev builds, see root `Cargo.toml`). The crates are being split
-into runtime (what a game client builds: `gs_base`, `gs_puppet`, `injury_doll`,
-later the render and field crates) and authoring (gs-studio's alone) -- `docs/crate-split-plan.md`
+into runtime (what a game client builds: `gs_base`, `gs_puppet`, `gs_render`,
+`injury_doll`, later the field crates) and authoring (gs-studio's alone) -- `docs/crate-split-plan.md`
 is the plan and its stages; a runtime crate never depends on an authoring one
 (`tools/check_layers.py`, `hydra_contract` holds Hydra's calls):
 
@@ -193,14 +193,21 @@ is the plan and its stages; a runtime crate never depends on an authoring one
   stay free of them, a layering rule: Android is no longer a target -- the
   field and the doll are for a desktop with a GPU, decided 2026-10-07): it embeds baked artefacts via `include_dir!` and hands
   their text to the frontend.
+- `gs_render` -- what the doll and the field both draw with: the puppet
+  cache (`puppet_cache`, over a `PuppetSource` each host gives it), the v2
+  GPU pass (`field_gpu`), the GPU skins and their relight (`skin_gpu`,
+  `relight_gpu`), a figure as a pass layer (`figure_image`). Reaches
+  neither (`tests/layering.rs`); `gs_field_egui` re-exports it under the
+  old paths.
 - `gs_field_egui` -- the renderer game clients use (art cache, stage,
-  puppet/doll fallback draw); for now also the puppet cache (`puppet_cache`,
-  over a `PuppetSource`: the field's is `field_puppets::FieldSource`) and
-  the GPU pass the doll shares.
+  puppet/doll fallback draw); the field's puppet source and what only the
+  field asks of the cache are `field_puppets` (`FieldSource`, `FieldCache`).
 - `injury_doll` -- the doll a game client draws (Hydra's only gs_studio
   dependency): its figures (`roster`), its cache's source (`source`: the
   pool's `global/bodies/<form>/` alone), its sky, the character's state and
-  the view. `hydra_contract` holds Hydra's calls to it.
+  the view, over `gs_base` and `gs_render` and nothing of the field's
+  (`tools/check_layers.py --enforce`). `hydra_contract` holds Hydra's calls
+  to it.
 - `gs_calibrators` -- the five art calibrators as embeddable egui bodies.
 - `studio` -- the app shell. A tool = a `ToolId` + entry in `TOOLS`
   (`src/app.rs`) + a module in `src/tools/`.

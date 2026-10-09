@@ -32,25 +32,20 @@ pub mod creature_doll;
 pub mod creature_field;
 pub mod creature_indicators;
 pub mod creature_light;
-/// Addition since the port (not in VellumFE): the no-art creature puppet,
-/// preferred over the flat doll whenever a baked puppet resolves.
-pub mod puppet_cache;
+/// Additions since the port (not in VellumFE), `gs_render`'s since the
+/// split (S7) and here under their old paths: the no-art creature puppet's
+/// cache (preferred over the flat doll whenever a baked puppet resolves),
+/// the v2 lighting pass (local lights and their shadows on the GPU, over
+/// each layer's v1 result), the puppet's smooth skin drawn on the GPU into
+/// a pass layer and vellum_light's relight for it, and a figure as the
+/// pass's layer image.
+pub use gs_render::{field_gpu, figure_image, puppet_cache, relight_gpu, skin_gpu};
 pub use puppet_cache as creature_puppet;
 /// Addition since the port (not in VellumFE): where the creature field's
 /// puppet cache gets its puppets, and what only the field asks of it.
 pub mod field_puppets;
-/// Addition since the port (not in VellumFE): the v2 lighting pass -- local
-/// lights and their shadows on the GPU, over each layer's v1 result.
-pub mod field_gpu;
 /// Addition since the port (not in VellumFE): [`field_gpu`] on the stage.
-pub mod figure_image;
 pub mod field_gpu_stage;
-/// Addition since the port (not in VellumFE): the puppet's smooth skin
-/// drawn on the GPU into a [`field_gpu`] layer.
-pub mod skin_gpu;
-/// Addition since the port (not in VellumFE): vellum_light's relight on the
-/// GPU, for [`skin_gpu`]'s skins on the stage.
-pub mod relight_gpu;
 pub mod field_lights;
 pub mod field_occluders;
 pub mod field_weather;

@@ -1059,14 +1059,13 @@ dependencies = [
 name = "gs_field_egui"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "eframe",
  "egui",
  "egui-wgpu",
  "gs_field",
  "gs_puppet",
+ "gs_render",
  "image",
- "naga",
  "tempfile",
  "tracing",
  "vellum_light",
@@ -1092,6 +1091,22 @@ dependencies = [
  "png 0.17.16",
  "rig",
  "rig_bake",
+]
+
+[[package]]
+name = "gs_render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "egui-wgpu",
+ "gs_base",
+ "gs_field",
+ "gs_puppet",
+ "image",
+ "naga",
+ "tracing",
+ "vellum_light",
 ]
 
 [[package]]
@@ -1346,8 +1361,8 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "gs_base",
- "gs_field_egui",
  "gs_puppet",
+ "gs_render",
  "serde",
  "toml",
 ]

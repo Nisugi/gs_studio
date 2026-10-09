@@ -1701,3 +1701,14 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   over `injury_doll::source::DollSource`: the pool's installed figures
   alone), not the field's `PuppetCache::shared`; studio's Doll window from
   one over its pool figures, then the field's forms.
+
+## The crate split, S7 (2026-10-09)
+
+- `puppet_cache`, `field_gpu`, `skin_gpu`, `relight_gpu`, `figure_image`
+  and their shaders left for the `gs_render` crate, which the doll and the
+  field both draw with; this crate re-exports them under the same paths.
+  The cache made without a source serves nothing: the field's shared cache
+  is `field_puppets::FieldCache::shared` (`PuppetCache::shared` still
+  names it with the trait in scope). The cache's tests of dressing,
+  arming, creature keys and calibration are `field_puppets`' now; the rest
+  stayed with it, posing the published set.

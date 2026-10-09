@@ -13,6 +13,9 @@ gs_field = { path = "../gs_field" }
 # ADDITION (not in VellumFE): the baked 3D creature puppets the no-art draw
 # path prefers over the flat doll.
 gs_puppet = { path = "../gs_puppet" }
+# The puppet cache, the v2 pass and the GPU skins it shares with the injury
+# doll (out of this crate in the split's S7; re-exported under old paths).
+gs_render = { path = "../gs_render" }
 # MUST be the same egui the host apps link (VellumFE, gs-studio): textures,
 # painters and contexts cross the crate boundary.
 egui = { workspace = true }
@@ -26,12 +29,9 @@ vellum_light = { path = "../vellum_light" }
 # drawn through an egui_wgpu paint callback. MUST be the same source and
 # rev as egui (the host's renderer owns the callback resources).
 egui-wgpu = { workspace = true }
-bytemuck = "1"
 
 [dev-dependencies]
 gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
 tempfile = "3"
-# Validates the WGSL offline (tests): the same naga wgpu builds on.
-naga = { version = "29.0.4", features = ["wgsl-in"] }
 # examples/stage_demo.rs only. Same source, branch and features as the hosts.
 eframe = { workspace = true }
