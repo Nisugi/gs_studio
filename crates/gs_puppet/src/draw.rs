@@ -10,7 +10,7 @@
 
 use crate::math::{add, cross, dot, len, mul_mv, norm_or, rot_y, scale, sub, V3};
 use crate::pose::Posed;
-use crate::puppet::{Kind, Station, CAP_RINGS};
+use crate::model::{Kind, Station, CAP_RINGS};
 
 pub type Rgba = [u8; 4];
 
@@ -102,7 +102,7 @@ fn rank_in(list: &[(&str, u8)], part: Option<&str>) -> u8 {
 }
 
 /// The doll part an eye is: the creature's right eye is on its -x side.
-pub(crate) fn eye_part(eye: &crate::puppet::Eye) -> &'static str {
+pub(crate) fn eye_part(eye: &crate::model::Eye) -> &'static str {
     if eye.pos[0] < 0.0 {
         "rightEye"
     } else {
@@ -111,7 +111,7 @@ pub(crate) fn eye_part(eye: &crate::puppet::Eye) -> &'static str {
 }
 
 /// An eye a rank-3 wound or scar has taken: not drawn.
-pub(crate) fn eye_lost(look: &Look, eye: &crate::puppet::Eye) -> bool {
+pub(crate) fn eye_lost(look: &Look, eye: &crate::model::Eye) -> bool {
     let part = Some(eye_part(eye));
     look.rank(part) >= 3 || look.scar(part) >= 3
 }

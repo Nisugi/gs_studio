@@ -22,7 +22,7 @@
 use std::f32::consts::TAU;
 
 use crate::math::{dot, len, norm_or, scale, sub, V3};
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 
 /// Blank sheet pixels between patches.
 const GAP_PX: f32 = 6.0;
@@ -124,7 +124,7 @@ fn seam_direction(p: &Puppet, i: usize) -> V3 {
     };
     // A limb off to one side: its inside, toward the midline.
     let mid_x = (s.head[0] + s.tail[0]) * 0.5;
-    if mid_x.abs() > 0.05 && crate::puppet::is_limb_part(s.part.as_deref()) {
+    if mid_x.abs() > 0.05 && crate::model::is_limb_part(s.part.as_deref()) {
         if let Some(v) = perp([-mid_x.signum(), 0.0, 0.0]) {
             return v;
         }

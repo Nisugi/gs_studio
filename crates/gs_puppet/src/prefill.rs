@@ -39,7 +39,7 @@ use std::borrow::Cow;
 use rig_bake::Grid;
 
 use crate::math::{add, dot, mul_mv, norm_or, scale, transpose, Xf, V3};
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 use crate::uv::UvLayout;
 
 /// How squarely a view must face a surface before it contributes.
@@ -203,11 +203,11 @@ impl DepthMap {
     }
 
     /// Only the segments `keep` accepts (hidden ones never).
-    fn of(p: &Puppet, look: Look, g: &Grid, keep: &dyn Fn(&crate::puppet::Segment) -> bool) -> DepthMap {
+    fn of(p: &Puppet, look: Look, g: &Grid, keep: &dyn Fn(&crate::model::Segment) -> bool) -> DepthMap {
         let (w, h) = (g.w, g.h);
         let mut z = vec![f32::INFINITY; w * h];
         for s in p.segments.iter().filter(|s| !s.hidden && keep(s)) {
-            let ring = |st: &crate::puppet::Station| -> Vec<([f32; 2], f32)> {
+            let ring = |st: &crate::model::Station| -> Vec<([f32; 2], f32)> {
                 (0..AROUND)
                     .map(|j| {
                         let (sn, cs) = (j as f32 / AROUND as f32 * std::f32::consts::TAU).sin_cos();

@@ -29,7 +29,7 @@ use std::collections::BTreeMap;
 
 use crate::math::{axis_angle, cross, dot, len, mul_mm, mul_mv, norm_or, quat_from_m3, quat_to_m3, scale, Quat, IDENTITY, M3, V3};
 use crate::pose::Pose;
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 
 /// When the body hits the ground.
 pub const IMPACT_SECS: f32 = 0.55;

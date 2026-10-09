@@ -8,7 +8,7 @@ use rig_bake::Mask;
 use crate::draw::{Look, Prim};
 use crate::math::V3;
 use crate::pose::Pose;
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 use crate::raster::Canvas;
 
 /// Orthographic projection of the world onto `view`'s silhouette plane, in

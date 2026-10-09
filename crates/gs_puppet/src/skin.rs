@@ -270,7 +270,7 @@ struct Paint<'a> {
 /// with no `back` part, its chest and abdomen split front from back, the
 /// back's wound on their rear, and the back's blood (rank 2 and up) run down
 /// their sides and the backs of the legs.
-pub(crate) fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw::Surface], look: &Look, effects: Effects) -> Vec<crate::wounds::Marks> {
+pub(crate) fn segment_marks(puppet: &crate::model::Puppet, surfs: &[crate::draw::Surface], look: &Look, effects: Effects) -> Vec<crate::wounds::Marks> {
     use crate::wounds::status;
     let mut marks = vec![crate::wounds::Marks::default(); puppet.segments.len()];
     let has_back = puppet.segments.iter().any(|s| s.part.as_deref() == Some("back"));
@@ -320,7 +320,7 @@ pub(crate) fn segment_marks(puppet: &crate::puppet::Puppet, surfs: &[crate::draw
 
 /// The wounds and scars of segment `seg`'s eyes (up to two), where they
 /// sit on its surface; laid out by [`marks_sheet`].
-fn eye_marks(puppet: &crate::puppet::Puppet, seg: usize, look: &Look) -> [crate::wounds::EyeMark; 2] {
+fn eye_marks(puppet: &crate::model::Puppet, seg: usize, look: &Look) -> [crate::wounds::EyeMark; 2] {
     use crate::wounds::{EyeMark, EYE_Q};
     let mut out = [EyeMark::default(); 2];
     let s = &puppet.segments[seg];
@@ -359,7 +359,7 @@ fn eye_marks(puppet: &crate::puppet::Puppet, seg: usize, look: &Look) -> [crate:
 /// resolution for lines no thinner than `min_half` feet -- cached, so a
 /// figure bakes once per set of wounds and size, not per frame.
 pub(crate) fn marks_sheet(
-    puppet: &crate::puppet::Puppet,
+    puppet: &crate::model::Puppet,
     layout: &UvLayout,
     surfs: &[crate::draw::Surface],
     marks: &[crate::wounds::Marks],

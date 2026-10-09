@@ -157,7 +157,7 @@ use serde::Deserialize;
 use crate::math::{
     axis_angle, euler, mul_mm, quat_from_m3, quat_mirror, quat_to_m3, slerp, sub, transpose, Quat, Xf, M3, QUAT_IDENTITY, V3,
 };
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BonePose {

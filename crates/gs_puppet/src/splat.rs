@@ -344,7 +344,7 @@ pub struct BoundCloud {
 }
 
 impl BoundCloud {
-    pub fn bind(puppet: &crate::puppet::Puppet, rest: Vec<Gaussian>) -> BoundCloud {
+    pub fn bind(puppet: &crate::model::Puppet, rest: Vec<Gaussian>) -> BoundCloud {
         let (seg, weights) = skin_weights(puppet, rest.iter().map(|g| g.c));
         BoundCloud { rest, seg, weights, modelled: false }
     }
@@ -386,9 +386,9 @@ impl BoundCloud {
 /// What [`BoundCloud::bind`] gives each of `points` (in the puppet's rest
 /// space): the segment it sits nearest, and its shares. A mesh's vertices
 /// are bound by it too (`mesh::BoundMesh`).
-pub fn skin_weights(puppet: &crate::puppet::Puppet, points: impl Iterator<Item = V3>) -> (Vec<usize>, Vec<[(usize, f32); 3]>) {
+pub fn skin_weights(puppet: &crate::model::Puppet, points: impl Iterator<Item = V3>) -> (Vec<usize>, Vec<[(usize, f32); 3]>) {
     {
-        let bodies: Vec<(usize, &crate::puppet::Segment, V3)> = puppet
+        let bodies: Vec<(usize, &crate::model::Segment, V3)> = puppet
             .segments
             .iter()
             .enumerate()
@@ -397,13 +397,13 @@ pub fn skin_weights(puppet: &crate::puppet::Puppet, points: impl Iterator<Item =
             .collect();
         // Feet from the segment's surface: outside the nearest ring's
         // ellipse (0 inside) and past the ring's own slab along the bone.
-        let surface = |s: &crate::puppet::Segment, axis: V3, p: V3| {
+        let surface = |s: &crate::model::Segment, axis: V3, p: V3| {
             let mut best = f32::MAX;
             for st in &s.stations {
                 let e = sub(p, st.c);
                 let (u, v) = (dot(e, s.axis_w) / st.w.max(0.02), dot(e, s.axis_d) / st.d.max(0.02));
                 let radial = ((u * u + v * v).sqrt() - 1.0).max(0.0) * (st.w + st.d) * 0.5;
-                let along = (dot(e, axis).abs() - crate::puppet::STATION_STEP_FT * 0.5).max(0.0);
+                let along = (dot(e, axis).abs() - crate::model::STATION_STEP_FT * 0.5).max(0.0);
                 best = best.min(radial * radial + along * along);
             }
             best.sqrt()

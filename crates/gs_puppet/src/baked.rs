@@ -9,7 +9,7 @@
 use rig::View;
 use serde::{Deserialize, Serialize};
 
-use crate::puppet::{Eye, Kind, Puppet, PuppetError, Segment, Station};
+use crate::model::{Eye, Kind, Puppet, PuppetError, Segment, Station};
 
 pub const BAKED_VERSION: u32 = 1;
 

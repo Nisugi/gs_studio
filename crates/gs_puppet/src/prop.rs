@@ -21,7 +21,7 @@ use std::sync::OnceLock;
 use serde::Deserialize;
 
 use crate::math::{add, cross, dot, norm_or, scale, sub, V3};
-use crate::puppet::{Kind, Puppet, Segment, Station};
+use crate::model::{Kind, Puppet, Segment, Station};
 
 /// The props file this crate ships, embedded.
 pub const SHIPPED_PROPS: &str = include_str!("../../../data/props/weapons.toml");

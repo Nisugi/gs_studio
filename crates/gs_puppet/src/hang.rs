@@ -17,7 +17,7 @@
 use std::collections::HashSet;
 
 use crate::math::{add, axis_angle, len, mul_mm, mul_mv, norm_or, sub, transpose, Xf, IDENTITY, M3, V3};
-use crate::puppet::{Kind, Puppet};
+use crate::model::{Kind, Puppet};
 
 /// How far out a raised arm's upper arm is taken to hang when the builder
 /// works out where the torso ends beside it, degrees from straight down:

@@ -22,7 +22,7 @@
 
 use crate::math::{dot, len, mul_mv, norm_or, quat_from_m3, quat_to_m3, slerp, sub, Xf};
 use crate::pose::Posed;
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 
 /// How far from a joint its flesh shares the bend, in the joint's own
 /// thickness (the radius of the ring nearest it), at least

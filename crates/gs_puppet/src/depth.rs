@@ -8,7 +8,7 @@ use rig_bake::Mask;
 
 use crate::math::V3;
 use crate::measure::{row_spans, widest_span, MERGE_GAP_FT};
-use crate::puppet::MASK_PX;
+use crate::build::MASK_PX;
 
 /// A front-view span narrower than this is a limb, not the trunk.
 const LIMB_SPAN_FT: f32 = 0.6;
@@ -104,8 +104,8 @@ pub fn guess_depths(rig: &Rig, outlines: &Outlines) -> BTreeMap<String, DepthGue
     let mask = raster(other);
     let mask = match (rig.from_above, &mask) {
         (true, Some(side)) => Some(match raster(rig.view) {
-            Some(plan) => crate::puppet::side_for_plan(side, &plan),
-            None => crate::puppet::turned_head_up(side),
+            Some(plan) => crate::build::side_for_plan(side, &plan),
+            None => crate::build::turned_head_up(side),
         }),
         _ => mask,
     };
@@ -218,7 +218,7 @@ pub fn snap_limb_joints(rig: &Rig, outlines: &Outlines) -> Rig {
     };
     let front = rig_bake::rasterize(&entry.outline(), MASK_PX);
     let floor = front.grid.max_y - front.grid.h as f32 / front.grid.px_per_ft + 0.03;
-    for b in rig.bones.iter().filter(|b| crate::puppet::is_limb_part(b.part.as_deref())) {
+    for b in rig.bones.iter().filter(|b| crate::model::is_limb_part(b.part.as_deref())) {
         for j in &b.joints {
             let Some(p) = rig.joints.get(j) else { continue };
             let best = row_spans(&front, p[1].max(floor), MERGE_GAP_FT)

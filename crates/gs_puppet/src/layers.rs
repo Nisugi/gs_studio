@@ -48,7 +48,7 @@
 use crate::draw::{Look, Surface, BODY_DEAD};
 use crate::math::{add, cross, dot, len, lerp as lerp3, norm_or, scale, sub, V3};
 use crate::pose::Posed;
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 use crate::skin::{smoothstep, Effects};
 use crate::splat::{BoundCloud, Gaussian, SplatParams};
 use crate::uv::{Texture, UvLayout};
@@ -461,7 +461,7 @@ fn gashes(seg: u32, rank: u8, kind: Cause, salt: u32, places: &[&Anchor], radius
                 Some(&(station, theta)) => *places.iter().min_by(|a, b| {
                     let off = |p: &Anchor| {
                         let turn = ((p.theta + theta + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI).abs();
-                        (p.station - station).abs() * crate::puppet::STATION_STEP_FT + turn * p.radius
+                        (p.station - station).abs() * crate::model::STATION_STEP_FT + turn * p.radius
                     };
                     off(a).total_cmp(&off(b))
                 })?,
@@ -832,7 +832,7 @@ impl Anchor {
     /// A surface point for the procedural looks: the layout's, else its own
     /// address.
     fn at(&self) -> [f32; 2] {
-        self.feet.unwrap_or([self.theta * self.radius, self.station * crate::puppet::STATION_STEP_FT])
+        self.feet.unwrap_or([self.theta * self.radius, self.station * crate::model::STATION_STEP_FT])
     }
 }
 
@@ -876,7 +876,7 @@ fn inside_other(surfs: &[Surface], a: &Anchor, p: V3) -> bool {
     a.inside.and_then(|j| surfs.iter().find(|s| s.index == j as usize)).is_some_and(|o| {
         let n = o.rings.len();
         let axis = norm_or(sub(o.rings[n - 1].c, o.rings[0].c), [0.0, 1.0, 0.0]);
-        in_hull(o.rings.iter().map(|r| (r.c, r.a, r.b)), axis, crate::puppet::STATION_STEP_FT * 0.6, p)
+        in_hull(o.rings.iter().map(|r| (r.c, r.a, r.b)), axis, crate::model::STATION_STEP_FT * 0.6, p)
     })
 }
 
@@ -1124,7 +1124,7 @@ impl LayerCloud {
             }
             spans.push((start, anchors.len()));
         }
-        let slab = crate::puppet::STATION_STEP_FT * 0.6;
+        let slab = crate::model::STATION_STEP_FT * 0.6;
         for (a, p) in anchors.iter_mut().zip(&rest) {
             a.inside = puppet.segments.iter().enumerate().position(|(j, o)| {
                 j != a.seg && !o.hidden && o.kind.is_body() && {
@@ -1884,7 +1884,7 @@ impl LayerCloud {
                     a.inside.and_then(|j| surf_of(j as usize)).is_some_and(|o| {
                         let n = o.rings.len();
                         let axis = norm_or(sub(o.rings[n - 1].c, o.rings[0].c), [0.0, 1.0, 0.0]);
-                        in_hull(o.rings.iter().map(|r| (r.c, r.a, r.b)), axis, crate::puppet::STATION_STEP_FT * 0.6, p)
+                        in_hull(o.rings.iter().map(|r| (r.c, r.a, r.b)), axis, crate::model::STATION_STEP_FT * 0.6, p)
                     })
                 };
                 // (over a fitted cloud the coat is laid an anchor at a time, above)

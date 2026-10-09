@@ -71,7 +71,7 @@ pub mod pose;
 pub mod prefill;
 pub mod prop;
 pub mod build;
-pub use build as puppet;
+pub mod model;
 pub mod raster;
 pub mod shadow;
 pub mod skin;
@@ -108,7 +108,8 @@ pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinCorner, SkinMesh, SkinShading, SkinSurface, SKIN_SS};
 pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
-pub use puppet::{plan_shift, side_for_plan, turned_head_up, Eye, Kind, Puppet, PuppetError, Segment, Station, MASK_PX};
+pub use build::{plan_shift, side_for_plan, turned_head_up, MASK_PX};
+pub use model::{Eye, Kind, Puppet, PuppetError, Segment, Station};
 
 #[cfg(test)]
 mod pose_tests;

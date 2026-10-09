@@ -21,7 +21,7 @@ use std::path::Path;
 
 use crate::math::*;
 use crate::pose::Posed;
-use crate::puppet::Puppet;
+use crate::model::Puppet;
 use crate::skin::Skin;
 
 /// Triangles over vertices that each have a place, a facing and a place
@@ -365,7 +365,7 @@ impl BoundMesh {
         for (v, s) in self.seg.iter().enumerate() {
             of_seg[*s].push(v as u32);
         }
-        let slab = crate::puppet::STATION_STEP_FT * 0.6;
+        let slab = crate::model::STATION_STEP_FT * 0.6;
         // each arm's shoulder joint, and its elbow's height
         let shoulders: Vec<(V3, f32)> = puppet
             .segments
@@ -454,14 +454,14 @@ impl BoundMesh {
                     let Some(j) = (0..n).filter(|j| calm[*j].is_some()).min_by_key(|j| j.abs_diff(k)) else { continue };
                     let (w, d, du, dv) = calm[j].expect("just filtered");
                     let c = add(was[k].c, add(scale(aw, du), scale(ad, dv)));
-                    seg.stations[k] = crate::puppet::Station { c, w: (was[k].w * w / was[j].w.max(0.02)).max(0.02), d: (was[k].d * d / was[j].d.max(0.02)).max(0.02) };
+                    seg.stations[k] = crate::model::Station { c, w: (was[k].w * w / was[j].w.max(0.02)).max(0.02), d: (was[k].d * d / was[j].d.max(0.02)).max(0.02) };
                     continue;
                 }
                 let near: Vec<(f32, f32, f32, f32)> = (k.saturating_sub(1)..=(k + 1).min(n - 1)).filter_map(|j| calm[j]).collect();
                 let m = near.len() as f32;
                 let (w, d, du, dv) = near.iter().fold((0.0, 0.0, 0.0, 0.0), |a, x| (a.0 + x.0 / m, a.1 + x.1 / m, a.2 + x.2 / m, a.3 + x.3 / m));
                 let c = add(was[k].c, add(scale(aw, du), scale(ad, dv)));
-                seg.stations[k] = crate::puppet::Station { c, w: w.max(0.02), d: d.max(0.02) };
+                seg.stations[k] = crate::model::Station { c, w: w.max(0.02), d: d.max(0.02) };
             }
         }
         // what a puppet works out from its rings (how its arms hang) again

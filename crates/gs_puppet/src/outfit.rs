@@ -23,7 +23,7 @@ use serde::Deserialize;
 
 use crate::math::{add, axis_angle, cross, dot, len, lerp, norm_or, scale, sub, Xf, V3};
 use crate::pose::Posed;
-use crate::puppet::{Kind, Puppet, Segment, Station};
+use crate::model::{Kind, Puppet, Segment, Station};
 
 /// The clothing kit this crate ships, embedded.
 pub const SHIPPED_KIT: &str = include_str!("../../../data/outfits/kit.toml");

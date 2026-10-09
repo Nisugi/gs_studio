@@ -16,10 +16,8 @@ use std::collections::BTreeMap;
 use rig::{Anchors, Rig, RigBone, View};
 use rig_bake::{Grid, Mask};
 
-use crate::puppet::{
-    interpolate_depth, is_limb_part, split_chain, Kind, Puppet, Segment, Station, CAP_RINGS, LIMB_DEPTH_MAX,
-    LIMB_DEPTH_MIN,
-};
+use crate::model::{is_limb_part, Kind, Puppet, Segment, Station, CAP_RINGS};
+use crate::build::{interpolate_depth, split_chain, LIMB_DEPTH_MAX, LIMB_DEPTH_MIN};
 
 // ---------------------------------------------------------------- fixtures
 
@@ -1145,7 +1143,7 @@ fn shipped_plans_carry_their_side_registration() {
 /// one line span none.
 #[test]
 fn a_membrane_plane_is_the_plane_of_its_joints() {
-    use crate::puppet::membrane_plane;
+    use crate::build::membrane_plane;
     // z = x, a little off it: the normal is (1, 0, -1) either way round
     let tilted = [[0.0, 0.0, 0.01], [1.0, 2.0, 1.0], [2.0, 0.5, 1.99], [0.5, 3.0, 0.5]];
     let n = membrane_plane(&tilted).expect("a plane");
