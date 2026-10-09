@@ -26,7 +26,7 @@ reading then goes unused.
 What stays single-sourced, whichever side tracks:
 
 - **The words**: look phrases and weather lines, in
-  `crates/gs_field/data/sky.toml`. Add new ones there.
+  `crates/gs_base/data/sky.toml`. Add new ones there.
 - **The arithmetic**, pure functions in `gs_field::sky`: `moon_age`,
   `elongation`, `phase_name`, `moon_place`, `place_words`, `sun_hours`,
   `MoonAge` (`lit`, `waxing`, `highest`), `lornon_blood`, `moons_sky`,

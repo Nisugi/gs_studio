@@ -1686,7 +1686,7 @@ mod tests {
     fn embedded_metadata_hydrates_a_sidecar_on_first_read() {
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("shared.png");
-        std::fs::write(&image, crate::png_meta::test_png::tiny_png_bytes()).unwrap();
+        std::fs::write(&image, crate::test_png::tiny_png_bytes()).unwrap();
 
         // A shared image arrives with metadata inside and no sidecar file.
         crate::pool_dirs::write_png_meta(
@@ -1713,7 +1713,7 @@ mod tests {
     fn sidecar_writers_bake_embedded_metadata_into_png_images() {
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("cal.png");
-        std::fs::write(&image, crate::png_meta::test_png::tiny_png_bytes()).unwrap();
+        std::fs::write(&image, crate::test_png::tiny_png_bytes()).unwrap();
 
         let mut anchors = HashMap::new();
         anchors.insert("head".to_string(), [0.5, 0.1]);
@@ -1726,7 +1726,7 @@ mod tests {
         assert_eq!(embedded, sidecar_file);
         assert!(embedded.contains("kind = \"doll\""));
         // And the baked PNG still decodes.
-        assert!(crate::png_meta::test_png::decodes(&std::fs::read(&image).unwrap()));
+        assert!(crate::test_png::decodes(&std::fs::read(&image).unwrap()));
     }
 
     #[test]

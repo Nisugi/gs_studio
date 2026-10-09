@@ -38,7 +38,7 @@ impl DollSource {
     }
 
     fn global(&self) -> Option<PathBuf> {
-        self.global.clone().or_else(|| gs_field::data_dirs::global_dir().ok())
+        self.global.clone().or_else(|| gs_base::data_dirs::global_dir().ok())
     }
 
     /// `form`'s folder of its own (`global/bodies/<form>/`).

@@ -135,8 +135,8 @@ prints timings.
 
 Dependency chain (bottom up; `rig_bake`, `gs_puppet`, `gs_puppet_author` and `vellum_light` are
 `opt-level = 3` in dev builds, see root `Cargo.toml`). The crates are being split
-into runtime (what a game client builds: `gs_puppet`, `injury_doll`, later the base
-and field crates) and authoring (gs-studio's alone) -- `docs/crate-split-plan.md`
+into runtime (what a game client builds: `gs_base`, `gs_puppet`, `injury_doll`,
+later the render and field crates) and authoring (gs-studio's alone) -- `docs/crate-split-plan.md`
 is the plan and its stages; a runtime crate never depends on an authoring one
 (`tools/check_layers.py`, `hydra_contract` holds Hydra's calls):
 
@@ -183,13 +183,24 @@ is the plan and its stages; a runtime crate never depends on an authoring one
   straight RGBA8 slices. `gs_field::lighting` holds the data side
   (`[light]` in scene files, `global/lighting.toml`); `gs_field_egui::creature_light`
   and `field_lights` do the drawing. Built at `opt-level = 3` in dev too.
+- `gs_base` -- what the doll and the field both stand on: the data folder
+  (`data_dirs`), the game's clock and sky (`elanthian_time`, `sky`, `stars`,
+  `sky_light`), the body's parts (`body`), the statuses (`status`), PNG
+  metadata (`png_meta`). Reaches neither, no egui (`tests/layering.rs`);
+  `gs_field` re-exports it under the old paths.
 - `gs_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must
   stay free of them, a layering rule: Android is no longer a target -- the
   field and the doll are for a desktop with a GPU, decided 2026-10-07): it embeds baked artefacts via `include_dir!` and hands
   their text to the frontend.
 - `gs_field_egui` -- the renderer game clients use (art cache, stage,
-  puppet/doll fallback draw).
+  puppet/doll fallback draw); for now also the puppet cache (`puppet_cache`,
+  over a `PuppetSource`: the field's is `field_puppets::FieldSource`) and
+  the GPU pass the doll shares.
+- `injury_doll` -- the doll a game client draws (Hydra's only gs_studio
+  dependency): its figures (`roster`), its cache's source (`source`: the
+  pool's `global/bodies/<form>/` alone), its sky, the character's state and
+  the view. `hydra_contract` holds Hydra's calls to it.
 - `gs_calibrators` -- the five art calibrators as embeddable egui bodies.
 - `studio` -- the app shell. A tool = a `ToolId` + entry in `TOOLS`
   (`src/app.rs`) + a module in `src/tools/`.

@@ -1,0 +1,27 @@
+[package]
+name = "gs_base"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "What the injury doll and the creature field both stand on: the data folder, the game's clock and sky, the stars, the sky as the lights read it, the body's parts, the statuses, PNG metadata."
+
+[lib]
+doctest = false
+
+# docs/crate-split-plan.md, S7: the doll (`injury_doll`) and the field
+# (`gs_field`) each depend on this; it depends on neither, nor on egui
+# (`tests/layering.rs` holds it to these).
+[dependencies]
+# The sky's light (moon arcs, night share) is vellum_light's maths.
+vellum_light = { path = "../vellum_light" }
+# sky.toml, constellations.toml, the clock's serde.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+# Result/Context in data_dirs.
+anyhow = "1"
+# `~` for the default data dir (a host sets its own: set_base_dir).
+dirs = "5"
+
+[dev-dependencies]
+# png_meta's tests build and re-decode real PNGs.
+png = "0.17"

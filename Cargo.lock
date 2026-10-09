@@ -1012,6 +1012,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gs_base"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "png 0.17.16",
+ "serde",
+ "toml",
+ "vellum_light",
+]
+
+[[package]]
 name = "gs_calibrators"
 version = "0.1.0"
 dependencies = [
@@ -1030,7 +1042,7 @@ name = "gs_field"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dirs",
+ "gs_base",
  "include_dir",
  "png 0.17.16",
  "regex",
@@ -1333,7 +1345,7 @@ name = "injury_doll"
 version = "0.1.0"
 dependencies = [
  "egui",
- "gs_field",
+ "gs_base",
  "gs_field_egui",
  "gs_puppet",
  "serde",

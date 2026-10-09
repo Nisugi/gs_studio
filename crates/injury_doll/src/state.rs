@@ -9,8 +9,8 @@
 //!
 //! Egui-free, like the rest of the crate.
 
-use gs_field::body::canonical_part;
-pub use gs_field::status::{Status, Statuses, PRECEDENCE};
+use gs_base::body::canonical_part;
+pub use gs_base::status::{Status, Statuses, PRECEDENCE};
 
 /// A character as the doll draws it.
 #[derive(Debug, Clone, Default, PartialEq)]

@@ -299,7 +299,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     }
     key = layered_if_marked(key);
     // hit on the back: turned round to show it, a moment
-    let back = gs_field::body::part_label("back");
+    let back = gs_base::body::part_label("back");
     let turning = id.and_then(|id| cache.last_hit(id)).filter(|(label, _)| Some(*label) == back).and_then(|(_, at)| show_back(now - at));
     if let Some(turn) = turning {
         key = key.with_facing(key.yaw() + turn);
@@ -699,7 +699,7 @@ mod tests {
         let key = key_for(&state);
         assert_eq!(key.pose, PoseChoice::Kneeling);
         assert!(key.effects.bleeding && !key.effects.webbed);
-        let label = |p: &str| gs_field::body::part_label(p).unwrap() as usize - 1;
+        let label = |p: &str| gs_base::body::part_label(p).unwrap() as usize - 1;
         assert_eq!(key.ranks[label("chest")], 2);
         assert_eq!(key.ranks[label("neck")], 0, "a cut throat is no neck wound rank: its own slash");
         assert!(key.effects.cutthroat);

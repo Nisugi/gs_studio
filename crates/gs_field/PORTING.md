@@ -650,3 +650,8 @@ itself. Egui-free.
 - S6: `doll_roster`, `doll_sky` and `doll_state` left for the injury doll's
   crate (`injury_doll::roster`, `::sky`, `::state`): the field has no doll
   in it.
+- S7: the base modules (`data_dirs`, `elanthian_time`, `sky`, `stars`,
+  `sky_light`, `body`, `status`, `png_meta`) and `data/sky.toml`,
+  `data/constellations.toml` left for the `gs_base` crate; this crate
+  re-exports them under the same paths (`base_layering`'s check is the
+  crate boundary now; the tests' PNG helpers are `test_png`).

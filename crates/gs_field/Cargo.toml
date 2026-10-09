@@ -9,6 +9,9 @@ description = "The GemStone IV creature field without the drawing: card resoluti
 doctest = false
 
 [dependencies]
+# The base the doll and the field share (the clock, the sky, the data
+# folder...), out of this crate; re-exported under its old paths.
+gs_base = { path = "../gs_base" }
 # Creature-field lighting maths (dependency-free, Android-safe).
 vellum_light = { path = "../vellum_light" }
 # Asset formats: skin.toml, scene files, creature_field.toml, image sidecars.
@@ -18,10 +21,8 @@ toml = "0.8"
 toml_edit = "0.22"
 # The bundled bestiary (data/bestiary.json).
 serde_json = "1"
-# Result/Context in data_dirs, skins, scenes, field_config, bestiary.
+# Result/Context in skins, scenes, field_config, bestiary.
 anyhow = "1"
-# `~` for the default data dir (~/.vellum-fe).
-dirs = "5"
 # debug!/warn! on ignored pool files, open-vocabulary crtrStatus flags, etc.
 tracing = "0.1"
 # Creature::is_body_part (Lich's appendage-noun pattern).

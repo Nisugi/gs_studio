@@ -9,10 +9,10 @@
 //! The doll's own code is here: its figures ([`roster`]) and where its
 //! cache reads them ([`source`]), its light ([`sky`]), the character's
 //! state ([`state`]) and the view ([`view`]).
-//! What it shares with the creature field -- the base data, the puppet
-//! cache, the GPU pass -- it reaches in `gs_field` / `gs_field_egui` until
-//! those leave for crates of their own (the split's S7); the paths here
-//! stay.
+//! What it shares with the creature field is the base (`gs_base`: the data
+//! folder, the clock, the sky, the body's parts, the statuses) and, for
+//! now in `gs_field_egui`, the puppet cache and the GPU pass (they leave
+//! for a crate of their own in the split's S7); the paths here stay.
 
 pub mod roster;
 pub mod sky;
@@ -23,7 +23,7 @@ pub mod view;
 /// What the doll shares with the rest of gs_studio's runtime: where its
 /// files are (a client sets its data folder), and the game's clock.
 pub mod base {
-    pub use gs_field::{data_dirs, elanthian_time};
+    pub use gs_base::{data_dirs, elanthian_time};
 }
 
 /// The GPU pass the doll is drawn by: set up once as the window opens; a

@@ -8,11 +8,13 @@ description = "The 3D injury doll a game client draws: its figures, its sky, the
 [lib]
 doctest = false
 
-# The doll's own code is here (docs/crate-split-plan.md, S6); the base data,
-# the puppet cache and the GPU pass it still reaches in gs_field /
-# gs_field_egui until they leave for crates of their own (S7).
+# The doll's own code is here (docs/crate-split-plan.md, S6); the puppet
+# cache and the GPU pass it still reaches in gs_field_egui until they leave
+# for a crate of their own (S7).
 [dependencies]
-gs_field = { path = "../gs_field" }
+# The base it shares with the field: the data folder, the clock, the sky,
+# the body's parts, the statuses.
+gs_base = { path = "../gs_base" }
 gs_field_egui = { path = "../gs_field_egui" }
 gs_puppet = { path = "../gs_puppet" }
 # MUST be the same egui the host links (one source for the workspace).

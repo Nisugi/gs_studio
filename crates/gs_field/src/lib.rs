@@ -29,30 +29,29 @@
 )]
 
 pub mod bestiary;
-mod base_layering;
-pub mod body;
 pub mod cards;
 pub mod condition;
 pub mod creature;
-pub mod data_dirs;
 pub mod dolls;
-pub mod elanthian_time;
 pub mod field_config;
 pub mod geometry;
 pub mod naming;
-pub mod png_meta;
 pub mod pool_dirs;
 pub mod pool;
 pub mod puppets;
 pub mod lighting;
-pub mod sky_light;
-pub mod status;
 pub mod scenes;
 pub mod skins;
-pub mod sky;
-pub mod stars;
 pub mod walk;
 pub mod solver;
+
+/// The base (docs/crate-split-plan.md, S7): out of this crate into
+/// `gs_base`, under the paths it had here.
+pub use gs_base::{body, data_dirs, elanthian_time, png_meta, sky, sky_light, stars, status};
+
+/// Test-only PNGs (png_meta's own helpers stayed with it in gs_base).
+#[cfg(test)]
+mod test_png;
 
 pub use condition::Condition;
 pub use creature::{Creature, CreatureFlags};
