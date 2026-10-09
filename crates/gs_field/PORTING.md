@@ -629,3 +629,8 @@ itself. Egui-free.
   game's own sky at that instant -- the hour and date then, the sun and
   moons where they stand (`sky::GameSky`), seen facing a compass bearing
   (Hydra looks south), no cloud.
+
+- `doll_sky::game_doll_sky_at` (2026-10-08): the game's sky for the doll at
+  an hour the player picks (the sun at that hour, the moons where they
+  stand now); `game_doll_sky` is it at the hour now. Hydra's Injuries page
+  sets the hour with its *Time of day* slider.

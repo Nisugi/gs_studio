@@ -137,7 +137,15 @@ pub fn display() -> DollSky {
 /// looks south, where the sun and moons are highest). No cloud: the doll is
 /// read for its wounds, not the weather.
 pub fn game_doll_sky(unix: f64, facing: f32) -> DollSky {
-    let hour = crate::elanthian_time::elanthian_hour_f(unix);
+    game_doll_sky_at(unix, None, facing)
+}
+
+/// [`game_doll_sky`] at `hour` (Elanthian, 0..24) of the day `unix` falls
+/// in, or the hour then (`None`): the sun where it stands at that hour, the
+/// moons where they stand at `unix` -- the light a player picks for the
+/// doll on its page.
+pub fn game_doll_sky_at(unix: f64, hour: Option<f32>, facing: f32) -> DollSky {
+    let hour = hour.map_or_else(|| crate::elanthian_time::elanthian_hour_f(unix), |h| h.rem_euclid(24.0));
     let (_, month, day) = crate::elanthian_time::eastern_date(unix as i64);
     let sky = crate::sky::GameSky::default().sky(unix, month, day, hour);
     doll_sky(Some(hour), &Sky { clouds: 0.0, facing: Some(facing), ..sky }, true)
