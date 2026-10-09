@@ -118,6 +118,7 @@ pub fn invalidate_caches() {
     gs_field::geometry::invalidate_calibrations();
     gs_field::dolls::invalidate_cache();
     gs_field::puppets::invalidate_cache();
+    gs_field::doll_roster::invalidate();
 }
 
 /// A pool dir typed into the app.

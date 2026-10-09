@@ -13,7 +13,7 @@
 /// The doll's figures: the playable races' modelled bodies installed in the
 /// data folder (`global/bodies/<form>/`, each with its `doll.toml`).
 pub mod roster {
-    pub use gs_field::doll_roster::{arms_hang, figure, races, races_of, read_figure, roster, scan, DollFigure, DollRace, FigureDraw, FigureKind};
+    pub use gs_field::doll_roster::{arms_hang, figure, invalidate, races, races_of, read_figure, roster, scan, DollFigure, DollRace, FigureDraw, FigureKind};
 }
 
 /// The light and background the doll stands in: a steady display, a day,

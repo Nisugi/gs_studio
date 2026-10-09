@@ -167,13 +167,23 @@ pub fn scan(bodies: &Path) -> Vec<DollFigure> {
 
 type Kept = Mutex<Option<(u64, std::path::PathBuf, Arc<Vec<DollFigure>>)>>;
 
+/// Bumped by [`invalidate`]: the roster is read again.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Read the figures again at the next [`roster`]: a body was installed or
+/// removed behind the doll's back (gs-studio's `--install-doll` calls it).
+pub fn invalidate() {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// The doll's figures in the pool: [`scan`] of `global/bodies`, kept until
-/// the puppet set changes (`crate::puppets::invalidate_cache`, which
-/// gs-studio calls when it installs a body) or the base dir moves.
+/// [`invalidate`] or the base dir moves (`data_dirs::base_generation`). It
+/// reads the bodies folder alone -- not the creature set, which a client's
+/// doll never loads.
 pub fn roster() -> Arc<Vec<DollFigure>> {
     static KEPT: OnceLock<Kept> = OnceLock::new();
     let Ok(dir) = crate::puppets::bodies_dir() else { return Arc::default() };
-    let generation = crate::puppets::puppets().generation();
+    let generation = GENERATION.load(std::sync::atomic::Ordering::Relaxed).wrapping_add(crate::data_dirs::base_generation() << 32);
     let mut kept = KEPT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     if let Some((g, d, list)) = kept.as_ref() {
         if *g == generation && *d == dir {
