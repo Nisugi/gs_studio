@@ -91,6 +91,16 @@ pub fn global_dir() -> Result<PathBuf> {
     Ok(base_dir()?.join("global"))
 }
 
+/// Where the pool keeps modelled bodies (ADDITION): `global/bodies/<form>/`
+/// holds `body.obj` (or `body_thin.obj`), `color.png`, `normal.png`,
+/// `weights.txt`, `splat.spz` (or `.ply`) and `doll.toml`, as
+/// `<data>/meshes/<form>/<size>/` has them (gs-studio installs the largest
+/// size). The injury doll's figures, and any form's body. Not compiled in:
+/// too big.
+pub fn bodies_dir() -> Result<PathBuf> {
+    Ok(global_dir()?.join("bodies"))
+}
+
 
 
 #[cfg(test)]

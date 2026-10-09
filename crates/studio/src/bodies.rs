@@ -169,7 +169,7 @@ fn install_bodies_of(data: &Path, bodies_dir: &Path, keep: &dyn Fn(&str) -> bool
 pub fn install_all(data: &Path) -> std::io::Result<Vec<String>> {
     let err = |e| std::io::Error::other(format!("{e}"));
     let mut forms = install_puppets(data, &gs_field::puppets::puppets_dir().map_err(err)?)?;
-    forms.extend(install_bodies(data, &gs_field::puppets::bodies_dir().map_err(err)?)?);
+    forms.extend(install_bodies(data, &gs_field::data_dirs::bodies_dir().map_err(err)?)?);
     forms.sort();
     forms.dedup();
     Ok(forms)

@@ -412,6 +412,45 @@ pub const WHOLE_CLOUD_PX: u16 = 240;
 /// size, and within what one storage buffer holds.
 pub const MADE_SPLATS: usize = 800_000;
 
+/// What a modelled body's figure file (`doll.toml`) says of the body
+/// itself; the rest of the file -- its label, race, how the doll shows it
+/// -- is the doll's (its roster).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BodyMeta {
+    /// How many splats its made cloud aims at (`made_splats`; None: the
+    /// renderer's own, [`MADE_SPLATS`]).
+    pub made_splats: Option<usize>,
+    /// How far out its arms hang at rest, degrees from straight down
+    /// (`arms_hang`; None: the puppet's own clearing).
+    pub arms_hang: Option<f32>,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(default)]
+struct BodyToml {
+    made_splats: Option<usize>,
+    arms_hang: Option<f32>,
+}
+
+impl BodyMeta {
+    /// The figure file of the body in `dir`: the one beside it, else the
+    /// one in the folder over it (a source's `<form>/master/` body has it
+    /// in `<form>/`). The made cloud's size is the first file's (one that
+    /// does not parse says nothing); the arms', the first file that sets it.
+    pub fn read(dir: &Path) -> BodyMeta {
+        let files: Vec<Option<BodyToml>> = [Some(dir), dir.parent()]
+            .into_iter()
+            .flatten()
+            .filter_map(|d| std::fs::read_to_string(d.join("doll.toml")).ok())
+            .map(|text| toml::from_str::<BodyToml>(&text).ok())
+            .collect();
+        BodyMeta {
+            made_splats: files.first().and_then(|f| f.as_ref()?.made_splats).filter(|n| *n > 0),
+            arms_hang: files.iter().flatten().find_map(|f| f.arms_hang.filter(|deg| deg.is_finite())),
+        }
+    }
+}
+
 impl BodyMesh {
     /// The body as splats made straight from its mesh and sheet -- no
     /// fitting: a flat Gaussian at each of about [`MADE_SPLATS`] points
@@ -1176,6 +1215,30 @@ mod tests {
             tris: vec![[0, 1, 2], [0, 2, 3]],
             source: Vec::new(),
         }
+    }
+
+    /// A body's figure file is the one beside it, else the one in the
+    /// folder over it; its arms come from the first that sets them, its
+    /// made cloud from the first file there is.
+    #[test]
+    fn a_bodys_meta_is_read_beside_it_or_over_it() {
+        let form = std::env::temp_dir().join(format!("gs_puppet_body_meta_{}", std::process::id()));
+        let master = form.join("master");
+        let _ = std::fs::remove_dir_all(&form);
+        std::fs::create_dir_all(&master).unwrap();
+        assert_eq!(BodyMeta::read(&master), BodyMeta::default(), "no file: nothing said");
+        std::fs::write(form.join("doll.toml"), "label = \"Half-elf\"
+made_splats = 300000
+arms_hang = 14
+").unwrap();
+        assert_eq!(BodyMeta::read(&master), BodyMeta { made_splats: Some(300000), arms_hang: Some(14.0) }, "the form's file, over the body");
+        std::fs::write(master.join("doll.toml"), "draw = \"made\"
+").unwrap();
+        assert_eq!(BodyMeta::read(&master), BodyMeta { made_splats: None, arms_hang: Some(14.0) }, "its own file first; the arms where one sets them");
+        std::fs::write(master.join("doll.toml"), "made_splats = \"many\"
+").unwrap();
+        assert_eq!(BodyMeta::read(&master).made_splats, None, "a file that does not parse says nothing");
+        std::fs::remove_dir_all(&form).ok();
     }
 
     #[test]

@@ -1688,3 +1688,10 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   `has_body` are the cache's methods, and a form's body is where its
   source says (`PuppetSource::body_dir`; the field's: the pool's
   `global/bodies/<form>/`). `bodies_loading` counts loads in any cache.
+
+## The crate split, S6 (2026-10-09)
+
+- A modelled body's `doll.toml` keys the body loader needs (`made_splats`,
+  `arms_hang`) are read by `gs_puppet::mesh::BodyMeta`; the cache no longer
+  reads the doll's roster. Its tests write the doll's layering rule out
+  rather than borrow `doll_view::layered_if_marked`.

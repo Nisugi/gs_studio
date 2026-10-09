@@ -240,9 +240,9 @@ impl PuppetSource for FieldSource {
     }
 
     /// The pool's (`<pool>/global/bodies/<form>/body.obj`,
-    /// `gs_field::puppets::bodies_dir`), when it is there.
+    /// `gs_field::data_dirs::bodies_dir`), when it is there.
     fn body_dir(&self, form: &str) -> Option<PathBuf> {
-        let dir = gs_field::puppets::bodies_dir().ok()?.join(form);
+        let dir = gs_field::data_dirs::bodies_dir().ok()?.join(form);
         dir.join("body.obj").is_file().then_some(dir)
     }
 

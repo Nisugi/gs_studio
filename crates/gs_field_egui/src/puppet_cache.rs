@@ -458,12 +458,7 @@ fn load_body(dir: &std::path::Path, puppet: &Puppet) -> std::io::Result<gs_puppe
         _ => None,
     };
     // its figure's made cloud size (`doll.toml`, beside it or in its form's folder)
-    let made_count = [Some(dir.to_path_buf()), dir.parent().map(|p| p.to_path_buf())]
-        .into_iter()
-        .flatten()
-        .find(|d| d.join("doll.toml").is_file())
-        .and_then(|d| gs_field::doll_roster::read_figure("", &d).made_splats)
-        .unwrap_or(gs_puppet::mesh::MADE_SPLATS);
+    let made_count = gs_puppet::mesh::BodyMeta::read(dir).made_splats.unwrap_or(gs_puppet::mesh::MADE_SPLATS);
     let paint_lands = has_sheet && obj == "body.obj";
     Ok(gs_puppet::mesh::BodyMesh { bound, paint, normal, splats, made: Default::default(), thinned: Default::default(), made_count, paint_lands })
 }
@@ -2331,11 +2326,11 @@ impl PuppetCache {
     }
 
     /// How far out `family`'s modelled body has its arms hang at rest, when
-    /// its `doll.toml` says (`gs_field::doll_roster::arms_hang`): the folder
-    /// a host named for it, else its source's.
+    /// its `doll.toml` says (`gs_puppet::mesh::BodyMeta`): the folder a host
+    /// named for it, else its source's.
     fn body_arms_hang(&self, family: &str) -> Option<f32> {
         let form = body_family(family);
-        gs_field::doll_roster::arms_hang(&self.bodies.look(form, || self.source.body_dir(form))?)
+        gs_puppet::mesh::BodyMeta::read(&self.bodies.look(form, || self.source.body_dir(form))?).arms_hang
     }
 
     /// The registry `puppet`'s body is found in, looked for there first
@@ -2904,6 +2899,13 @@ mod tests {
     use super::*;
     use crate::field_puppets::{calibration_for, creature_key, FieldCache, FieldSource};
     use gs_field::puppets::PuppetRigs;
+
+    /// `key` as the injury doll draws a hurt modelled body: its layered
+    /// cloud, at the doll's spacing (`doll_view::layered_if_marked`).
+    fn layered(key: PuppetKey) -> PuppetKey {
+        let params = gs_puppet::splat::SplatParams { spacing: 0.015, ..Default::default() };
+        key.with_layers(true, params.into(), key.coat.coating())
+    }
 
     /// The pose set `puppet`'s body type ships with.
     fn shipped(puppet: &Puppet) -> Option<Arc<PoseSet>> {
@@ -3647,7 +3649,7 @@ mod tests {
                 continue;
             }
             let wounded = vec![("chest".to_string(), 2u8)];
-            let key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, cloud));
+            let key = layered(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, cloud));
             let t = std::time::Instant::now();
             let first = build_marked(&puppet, &body, &key, shipped(&puppet).as_deref()).expect("a marked body");
             println!("{what}: first wound {:.0} ms ({} dots, {:.1} MB to upload)", t.elapsed().as_secs_f64() * 1e3, first.len(), first.len() as f64 * 144.0 / 1e6);
@@ -3679,7 +3681,7 @@ mod tests {
         let dir = size.map_or(form_dir.to_path_buf(), |s| form_dir.join(s));
         let body = Arc::new(load_body(&dir, &puppet).unwrap());
         let wounded = vec![("chest".to_string(), 2u8)];
-        let mut key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
+        let mut key = layered(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
         key.effects.invisible = true;
         let made = build_marked(&puppet, &body, &key, shipped(&puppet).as_deref()).expect("a marked body");
         let count = |f: &dyn Fn(&gs_puppet::splat::Gaussian) -> bool| made.rest.iter().filter(|g| f(g)).count();
@@ -3758,7 +3760,7 @@ mod tests {
         let splats = SplatBody::bind(&bound, skin.iter().step_by(2).cloned().collect());
         let body = Arc::new(BodyMesh { bound, paint: Paint { w: 1, h: 1, rgba: vec![200; 4] }, normal: None, splats: Some(Arc::new(splats)), made: Default::default(), thinned: Default::default(), made_count: gs_puppet::mesh::MADE_SPLATS, paint_lands: true });
         let wounded = vec![("chest".to_string(), 2u8)];
-        let key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
+        let key = layered(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
         assert!(key.layers);
         let ready = |k: &PuppetKey| {
             let start = std::time::Instant::now();

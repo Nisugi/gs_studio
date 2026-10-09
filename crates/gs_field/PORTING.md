@@ -634,3 +634,16 @@ itself. Egui-free.
   an hour the player picks (the sun at that hour, the moons where they
   stand now); `game_doll_sky` is it at the hour now. Hydra's Injuries page
   sets the hour with its *Time of day* slider.
+
+## The crate split (2026-10-09; docs/crate-split-plan.md)
+
+- S4: the base modules -- `data_dirs` (the base dir alone; the pool's
+  folders and writers are `pool_dirs`), `elanthian_time` (with `DayPhase`),
+  `sky`, `stars`, `sky_light` (the sky as the lights read it, out of
+  `lighting`, which re-exports it), `body` (the doll's parts and labels,
+  re-exported by `dolls`, `cards`, `condition`), `status` (re-exported by
+  `doll_state`), `png_meta` -- name only each other (`base_layering`
+  checks it). `doll_roster` keys its roster on its own generation and
+  `data_dirs::base_generation`, and no longer loads the creature set.
+- S6: `bodies_dir` is `data_dirs`' (the base), `puppets::bodies_dir` its
+  re-export.

@@ -425,13 +425,7 @@ pub fn puppets_dir() -> anyhow::Result<PathBuf> {
     Ok(crate::data_dirs::global_dir()?.join("puppets"))
 }
 
-/// Where the pool keeps forms' modelled bodies (ADDITION): `global/bodies/
-/// <form>/` holds `body.obj`, `color.png`, `normal.png`, `weights.txt` and
-/// `splat.spz` (or `.ply`), as `<data>/meshes/<form>/<size>/` has them
-/// (gs-studio installs the largest size). Not compiled in: too big.
-pub fn bodies_dir() -> anyhow::Result<PathBuf> {
-    Ok(crate::data_dirs::global_dir()?.join("bodies"))
-}
+pub use crate::data_dirs::bodies_dir;
 
 /// Baked puppets and pose files in a directory: every `<family>.puppet.toml`
 /// is a puppet, every other `<name>.toml` a pose set for that body type.
