@@ -209,7 +209,7 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32, f3
                 lit.extend_from_slice(&[l[0], l[1], l[2], 0]);
             }
         }
-        let geo = crate::field_gpu_stage::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
+        let geo = crate::figure_image::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
         LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(lit), geo: Arc::new(geo) }
     })
 }
@@ -231,7 +231,7 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
                 p[c] = l2s(s2l(p[c]) * sky.floor[c]);
             }
         }
-        crate::field_gpu_stage::skin_image(key, &dim, surface, M_PER_FT)
+        crate::figure_image::skin_image(key, &dim, surface, M_PER_FT)
     };
     Some(if moving { Arc::new(make()) } else { cached(key, make) })
 }

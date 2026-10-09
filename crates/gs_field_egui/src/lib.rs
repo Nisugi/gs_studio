@@ -43,6 +43,7 @@ pub mod doll_view;
 /// lights and their shadows on the GPU, over each layer's v1 result.
 pub mod field_gpu;
 /// Addition since the port (not in VellumFE): [`field_gpu`] on the stage.
+pub mod figure_image;
 pub mod field_gpu_stage;
 /// Addition since the port (not in VellumFE): the puppet's smooth skin
 /// drawn on the GPU into a [`field_gpu`] layer.
