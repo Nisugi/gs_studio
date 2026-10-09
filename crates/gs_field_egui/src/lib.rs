@@ -34,7 +34,8 @@ pub mod creature_indicators;
 pub mod creature_light;
 /// Addition since the port (not in VellumFE): the no-art creature puppet,
 /// preferred over the flat doll whenever a baked puppet resolves.
-pub mod creature_puppet;
+pub mod puppet_cache;
+pub use puppet_cache as creature_puppet;
 /// Addition since the port (not in VellumFE): the injury doll -- one
 /// puppet in a window of its own, lit by the sky round the player.
 pub mod doll_view;
