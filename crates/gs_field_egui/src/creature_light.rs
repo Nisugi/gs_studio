@@ -955,18 +955,43 @@ fn blend_keyframes(
     out
 }
 
+/// The field's sky as it stands (ADDITION): the clock's hour, the sky over
+/// the scene (moons, cloud, facing), and whether the scene is outdoors --
+/// what a doll beside the field is lit by (a host turns it into the doll's
+/// own sky; the field knows nothing of the doll).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FieldSkyNow {
+    pub game_hour: Option<f32>,
+    pub sky: gs_field::lighting::Sky,
+    pub outdoor: bool,
+}
+
 impl LightState {
-    /// The sky an injury doll stands under here (ADDITION): this scene's,
-    /// indoors or out, at the clock's hour, under its sky and facing
-    /// (`gs_field::doll_sky`). None with no scene or with lighting off.
-    pub fn doll_sky(&self) -> Option<gs_field::doll_sky::DollSky> {
+    /// This scene's sky now ([`FieldSkyNow`]). None with no scene or with
+    /// lighting off.
+    pub fn field_sky_now(&self) -> Option<FieldSkyNow> {
         let (light, _) = self.scene.as_ref()?;
         if self.clock.strength <= 0.0 {
             return None;
         }
-        let outdoor = light.is_outdoor(self.clock.outdoor_guess);
-        Some(gs_field::doll_sky::doll_sky(self.clock.game_hour, &self.clock.sky, outdoor))
+        Some(FieldSkyNow { game_hour: self.clock.game_hour, sky: self.clock.sky, outdoor: light.is_outdoor(self.clock.outdoor_guess) })
     }
+}
+
+fn field_sky_id() -> egui::Id {
+    egui::Id::new("gs_field_egui::creature_light::field_sky")
+}
+
+/// Publish the field's sky now ([`FieldSkyNow`]): the art cache does, every
+/// frame it lights the field.
+pub fn publish_field_sky(ctx: &egui::Context, sky: Option<FieldSkyNow>) {
+    ctx.data_mut(|d| d.insert_temp(field_sky_id(), sky));
+}
+
+/// The field's sky as last published ([`publish_field_sky`]); None before
+/// the field has drawn, or with no scene.
+pub fn field_sky_now(ctx: &egui::Context) -> Option<FieldSkyNow> {
+    ctx.data(|d| d.get_temp::<Option<FieldSkyNow>>(field_sky_id())).flatten()
 }
 
 #[cfg(test)]

@@ -21,22 +21,6 @@ use gs_field::doll_state::{DollState, Status, Statuses};
 use crate::creature_puppet::{body_size_step, has_body, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
-fn sky_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::doll_view::sky")
-}
-
-/// The field's sky for a doll to stand under (its scene, clock and facing),
-/// or None; the art cache publishes it every frame it lights the field.
-pub fn publish_sky(ctx: &egui::Context, sky: Option<DollSky>) {
-    ctx.data_mut(|d| d.insert_temp(sky_id(), sky));
-}
-
-/// The sky the field last published ([`publish_sky`]): what a doll beside
-/// it follows. None before the field has drawn, or with no scene.
-pub fn field_sky(ctx: &egui::Context) -> Option<DollSky> {
-    ctx.data(|d| d.get_temp::<Option<DollSky>>(sky_id())).flatten()
-}
-
 /// The doll's view of the pass.
 pub const DOLL_VIEW: u64 = 0xD011;
 

@@ -261,7 +261,7 @@ impl DollWindow {
         if self.display {
             return gs_field::doll_sky::display();
         }
-        if let Some(sky) = self.follow_field.then(|| gs_field_egui::doll_view::field_sky(ctx)).flatten() {
+        if let Some(sky) = self.follow_field.then(|| gs_field_egui::creature_light::field_sky_now(ctx)).flatten().map(|f| gs_field::doll_sky::doll_sky(f.game_hour, &f.sky, f.outdoor)) {
             return sky;
         }
         self.own_sky()
@@ -553,7 +553,7 @@ impl DollWindow {
         if self.display {
             return;
         }
-        let field = gs_field_egui::doll_view::field_sky(ui.ctx()).is_some();
+        let field = gs_field_egui::creature_light::field_sky_now(ui.ctx()).is_some();
         ui.checkbox(&mut self.follow_field, "The field's sky")
             .on_hover_text(if field {
                 "Stand under the stage's own sky: its scene, hour, weather and the way it faces"
