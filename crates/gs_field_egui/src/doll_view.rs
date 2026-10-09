@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use gs_field::doll_sky::DollSky;
 use gs_field::doll_state::{DollState, Status, Statuses};
 
-use crate::creature_puppet::{body_size_step, has_body, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use crate::creature_puppet::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
 /// The doll's view of the pass.
@@ -248,7 +248,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     // a form with a modelled body is drawn as it, its trained splats,
     // unless the host said otherwise; hurt, scarred, coated or under a
     // status that marks the body, as the layered cloud
-    if key.auto_body && has_body(family) {
+    if key.auto_body && cache.has_body(family) {
         let draw = gs_field::doll_roster::figure(family).map_or(1, |f| f.draw.body_cloud());
         key = key.with_modelled(true, draw);
     }

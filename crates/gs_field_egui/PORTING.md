@@ -1684,3 +1684,7 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   modelled body's layered cloud is made in the cache's pose set for its
   family (it read the body type's raw set before; the same for every
   form with a body).
+- Each `PuppetCache` keeps its own modelled bodies: `set_body_dir` and
+  `has_body` are the cache's methods, and a form's body is where its
+  source says (`PuppetSource::body_dir`; the field's: the pool's
+  `global/bodies/<form>/`). `bodies_loading` counts loads in any cache.

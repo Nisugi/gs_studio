@@ -255,19 +255,19 @@ impl CoatKey {
     }
 }
 
-/// A form's body: where it is, whether a host named it ([`set_body_dir`])
-/// or the pool holds it, and the body once loaded (inner None: it would
-/// not load).
+/// A form's body: where it is, whether a host named it
+/// ([`PuppetCache::set_body_dir`]) or its cache's source has it, and the
+/// body once loaded (inner None: it would not load).
 struct BodyEntry {
     family: String,
-    /// None: the pool has no body for it (looked once per puppet set).
+    /// None: the source has no body for it (looked once per generation).
     dir: Option<std::path::PathBuf>,
     named: bool,
     loaded: Option<Option<Arc<gs_puppet::mesh::BodyMesh>>>,
     /// Being loaded on a worker ([`body_now`]).
     loading: bool,
     /// Which load this entry waits for: a load that finishes after the
-    /// entry was reset (a new folder, a new puppet set) is thrown away.
+    /// entry was reset (a new folder, a new generation) is thrown away.
     ticket: u64,
 }
 
@@ -276,13 +276,48 @@ fn next_ticket() -> u64 {
     TICKETS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
-/// `family`'s entry, the pool looked in for it the first time.
-fn body_entry<'a>(list: &'a mut Vec<BodyEntry>, family: &str) -> &'a mut BodyEntry {
-    if let Some(at) = list.iter().position(|e| e.family == family) {
-        return &mut list[at];
+/// The modelled bodies one cache has looked for and loaded (ADDITION), by
+/// form; shared with the workers loading them.
+#[derive(Clone, Default)]
+struct Bodies(Arc<Mutex<Vec<BodyEntry>>>);
+
+impl Bodies {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<BodyEntry>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
-    list.push(BodyEntry { family: family.to_string(), dir: pool_body_dir(family), named: false, loaded: None, loading: false, ticket: next_ticket() });
-    list.last_mut().expect("just pushed")
+
+    /// Where `family`'s body is (None: it has none), looked for with `find`
+    /// the first time.
+    fn look(&self, family: &str, find: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
+        let mut list = self.lock();
+        if let Some(e) = list.iter().find(|e| e.family == family) {
+            return e.dir.clone();
+        }
+        let dir = find();
+        list.push(BodyEntry { family: family.to_string(), dir: dir.clone(), named: false, loaded: None, loading: false, ticket: next_ticket() });
+        dir
+    }
+
+    /// Forget every loaded body (the source moved on: a Save installed
+    /// one): the next pose loads it again. Named folders stay named.
+    fn drop_loaded(&self) {
+        let mut list = self.lock();
+        list.retain(|e| e.named);
+        for e in list.iter_mut() {
+            e.loaded = None;
+            e.loading = false;
+            e.ticket = next_ticket();
+        }
+    }
+
+    /// Name `family`'s folder (None forgets it).
+    fn name(&self, family: &str, dir: Option<PathBuf>) {
+        let mut list = self.lock();
+        list.retain(|e| e.family != family);
+        if let Some(dir) = dir {
+            list.push(BodyEntry { family: family.to_string(), dir: Some(dir), named: true, loaded: None, loading: false, ticket: next_ticket() });
+        }
+    }
 }
 
 /// A form's modelled body as things stand ([`body_now`]).
@@ -296,33 +331,13 @@ enum BodyNow {
     Ready(Arc<gs_puppet::mesh::BodyMesh>),
 }
 
+/// Bodies being loaded on workers, in any cache.
+static BODIES_LOADING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Whether any body is being loaded, or a hurt body's layered cloud made
 /// (a host taking a screenshot waits).
 pub fn bodies_loading() -> bool {
-    bodies().lock().unwrap_or_else(|e| e.into_inner()).iter().any(|e| e.loading) || marked_building()
-}
-
-type Bodies = std::sync::Mutex<Vec<BodyEntry>>;
-
-fn bodies() -> &'static Bodies {
-    static BODIES: std::sync::OnceLock<Bodies> = std::sync::OnceLock::new();
-    BODIES.get_or_init(Default::default)
-}
-
-/// How far out `family`'s modelled body has its arms hang at rest, when its
-/// `doll.toml` says (`gs_field::doll_roster::arms_hang`): the folder a host
-/// named for it, else the pool's.
-fn body_arms_hang(family: &str) -> Option<f32> {
-    let form = body_family(family);
-    let named = bodies().lock().unwrap_or_else(|e| e.into_inner()).iter().find(|e| e.family == form).and_then(|e| e.dir.clone());
-    gs_field::doll_roster::arms_hang(&named.or_else(|| pool_body_dir(form))?)
-}
-
-/// The pool's body for `family` (`<pool>/global/bodies/<family>/body.obj`,
-/// `gs_field::puppets::bodies_dir`), when it is there.
-fn pool_body_dir(family: &str) -> Option<std::path::PathBuf> {
-    let dir = gs_field::puppets::bodies_dir().ok()?.join(family);
-    dir.join("body.obj").is_file().then_some(dir)
+    BODIES_LOADING.load(std::sync::atomic::Ordering::Relaxed) > 0 || marked_building()
 }
 
 /// The form `family` (a pool key: `humanoid`, `humanoid#lay_figure`,
@@ -332,50 +347,16 @@ fn body_family(family: &str) -> &str {
     family.split(['#', '@']).next().unwrap_or(family)
 }
 
-/// Whether `family`'s form has a modelled body to be drawn as: one a host
-/// named ([`set_body_dir`]) or one in the pool. What makes the doll draw
-/// a form as its body by itself (`doll_view`).
-pub fn has_body(family: &str) -> bool {
-    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
-    body_entry(&mut list, body_family(family)).dir.is_some()
-}
-
-/// Forget every loaded body (the pool changed: a Save installed one): the
-/// next pose loads it again. Named folders stay named.
-fn drop_loaded_bodies() {
-    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
-    list.retain(|e| e.named);
-    for e in list.iter_mut() {
-        e.loaded = None;
-        e.loading = false;
-        e.ticket = next_ticket();
-    }
-}
-
-/// Where `family`'s modelled body is (ADDITION): a folder holding
-/// `body.obj` (y up, facing +z, standing as the rig was drawn), `color.png`,
-/// and optionally `normal.png`, `weights.txt` (`tools/mesh_weights.py`) and
-/// `splat.spz` or `splat.ply` (a cloud trained from pictures of the mesh, z up as Blender
-/// holds a GLB: `image-gen/mesh_orbit.py` + Brush).
-/// None forgets it. It is loaded the first time a key
-/// [`with_modelled`](PuppetKey::with_modelled) is posed.
-pub fn set_body_dir(family: &str, dir: Option<std::path::PathBuf>) {
-    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
-    list.retain(|e| e.family != family);
-    if let Some(dir) = dir {
-        list.push(BodyEntry { family: family.to_string(), dir: Some(dir), named: true, loaded: None, loading: false, ticket: next_ticket() });
-    }
-}
-
-/// `puppet`'s modelled body -- the folder a host named, else the pool's
-/// (`global/bodies/<form>/`) -- loaded and bound to it on a worker thread
-/// the first time it is asked for: a master body's OBJ is hundreds of MB,
-/// seconds of parsing that must not stall the frame. [`BodyNow::Loading`]
-/// until it is in; [`BodyNow::None`] when its form has none or it would
-/// not load (said once, on stderr).
-fn body_now(puppet: &Puppet) -> BodyNow {
-    let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
-    let entry = body_entry(&mut list, &puppet.family);
+/// `puppet`'s modelled body in `bodies` -- the folder a host named, else
+/// its source's (`global/bodies/<form>/` for the field's) -- loaded and
+/// bound to it on a worker thread the first time it is asked for: a master
+/// body's OBJ is hundreds of MB, seconds of parsing that must not stall
+/// the frame. [`BodyNow::Loading`] until it is in; [`BodyNow::None`] when
+/// its form has none (or was never looked for: [`PuppetCache::bodies_for`])
+/// or it would not load (said once, on stderr).
+fn body_now(bodies: &Bodies, puppet: &Puppet) -> BodyNow {
+    let mut list = bodies.lock();
+    let Some(entry) = list.iter_mut().find(|e| e.family == puppet.family) else { return BodyNow::None };
     let Some(dir) = entry.dir.clone() else { return BodyNow::None };
     match &entry.loaded {
         Some(Some(b)) => return BodyNow::Ready(b.clone()),
@@ -387,20 +368,24 @@ fn body_now(puppet: &Puppet) -> BodyNow {
     let (family, ticket, puppet) = (entry.family.clone(), entry.ticket, puppet.clone());
     drop(list);
     let name = format!("body {}", puppet_family_short(&family));
+    let worker_bodies = bodies.clone();
     let load = move || {
         let loaded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_body(&dir, &puppet))).unwrap_or_else(|_| Err(std::io::Error::other("the loader panicked")));
         if let Err(e) = &loaded {
             eprintln!("modelled body {}: {e}", dir.display());
         }
-        let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+        let mut list = worker_bodies.lock();
         if let Some(e) = list.iter_mut().find(|e| e.family == family && e.ticket == ticket) {
             e.loaded = Some(loaded.ok().map(Arc::new));
             e.loading = false;
         }
+        BODIES_LOADING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     };
+    BODIES_LOADING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if std::thread::Builder::new().name(name).spawn(load).is_err() {
+        BODIES_LOADING.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
         // no thread to be had: say it has none rather than wait forever
-        let mut list = bodies().lock().unwrap_or_else(|e| e.into_inner());
+        let mut list = bodies.lock();
         if let Some(e) = list.iter_mut().find(|e| e.ticket == ticket) {
             e.loaded = Some(None);
             e.loading = false;
@@ -415,8 +400,8 @@ fn puppet_family_short(family: &str) -> &str {
 }
 
 /// [`body_now`] when it is in.
-fn body_of(puppet: &Puppet) -> Option<Arc<gs_puppet::mesh::BodyMesh>> {
-    match body_now(puppet) {
+fn body_of(bodies: &Bodies, puppet: &Puppet) -> Option<Arc<gs_puppet::mesh::BodyMesh>> {
+    match body_now(bodies, puppet) {
         BodyNow::Ready(b) => Some(b),
         _ => None,
     }
@@ -1709,13 +1694,14 @@ pub fn pose_puppet_with(
     light: Option<&dyn SkinLight>,
     texture: Option<&gs_puppet::Texture>,
 ) -> PosedPuppet {
-    pose_puppet_inner(puppet, pose, key, skin, light, texture, None, Bare::No, None)
+    pose_puppet_inner(puppet, pose, key, skin, light, texture, None, Bare::No, None, None)
 }
 
 /// [`pose_puppet_with`]; `bare` keeps the skin's surface even unlit (the
 /// doll's: the v2 pass does all its lighting), or hands over the mesh;
 /// `set` is the pose set it is posed by (a modelled body's layered cloud
-/// is made standing in it).
+/// is made standing in it), `bodies` where its modelled body is looked
+/// for (None: it has none).
 #[allow(clippy::too_many_arguments)]
 fn pose_puppet_inner(
     puppet: &Puppet,
@@ -1727,6 +1713,7 @@ fn pose_puppet_inner(
     texture_arc: Option<Arc<gs_puppet::Texture>>,
     bare: Bare,
     set: Option<&Arc<PoseSet>>,
+    bodies: Option<&Bodies>,
 ) -> PosedPuppet {
     let keep_surface = bare != Bare::No;
     let posed: Posed<'_> = puppet.pose(pose);
@@ -1767,13 +1754,13 @@ fn pose_puppet_inner(
     // For the GPU skin: the figure as a mesh, and no CPU skin at all.
     let gpu = skin && bare == Bare::Mesh && light.is_none();
     // its modelled body still loading: this is a stand-in
-    let mut pending = key.modelled && matches!(body_now(puppet), BodyNow::Loading);
+    let mut pending = key.modelled && bodies.is_some_and(|b| matches!(body_now(b, puppet), BodyNow::Loading));
     // its modelled body: only its pose is worked out here
     // (hurt, scarred or coated: its splats as the layered cloud wears them,
     // made on a worker -- meanwhile the last one, and this is a stand-in)
     let body = (gpu && key.modelled)
         .then(|| {
-            let b = body_of(puppet)?;
+            let b = body_of(bodies?, puppet)?;
             let cloud = if key.layers {
                 match marked_body(puppet, &b, key, set) {
                     Marked::Ready(c) => Some(c),
@@ -1812,7 +1799,7 @@ fn pose_puppet_inner(
             let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_field::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
             let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *c))).collect();
             // a modelled body's splat cloud is worn as the skin
-            let fitted = key.modelled.then(|| body_of(puppet).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
+            let fitted = key.modelled.then(|| bodies.and_then(|bs| body_of(bs, puppet)).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
             // held (webbed, bound), it is wrapped as it stands
             let held = (key.pose == PoseChoice::Webbed).then_some(&posed);
             let look = gs_puppet::layers::LayerLook { look, effects: key.effects, texture, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh, fitted: fitted.as_deref(), held, stands: None };
@@ -2074,6 +2061,8 @@ pub struct PuppetCache {
     posed_bytes: usize,
     pose_budget: Option<usize>,
     tick: u64,
+    /// The modelled bodies this cache has looked for and loaded.
+    bodies: Bodies,
     /// The scene light in force (see [`PuppetCache::set_light`]).
     light: Option<Arc<dyn SkinLight>>,
     /// Per creature id: what it was last drawn doing, and when it died in
@@ -2286,7 +2275,7 @@ impl PuppetCache {
             self.pose_sets.clear();
             self.posed.clear();
             self.posed_bytes = 0;
-            drop_loaded_bodies();
+            self.bodies.drop_loaded();
         }
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
     }
@@ -2321,6 +2310,43 @@ impl PuppetCache {
         self.source.as_any_mut().downcast_mut()
     }
 
+    /// Where `family`'s modelled body is (ADDITION): a folder holding
+    /// `body.obj` (y up, facing +z, standing as the rig was drawn),
+    /// `color.png`, and optionally `normal.png`, `weights.txt`
+    /// (`tools/mesh_weights.py`) and `splat.spz` or `splat.ply` (a cloud
+    /// trained from pictures of the mesh, z up as Blender holds a GLB:
+    /// `image-gen/mesh_orbit.py` + Brush), in place of the one its source
+    /// has. None forgets it. It is loaded the first time a key
+    /// [`with_modelled`](PuppetKey::with_modelled) is posed.
+    pub fn set_body_dir(&mut self, family: &str, dir: Option<PathBuf>) {
+        self.bodies.name(family, dir);
+    }
+
+    /// Whether `family`'s form has a modelled body to be drawn as: one a
+    /// host named ([`Self::set_body_dir`]) or one its source has. What
+    /// makes the doll draw a form as its body by itself (`doll_view`).
+    pub fn has_body(&self, family: &str) -> bool {
+        let form = body_family(family);
+        self.bodies.look(form, || self.source.body_dir(form)).is_some()
+    }
+
+    /// How far out `family`'s modelled body has its arms hang at rest, when
+    /// its `doll.toml` says (`gs_field::doll_roster::arms_hang`): the folder
+    /// a host named for it, else its source's.
+    fn body_arms_hang(&self, family: &str) -> Option<f32> {
+        let form = body_family(family);
+        gs_field::doll_roster::arms_hang(&self.bodies.look(form, || self.source.body_dir(form))?)
+    }
+
+    /// The registry `puppet`'s body is found in, looked for there first
+    /// when `key` draws it.
+    fn bodies_for(&self, puppet: &Puppet, key: &PuppetKey) -> Option<&Bodies> {
+        if key.modelled {
+            self.bodies.look(&puppet.family, || self.source.body_dir(&puppet.family));
+        }
+        Some(&self.bodies)
+    }
+
     /// The parsed puppet for a family (parsed once; misses cached); for a
     /// creature's key, the family's puppet in its outfit; for an armed key,
     /// that holding its props (dressed first, so the garments are laid out
@@ -2346,7 +2372,7 @@ impl PuppetCache {
                 Ok(mut p) => {
                     // a modelled body's own rest for its arms (its
                     // doll.toml's `arms_hang`)
-                    if let Some(deg) = body_arms_hang(family) {
+                    if let Some(deg) = self.body_arms_hang(family) {
                         p.arm_hang = p.arm_hangs_at(deg);
                     }
                     Some(Arc::new(p))
@@ -2585,7 +2611,7 @@ impl PuppetCache {
         // and held (webbed, bound), its arms pinned to its sides
         let pose = &pinned(&puppet, key, set.clamp(&pose));
         let texture = if skin { self.texture(family) } else { None };
-        let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set)));
+        let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set), self.bodies_for(&puppet, key)));
         self.builds += 1;
         // a stand-in for a body still loading: drawn, not kept
         if posed.pending {
@@ -2765,7 +2791,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set), self.bodies_for(&puppet, key))))
     }
 
     /// The figure holding `key`'s pose (breathing as the key says) and
@@ -2788,7 +2814,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set), self.bodies_for(&puppet, key))))
     }
 
     /// The figure `t` seconds into falling dead from `from` into `key`'s
@@ -2817,7 +2843,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set), self.bodies_for(&puppet, key))))
     }
 
     /// The doll's figure now (ADDITION): as the stage draws a creature --
@@ -3779,11 +3805,12 @@ mod tests {
         image::RgbaImage::from_pixel(2, 2, image::Rgba([200, 150, 120, 255])).save(dir.join("color.png")).unwrap();
         let mut puppet = Puppet::from_baked_toml(gs_puppet::fixtures::HUMANOID).unwrap();
         puppet.family = format!("body_load_test_{}", std::process::id());
-        set_body_dir(&puppet.family, Some(dir.clone()));
-        assert!(matches!(body_now(&puppet), BodyNow::Loading), "first asked: loading");
+        let bodies = Bodies::default();
+        bodies.name(&puppet.family, Some(dir.clone()));
+        assert!(matches!(body_now(&bodies, &puppet), BodyNow::Loading), "first asked: loading");
         let start = std::time::Instant::now();
         let got = loop {
-            match body_now(&puppet) {
+            match body_now(&bodies, &puppet) {
                 BodyNow::Loading if start.elapsed().as_secs() < 30 => std::thread::sleep(std::time::Duration::from_millis(10)),
                 other => break other,
             }
@@ -3792,14 +3819,12 @@ mod tests {
         // nothing there: none, once tried
         let mut empty = puppet.clone();
         empty.family = format!("{}_empty", puppet.family);
-        set_body_dir(&empty.family, Some(dir.join("nothing")));
+        bodies.name(&empty.family, Some(dir.join("nothing")));
         let start = std::time::Instant::now();
-        while matches!(body_now(&empty), BodyNow::Loading) && start.elapsed().as_secs() < 30 {
+        while matches!(body_now(&bodies, &empty), BodyNow::Loading) && start.elapsed().as_secs() < 30 {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        assert!(matches!(body_now(&empty), BodyNow::None));
-        set_body_dir(&puppet.family, None);
-        set_body_dir(&empty.family, None);
+        assert!(matches!(body_now(&bodies, &empty), BodyNow::None));
         std::fs::remove_dir_all(&dir).ok();
     }
 

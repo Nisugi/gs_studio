@@ -1,5 +1,5 @@
 //! Modelled bodies in the data root: `<data>/meshes/<form>/[<size>/]`,
-//! each a folder `gs_field_egui::creature_puppet::set_body_dir` reads
+//! each a folder `PuppetCache::set_body_dir` (`gs_field_egui::puppet_cache`) reads
 //! (`body.obj`, `color.png`, `weights.txt`, `splat.spz`...). A form with a
 //! body may bring its own puppet -- its rings measured from the mesh
 //! (`gs_puppet::mesh::BoundMesh::measured`) -- as `<data>/meshes/<form>/

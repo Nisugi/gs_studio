@@ -83,6 +83,9 @@ pub struct DollWindow {
     body_size: std::collections::HashMap<String, String>,
     /// The (form, folder) last handed to the puppet cache.
     body_set: Option<(String, std::path::PathBuf)>,
+    /// A (form, folder) to hand it when the window next shows
+    /// (`GS_STUDIO_DOLL_BODY`, named before there is a cache to hand it to).
+    body_named: Option<(String, std::path::PathBuf)>,
     /// The figure `follow_body` last saw.
     body_family: Option<String>,
     /// `GS_STUDIO_DOLL_FIGURE` named the figure (any form, a dev's way past
@@ -133,6 +136,7 @@ impl Default for DollWindow {
             bodies: Vec::new(),
             body_size: Default::default(),
             body_set: None,
+            body_named: None,
             body_family: None,
             family_named: false,
             body_as_named: false,
@@ -193,7 +197,7 @@ impl DollWindow {
         // GS_STUDIO_DOLL_BODY=<folder> draws the humanoid as the modelled
         // body there (body.obj, color.png, weights.txt), posed on the GPU
         if let Some(dir) = std::env::var_os("GS_STUDIO_DOLL_BODY").filter(|v| !v.is_empty()) {
-            gs_field_egui::creature_puppet::set_body_dir("humanoid", Some(dir.into()));
+            w.body_named = Some(("humanoid".to_string(), dir.into()));
             w.modelled = true;
             w.body_cloud = body_as_env();
         }
@@ -322,7 +326,11 @@ impl DollWindow {
     }
 
     /// Hand the figure's chosen body to the puppet cache when it changes.
-    fn follow_body(&mut self) {
+    fn follow_body(&mut self, ctx: &egui::Context) {
+        let name_body = |form: &str, dir: std::path::PathBuf| PuppetCache::shared(ctx).lock().unwrap_or_else(|e| e.into_inner()).set_body_dir(form, Some(dir));
+        if let Some((form, dir)) = self.body_named.take() {
+            name_body(&form, dir);
+        }
         // a form that is its body's own (it brought its puppet) is drawn as it
         if self.body_family.as_deref() != Some(self.family.as_str()) {
             if self.bodies.iter().any(|b| b.form == self.family && b.own_puppet) {
@@ -338,7 +346,7 @@ impl DollWindow {
         let Some(dir) = self.body_dir() else { return };
         let now = (self.family.clone(), dir);
         if self.body_set.as_ref() != Some(&now) {
-            gs_field_egui::creature_puppet::set_body_dir(&now.0, Some(now.1.clone()));
+            name_body(&now.0, now.1.clone());
             crate::pool_dir::invalidate_caches();
             self.body_set = Some(now);
         }
@@ -363,7 +371,7 @@ impl DollWindow {
     /// The window, over whatever tab is showing.
     pub fn show(&mut self, ctx: &egui::Context) {
         if self.open {
-            self.follow_body();
+            self.follow_body(ctx);
             self.frames += 1;
             if let Some((part, rank, at)) = self.hit.filter(|h| self.frames >= h.2) {
                 let _ = at;
