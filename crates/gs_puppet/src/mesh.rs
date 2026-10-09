@@ -170,8 +170,18 @@ pub type Shares = [(usize, f32); 4];
 const FACES_IN: f32 = 0.25;
 
 /// How far round a splat the mesh's facings are blended into its own
-/// (`VertexGrid::facing_at`), feet.
-const FACING_REACH_FT: f32 = 0.08;
+/// (`VertexGrid::facing_at`), feet. A thinned mesh is folded on itself
+/// where its merge ran (`tools/decimate_mesh.py`), its facings tilting
+/// every way vertex to vertex: blended over less than this, a forehead's
+/// splats came out as a strip tilted up to the sky between strips tilted
+/// down, and an evening sky lit the strip pale (half_elf_male, 2026-10-08).
+const FACING_REACH_FT: f32 = 0.15;
+
+/// How much of the facings round a splat must agree (the length of their
+/// weighted sum over the sum of the weights) to be the skin's way there;
+/// less, and they cancel -- the two sides of an ear, a finger -- and the
+/// nearest vertex's facing says which side the splat is on.
+const FACING_AGREE: f32 = 0.3;
 
 /// The puppet's body segments as bones, for a tool that works the shares
 /// out: `height <feet>`, then a `bone <name> <parent's name or -> <head
@@ -617,30 +627,35 @@ impl VertexGrid {
 
     /// The skin's facing at `q`, smooth (ADDITION): the facings of the
     /// vertices within [`FACING_REACH_FT`] of it, nearer ones counting
-    /// more, those facing as vertex `near` does. A splat lit by its one
-    /// nearest vertex's facing took that vertex's facing whole, and on a
-    /// thinned mesh (a vertex every few hundredths of a foot, facings
-    /// varying vertex to vertex) neighbouring splats were lit as a
-    /// patchwork, light and dark.
+    /// more, those facing as most of them do -- or, where they cancel
+    /// ([`FACING_AGREE`]: an ear, a finger), as vertex `near` does. A
+    /// splat lit by its one nearest vertex's facing took that vertex's
+    /// facing whole, and on a thinned mesh (a vertex every few hundredths
+    /// of a foot, facings varying vertex to vertex) neighbouring splats
+    /// were lit as a patchwork, light and dark; and kept to those facing
+    /// as the nearest does, a folded vertex nearest led the rest astray.
     fn facing_at(&self, bound: &BoundMesh, q: V3, near: usize) -> V3 {
         let n0 = bound.mesh.nrm[near];
         let c = Self::cell(q);
         let reach = (FACING_REACH_FT / Self::CELL).ceil() as i32;
-        let mut sum = [0.0f32; 3];
+        let mut round: Vec<(V3, f32)> = Vec::new();
         for dx in -reach..=reach {
             for dy in -reach..=reach {
                 for dz in -reach..=reach {
                     for &k in self.grid.get(&[c[0] + dx, c[1] + dy, c[2] + dz]).into_iter().flatten() {
-                        let n = bound.mesh.nrm[k as usize];
                         let d = len(sub(bound.mesh.pos[k as usize], q));
-                        if d < FACING_REACH_FT && dot(n, n0) > 0.0 {
+                        if d < FACING_REACH_FT {
                             let w = 1.0 - d / FACING_REACH_FT;
-                            sum = add(sum, scale(n, w * w));
+                            round.push((bound.mesh.nrm[k as usize], w * w));
                         }
                     }
                 }
             }
         }
+        let all = round.iter().fold([0.0f32; 3], |s, (n, w)| add(s, scale(*n, *w)));
+        let weight: f32 = round.iter().map(|(_, w)| w).sum();
+        let way = if len(all) > FACING_AGREE * weight { all } else { n0 };
+        let sum = round.iter().filter(|(n, _)| dot(*n, way) > 0.0).fold([0.0f32; 3], |s, (n, w)| add(s, scale(*n, *w)));
         norm_or(sum, n0)
     }
 
