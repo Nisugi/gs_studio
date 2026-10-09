@@ -29,6 +29,7 @@
 )]
 
 pub mod bestiary;
+pub mod body;
 pub mod cards;
 pub mod condition;
 pub mod creature;

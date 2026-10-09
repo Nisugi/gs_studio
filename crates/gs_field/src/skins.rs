@@ -1750,3 +1750,13 @@ mod tests {
         assert!(write_scaffold("..").is_err());
     }
 }
+
+#[cfg(test)]
+mod doll_parts_tests {
+    /// The 2D doll's anchors are for the body's parts, in their order.
+    #[test]
+    fn doll_parts_are_the_bodys_parts() {
+        let ours: Vec<(&str, &str)> = super::DOLL_PARTS.iter().map(|(key, name, _)| (*key, *name)).collect();
+        assert_eq!(ours, crate::body::PARTS.to_vec());
+    }
+}

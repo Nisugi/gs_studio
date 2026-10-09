@@ -121,35 +121,7 @@ pub enum Condition {
     },
 }
 
-/// Phase of the in-game day, as `Condition::TimeOfDay` names it.
-///
-/// Ported from VellumFE `src/core/elanthian_time.rs` — the enum and
-/// `as_str` only; the clock (`phase_at`, `PhaseBoundaries`) stays with the
-/// host's evaluator.
-///
-/// The four Elanthian hour-names (gswiki) map onto these: Hour of Lumnis =
-/// dawn, Hour of Phoen = noon (Day), Hour of Tonis = dusk, Hour of Ronan =
-/// midnight (Night). The `time` verb also reports a phase in prose ("It is
-/// currently afternoon").
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DayPhase {
-    Dawn,
-    Day,
-    Dusk,
-    Night,
-}
-
-impl DayPhase {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            DayPhase::Dawn => "dawn",
-            DayPhase::Day => "day",
-            DayPhase::Dusk => "dusk",
-            DayPhase::Night => "night",
-        }
-    }
-}
+pub use crate::elanthian_time::DayPhase;
 
 fn default_true() -> bool {
     true
@@ -191,25 +163,8 @@ impl Condition {
     }
 }
 
-/// Body-part ids the injury feed uses (same keys as the injury doll). The
-/// canonical list the parser emits on a full clear; editors offer these in a
-/// dropdown for `Condition::Injury.area`.
-pub const INJURY_AREAS: &[&str] = &[
-    "head",
-    "neck",
-    "chest",
-    "abdomen",
-    "back",
-    "leftArm",
-    "rightArm",
-    "leftHand",
-    "rightHand",
-    "leftLeg",
-    "rightLeg",
-    "leftEye",
-    "rightEye",
-    "nsys",
-];
+
+pub use crate::body::INJURY_AREAS;
 
 /// Which hand a hand condition inspects.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]

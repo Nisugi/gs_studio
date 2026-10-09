@@ -52,6 +52,8 @@ pub const DEFAULT_INJURY_PALETTE: [&str; 7] = [
     "#555555", // 6: scar 3 (darker gray)
 ];
 
+pub use crate::body::{label_part, part_label, severed_parts, SEVERABLE_LIMBS};
+
 /// [`DEFAULT_INJURY_PALETTE`] entry for a wound rank, as RGB. Creature
 /// injuries are ranks 1-3; anything above clamps to 3, 0 is "none".
 pub fn injury_rank_rgb(rank: u8) -> [u8; 3] {
@@ -60,45 +62,7 @@ pub fn injury_rank_rgb(rank: u8) -> [u8; 3] {
     [ch(0), ch(2), ch(4)]
 }
 
-/// 1-based label value (the PNG's R channel) for a doll part key,
-/// case-insensitive. `None` for names outside [`crate::skins::DOLL_PARTS`].
-pub fn part_label(part: &str) -> Option<u8> {
-    crate::skins::DOLL_PARTS
-        .iter()
-        .position(|(key, _, _)| key.eq_ignore_ascii_case(part))
-        .map(|i| i as u8 + 1)
-}
 
-/// The doll part key for a label value (1-based); `None` for 0 / out of range.
-pub fn label_part(label: u8) -> Option<&'static str> {
-    (label as usize)
-        .checked_sub(1)
-        .and_then(|i| crate::skins::DOLL_PARTS.get(i))
-        .map(|(key, _, _)| *key)
-}
-
-/// The limbs whose rank-3 wound is a severance (see the doc comment on
-/// `CreatureFlags::injuries`), each with the parts that go with it: losing
-/// an arm takes the hand along.
-pub const SEVERABLE_LIMBS: &[(&str, &[&str])] = &[
-    ("leftArm", &["leftArm", "leftHand"]),
-    ("rightArm", &["rightArm", "rightHand"]),
-    ("leftLeg", &["leftLeg"]),
-    ("rightLeg", &["rightLeg"]),
-];
-
-/// The parts removed when `part` is wounded at `rank`: non-empty only for a
-/// rank-3 (or worse) wound on one of [`SEVERABLE_LIMBS`].
-pub fn severed_parts(part: &str, rank: u8) -> &'static [&'static str] {
-    if rank < 3 {
-        return &[];
-    }
-    SEVERABLE_LIMBS
-        .iter()
-        .find(|(limb, _)| limb.eq_ignore_ascii_case(part))
-        .map(|(_, removed)| *removed)
-        .unwrap_or(&[])
-}
 
 // ---- baked metadata -----------------------------------------------------
 

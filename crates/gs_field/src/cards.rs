@@ -682,25 +682,8 @@ pub fn sync_field(
     }
 }
 
-/// Map an external creature body-part name (CreatureBar vocabulary) onto
-/// the canonical doll part key used everywhere in Vellum. Differences:
-/// `nerves` -> `nsys`, and foot wounds fold into the matching leg. Canonical
-/// names pass through unchanged (case-insensitively); unknown parts return
-/// None and are dropped, same as the doll loader does.
-pub fn canonical_part(name: &str) -> Option<&'static str> {
-    let folded = match name.to_ascii_lowercase().as_str() {
-        "nerves" => "nsys",
-        "leftfoot" => "leftLeg",
-        "rightfoot" => "rightLeg",
-        other => {
-            return crate::condition::INJURY_AREAS
-                .iter()
-                .find(|part| part.eq_ignore_ascii_case(other))
-                .copied();
-        }
-    };
-    Some(folded)
-}
+
+pub use crate::body::canonical_part;
 
 #[cfg(test)]
 mod card_tests {
