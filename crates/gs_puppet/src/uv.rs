@@ -21,7 +21,7 @@
 
 use std::f32::consts::TAU;
 
-use crate::math::{dot, len, norm_or, scale, sub, V3};
+use crate::math::{add, dot, len, norm_or, scale, sub, V3};
 use crate::model::Puppet;
 
 /// Blank sheet pixels between patches.
@@ -584,6 +584,134 @@ pub fn silhouette_template(mask: &rig_bake::Mask, mirror: bool, rgb: [u8; 3]) ->
         }
     }
     rgba
+}
+
+/// How wide the blur is that a bump's detail is measured against (texels,
+/// box radius, run twice), how steep a unit of brightness change per texel
+/// makes the relief, and the most it may lean the surface.
+const BUMP_BLUR_TEXELS: usize = 3;
+const BUMP_SLOPE: f32 = 4.0;
+const BUMP_MAX: f32 = 0.6;
+
+/// A NORMAL sheet made from the colour sheet itself, for a skin that has
+/// none: the paint's fine detail (its brightness less a blur of it, within
+/// each patch) taken as height, and that height's slope along the body as
+/// the deviation a normal sheet stores (`prefill_normals`, authoring) -- so the ribs, folds, scales
+/// and cracks the paint shows catch the light. Fine relief only: the big
+/// forms are the body's own (a map from a depth estimate counts them
+/// twice). Transparent where the sheet is.
+pub fn bump_sheet(p: &Puppet, layout: &UvLayout, sheet: &[u8]) -> Vec<u8> {
+    let (w, h) = (layout.w, layout.h);
+    let n = w * h;
+    let mut out = vec![0u8; n * 4];
+    if sheet.len() < n * 4 {
+        return out;
+    }
+    // each texel's segment, rest point and normal
+    let mut owner = vec![usize::MAX; n];
+    let mut at: Vec<Option<(V3, V3)>> = vec![None; n];
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if sheet[i * 4 + 3] < 128 {
+                continue;
+            }
+            let Some((seg, station, theta)) = layout.address([x as f32 + 0.5, y as f32 + 0.5]) else { continue };
+            if let Some(pn) = rest_point(p, seg, station, theta) {
+                owner[i] = seg;
+                at[i] = Some(pn);
+            }
+        }
+    }
+    let lum: Vec<f32> =
+        sheet.chunks_exact(4).map(|c| (0.2126 * c[0] as f32 + 0.7152 * c[1] as f32 + 0.0722 * c[2] as f32) / 255.0).collect();
+    let base = blur_within(&lum, &owner, w, h, BUMP_BLUR_TEXELS);
+    let height: Vec<f32> = (0..n).map(|i| if owner[i] == usize::MAX { 0.0 } else { lum[i] - base[i] }).collect();
+    // The height's change per texel across `i` from `a` to `b` (both on its
+    // patch), and the way that step runs on the body.
+    let slope = |i: usize, a: Option<usize>, b: Option<usize>| -> Option<(f32, V3)> {
+        let same = |j: usize| owner[j] == owner[i];
+        let (a, b) = (a.filter(|&j| same(j))?, b.filter(|&j| same(j))?);
+        let (pa, pb) = (at[a]?.0, at[b]?.0);
+        Some(((height[b] - height[a]) * 0.5, norm_or(sub(pb, pa), [0.0; 3])))
+    };
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let Some((_, normal)) = at[i] else { continue };
+            let (left, right) = ((x > 0).then(|| i - 1), (x + 1 < w).then(|| i + 1));
+            let (up, down) = ((y > 0).then(|| i - w), (y + 1 < h).then(|| i + w));
+            let mut g = [0.0f32; 3];
+            for (dh, dir) in [slope(i, left, right), slope(i, up, down)].into_iter().flatten() {
+                g = add(g, scale(dir, dh * BUMP_SLOPE));
+            }
+            // along the surface only, and never past BUMP_MAX
+            g = sub(g, scale(normal, dot(g, normal)));
+            let len = dot(g, g).sqrt();
+            if len > BUMP_MAX {
+                g = scale(g, BUMP_MAX / len);
+            }
+            // uphill is where the surface leans away from
+            for k in 0..3 {
+                out[i * 4 + k] = encode_normal(-g[k]);
+            }
+            out[i * 4 + 3] = 255;
+        }
+    }
+    out
+}
+
+/// A box blur of radius `r`, run twice each way, that only averages texels
+/// of the same `owner` (a patch's own; `usize::MAX` = none, left as is).
+fn blur_within(v: &[f32], owner: &[usize], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let pass = |src: &[f32], horizontal: bool| -> Vec<f32> {
+        let mut out = src.to_vec();
+        for i in 0..w * h {
+            let o = owner[i];
+            if o == usize::MAX {
+                continue;
+            }
+            let (x, y) = ((i % w) as isize, (i / w) as isize);
+            let (mut sum, mut count) = (0.0f32, 0.0f32);
+            for d in -(r as isize)..=(r as isize) {
+                let (xx, yy) = if horizontal { (x + d, y) } else { (x, y + d) };
+                if xx < 0 || yy < 0 || xx >= w as isize || yy >= h as isize {
+                    continue;
+                }
+                let j = yy as usize * w + xx as usize;
+                if owner[j] == o {
+                    sum += src[j];
+                    count += 1.0;
+                }
+            }
+            out[i] = sum / count.max(1.0);
+        }
+        out
+    };
+    let mut cur = v.to_vec();
+    for _ in 0..2 {
+        cur = pass(&cur, true);
+        cur = pass(&cur, false);
+    }
+    cur
+}
+
+/// A surface address on the rest body: the point and its outward normal.
+pub fn rest_point(p: &Puppet, seg: usize, station: f32, theta: f32) -> Option<(V3, V3)> {
+    let s = p.segments.get(seg)?;
+    let last = s.stations.len().checked_sub(1)?;
+    let f = station.clamp(0.0, last as f32);
+    let k = (f.floor() as usize).min(last);
+    let (k1, t) = if k < last { (k + 1, f - k as f32) } else { (k, 0.0) };
+    let (a, b) = (&s.stations[k], &s.stations[k1]);
+    let c = add(a.c, scale(sub(b.c, a.c), t));
+    let (w, d) = (a.w + (b.w - a.w) * t, a.d + (b.d - a.d) * t);
+    let (sn, cs) = theta.sin_cos();
+    let point = add(c, add(scale(s.axis_w, w * cs), scale(s.axis_d, d * sn)));
+    // An ellipse's normal: the radial direction scaled by the reciprocal
+    // semi-axes, so a flat cross-section faces the right way.
+    let normal = norm_or(add(scale(s.axis_w, cs / w.max(1e-3)), scale(s.axis_d, sn / d.max(1e-3))), [0.0, 0.0, 1.0]);
+    Some((point, normal))
 }
 
 #[cfg(test)]

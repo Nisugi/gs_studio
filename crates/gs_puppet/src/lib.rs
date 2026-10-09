@@ -101,7 +101,8 @@ pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WO
 pub use fit::{rest_iou, rest_prims};
 pub use outfit::{Cut, Hang, Kit, Outfit, Outfits, Piece, SHIPPED_KIT};
 pub use paint::paint;
-pub use prefill::{bump_sheet, prefill_normals};
+pub use prefill::prefill_normals;
+pub use uv::bump_sheet;
 pub use pose::{flinch_envelope, BonePose, FamilyPoses, Idle, IdleBone, Limit, Pose, PoseOverride, PoseSet, Posed, FLINCH_REGIONS, FLINCH_SECS, SHIPPED_POSES};
 pub use prefill::{depth_guide, dressed_silhouette, normal_guide, prefill, project_view, puppet_eyes, side_silhouette, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
