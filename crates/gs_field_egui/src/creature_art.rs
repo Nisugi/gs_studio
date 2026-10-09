@@ -401,11 +401,11 @@ pub struct CreatureArtStore {
 }
 
 impl Default for CreatureArtStore {
-    /// Rooted at `gs_field::data_dirs::global_images_dir()` with the label
+    /// Rooted at `gs_field::pool_dirs::global_images_dir()` with the label
     /// "pool" -- exactly what `SkinState::apply_if_changed` passed.
     fn default() -> Self {
         Self::new(
-            &gs_field::data_dirs::global_images_dir().unwrap_or_default(),
+            &gs_field::pool_dirs::global_images_dir().unwrap_or_default(),
             "pool",
         )
     }
@@ -1011,7 +1011,7 @@ mod tests {
     }
 
     fn pool_dir() -> PathBuf {
-        gs_field::data_dirs::global_images_dir().unwrap()
+        gs_field::pool_dirs::global_images_dir().unwrap()
     }
 
     #[test]

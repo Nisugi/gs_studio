@@ -137,7 +137,7 @@ pub fn last_word(name: &str) -> String {
 /// skin not laid out for its figure, and draws the sprite; this does not
 /// decode skins to know.)
 pub fn has_art(name: &str, noun: Option<&str>) -> bool {
-    let Ok(root) = gs_field::data_dirs::global_images_dir() else {
+    let Ok(root) = gs_field::pool_dirs::global_images_dir() else {
         return false;
     };
     let family = noun.and_then(gs_field::cards::family_for_noun);
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn art_in_the_pool_is_found_by_the_same_resolver_the_renderer_uses() {
         let _base = crate::stage::test_support::TempBase::new();
-        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(&creatures).unwrap();
         std::fs::write(creatures.join("timber_wolf.png"), b"not really a png").unwrap();
         gs_field::pool::invalidate_cache();
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn a_puppet_in_its_own_skin_or_over_the_default_art_is_not_sprite_art() {
         let _base = crate::stage::test_support::TempBase::new();
-        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(creatures.join("default")).unwrap();
         std::fs::write(creatures.join("default/default.png"), b"not really a png").unwrap();
         std::fs::write(creatures.join("hill_troll.png"), b"not really a png").unwrap();

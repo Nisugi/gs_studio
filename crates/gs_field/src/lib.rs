@@ -43,6 +43,7 @@ pub mod field_config;
 pub mod geometry;
 pub mod naming;
 pub mod png_meta;
+pub mod pool_dirs;
 pub mod pool;
 pub mod puppets;
 pub mod lighting;

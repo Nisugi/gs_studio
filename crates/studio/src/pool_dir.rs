@@ -187,7 +187,7 @@ mod tests {
         let pool = set_in_app(&format!("  {}  ", dir.path().display())).unwrap();
         assert_eq!((pool.path.as_path(), pool.source), (dir.path(), PoolSource::SetInApp));
         assert_eq!(gs_field::data_dirs::base_dir().unwrap(), dir.path());
-        assert!(gs_field::data_dirs::global_images_dir().unwrap().starts_with(dir.path()));
+        assert!(gs_field::pool_dirs::global_images_dir().unwrap().starts_with(dir.path()));
         gs_field::data_dirs::clear_base_dir();
         gs_field::pool::invalidate_cache();
     }

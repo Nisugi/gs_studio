@@ -36,7 +36,7 @@ impl DollCalibrationTarget {
     /// as `SkinState::doll_override_abs_path` did (its root was
     /// `global_images_dir().unwrap_or_default()`).
     pub fn from_pool_path(pool_path: &str) -> Self {
-        let root = gs_field::data_dirs::global_images_dir().unwrap_or_default();
+        let root = gs_field::pool_dirs::global_images_dir().unwrap_or_default();
         Self {
             pool_path: pool_path.to_owned(),
             image_abs: skins::resolve_image_path(&root, pool_path),

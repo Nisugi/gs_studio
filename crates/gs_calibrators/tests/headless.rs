@@ -45,7 +45,7 @@ fn write_png(path: &Path, px: u32) {
 }
 
 fn pool_dir() -> PathBuf {
-    gs_field::data_dirs::global_images_dir().unwrap()
+    gs_field::pool_dirs::global_images_dir().unwrap()
 }
 
 /// Three frames: textures upload on the first, layout settles after.

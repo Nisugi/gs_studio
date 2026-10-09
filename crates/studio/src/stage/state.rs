@@ -1194,7 +1194,7 @@ mod tests {
         assert!(s.status_lines().last().unwrap().contains("humanoid puppet"));
 
         // With art in the pool the sprite wins, and the line says so.
-        let creatures = gs_field::data_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(&creatures).unwrap();
         std::fs::write(creatures.join("kobold.png"), b"x").unwrap();
         gs_field::pool::invalidate_cache();

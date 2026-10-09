@@ -83,7 +83,7 @@ impl StageScene {
         if name.is_empty() || name.contains(['/', '\\']) {
             anyhow::bail!("invalid scene name '{name}'");
         }
-        Ok(crate::data_dirs::scenes_dir()?.join(format!("{name}.toml")))
+        Ok(crate::pool_dirs::scenes_dir()?.join(format!("{name}.toml")))
     }
 
     /// Load one scene by name.
@@ -100,7 +100,7 @@ impl StageScene {
         let path = Self::path(name)?;
         let contents = toml::to_string_pretty(self)
             .map_err(|err| anyhow::anyhow!("cannot serialize scene: {}", err))?;
-        crate::data_dirs::write_atomic(&path, contents)
+        crate::pool_dirs::write_atomic(&path, contents)
             .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
         Ok(())
     }
@@ -290,7 +290,7 @@ pub fn scene_exists(stem: &str) -> bool {
 /// Saved scene names (file stems), sorted. A missing folder is an empty
 /// list, not an error.
 pub fn list_scenes() -> Vec<String> {
-    let Ok(dir) = crate::data_dirs::scenes_dir() else {
+    let Ok(dir) = crate::pool_dirs::scenes_dir() else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(&dir) else {

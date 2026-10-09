@@ -49,7 +49,7 @@ impl Demo {
             gs_field::data_dirs::set_base_dir(std::path::PathBuf::from(dir));
             gs_field::pool::invalidate_cache();
         }
-        let base = gs_field::data_dirs::global_images_dir()
+        let base = gs_field::pool_dirs::global_images_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| format!("<unresolved: {e}>"));
         eprintln!("calibrators_demo: pool = {base}");

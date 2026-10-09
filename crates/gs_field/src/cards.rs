@@ -572,7 +572,7 @@ pub fn scene_obstacles(
     let Some(scene) = scene else {
         return Vec::new();
     };
-    let Ok(pool_root) = crate::data_dirs::global_images_dir() else {
+    let Ok(pool_root) = crate::pool_dirs::global_images_dir() else {
         return Vec::new();
     };
     scene
@@ -699,7 +699,7 @@ mod card_tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         crate::pool::invalidate_cache();
 
-        let status = crate::data_dirs::global_image_category_dir("creatures")
+        let status = crate::pool_dirs::global_image_category_dir("creatures")
             .unwrap()
             .join("status");
         std::fs::create_dir_all(&status).unwrap();
@@ -1088,7 +1088,7 @@ mod wound_convention_tests {
             .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("VELLUM_FE_DIR", dir.path());
-        let wounds = crate::data_dirs::global_images_dir()
+        let wounds = crate::pool_dirs::global_images_dir()
             .unwrap()
             .join("creatures/wounds");
         std::fs::create_dir_all(&wounds).unwrap();

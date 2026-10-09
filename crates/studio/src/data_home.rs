@@ -26,7 +26,7 @@ pub const APP_DIR: &str = "gs-studio";
 
 /// The pool subtree gs-studio creates on first run: every category the pool
 /// listing and the calibrators read, plus the scene, rig and puppet stores.
-/// `creatures` is NOT in `gs_field::data_dirs::IMAGE_CATEGORIES` (that list
+/// `creatures` is NOT in `gs_field::pool_dirs::IMAGE_CATEGORIES` (that list
 /// predates the creature field) but every creature tab needs it, so it is
 /// named explicitly here rather than inferred.
 pub const POOL_SUBDIRS: &[&str] = &[

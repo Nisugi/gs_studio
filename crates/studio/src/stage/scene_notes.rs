@@ -91,7 +91,7 @@ impl SceneNotes {
         if scene.is_empty() || scene.contains(['/', '\\']) {
             return Err(format!("no notes for an unnamed scene ('{scene}'): save it first"));
         }
-        let dir = gs_field::data_dirs::scenes_dir().map_err(|e| e.to_string())?;
+        let dir = gs_field::pool_dirs::scenes_dir().map_err(|e| e.to_string())?;
         Ok(dir.join("notes").join(format!("{scene}.toml")))
     }
 

@@ -1132,7 +1132,7 @@ pub fn write_scaffold(name: &str) -> anyhow::Result<PathBuf> {
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')),
         "skin names may only use letters, digits, '-' and '_'"
     );
-    let root = crate::data_dirs::skins_dir()?.join(name);
+    let root = crate::pool_dirs::skins_dir()?.join(name);
     let manifest_path = root.join("skin.toml");
     anyhow::ensure!(
         !manifest_path.exists(),
@@ -1141,7 +1141,7 @@ pub fn write_scaffold(name: &str) -> anyhow::Result<PathBuf> {
         manifest_path.display()
     );
     std::fs::create_dir_all(&root)?;
-    crate::data_dirs::write_atomic(&manifest_path, SCAFFOLD_MANIFEST)?;
+    crate::pool_dirs::write_atomic(&manifest_path, SCAFFOLD_MANIFEST)?;
     Ok(manifest_path)
 }
 
@@ -1209,13 +1209,13 @@ scale = 1.0
 
 // `write_harmony_skin` (VellumFE, `#[cfg(feature = "gui")]`) is NOT ported: it
 // PNG-encodes through the `image` crate, which this crate must not depend on.
-// It stays in VellumFE, built on `data_dirs::skins_dir`, `write_atomic` and
+// It stays in VellumFE, built on `pool_dirs::skins_dir`, `write_atomic` and
 // `HARMONY_SKIN_MARKER` from here.
 
 /// Read and parse `skins/<name>/skin.toml`. Returns the manifest and the
 /// skin directory (for resolving relative image paths).
 pub fn load_manifest(name: &str) -> anyhow::Result<(SkinManifest, PathBuf)> {
-    let root = crate::data_dirs::skins_dir()?.join(name);
+    let root = crate::pool_dirs::skins_dir()?.join(name);
     let manifest_path = root.join("skin.toml");
     let contents = std::fs::read_to_string(&manifest_path)
         .map_err(|err| anyhow::anyhow!("cannot read {}: {}", manifest_path.display(), err))?;
@@ -1230,7 +1230,7 @@ pub fn load_manifest(name: &str) -> anyhow::Result<(SkinManifest, PathBuf)> {
 /// directory (manifest paths are relative to it); a missing manifest is
 /// just "no shared sheets".
 pub fn load_global_sheets() -> anyhow::Result<(HashMap<String, SheetSpec>, PathBuf)> {
-    let root = crate::data_dirs::global_icons_dir()?;
+    let root = crate::pool_dirs::global_icons_dir()?;
     let manifest_path = root.join("icons.toml");
     let contents = match std::fs::read_to_string(&manifest_path) {
         Ok(contents) => contents,
@@ -1266,7 +1266,7 @@ pub fn resolve_image_path(root: &Path, image: &str) -> PathBuf {
     if local.is_file() {
         return local;
     }
-    if let Ok(pool) = crate::data_dirs::global_images_dir() {
+    if let Ok(pool) = crate::pool_dirs::global_images_dir() {
         let pooled = pool.join(raw);
         if pooled.is_file() {
             return pooled;
@@ -1277,7 +1277,7 @@ pub fn resolve_image_path(root: &Path, image: &str) -> PathBuf {
 
 /// Skin directory names that contain a skin.toml, sorted.
 pub fn list_skins() -> Vec<String> {
-    let Ok(dir) = crate::data_dirs::skins_dir() else {
+    let Ok(dir) = crate::pool_dirs::skins_dir() else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(dir) else {

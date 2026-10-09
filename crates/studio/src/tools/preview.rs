@@ -262,7 +262,7 @@ impl StageTool {
 
     /// The pool directory moved: re-root the art, re-scan the cast.
     pub fn pool_changed(&mut self) {
-        let root = gs_field::data_dirs::global_images_dir().unwrap_or_default();
+        let root = gs_field::pool_dirs::global_images_dir().unwrap_or_default();
         self.art.reset_with_root(&root);
         self.stage.pool_changed();
     }
@@ -478,7 +478,7 @@ fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::
         let cache = art.lock().unwrap_or_else(|e| e.into_inner());
         (cache.occluders(&bg).map(|o| o.blobs.len()), cache.scene_background(&bg).map(|t| t.size()))
     };
-    let abs = gs_field::data_dirs::global_images_dir().ok().map(|d| d.join(&mask));
+    let abs = gs_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
     let exists = abs.as_ref().is_some_and(|p| p.is_file());
     match (count, exists) {
         (Some(n), _) => ui.label(format!("{mask}: {n} occluder(s)")),
@@ -513,7 +513,7 @@ fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::
 fn walk_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::creature_art::SharedCreatureArt) {
     let Some(bg) = stage.scene().background.clone() else { return };
     let mask = gs_field::walk::walk_path(&bg);
-    let abs = gs_field::data_dirs::global_images_dir().ok().map(|d| d.join(&mask));
+    let abs = gs_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
     let exists = abs.as_ref().is_some_and(|p| p.is_file());
     match (stage.field.walk(), &stage.walk_error) {
         (_, Some(e)) => ui.colored_label(ui.visuals().warn_fg_color, e.clone()),

@@ -96,7 +96,7 @@ impl FieldOverrides {
         clean.scenes.retain(|_, entry| !entry.is_empty());
         let contents = toml::to_string_pretty(&clean)
             .map_err(|err| anyhow::anyhow!("cannot serialize field overrides: {}", err))?;
-        crate::data_dirs::write_atomic(&path, contents)
+        crate::pool_dirs::write_atomic(&path, contents)
             .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
         Ok(())
     }

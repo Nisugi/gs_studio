@@ -59,7 +59,7 @@ pub fn write_embedded(path: &Path, meta: &str) -> anyhow::Result<()> {
         .map_err(|err| anyhow::anyhow!("cannot read {}: {}", path.display(), err))?;
     let updated = write_embedded_bytes(&bytes, meta)
         .ok_or_else(|| anyhow::anyhow!("{} is not a valid PNG", path.display()))?;
-    crate::data_dirs::write_atomic(path, updated)
+    crate::pool_dirs::write_atomic(path, updated)
         .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
     Ok(())
 }

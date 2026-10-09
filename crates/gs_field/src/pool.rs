@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 use serde::Deserialize;
 
 use crate::skins::DollDotSpec;
+#[cfg(test)]
 use crate::data_dirs;
+use crate::pool_dirs;
 
 /// Image extensions the pool recognizes (matches what the sheet registrar
 /// accepts).
@@ -135,7 +137,7 @@ pub fn list_category(category: &str) -> Vec<PoolImage> {
 }
 
 fn scan_category(category: &str) -> Vec<PoolImage> {
-    let Ok(dir) = data_dirs::global_image_category_dir(category) else {
+    let Ok(dir) = pool_dirs::global_image_category_dir(category) else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -205,7 +207,7 @@ fn pool_image(category: &str, set: Option<&str>, path: &Path) -> Option<PoolImag
 /// the generic one-level scan misses variant folders. Uncached: only
 /// editors and the Studio call it, never per-frame paths.
 pub fn list_creature_images() -> Vec<PoolImage> {
-    let Ok(root) = data_dirs::global_image_category_dir("creatures") else {
+    let Ok(root) = pool_dirs::global_image_category_dir("creatures") else {
         return Vec::new();
     };
     let mut images: Vec<PoolImage> = Vec::new();
@@ -529,7 +531,7 @@ pub fn migrate_sets() -> Vec<PathRewrite> {
 }
 
 fn migrate_category(category: &str) -> Result<Vec<PathRewrite>, String> {
-    let dir = data_dirs::global_image_category_dir(category)
+    let dir = pool_dirs::global_image_category_dir(category)
         .map_err(|e| format!("cannot resolve pool dir: {e}"))?;
     if !dir.is_dir() {
         return Ok(Vec::new());
@@ -907,7 +909,7 @@ pub fn read_sidecar<T: serde::de::DeserializeOwned + SidecarKind>(
     // No sidecar file: hydrate from metadata embedded in the image.
     let embedded = crate::png_meta::read_embedded(image_abs_path)?;
     let value = parse_sidecar::<T>(&embedded, &image_abs_path.display().to_string())?;
-    match data_dirs::write_atomic(&path, embedded) {
+    match pool_dirs::write_atomic(&path, embedded) {
         Ok(()) => invalidate_cache(), // has_sidecar flags must show the new file
         Err(err) => tracing::warn!(
             "cannot extract embedded metadata to {}: {}",
@@ -1177,7 +1179,7 @@ fn write_sidecar_tables(
     doc.insert("kind", value(kind));
     fill(&mut doc)?;
     let toml = doc.to_string();
-    data_dirs::write_atomic(&path, &toml)
+    pool_dirs::write_atomic(&path, &toml)
         .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
     // The listing cache carries has_sidecar; a fresh sidecar must show now.
     invalidate_cache();
@@ -1303,7 +1305,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("dolls").unwrap();
+        let cat = pool_dirs::global_image_category_dir("dolls").unwrap();
         std::fs::create_dir_all(&cat).unwrap();
         for name in [
             // Three dolls, same pose, different weapon.
@@ -1383,7 +1385,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("dolls").unwrap();
+        let cat = pool_dirs::global_image_category_dir("dolls").unwrap();
         std::fs::create_dir_all(&cat).unwrap();
         for name in [
             "nisugi.png",                  // the base
@@ -1749,7 +1751,7 @@ mod tests {
         // redirected VELLUM_FE_DIR must not serve another test's listing.
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("statusicons").unwrap();
+        let cat = pool_dirs::global_image_category_dir("statusicons").unwrap();
         std::fs::create_dir_all(&cat).unwrap();
         for name in [
             "runic_stunned.png",
@@ -1794,7 +1796,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("compass").unwrap();
+        let cat = pool_dirs::global_image_category_dir("compass").unwrap();
         std::fs::create_dir_all(cat.join("stormfront")).unwrap();
         std::fs::write(cat.join("stormfront/ne.png"), b"x").unwrap();
         std::fs::write(cat.join("stormfront/rose.png"), b"x").unwrap();
@@ -1841,7 +1843,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("compass").unwrap();
+        let cat = pool_dirs::global_image_category_dir("compass").unwrap();
         std::fs::create_dir_all(cat.join("dup")).unwrap();
         std::fs::write(cat.join("dup/ne.png"), b"new").unwrap();
         std::fs::write(cat.join("dup_ne.png"), b"old").unwrap();
@@ -1866,7 +1868,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("hands").unwrap();
+        let cat = pool_dirs::global_image_category_dir("hands").unwrap();
         std::fs::create_dir_all(cat.join("meteor")).unwrap();
         std::fs::write(cat.join("meteor/spellhand.png"), b"x").unwrap();
         std::fs::create_dir_all(cat.join("bone")).unwrap();
@@ -1908,7 +1910,7 @@ mod tests {
         std::env::set_var("VELLUM_FE_DIR", dir.path());
         invalidate_cache();
 
-        let cat = data_dirs::global_image_category_dir("compass").unwrap();
+        let cat = pool_dirs::global_image_category_dir("compass").unwrap();
         std::fs::create_dir_all(&cat).unwrap();
         std::fs::write(cat.join("stormfront_ne.png"), b"ne").unwrap();
         std::fs::write(cat.join("stormfront_rose.png"), b"rose").unwrap();
