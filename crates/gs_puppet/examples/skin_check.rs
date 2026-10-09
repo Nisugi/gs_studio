@@ -77,6 +77,8 @@ fn main() {
         hidden: wanted.contains("hidden"),
         invisible: wanted.contains("invisible"),
         possessed: wanted.contains("possess"),
+        cutthroat: wanted.contains("cutthroat"),
+        blinded: wanted.contains("blind"),
     };
     let data = data_dir();
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");

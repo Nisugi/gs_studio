@@ -37,6 +37,7 @@ pub mod doll_roster;
 pub mod doll_sky;
 pub mod doll_state;
 pub mod dolls;
+pub mod elanthian_time;
 pub mod field_config;
 pub mod geometry;
 pub mod naming;

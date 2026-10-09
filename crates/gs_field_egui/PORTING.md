@@ -1584,3 +1584,59 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   the screen -- the share of samples 2 and 4 px round a pixel (`RIM_PX`)
   past the figure or on a surface over `RIM_GAP_FT` away -- with a faint
   turned-away term over it; by the smoothed facing alone it was ragged.
+
+## Hidden: sunk in shadow (2026-10-08)
+
+- `gs_puppet::shade` (new): a hidden figure's skin is drained toward a cool
+  black under its marks (`shaded`, most at its feet: wounds stay red), a
+  soft film of shadow stands off one skin dot in six round its outline
+  (`aura`; none within reach of an open wound, `layers`), a pool of shade
+  lies on the ground round its feet (`pool`), and wisps of shadow rise
+  off the pool and its legs (`wisps`). The old veil round the ring
+  puppet's parts (`status_layers` `Veil::Shadow`) and the painted shadow
+  are gone.
+- `layers::LayerCloud::glints` is now `motes`: an invisible figure's
+  glints and a hidden one's wisps. `ParticleGlow::Shadow`: a looping
+  particle that is a dark film, unlit, spreading and swaying wider
+  (`cloud_gpu.wgsl` `mote`, glow code 3; `Particle::at`).
+
+## Possessed: veins, eyes, smoke (2026-10-08)
+
+- `gs_puppet::possess` (new): a possessed figure's skin goes toward a cold
+  violet under its marks (`tinted`), its eyes burn (`eyes`: a bright core
+  and a violet haze at each of its puppet's eyes), and dark violet smoke
+  and violet sparks rise off its head and shoulders (`wisps`, looping
+  particles). Its veins are `afflict`'s (`Affliction::possessed`): the
+  poison's vein walker, now given its colours, from the heart every way,
+  onto the neck and face. The old pall (`status_layers` `Veil`) is gone,
+  and with it the painted possessed marks.
+- The half-elves' `puppet.toml` eyes are set from their faces (the rig's
+  sat on the brows of these larger heads); `creature_puppet`'s env-gated
+  test `a_bodys_face_against_its_puppets_eyes` (`DOLL_BODY_FACE`,
+  `DOLL_BODY_FACE_PPM`) draws a body's head with its puppet's eyes marked.
+
+## Cutthroat: a slashed throat (2026-10-08)
+
+- `gs_puppet::Effects::cutthroat` (set by `PuppetKey::effects_of_statuses`;
+  `with_statuses` no longer raises the neck's wound rank for it). `layers`
+  adds a slash straight across the front of the neck to its front wounds
+  (`THROAT_SEED`): where the puppet has eyes, `THROAT_UNDER_EYES_FT` under
+  them, else midway along the neck that shows; with a fitted cloud worn, a
+  ring the chest hides at rest still counts. It always bleeds (a rank-2
+  well, its soak narrow enough to show the cut), whether or not the figure
+  is bleeding. `doll_view`'s hush sign is for silenced alone on a layered
+  figure.
+
+## Blinded: a band of mist (2026-10-08)
+
+- `gs_puppet::Effects::blinded` (`effects_of_statuses`). `gs_puppet::blind`
+  (new): a band of dark mist over the eyes as shown (`band`: films on the
+  head's skin within `HALF_WIDTH_FT` of the eyes across the head's up,
+  from the face round to the ears, standing off it enough to clear a brow
+  the puppet's head lacks) and wisps curling off it (`wisps`, looping
+  shadow particles). `doll_view`'s haze over the eyes is for an unlayered
+  figure alone.
+- The half-elves' puppet eyes now lie on their faces in depth too (the
+  rig's stood 0.04-0.13 ft in front of them): measured from each trained
+  cloud, the front-most splat at each eye (`a_bodys_face_against_its_puppets_eyes`
+  prints it).

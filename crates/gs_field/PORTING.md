@@ -619,3 +619,13 @@ itself. Egui-free.
   `race` and `variant`), `DollRace`, and `races()` / `races_of`: the
   playable races' figures, grouped by race -- what a game client's doll
   offers (Hydra's Infinite doll).
+
+## The game's clock; the doll under the game's sky (2026-10-08)
+
+- `elanthian_time` (moved here from `studio::stage::elanthian_time`, which
+  re-exports it): the Elanthian hour, date and day phase from unix seconds,
+  so a game client has the game's clock too.
+- `doll_sky::game_doll_sky(unix, facing)`: the doll's light under the
+  game's own sky at that instant -- the hour and date then, the sun and
+  moons where they stand (`sky::GameSky`), seen facing a compass bearing
+  (Hydra looks south), no cloud.

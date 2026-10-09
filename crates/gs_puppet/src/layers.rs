@@ -336,6 +336,11 @@ pub struct Fresh<'a> {
     pub age: f32,
 }
 
+/// A cut throat's slash, by its seed (`Effects::cutthroat`), and how far
+/// under the eyes a throat is cut, feet (the half-elves' faces, measured).
+const THROAT_SEED: u32 = 0x7407_7407;
+const THROAT_UNDER_EYES_FT: f32 = 0.48;
+
 /// One injury placed on a segment's surface (the surface layout, feet): a
 /// mark about `c` along `dir`, shaped by what made it.
 #[derive(Debug, Clone, Copy)]
@@ -528,6 +533,9 @@ pub enum ParticleGlow {
     Ember,
     /// A spark: bright, gone in a moment, never lands.
     Spark,
+    /// A wisp of shadow (hidden, `shade`): dark, see-through (a film, never
+    /// the surface), unlit, swaying wide as it rises and spreads.
+    Shadow,
 }
 
 /// A dot a hit throws off ([`Particle::at`]): where it leaves from and how
@@ -568,18 +576,20 @@ impl Particle {
         let glows = self.glow != ParticleGlow::None;
         let r = self.r;
         if let (Some(life), true) = (self.rises, self.loops) {
-            // a glint: in and out on its loop, twinkling, swaying as it rises
+            // a glint: in and out on its loop, twinkling, swaying as it
+            // rises; a wisp of shadow: no twinkle, spreading, swaying wider
+            let shadow = self.glow == ParticleGlow::Shadow;
             let life = life.max(0.1);
             let t = (age + self.delay).rem_euclid(life);
             let fade = smoothstep(0.0, 0.15 * life, t) * (1.0 - smoothstep(0.45 * life, life, t));
-            let twinkle = 0.55 + 0.45 * (age * 9.0 + self.delay * 37.0).sin();
+            let twinkle = if shadow { 1.0 } else { 0.55 + 0.45 * (age * 9.0 + self.delay * 37.0).sin() };
             if fade * twinkle <= 0.02 {
                 return None;
             }
-            let r = r * (1.0 + 0.6 * t / life);
-            let sway = 0.02 * (t * 2.7 + self.delay * 11.0).sin();
+            let r = r * (1.0 + if shadow { 1.2 } else { 0.6 } * t / life);
+            let sway = if shadow { 0.07 } else { 0.02 } * (t * 2.7 + self.delay * 11.0).sin();
             let c = add(self.from, [sway, self.v[1] * t, 0.6 * sway]);
-            return Some(Gaussian { c, axes: [[r, 0.0, 0.0], [0.0, r, 0.0], [0.0, 0.0, r]], n: [0.0; 3], rgb: self.rgb, alpha: self.alpha * fade * twinkle, glow: fade, wet: 0.0, film: false, rim: 0.0 });
+            return Some(Gaussian { c, axes: [[r, 0.0, 0.0], [0.0, r, 0.0], [0.0, 0.0, r]], n: [0.0; 3], rgb: self.rgb, alpha: self.alpha * fade * twinkle, glow: if shadow { 0.0 } else { fade }, wet: 0.0, film: shadow, rim: 0.0 });
         }
         if let Some(life) = self.rises {
             let t = age - self.delay;
@@ -596,7 +606,7 @@ impl Particle {
         let (glow, fade) = match self.glow {
             ParticleGlow::Spark => (1.0, 1.0 - smoothstep(0.1, 0.45, age)),
             ParticleGlow::Ember => ((-age).exp(), stale),
-            ParticleGlow::None => (0.0, stale),
+            ParticleGlow::None | ParticleGlow::Shadow => (0.0, stale),
         };
         if fade <= 0.02 {
             return None;
@@ -1171,12 +1181,15 @@ impl LayerCloud {
         Arrival { frames, particles }
     }
 
-    /// An invisible figure's glints (`ghost`): specks of light drifting up
-    /// off its skin as `look` shows it, each on a loop of its own
-    /// ([`Particle::loops`]), for a host with a clock to play. Placed in
-    /// `posed`'s pose, as [`LayerCloud::dots`]. None unless it is invisible.
-    pub fn glints(&self, posed: &Posed<'_>, look: &LayerLook<'_>) -> Vec<Particle> {
-        if !look.effects.invisible {
+    /// What drifts off the figure as `look` shows it, each on a loop of its
+    /// own ([`Particle::loops`]), for a host with a clock to play: an
+    /// invisible figure's glints (`ghost`), a hidden one's wisps of shadow
+    /// (`shade`), a possessed one's smoke and sparks (`possess`), a blinded
+    /// one's mist curling off its eyes (`blind`). Placed in `posed`'s pose,
+    /// as [`LayerCloud::dots`].
+    pub fn motes(&self, posed: &Posed<'_>, look: &LayerLook<'_>) -> Vec<Particle> {
+        let fx = look.effects;
+        if !fx.invisible && !fx.hidden && !fx.possessed && !fx.blinded {
             return Vec::new();
         }
         let puppet = posed.puppet;
@@ -1186,8 +1199,21 @@ impl LayerCloud {
         let parent: Vec<Option<usize>> = puppet.segments.iter().map(|s| s.parent).collect();
         let trunk: Vec<bool> = puppet.segments.iter().map(|s| s.kind == crate::Kind::Trunk).collect();
         let parts = crate::skin_field::Parts { rough: &rough, parent: &parent, trunk: &trunk };
-        let seed = puppet.family.bytes().fold(0x6057u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
-        crate::ghost::glints(&skin, &posed.xf, &shown.xf, &parts, seed)
+        let seed = |salt: u32| puppet.family.bytes().fold(salt, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+        let mut out = Vec::new();
+        if look.effects.invisible {
+            out.extend(crate::ghost::glints(&skin, &posed.xf, &shown.xf, &parts, seed(0x6057)));
+        }
+        if look.effects.hidden {
+            out.extend(crate::shade::wisps(&skin, &posed.xf, &shown.xf, &parts, seed(0x5A0E)));
+        }
+        if look.effects.possessed {
+            out.extend(crate::possess::wisps(&skin, &posed.xf, &shown.xf, &parts, seed(0x9055)));
+        }
+        if look.effects.blinded {
+            out.extend(crate::blind::wisps(&skin, &posed.xf, &shown.xf, posed, &parts, seed(0xB11D)));
+        }
+        out
     }
 
     /// The skin of the figure posed as `posed`, a point an anchor (on a
@@ -1269,7 +1295,7 @@ impl LayerCloud {
         // vines, ropes, blood, poison's veins and disease's boils are built
         // on the body (`status_layers`, `blood`, `afflict`), not painted:
         // poison and disease only tint it (below)
-        let painted_fx = crate::skin::Effects { rooted: false, bound: false, bleeding: false, poisoned: false, diseased: false, ..look.effects };
+        let painted_fx = crate::skin::Effects { rooted: false, bound: false, bleeding: false, poisoned: false, diseased: false, hidden: false, possessed: false, ..look.effects };
         let marks = crate::skin::segment_marks(puppet, &surfs, &unturned, painted_fx);
         // the sheet paints everything but the wounds themselves, which are
         // gashes here (a stump keeps its paint)
@@ -1316,7 +1342,7 @@ impl LayerCloud {
             // another part, a split trunk's own on its front and the
             // back's on its rear
             let slice = &self.anchors[from..to];
-            let (gashed, front_gashes): (Vec<Gash>, usize) = if s.kind.is_body() && !stump[i] && slice.len() >= GASH_MIN_ANCHORS && (m.rank > 0 || m.back > 0) {
+            let (mut gashed, mut front_gashes): (Vec<Gash>, usize) = if s.kind.is_body() && !stump[i] && slice.len() >= GASH_MIN_ANCHORS && (m.rank > 0 || m.back > 0) {
                 let radius = slice.iter().map(|a| a.radius).sum::<f32>() / slice.len() as f32;
                 let tint_at = |a: &Anchor| {
                     let k = (a.station.floor() as usize).min(kept - 1);
@@ -1345,11 +1371,52 @@ impl LayerCloud {
             } else {
                 (Vec::new(), 0)
             };
+            // a cut throat: a deep slash straight across the front of the
+            // neck, among its front wounds, bleeding whatever else does
+            if look.effects.cutthroat && part == Some("neck") && s.kind.is_body() && !stump[i] {
+                // on the throat that shows: not inside the head or the chest
+                // at rest (a neck's top rings run up under the jaw), facing
+                // ahead, midway along what shows
+                // -- and, where it has eyes, as far under them as a throat is
+                // (a modelled body's head is not the rig's: its neck shows
+                // lower than the puppet's rings say)
+                // (with a fitted cloud worn, a neck ring the chest hides at rest
+                // stands on the cloud's own throat: `skin_points` judges what
+                // shows, there)
+                let mut seen: Vec<&Anchor> = slice.iter().filter(|a| a.feet.is_some() && (a.inside.is_none() || fitted.is_some()) && a.front > 0.7).collect();
+                seen.sort_by(|a, b| a.station.total_cmp(&b.station));
+                let eyes = &puppet.eyes;
+                let throat_up = (!eyes.is_empty()).then(|| (eyes.iter().map(|e| e.pos[1]).sum::<f32>() / eyes.len() as f32 - THROAT_UNDER_EYES_FT) / puppet.height.max(0.1));
+                let front = match throat_up {
+                    Some(t) => seen.iter().copied().min_by(|a, b| ((a.up - t).abs() - 0.03 * a.front).total_cmp(&((b.up - t).abs() - 0.03 * b.front))),
+                    None => {
+                        let mid = seen.get(seen.len() / 2).map(|a| a.station);
+                        mid.and_then(|m| seen.iter().copied().filter(|a| (a.station - m).abs() < 0.75).max_by(|a, b| a.front.total_cmp(&b.front)))
+                    }
+                };
+                if let Some((a, c)) = front.and_then(|a| Some((a, a.feet?))) {
+                    let throat = Gash {
+                        kind: Cause::Slash,
+                        c,
+                        // round the ring: across the throat
+                        dir: [1.0, 0.0],
+                        half_len: (a.radius * 1.25).min(0.24),
+                        half_w: 0.035 * (0.2 + 0.8 * open),
+                        depth: 0.075f32.min(a.radius * GASH_MAX_OF_RADIUS) * open,
+                        bone: false,
+                        phase: 0.6,
+                        seed: THROAT_SEED,
+                        from: (a.station, a.theta),
+                    };
+                    gashed.insert(front_gashes, throat);
+                    front_gashes += 1;
+                }
+            }
             // bleeding: which of its wounds are open, and the skin in and
             // round each (`blood`)
             // (and where poison got in: `afflict`)
             // (dead, its open wounds have bled out under it: `blood`, darkened)
-            let bleeds: Vec<bool> = gashed.iter().map(|g| (look.effects.bleeding || look.effects.poisoned || unturned.dead) && g.kind.opens() && g.depth > 0.0).collect();
+            let bleeds: Vec<bool> = gashed.iter().map(|g| (look.effects.bleeding || look.effects.poisoned || unturned.dead || g.seed == THROAT_SEED) && g.kind.opens() && g.depth > 0.0).collect();
             let mut lips: Vec<Vec<crate::blood::Lip>> = vec![Vec::new(); gashed.len()];
             // the deepest pit at a surface point, and the nearest gash's
             // `across` there
@@ -1527,6 +1594,15 @@ impl LayerCloud {
                     rgb = wounds::mix(rgb, DEAD_SKIN, 0.72 * skin);
                     let grey = (rgb[0] + rgb[1] + rgb[2]) / 3.0;
                     rgb = wounds::mix(rgb, [grey; 3], 0.3 * (1.0 - skin)).map(|c| c * (1.0 - 0.08 * (1.0 - skin)));
+                }
+                // hidden: sunk in shadow, most at its feet (`shade`), under
+                // the marks -- its wounds stay as red as ever against the dark
+                if look.effects.hidden && !stump[i] {
+                    rgb = crate::shade::shaded(rgb, a.up);
+                }
+                // possessed: gone cold toward a dead violet (`possess`)
+                if look.effects.possessed && !stump[i] {
+                    rgb = crate::possess::tinted(rgb);
                 }
                 // poisoned, a sickly cast; diseased, a pallor
                 if look.effects.poisoned {
@@ -1827,13 +1903,15 @@ impl LayerCloud {
             }
             for (k, lips) in lips.into_iter().enumerate() {
                 if bleeds[k] && middle[k].0 < 2.0 && lips.iter().any(|l| l.across < 1.0) {
-                    let rank = if k < front_gashes { m.rank } else { m.back }.max(1);
+                    // (a cut throat bleeds as a deep wound, its soak not so
+                    // wide as to bury the cut)
+                    let rank = if gashed[k].seed == THROAT_SEED { 2 } else if k < front_gashes { m.rank } else { m.back }.max(1);
                     wells.push(crate::blood::Well { seg: i, rank, age, seed: gashed[k].seed ^ (i as u32).wrapping_mul(0x2545_F491), lips });
                 }
             }
             // what its statuses build on it (`status_layers`), on its anchors
             let fx = if look.held.is_some() { crate::skin::Effects { bound: false, ..look.effects } } else { look.effects };
-            if own.is_none() && (fx.rooted || fx.bound || fx.hidden || fx.possessed) {
+            if own.is_none() && (fx.rooted || fx.bound) {
                 let mut by_ring: Vec<Vec<(f32, u32)>> = vec![Vec::new(); kept];
                 let mut proud = vec![(0.0f32, 0u32); kept];
                 for (ai, a) in self.anchors[from..to].iter().enumerate() {
@@ -1883,7 +1961,7 @@ impl LayerCloud {
         // another segment has inside a hollow is cleared out of it.
         // invisible: the skin itself pale, seen only edge-on -- a glassy rim
         // round a nearly empty middle (`Gaussian::rim`), glinting
-        // (`LayerCloud::glints`); what is in its wounds and built on it
+        // (`LayerCloud::motes`); what is in its wounds and built on it
         // still shows, hanging in the air
         if look.effects.invisible {
             for d in dots.iter_mut().filter(|d| d.layer == Layer::Skin) {
@@ -1891,6 +1969,23 @@ impl LayerCloud {
                 d.g.rgb = wounds::mix(d.g.rgb, GHOST_RGB, 0.55);
                 d.g.glow = d.g.glow.max(0.3);
             }
+        }
+        // hidden (its skin sunk in shadow above, `shade`): shadow clinging
+        // round its outline, a haze off its skin, on the part it rides --
+        // and none over an open wound, whose flesh it would darken and leave
+        // only its wet shine
+        if look.effects.hidden {
+            const CLEAR_FT: f32 = 0.15;
+            let near_wound = |c: V3| hollows.iter().any(|h| len(sub(h.p, c)) < h.r + CLEAR_FT);
+            let mut clinging = Vec::new();
+            for (k, d) in dots.iter_mut().enumerate().filter(|(_, d)| d.layer == Layer::Skin) {
+                let up = d.anchor.and_then(|a| self.anchors.get(a as usize)).map_or(0.5, |a| a.up);
+                d.g.wet *= 0.3;
+                if let Some(g) = crate::shade::aura(d.g.c, norm_or(d.g.n, [0.0; 3]), up, (k as u32).wrapping_mul(0x9E37_79B9)).filter(|_| !near_wound(d.g.c)) {
+                    clinging.push(Dot { layer: Layer::Wrap, anchor: d.anchor, source: None, g });
+                }
+            }
+            dots.extend(clinging);
         }
         let own = hollows.len();
         hollows.extend(around.iter().filter(|h| only.is_none_or(|o| !o.get(h.seg).copied().unwrap_or(false))).cloned());
@@ -1945,9 +2040,12 @@ impl LayerCloud {
         // bleeding, what its open wounds pour out, down it (`blood`); frozen,
         // icicles off it and ice at its feet, once a build (`frost`)
         let frosted = look.effects.frozen && only.is_none();
-        let afflicted = (look.effects.poisoned || look.effects.diseased) && only.is_none();
-        let bleeding = (look.effects.bleeding || unturned.dead) && !wells.is_empty();
-        if bleeding || frosted || afflicted {
+        let afflicted = (look.effects.poisoned || look.effects.diseased || look.effects.possessed) && only.is_none();
+        // (a cut throat's well is its own: the others only when bleeding)
+        let bleeding = (look.effects.bleeding || unturned.dead || look.effects.cutthroat) && !wells.is_empty();
+        let shaded = look.effects.hidden && only.is_none();
+        let blinded = look.effects.blinded && only.is_none();
+        if bleeding || frosted || afflicted || shaded || blinded {
             let shown = look.stands.or(look.held).unwrap_or(posed);
             let skin = self.skin_points(shown, &look.look, look.fitted);
             let rough: Vec<bool> = puppet.segments.iter().map(|s| s.part.as_deref().is_some_and(|q| q.ends_with("Hand"))).collect();
@@ -1978,7 +2076,7 @@ impl LayerCloud {
                         Some((crate::skin_field::carry(from, into, c), crate::skin_field::turn(from, into, n), inner.len() as f32))
                     })
                     .collect();
-                let what = crate::afflict::Affliction { poisoned: look.effects.poisoned, diseased: look.effects.diseased, entries: &entries };
+                let what = crate::afflict::Affliction { poisoned: look.effects.poisoned, diseased: look.effects.diseased, possessed: look.effects.possessed, entries: &entries };
                 let seed = puppet.family.bytes().fold(0xD15Eu32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
                 let part_of = |seg: usize| puppet.segments.get(seg).and_then(|s| s.part.as_deref());
                 dots.extend(crate::afflict::build(&what, &skin, &posed.xf, &shown.xf, &parts, &part_of, seed));
@@ -1986,6 +2084,19 @@ impl LayerCloud {
             if frosted {
                 let seed = puppet.family.bytes().fold(0x1CEu32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
                 dots.extend(crate::frost::build(&skin, &posed.xf, &shown.xf, &parts, COAT_FT * 0.75, seed));
+            }
+            if shaded {
+                let seed = puppet.family.bytes().fold(0x5AD0u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                dots.extend(crate::shade::pool(&skin, &posed.xf, &shown.xf, &parts, seed));
+            }
+            // possessed: its eyes burning (its veins are `afflict`'s)
+            if look.effects.possessed && only.is_none() {
+                dots.extend(crate::possess::eyes(posed));
+            }
+            // blinded: a band of dark mist over its eyes
+            if look.effects.blinded && only.is_none() {
+                let seed = puppet.family.bytes().fold(0xB11Du32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                dots.extend(crate::blind::band(&skin, &posed.xf, &shown.xf, posed, seed));
             }
         }
         hollows.truncate(own);
@@ -2316,24 +2427,84 @@ mod tests {
         let sick = built(crate::skin::Effects { diseased: true, ..Default::default() }, &[]);
         assert!(sick.len() > 1500 && sick.iter().all(|d| d.anchor.is_some()), "{} boil, sore and blotch dots", sick.len());
         assert!(with(crate::skin::Effects { poisoned: true, diseased: true, ..Default::default() }, &[]).is_empty(), "nothing per part");
-        let veil = with(crate::skin::Effects { hidden: true, ..Default::default() }, &[]);
-        assert!(veil.len() > 2000 && veil.iter().all(|d| d.g.film), "{} shadow films", veil.len());
-        let wisps = with(crate::skin::Effects { possessed: true, ..Default::default() }, &[]);
-        assert!(wisps.iter().any(|d| d.g.c[1] > p.height), "wisps rising over the head");
+        // hidden: no veil round its parts, but its skin sunk in shadow (most
+        // at its feet), a pool of shade round its feet, wisps rising
+        let hidden = LayerLook { effects: crate::skin::Effects { hidden: true, ..Default::default() }, ..LayerLook::default() };
+        assert!(with(hidden.effects, &[]).is_empty(), "no veil");
+        let shaded = cloud.dots(&posed, &hidden);
+        let plain_skin = cloud.dots(&posed, &LayerLook::default());
+        let bright = |ds: &[Dot]| ds.iter().filter(|d| d.layer == Layer::Skin).map(|d| d.g.rgb.iter().sum::<f32>()).sum::<f32>() / ds.len().max(1) as f32;
+        assert!(bright(&shaded) < bright(&plain_skin) * 0.5, "its skin in shadow");
+        let built: Vec<&Dot> = shaded.iter().filter(|d| d.layer == Layer::Wrap).collect();
+        assert!(built.iter().all(|d| d.g.film), "all shadow is film");
+        let pool = built.iter().filter(|d| d.g.c[1] < 0.02 && d.g.axes[1][1].abs() < 0.01).count();
+        assert!(pool > 200, "{pool} pool films, flat on the ground");
+        let clinging = built.len() - pool;
+        assert!(clinging > 1000 && built.iter().any(|d| d.g.c[1] > p.height * 0.8), "{clinging} films clinging round it, up to its head");
+        // none over an open wound: its flesh stays red
+        let cut = cloud.dots(&posed, &LayerLook { effects: hidden.effects, ..wounded(&[("chest", 3)]) });
+        let flesh: Vec<V3> = cut.iter().filter(|d| d.layer == Layer::Flesh).map(|d| d.g.c).collect();
+        assert!(!flesh.is_empty());
+        let over = cut.iter().filter(|d| d.layer == Layer::Wrap && d.g.c[1] > 0.1).filter(|d| flesh.iter().any(|f| len(sub(*f, d.g.c)) < 0.05)).count();
+        assert_eq!(over, 0, "no shadow over the wound");
+        let wisps = cloud.motes(&posed, &hidden);
+        assert!(wisps.len() > 60 && wisps.iter().all(|w| w.loops && w.glow == ParticleGlow::Shadow), "{} wisps", wisps.len());
+        let wisp = (0..20).find_map(|k| wisps[0].at(k as f32 * 0.2));
+        assert!(wisp.is_some_and(|g| g.film && g.glow == 0.0), "a wisp is a dark film");
+        // possessed: no pall round its parts; glowing veins from its heart
+        // onto its neck and face, its eyes burning, smoke and sparks rising
+        let possessed = LayerLook { effects: crate::skin::Effects { possessed: true, ..Default::default() }, ..LayerLook::default() };
+        assert!(with(possessed.effects, &[]).is_empty(), "no pall");
+        let taken = cloud.dots(&posed, &possessed);
+        let veins: Vec<&Dot> = taken.iter().filter(|d| d.layer == Layer::Wrap && d.anchor.is_some()).collect();
+        assert!(veins.len() > 1000 && veins.iter().any(|d| d.g.glow > 0.3), "{} vein dots, aglow", veins.len());
+        assert!(veins.iter().any(|d| part_of(d) == Some("neck")) && veins.iter().any(|d| part_of(d).is_some_and(|q| q.ends_with("Arm"))), "up the neck and down the arms");
+        let eyes = taken.iter().filter(|d| d.layer == Layer::Wrap && d.anchor.is_none() && d.g.glow >= 1.0).count();
+        assert_eq!(eyes, 2 * p.eyes.len(), "its eyes burning");
+        let smoke = cloud.motes(&posed, &possessed);
+        assert!(smoke.iter().any(|w| w.glow == ParticleGlow::Shadow) && smoke.iter().any(|w| w.glow == ParticleGlow::Spark));
+        assert!(smoke.iter().all(|w| w.from[1] > p.height * 0.7), "off its head and shoulders");
+        // blinded: a band of dark mist on the head at its eyes, mist curling off
+        let blind = LayerLook { effects: crate::skin::Effects { blinded: true, ..Default::default() }, ..LayerLook::default() };
+        let band: Vec<Dot> = cloud.dots(&posed, &blind).into_iter().filter(|d| d.layer == Layer::Wrap).collect();
+        let eye_y = p.eyes.iter().map(|e| e.pos[1]).sum::<f32>() / p.eyes.len().max(1) as f32;
+        assert!(band.len() > 30 && band.iter().all(|d| part_of(d) == Some("head") && (d.g.c[1] - eye_y).abs() < 0.12), "{} band dots, over the eyes", band.len());
+        assert!(band.iter().any(|d| d.g.c[2] > 0.1), "across the face");
+        assert!(cloud.motes(&posed, &blind).iter().all(|w| w.glow == ParticleGlow::Shadow && w.loops));
         // invisible: the skin a pale film seen only edge-on, glints rising off it
         let invisible = LayerLook { effects: crate::skin::Effects { invisible: true, ..Default::default() }, ..LayerLook::default() };
         let ghost = cloud.dots(&posed, &invisible);
         assert!(ghost.iter().filter(|d| d.layer == Layer::Skin).all(|d| d.g.rim > 0.9));
-        let glints = cloud.glints(&posed, &invisible);
+        let glints = cloud.motes(&posed, &invisible);
         assert!(glints.len() > 80 && glints.iter().all(|g| g.loops && g.rises.is_some()), "{} glints, on loops", glints.len());
         assert!(glints.iter().any(|g| g.from[1] > p.height * 0.75) && glints.iter().any(|g| g.from[1] < p.height * 0.3), "off the whole figure");
-        assert!(cloud.glints(&posed, &LayerLook::default()).is_empty());
+        assert!(cloud.motes(&posed, &LayerLook::default()).is_empty());
         // one on a loop is where it was a loop later, and in and out between
         let g = &glints[0];
         let life = g.rises.unwrap_or(1.0);
         let at = |age: f32| g.at(age).map(|d| (d.c, d.alpha));
         assert_eq!(at(0.4).map(|(c, _)| c.map(|v| (v * 1e3).round())), at(0.4 + life).map(|(c, _)| c.map(|v| (v * 1e3).round())));
         assert!((0..40).any(|k| at(k as f32 * life / 40.0).is_none()) && (0..40).any(|k| at(k as f32 * life / 40.0).is_some()));
+    }
+
+    /// A cut throat: a slash opened across the front of the neck, to its
+    /// flesh, and bleeding down the figure though nothing else bleeds.
+    #[test]
+    fn a_cut_throat_opens_and_bleeds() {
+        let p = humanoid();
+        let cloud = LayerCloud::build(&p, &SplatParams { spacing: 0.015, ..SplatParams::default() });
+        let posed = p.pose_as_drawn(&Pose::default());
+        let seg_of = |d: &Dot| d.anchor.map(|a| cloud.anchors()[a as usize].seg);
+        let neck = p.segments.iter().position(|s| s.part.as_deref() == Some("neck")).expect("a neck");
+        let cut = cloud.dots(&posed, &LayerLook { effects: crate::skin::Effects { cutthroat: true, ..Default::default() }, ..LayerLook::default() });
+        let flesh: Vec<&Dot> = cut.iter().filter(|d| d.layer == Layer::Flesh).collect();
+        assert!(!flesh.is_empty() && flesh.iter().all(|d| seg_of(d) == Some(neck)), "{} flesh dots, in the neck", flesh.len());
+        let (lo, hi) = flesh.iter().fold((f32::MAX, f32::MIN), |(lo, hi), d| (lo.min(d.g.c[0]), hi.max(d.g.c[0])));
+        assert!(hi - lo > 0.2, "across the throat: {:.2} ft wide", hi - lo);
+        assert!(flesh.iter().all(|d| d.g.c[2] > 0.0), "on its front");
+        let blood = cut.iter().filter(|d| matches!(d.layer, Layer::Blood { .. })).count();
+        assert!(blood > 1000, "{blood} blood dots");
+        assert!(cloud.dots(&posed, &LayerLook::default()).iter().all(|d| d.layer == Layer::Skin));
     }
 
     /// Dead, its open wounds have bled out of it as it lies: the blood is

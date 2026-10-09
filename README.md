@@ -1030,8 +1030,16 @@ an *x* to put it back:
   clustered where they start, a sweat's sheen and
   a sickly cast; diseased raises a dozen clusters of boils, mostly on the
   front, each in a dark blotch with a crusted sore or two, under a pallor
-  (not on the face, nor below the knee); hidden wraps it in a veil of shadow; possessed, in a violet
-  pall with wisps rising off the head and shoulders; invisible makes its
+  (not on the face, nor below the knee); hidden sinks it in shadow -- its own shape and colours drained toward a cool black, most at its feet, under its wounds' marks so they stay red, with a soft shadow clinging round its outline (none over an open wound), a pool of shade on the ground round its feet and, on a modelled body, wisps of shadow rising off the pool and its legs; possessed goes cold
+  toward a dead violet under its marks, dark veins glowing violet spread from
+  its heart up its neck and down its arms, its eyes burn (at its puppet's
+  eyes -- a modelled body's set from its face, not the rig's), and dark violet
+  smoke with violet sparks rises off its head and shoulders; cutthroat is a
+  slash straight across the front of the neck -- a modelled body's throat,
+  set as far under its eyes as a throat is, not by the rig's rings -- opened
+  to the flesh and bleeding down the chest to a pool, whatever else bleeds; blinded
+  binds a band of dark mist over the eyes, round the front and sides of
+  the head, mist curling off it; invisible makes its
   skin a pale film seen only edge-on, a glassy rim round a nearly empty
   middle, its wounds and whatever is built on it hanging in the air, and
   it throws no shadow (on a modelled body the rim is an outline drawn
@@ -1153,7 +1161,7 @@ scope. Of the leaves that read the player, some are therefore TRUE:
 `effect_inactive`, `hand_empty` (every slot), `indicator` with
 `active = false`, `injury` / percent `vital` when the comparison holds for a
 healthy player with full (100%) bars, and `time_of_day` by the wall clock
-(US Eastern, `stage/elanthian_time.rs`). The rest are false. One known
+(US Eastern, `gs_field::elanthian_time`). The rest are false. One known
 difference: `spell_affordable` is always false, because the spell table is
 not part of this workspace (VellumFE answers true for a known spell with no
 static cost). The table of answers, each with the line of VellumFE's

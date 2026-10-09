@@ -709,7 +709,8 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
         bound
     };
     // what moves off it by itself, each held where it leaves (bound there)
-    // and moved by the GPU: a hit's thrown dots, an invisible figure's glints
+    // and moved by the GPU: a hit's thrown dots, an invisible figure's
+    // glints, a hidden one's wisps of shadow
     let loose = |particles: Vec<gs_puppet::layers::Particle>| {
         let particles: Vec<gs_puppet::layers::Particle> = particles
             .into_iter()
@@ -726,7 +727,7 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
             thrown
         })
     };
-    let glints = loose(cloud.glints(&rest, &still));
+    let glints = loose(cloud.motes(&rest, &still));
     let Some(fresh) = fresh else {
         let made = bind(cloud.dots(&rest, &still));
         return Some(Arc::new(match glints {
@@ -1135,12 +1136,6 @@ impl PuppetKey {
         let statuses = statuses.resolved();
         self.statuses = statuses;
         self.effects = Self::effects_of_statuses(statuses);
-        if statuses.has(Status::Cutthroat) {
-            if let Some(l) = gs_field::dolls::part_label("neck") {
-                let r = &mut self.ranks[l as usize - 1];
-                *r = (*r).max(2);
-            }
-        }
         self
     }
 
@@ -1158,6 +1153,8 @@ impl PuppetKey {
             hidden: has(Status::Hidden),
             invisible: has(Status::Invisible),
             possessed: has(Status::Possessed),
+            cutthroat: has(Status::Cutthroat),
+            blinded: has(Status::Blinded),
         }
     }
 
@@ -3784,6 +3781,50 @@ mod tests {
         assert!(rim * 10 > all * 8, "most of it is rim");
         assert_eq!(rim_unfaced, 0, "a rim needs a facing");
         assert!(made.particles.iter().all(|(_, p)| p.loops) && made.particles.len() > 80);
+    }
+
+    /// Where a modelled body's eyes are against its puppet's:
+    /// `DOLL_BODY_FACE=<form dir>[:<size>]` and `DOLL_BODY_FACE_PPM=<path>`
+    /// draw its trained cloud's head from the front on the CPU, a pixel per
+    /// 1/400 ft (x right, y down from 6.2 ft), the puppet's eyes marked in
+    /// green. Without them, nothing runs.
+    #[test]
+    fn a_bodys_face_against_its_puppets_eyes() {
+        let (Ok(spec), Ok(out)) = (std::env::var("DOLL_BODY_FACE"), std::env::var("DOLL_BODY_FACE_PPM")) else { return };
+        let (form_dir, size) = spec.rsplit_once(':').filter(|(_, s)| !s.contains(['/', '\\'])).map_or((spec.as_str(), None), |(d, s)| (d, Some(s)));
+        let form_dir = std::path::Path::new(form_dir);
+        let puppet = Puppet::from_baked_toml(&std::fs::read_to_string(form_dir.join("puppet.toml")).unwrap()).unwrap();
+        let dir = size.map_or(form_dir.to_path_buf(), |s| form_dir.join(s));
+        let body = load_body(&dir, &puppet).unwrap();
+        let cloud = body.splats.as_ref().expect("a trained cloud");
+        const K: f32 = 400.0;
+        let project = |p: [f32; 3]| ([(p[0] + 0.5) * K, (6.2 - p[1]) * K], -p[2]);
+        let head: Vec<gs_puppet::splat::Gaussian> = cloud.rest.iter().filter(|g| g.c[1] > 5.0).cloned().collect();
+        let skin = gs_puppet::splat::render(&head, &project, 0.0);
+        let (w, h) = (skin.w, skin.h);
+        let mut rgb: Vec<[u8; 3]> = skin.rgba.chunks_exact(4).map(|p| [p[0], p[1], p[2]]).collect();
+        for eye in &puppet.eyes {
+            let ([x, y], _) = project(eye.pos);
+            let (x, y) = (x - skin.origin[0], y - skin.origin[1]);
+            for d in -8i32..=8 {
+                for (px, py) in [(x as i32 + d, y as i32), (x as i32, y as i32 + d)] {
+                    if px >= 0 && py >= 0 && (px as usize) < w && (py as usize) < h {
+                        rgb[py as usize * w + px as usize] = [0, 255, 0];
+                    }
+                }
+            }
+            println!("puppet eye at ({:.3}, {:.3}): pixel ({:.0}, {:.0})", eye.pos[0], eye.pos[1], x, y);
+        }
+        println!("origin {:?}, {w}x{h}", skin.origin);
+        // the face's own depth at each eye: the front-most of the cloud near it
+        for eye in &puppet.eyes {
+            let z = cloud.rest.iter().filter(|g| (g.c[0] - eye.pos[0]).abs() < 0.025 && (g.c[1] - eye.pos[1]).abs() < 0.025 && g.alpha > 0.3).map(|g| g.c[2]).fold(f32::MIN, f32::max);
+            println!("eye ({:.3}, {:.3}): puppet z {:.3}, face z {:.3}", eye.pos[0], eye.pos[1], eye.pos[2], z);
+        }
+        let mut ppm = format!("P6 {w} {h} 255
+").into_bytes();
+        ppm.extend(rgb.iter().flatten());
+        std::fs::write(out, ppm).unwrap();
     }
 
     /// A hurt modelled body's layered cloud is made on a worker: first asked

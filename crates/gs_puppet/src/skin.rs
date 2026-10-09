@@ -140,11 +140,17 @@ pub struct Effects {
     pub invisible: bool,
     /// A dark cast and dark veins.
     pub possessed: bool,
+    /// A cut throat: a deep slash across the front of the neck, bleeding
+    /// down the chest (`layers`; the smooth skin draws nothing for it).
+    pub cutthroat: bool,
+    /// Blinded: a band of dark mist over the eyes (`layers`; the smooth skin
+    /// draws nothing for it).
+    pub blinded: bool,
 }
 
 impl Effects {
     pub fn any(&self) -> bool {
-        self.webbed || self.frozen || self.marks_any()
+        self.webbed || self.frozen || self.cutthroat || self.blinded || self.marks_any()
     }
 
     /// The effects drawn as marks (`wounds::status`), not by the shader.

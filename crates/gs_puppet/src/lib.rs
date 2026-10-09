@@ -41,6 +41,7 @@
 //! Plain data and functions throughout; everything but `paint` is egui-free.
 
 mod afflict;
+mod blind;
 pub mod baked;
 mod blood;
 pub mod camera;
@@ -50,6 +51,8 @@ pub mod fall;
 pub mod fit;
 mod frost;
 mod ghost;
+mod possess;
+mod shade;
 pub mod hang;
 pub mod joints;
 pub mod layers;

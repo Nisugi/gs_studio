@@ -131,6 +131,18 @@ pub fn display() -> DollSky {
     }
 }
 
+/// The doll's light under the game's own sky at `unix` (seconds): the
+/// Elanthian hour and date then, the sun and the moons where they stand
+/// (`crate::sky::GameSky`), seen facing `facing` (a compass bearing: 180
+/// looks south, where the sun and moons are highest). No cloud: the doll is
+/// read for its wounds, not the weather.
+pub fn game_doll_sky(unix: f64, facing: f32) -> DollSky {
+    let hour = crate::elanthian_time::elanthian_hour_f(unix);
+    let (_, month, day) = crate::elanthian_time::eastern_date(unix as i64);
+    let sky = crate::sky::GameSky::default().sky(unix, month, day, hour);
+    doll_sky(Some(hour), &Sky { clouds: 0.0, facing: Some(facing), ..sky }, true)
+}
+
 /// [`display`]'s key and fill light, and its floor.
 const DISPLAY_KEY: f32 = 1.0;
 const DISPLAY_FILL: f32 = 0.35;
@@ -265,5 +277,23 @@ mod tests {
         assert!(cloudy.lights[0].power < clear.lights[0].power * 0.6);
         let spread = |c: [f32; 3]| c.iter().cloned().fold(f32::MIN, f32::max) - c.iter().cloned().fold(f32::MAX, f32::min);
         assert!(spread(cloudy.sky_top) < spread(clear.sky_top));
+    }
+
+    /// The game's sky at an instant: the sun up at the game's midday,
+    /// down at its midnight, and the night sky darker than the day's.
+    #[test]
+    fn the_game_sky_follows_the_game_clock() {
+        use crate::elanthian_time::elanthian_hour_f;
+        // the instants nearest the game's noon and midnight in a day from a known time
+        let base = 1_790_000_000.0f64;
+        let at = |want: f32| (0..24 * 60).map(|m| base + m as f64 * 60.0).min_by(|a, b| {
+            let d = |t: f64| ((elanthian_hour_f(t) - want + 12.0).rem_euclid(24.0) - 12.0).abs();
+            d(*a).total_cmp(&d(*b))
+        }).unwrap();
+        let (noon, midnight) = (game_doll_sky(at(12.5), 180.0), game_doll_sky(at(0.5), 180.0));
+        assert!(noon.lights.iter().any(|l| l.power > 0.5 && l.elevation > 30.0), "the sun high at noon: {noon:?}");
+        let lum = |s: &DollSky| s.sky_top.iter().sum::<f32>();
+        assert!(lum(&midnight) < lum(&noon) * 0.5, "a darker sky at night");
+        assert!(!noon.indoor);
     }
 }

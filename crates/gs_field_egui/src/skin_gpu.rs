@@ -1109,6 +1109,7 @@ impl SkinGpu {
                     ParticleGlow::None => 0.0,
                     ParticleGlow::Ember => 1.0,
                     ParticleGlow::Spark => 2.0,
+                    ParticleGlow::Shadow => 3.0,
                 };
                 bytes.extend(floats(&[p.from[0], p.from[1], p.from[2], 0.0]));
                 bytes.extend(floats(&[p.v[0], p.v[1], p.v[2], 0.0]));

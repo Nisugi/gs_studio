@@ -51,8 +51,8 @@ const FIT_WIDTH: f32 = 0.92;
 const DISTANCE_HEIGHTS: f32 = 3.5;
 const EYE_SHARE: f32 = 0.6;
 const M_PER_FT: f32 = 0.3048;
-/// An invisible modelled body's glints and shimmer move on a clock this
-/// many seconds a tick (a new image each).
+/// An invisible or hidden modelled body's glints, shimmer and wisps move on
+/// a clock this many seconds a tick (a new image each).
 const GHOST_TICK_S: f64 = 1.0 / 30.0;
 /// The backdrop is made at this share of the window's size: it is only a
 /// gradient.
@@ -368,8 +368,10 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     } else if let Some(body) = &posed.body {
         // its modelled body, posed and rasterised by the GPU
         // (a hit arriving: a new image every frame, at its age; invisible,
-        // its glints and shimmer on a running clock, a new image a tick)
-        let clock = if key.layers && key.effects.invisible {
+        // hidden, possessed or blinded, its glints and shimmer or its wisps
+        // on a running clock, a new image a tick)
+        let fx = &key.effects;
+        let clock = if key.layers && (fx.invisible || fx.hidden || fx.possessed || fx.blinded) {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(GHOST_TICK_S));
             ((now / GHOST_TICK_S).floor() * GHOST_TICK_S % 3600.0) as f32
         } else {
@@ -595,7 +597,8 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool,
             painter.circle(pos2(x, y), r, rgba(110, 210, 60, a * 0.55), Stroke::new(1.5, rgba(170, 255, 100, a)));
         }
     }
-    if s.has(Status::Blinded) {
+    // (a layered figure's blindness is a band of mist over its eyes)
+    if s.has(Status::Blinded) && !built {
         shown = true;
         let eyes = pos2(head.x, eyes_y);
         painter.add(Shape::ellipse_filled(eyes, vec2(head_r * 1.15, head_r * 0.32), rgba(18, 16, 22, 0.78)));
@@ -605,7 +608,8 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool,
             painter.circle_filled(c, head_r * (0.25 + 0.25 * p), rgba(30, 28, 36, (1.0 - p) * 0.5));
         }
     }
-    if s.has(Status::Silenced) || s.has(Status::Cutthroat) {
+    // (a layered figure's cut throat is its own slash, bleeding)
+    if s.has(Status::Silenced) || (s.has(Status::Cutthroat) && !built) {
         // a hush by the mouth: a small circle, struck through
         let c = pos2(head.x + head_r * 1.9, eyes_y + head_r * 0.7);
         let r = u * 0.022;
@@ -672,7 +676,8 @@ mod tests {
         assert!(key.effects.bleeding && !key.effects.webbed);
         let label = |p: &str| gs_field::dolls::part_label(p).unwrap() as usize - 1;
         assert_eq!(key.ranks[label("chest")], 2);
-        assert_eq!(key.ranks[label("neck")], 2, "a cut throat is a neck wound");
+        assert_eq!(key.ranks[label("neck")], 0, "a cut throat is no neck wound rank: its own slash");
+        assert!(key.effects.cutthroat);
         assert_eq!(key.scars[label("rightArm")], 1);
         assert_eq!(key.breath_pace(), Some((1.0, 1.0)));
         let held = key_for(&DollState { statuses: Statuses::NONE.with(Status::Bound), ..DollState::default() });

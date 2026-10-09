@@ -40,6 +40,9 @@ const STEP_FT: f32 = 0.006;
 pub(crate) struct Affliction<'a> {
     pub poisoned: bool,
     pub diseased: bool,
+    /// Possessed: dark veins glowing violet from the heart up the neck onto
+    /// the face and down the arms (`possess`).
+    pub possessed: bool,
     /// Where the poison got in, as shown: the open wounds' middles,
     /// facings and sizes (empty: a bite at the neck and the forearm).
     pub entries: &'a [(V3, V3, f32)],
@@ -62,7 +65,8 @@ fn dome(made: &mut Vec<(Gaussian, u32)>, s: &SkinPoint, i: u32, r: f32, rim: [f3
 /// One vein crawling over the skin from `p` along `heading`, `length` feet,
 /// `width` at its root, branching as it goes (`depth` branchings more).
 #[allow(clippy::too_many_arguments)]
-fn vein(made: &mut Vec<(Gaussian, u32)>, field: &Field, parts: &Parts, off_parts: &[bool], p: V3, heading: V3, on: u32, length: f32, width: f32, depth: u32, salt: i32) {
+#[allow(clippy::too_many_arguments)]
+fn vein(made: &mut Vec<(Gaussian, u32)>, field: &Field, parts: &Parts, off_parts: &[bool], p: V3, heading: V3, on: u32, length: f32, width: f32, depth: u32, colours: ([f32; 3], [f32; 3]), salt: i32) {
     let h = |q: u32| hash(salt, q ^ 0x7E1E);
     let (mut p, mut on) = (p, on);
     let mut n = field.skin[on as usize].n;
@@ -84,13 +88,14 @@ fn vein(made: &mut Vec<(Gaussian, u32)>, field: &Field, parts: &Parts, off_parts
         let w = (width * (1.0 - 0.6 * u)).max(0.006);
         let side = norm_or(cross(n, dir), [1.0, 0.0, 0.0]);
         // raised, dark, and aglow down its middle, fading to its tip
-        made.push((plain(add(p, scale(n, w * 0.45)), [scale(dir, STEP_FT * 1.2), scale(side, w * 0.5), scale(n, w * 0.4)], n, VEIN, 0.95, 0.0, 0.5), on));
-        made.push((plain(add(p, scale(n, w * 0.8)), [scale(dir, STEP_FT * 1.2), scale(side, w * 0.26), scale(n, w * 0.15)], n, mix(VEIN_GLOW, VEIN, 0.75 * u), 0.85, 0.6 * (1.0 - 0.8 * u), 0.6), on));
+        let (dark, glow) = colours;
+        made.push((plain(add(p, scale(n, w * 0.45)), [scale(dir, STEP_FT * 1.2), scale(side, w * 0.5), scale(n, w * 0.4)], n, dark, 0.95, 0.0, 0.5), on));
+        made.push((plain(add(p, scale(n, w * 0.8)), [scale(dir, STEP_FT * 1.2), scale(side, w * 0.26), scale(n, w * 0.15)], n, mix(glow, dark, 0.75 * u), 0.85, 0.6 * (1.0 - 0.8 * u), 0.6), on));
         if depth > 0 && gone > next_branch {
             b += 1;
             let lean = (0.45 + 0.4 * hash(salt ^ b as i32, 4)) * if hash(salt ^ b as i32, 5) < 0.5 { -1.0 } else { 1.0 };
             let fork = norm_or(add(scale(dir, lean.cos()), scale(side, lean.sin())), dir);
-            vein(made, field, parts, off_parts, p, fork, on, (length - gone) * (0.35 + 0.25 * hash(salt ^ b as i32, 6)), w * 0.7, depth - 1, salt.wrapping_mul(31) ^ b as i32);
+            vein(made, field, parts, off_parts, p, fork, on, (length - gone) * (0.35 + 0.25 * hash(salt ^ b as i32, 6)), w * 0.7, depth - 1, colours, salt.wrapping_mul(31) ^ b as i32);
             next_branch = gone + 0.16 + 0.16 * hash(salt ^ b as i32, 7);
         }
         // on along the skin, wandering
@@ -164,7 +169,7 @@ pub(crate) fn build<'p>(what: &Affliction, skin: &[SkinPoint], built: &[Xf], sho
                 let g = |q: u32| hash(salt ^ (e as i32 * 97 + v as i32).wrapping_mul(0x3B1), q ^ 0x9015);
                 let a = TAU * (v as f32 + 0.6 * g(1)) / veins as f32;
                 let heading = add(scale(t1, a.cos()), scale(t2, a.sin()));
-                vein(&mut made, &field, parts, &off_head, s.p, heading, i, 0.9 + 0.7 * g(2), 0.02 + 0.007 * g(3), 2, salt ^ (e as i32 * 131 + v as i32 * 7));
+                vein(&mut made, &field, parts, &off_head, s.p, heading, i, 0.9 + 0.7 * g(2), 0.02 + 0.007 * g(3), 2, (VEIN, VEIN_GLOW), salt ^ (e as i32 * 131 + v as i32 * 7));
             }
             // blisters clustered where it got in
             let mut b = 0;
@@ -177,6 +182,36 @@ pub(crate) fn build<'p>(what: &Affliction, skin: &[SkinPoint], built: &[Xf], sho
                     dome(&mut made, o, j, 0.007 + 0.011 * g(2) * close, BLISTER_RIM, BLISTER_HEAD, 0.18);
                 }
             });
+        }
+    }
+
+    if what.possessed {
+        // from its heart: the front of its chest, a little left of middle
+        // and high, the veins every way -- up the neck onto the face, out
+        // along the shoulders and down the arms, down the belly
+        let chest: Vec<u32> = (0..skin.len() as u32).filter(|&i| open(&skin[i as usize]) && part_of(skin[i as usize].seg) == Some("chest") && skin[i as usize].n[2] > 0.5).collect();
+        if !chest.is_empty() {
+            let (cx, lo, hi) = chest.iter().fold((0.0f32, f32::MAX, f32::MIN), |(x, lo, hi), &i| {
+                let p = skin[i as usize].p;
+                (x + p[0] / chest.len() as f32, lo.min(p[1]), hi.max(p[1]))
+            });
+            let want = [cx + 0.08, hi - 0.35 * (hi - lo)];
+            let heart = chest.iter().copied().min_by(|&a, &b| {
+                let d = |i: u32| (skin[i as usize].p[0] - want[0]).powi(2) + (skin[i as usize].p[1] - want[1]).powi(2);
+                d(a).total_cmp(&d(b))
+            });
+            if let Some(i) = heart {
+                let s = &skin[i as usize];
+                let (t1, t2) = tangents(s.n);
+                let none = vec![false; shown.len()];
+                let veins = 10;
+                for v in 0..veins {
+                    let g = |q: u32| hash(salt ^ (v as i32).wrapping_mul(0x905), q ^ 0x9055);
+                    let a = TAU * (v as f32 + 0.6 * g(1)) / veins as f32;
+                    let heading = add(scale(t1, a.cos()), scale(t2, a.sin()));
+                    vein(&mut made, &field, parts, &none, s.p, heading, i, 1.2 + 0.7 * g(2), 0.018 + 0.006 * g(3), 2, (crate::possess::VEIN, crate::possess::VEIN_GLOW), salt ^ (v as i32 * 173 + 11));
+                }
+            }
         }
     }
 

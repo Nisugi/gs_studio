@@ -2,9 +2,9 @@
 //! layered cloud (`layers`) rather than marks painted into its colour:
 //! rooted, thick bark vines wound up the legs from roots spread on the
 //! ground; bound, twisted ropes of light looped round the trunk, arms and
-//! legs; hidden, a veil of shadow; possessed,
-//! dark wisps rising off the head and shoulders. (A ghost's see-through skin, a dead
-//! figure's pallor, frost and a web are `layers`' own.)
+//! legs. (A ghost's see-through skin, a hidden figure's shadow, a possessed
+//! one's veins and smoke, a dead figure's pallor, frost and a web are
+//! `layers`' own.)
 //!
 //! Built at rest, segment by segment, each dot on an anchor of the segment
 //! it stands on, so it rides that segment: a host that binds dots by their
@@ -125,11 +125,6 @@ impl Seg<'_> {
         }
         None
     }
-
-    /// Every anchor: its ring, angle and index.
-    fn anchors(&self) -> impl Iterator<Item = (usize, f32, u32)> + '_ {
-        self.by_ring.iter().enumerate().flat_map(|(k, list)| list.iter().map(move |&(th, i)| (k, th, i)))
-    }
 }
 
 fn dot_on(anchor: Option<u32>, g: Gaussian) -> Dot {
@@ -152,12 +147,6 @@ pub(crate) fn build(seg: &Seg, fx: &Effects, out: &mut Vec<Dot>) {
     }
     if fx.bound {
         ropes(seg, out);
-    }
-    if fx.hidden {
-        veil(seg, Veil::Shadow, out);
-    }
-    if fx.possessed {
-        veil(seg, Veil::Possessed, out);
     }
 }
 
@@ -337,50 +326,6 @@ fn ropes(seg: &Seg, out: &mut Vec<Dot>) {
                 let rgb = mix([150.0, 104.0, 40.0], [255.0, 222.0, 140.0], crest);
                 let n = norm_or(off, s.n);
                 out.push(dot_on(anchor_at(theta), Gaussian { glow: 0.12 + 0.3 * crest, ..plain(c, [scale(s.round, rr * 0.42), scale(n, rr * 0.36), scale(norm_or(cross(s.round, n), s.along), rr * 0.36)], n, rgb, 0.98) }));
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------- hidden, possessed
-
-enum Veil {
-    /// Hidden: shadow clinging round it, and smoke curling up off it.
-    Shadow,
-    /// Possessed: a dark violet pall, and wisps rising off the head and
-    /// shoulders, aglow.
-    Possessed,
-}
-
-fn veil(seg: &Seg, kind: Veil, out: &mut Vec<Dot>) {
-    let (density, plumes, near, far, glow, salt) = match kind {
-        Veil::Shadow => (0.3, 0.025, [16.0, 16.0, 22.0], [30.0, 30.0, 38.0], 0.0, 0x5AD0),
-        Veil::Possessed => (0.16, 0.14, [74.0, 14.0, 96.0], [20.0, 4.0, 28.0], 0.35, 0x9055),
-    };
-    for (k, theta, i) in seg.anchors() {
-        let h = |q: u32| hash(i as i32 ^ seg.seed as i32, q ^ salt);
-        let s = seg.spot(k as f32, theta);
-        let anchor = Some(i);
-        // the pall: soft films standing off the skin
-        if h(1) < density {
-            let off = 0.015 + 0.06 * h(2);
-            let size = 0.035 + 0.05 * h(3);
-            let rgb = mix(near, far, h(4));
-            out.push(dot_on(anchor, Gaussian { film: true, glow: glow * 0.3, ..plain(add(s.p, scale(s.n, off)), [[size, 0.0, 0.0], [0.0, size, 0.0], [0.0, 0.0, size]], s.n, rgb, 0.16) }));
-        }
-        // a plume off what faces up, rising, spreading and fading
-        let upper = s.p[1] > seg.height * if matches!(kind, Veil::Possessed) { 0.6 } else { 0.0 };
-        if upper && s.n[1] > 0.15 && h(5) < plumes {
-            let drift = [h(6) - 0.5, 0.0, h(7) - 0.5];
-            const PUFFS: usize = 9;
-            for q in 0..PUFFS {
-                let u = q as f32 / (PUFFS - 1) as f32;
-                let tall = if matches!(kind, Veil::Possessed) { 0.65 } else { 0.42 };
-                let rise = 0.03 + tall * u * (0.6 + 0.4 * h(8));
-                let c = add(add(s.p, scale(s.n, 0.02)), add([0.0, rise, 0.0], scale(drift, 0.12 * u * u)));
-                let size = 0.016 + 0.05 * u;
-                let rgb = mix(near, far, u);
-                out.push(dot_on(anchor, Gaussian { film: true, glow: glow * (1.0 - u), ..plain(c, [[size, 0.0, 0.0], [0.0, size * 1.6, 0.0], [0.0, 0.0, size]], [0.0, 1.0, 0.0], rgb, 0.4 * (1.0 - u) + 0.05) }));
             }
         }
     }

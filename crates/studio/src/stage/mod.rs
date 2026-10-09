@@ -10,7 +10,8 @@
 
 pub mod cast;
 pub mod color;
-pub mod elanthian_time;
+/// The game's clock: in `gs_field` now, which a game client's doll shares.
+pub use gs_field::elanthian_time;
 pub mod eval;
 pub mod naming;
 pub mod report;

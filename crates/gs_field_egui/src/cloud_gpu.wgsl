@@ -204,11 +204,12 @@ fn thrown(i: Inst, age: f32) -> Dot {
     return d;
 }
 
-// A glint drifting up off an invisible figure on a loop of its own
-// (gs_puppet::layers::Particle::at with `loops`, line for line): c where it
-// leaves from; ax0.y how fast it rises in the world; ax1.x its size, ax1.y
-// its place in the loop, ax1.z the loop's length (seconds). Where it has
-// risen to is `mote_rise`, added in the world.
+// A glint drifting up off an invisible figure, or a wisp of shadow off a
+// hidden one (ax2.x 3: dark, a film, unlit, spreading, swaying wider), on
+// a loop of its own (gs_puppet::layers::Particle::at with `loops`, line for
+// line): c where it leaves from; ax0.y how fast it rises in the world;
+// ax1.x its size, ax1.y its place in the loop, ax1.z the loop's length
+// (seconds). Where it has risen to is `mote_rise`, added in the world.
 fn mote_t(i: Inst) -> f32 {
     let life = max(i.ax1.z, 0.1);
     let t = (u.arrive[3].z + i.ax1.y) % life;
@@ -219,10 +220,11 @@ fn mote(i: Inst) -> Dot {
     var d = Dot(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), 0.0, 0.0, vec3<f32>(0.0), 0.0, false);
     let life = max(i.ax1.z, 0.1);
     let t = mote_t(i);
+    let shadow = i.ax2.x > 2.5;
     let fade = smoothstep(0.0, 0.15 * life, t) * (1.0 - smoothstep(0.45 * life, life, t));
-    let twinkle = 0.55 + 0.45 * sin(u.arrive[3].z * 9.0 + i.ax1.y * 37.0);
+    let twinkle = select(0.55 + 0.45 * sin(u.arrive[3].z * 9.0 + i.ax1.y * 37.0), 1.0, shadow);
     if (fade * twinkle <= 0.02) { return d; }
-    let r = i.ax1.x * (1.0 + 0.6 * t / life);
+    let r = i.ax1.x * (1.0 + select(0.6, 1.2, shadow) * t / life);
     d.ok = true;
     d.c = i.c.xyz;
     d.a0 = vec3<f32>(r, 0.0, 0.0);
@@ -230,13 +232,14 @@ fn mote(i: Inst) -> Dot {
     d.a2 = vec3<f32>(0.0, 0.0, r);
     d.rgb = i.color.rgb;
     d.alpha = i.color.a * fade * twinkle;
-    d.glow = fade;
+    d.glow = select(fade, 0.0, shadow);
+    d.film = shadow;
     return d;
 }
 
 fn mote_rise(i: Inst) -> vec3<f32> {
     let t = mote_t(i);
-    let sway = 0.02 * sin(t * 2.7 + i.ax1.y * 11.0);
+    let sway = select(0.02, 0.07, i.ax2.x > 2.5) * sin(t * 2.7 + i.ax1.y * 11.0);
     return vec3<f32>(sway, i.ax0.y * t, 0.6 * sway);
 }
 

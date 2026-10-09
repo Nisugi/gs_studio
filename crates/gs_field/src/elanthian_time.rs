@@ -12,7 +12,7 @@
 //! GemStone's clock runs on US Eastern time, so the phase is derivable from
 //! the system clock with no game connection.
 
-use gs_field::condition::DayPhase;
+use crate::condition::DayPhase;
 
 /// Hour boundaries between phases, on the 24-hour Eastern clock. A phase
 /// runs from its own hour up to the next one, and `night` wraps midnight.

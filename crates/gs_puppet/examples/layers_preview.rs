@@ -141,6 +141,8 @@ fn main() {
         hidden: fx.contains("hidden"),
         invisible: fx.contains("invisible"),
         possessed: fx.contains("possess"),
+        cutthroat: fx.contains("cutthroat"),
+        blinded: fx.contains("blind"),
     };
     let crits: Vec<(&str, u8)> = wounds.iter().map(|(part, _)| (*part, crit)).collect();
     // a part just hit: a row per age, the coating's first step on each
