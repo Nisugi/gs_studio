@@ -39,9 +39,6 @@ pub use puppet_cache as creature_puppet;
 /// Addition since the port (not in VellumFE): where the creature field's
 /// puppet cache gets its puppets, and what only the field asks of it.
 pub mod field_puppets;
-/// Addition since the port (not in VellumFE): the injury doll -- one
-/// puppet in a window of its own, lit by the sky round the player.
-pub mod doll_view;
 /// Addition since the port (not in VellumFE): the v2 lighting pass -- local
 /// lights and their shadows on the GPU, over each layer's v1 result.
 pub mod field_gpu;

@@ -1022,7 +1022,7 @@ pub struct PuppetKey {
     /// The game's critical rank of each part's wound (1..=9, 0 unknown).
     pub crits: [u8; PARTS],
     pub fresh: Option<(u8, u8)>,
-    /// The statuses it is under (ADDITION, the doll's: `gs_field::doll_state`):
+    /// The statuses it is under (ADDITION, the doll's: `injury_doll::state`):
     /// how it holds itself, sways, trembles and breathes. What they draw on
     /// the body is in `effects` ([`with_statuses`](Self::with_statuses) sets both).
     pub statuses: Statuses,
@@ -2319,7 +2319,7 @@ impl PuppetCache {
 
     /// Whether `family`'s form has a modelled body to be drawn as: one a
     /// host named ([`Self::set_body_dir`]) or one its source has. What
-    /// makes the doll draw a form as its body by itself (`doll_view`).
+    /// makes the doll draw a form as its body by itself (`injury_doll::view`).
     pub fn has_body(&self, family: &str) -> bool {
         let form = body_family(family);
         self.bodies.look(form, || self.source.body_dir(form)).is_some()
@@ -2569,7 +2569,7 @@ impl PuppetCache {
 
     /// The smooth skin with its surface kept but no scene light on it
     /// (ADDITION): what the v2 pass lights by itself -- the injury doll's
-    /// (`doll_view`). Cached apart from the stage's skins.
+    /// (`injury_doll::view`). Cached apart from the stage's skins.
     pub fn posed_surface(&mut self, family: &Arc<str>, key: &PuppetKey) -> Option<Arc<PosedPuppet>> {
         self.posed_cached(family, key, true, Bare::Surface)
     }
@@ -2901,7 +2901,7 @@ mod tests {
     use gs_field::puppets::PuppetRigs;
 
     /// `key` as the injury doll draws a hurt modelled body: its layered
-    /// cloud, at the doll's spacing (`doll_view::layered_if_marked`).
+    /// cloud, at the doll's spacing (`injury_doll::view::layered_if_marked`).
     fn layered(key: PuppetKey) -> PuppetKey {
         let params = gs_puppet::splat::SplatParams { spacing: 0.015, ..Default::default() };
         key.with_layers(true, params.into(), key.coat.coating())

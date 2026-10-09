@@ -3,7 +3,7 @@
 //! stands at an hour ([`moon_arc`], [`moon_sky_arc`]) and how much of its
 //! light reaches the ground ([`moon_light`], [`lornon_light`]); how much of
 //! the night it is ([`night_share`]); the moons' colours. Shared by the
-//! creature field's lighting and the injury doll's sky (`doll_sky`): the
+//! creature field's lighting and the injury doll's sky (`injury_doll::sky`): the
 //! base the two stand on (docs/crate-split-plan.md), out of `lighting`,
 //! which re-exports it.
 

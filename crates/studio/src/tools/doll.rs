@@ -1,14 +1,14 @@
 //! The injury doll window: one puppet lit by the sky round the player
-//! (`gs_field_egui::doll_view`), with what the game would send it -- wounds
-//! and scars per part, every status the doll draws (`gs_field::doll_state`),
+//! (`injury_doll::view`), with what the game would send it -- wounds
+//! and scars per part, every status the doll draws (`injury_doll::state`),
 //! a held weapon -- and the sky it stands under (the hour, the way the
 //! player faces, the moon, indoors), to try it beside the field in the same
-//! frame. It draws through `doll_view::key_for`, as a game client does.
+//! frame. It draws through `injury_doll::view::key_for`, as a game client does.
 //! Drawing and input only.
 
 use std::sync::Arc;
 
-use gs_field::doll_state::{DollState, Status, Statuses};
+use injury_doll::state::{DollState, Status, Statuses};
 use gs_field::lighting::Sky;
 use gs_field_egui::creature_puppet::{PuppetCache, PuppetKey};
 
@@ -59,7 +59,7 @@ pub struct DollWindow {
     /// Stand under the field's own sky (the stage's scene, clock and
     /// facing) when it has one, not these sliders.
     follow_field: bool,
-    /// Lit as a display (`doll_sky::display`: a steady key and fill on a
+    /// Lit as a display (`injury_doll::sky::display`: a steady key and fill on a
     /// dark backdrop, the default) or by the sky round the player.
     display: bool,
     /// `GS_STUDIO_DOLL_HIT`: a wound rank to raise at a frame (part index,
@@ -261,19 +261,19 @@ impl DollWindow {
         w
     }
 
-    fn sky(&self, ctx: &egui::Context) -> gs_field::doll_sky::DollSky {
+    fn sky(&self, ctx: &egui::Context) -> injury_doll::sky::DollSky {
         if self.display {
-            return gs_field::doll_sky::display();
+            return injury_doll::sky::display();
         }
-        if let Some(sky) = self.follow_field.then(|| gs_field_egui::creature_light::field_sky_now(ctx)).flatten().map(|f| gs_field::doll_sky::doll_sky(f.game_hour, &f.sky, f.outdoor)) {
+        if let Some(sky) = self.follow_field.then(|| gs_field_egui::creature_light::field_sky_now(ctx)).flatten().map(|f| injury_doll::sky::doll_sky(f.game_hour, &f.sky, f.outdoor)) {
             return sky;
         }
         self.own_sky()
     }
 
-    fn own_sky(&self) -> gs_field::doll_sky::DollSky {
+    fn own_sky(&self) -> injury_doll::sky::DollSky {
         let sky = Sky { moon: self.moon, clouds: self.clouds, facing: FACINGS[self.facing].1, ..Sky::default() };
-        gs_field::doll_sky::doll_sky(Some(self.hour), &sky, !self.indoor)
+        injury_doll::sky::doll_sky(Some(self.hour), &sky, !self.indoor)
     }
 
     /// What a game client would hand the doll.
@@ -302,7 +302,7 @@ impl DollWindow {
         // the doll is one of its figures (the playable races, the extras),
         // not a creature's form
         if !self.family_named {
-            if let Some(first) = gs_field::doll_roster::roster().first() {
+            if let Some(first) = injury_doll::roster::roster().first() {
                 self.family = first.form.clone();
             }
         }
@@ -337,7 +337,7 @@ impl DollWindow {
                 self.modelled = true;
             }
             // drawn as its doll.toml says, unless GS_STUDIO_DOLL_BODY_AS said
-            if let Some(figure) = gs_field::doll_roster::figure(&self.family).filter(|_| !self.body_as_named) {
+            if let Some(figure) = injury_doll::roster::figure(&self.family).filter(|_| !self.body_as_named) {
                 self.modelled = true;
                 self.body_cloud = figure.draw.body_cloud();
             }
@@ -353,15 +353,15 @@ impl DollWindow {
     }
 
     fn key(&self) -> PuppetKey {
-        let key = gs_field_egui::doll_view::key_for(&self.state()).with_facing(self.turn).with_modelled(self.modelled, self.body_cloud);
+        let key = injury_doll::view::key_for(&self.state()).with_facing(self.turn).with_modelled(self.modelled, self.body_cloud);
         // a modelled body's splats take wounds as the layered cloud does:
         // layered once it is hurt, scarred or coated (unhurt, the GPU poses it)
-        let marked = gs_field_egui::doll_view::body_marked(&key) || self.coat.is_some();
+        let marked = injury_doll::view::body_marked(&key) || self.coat.is_some();
         if !self.layers && !(self.modelled && self.body_cloud > 0 && marked) {
             return key;
         }
         // finer than the stage's cloud: one figure, seen close
-        let params = gs_puppet::splat::SplatParams { spacing: gs_field_egui::doll_view::LAYERS_SPACING_FT, ..Default::default() };
+        let params = gs_puppet::splat::SplatParams { spacing: injury_doll::view::LAYERS_SPACING_FT, ..Default::default() };
         let causes: Vec<(String, gs_puppet::layers::Cause)> = gs_field::skins::DOLL_PARTS.iter().zip(&self.causes).map(|((part, _, _), c)| (part.to_string(), *c)).collect();
         let mut key = key.with_layers(true, params.into(), self.coat.map(|m| gs_puppet::layers::Coating::new(m, self.coat_progress).over_wounds(self.coat_over))).with_causes(&causes);
         key.crits.iter_mut().zip(&self.crits).for_each(|(k, c)| *k = *c);
@@ -395,7 +395,7 @@ impl DollWindow {
                 let started = std::time::Instant::now();
                 let drawn = {
                     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
-                    gs_field_egui::doll_view::paint(ui, rect, &mut cache, &family, self.key(), &self.sky(ctx), self.breathe.then_some("studio doll"), self.gpu_skin)
+                    injury_doll::view::paint(ui, rect, &mut cache, &family, self.key(), &self.sky(ctx), self.breathe.then_some("studio doll"), self.gpu_skin)
                 };
                 // GS_STUDIO_DOLL_TIMES=1: what each frame's doll cost
                 if std::env::var_os("GS_STUDIO_DOLL_TIMES").is_some() {
@@ -415,9 +415,9 @@ impl DollWindow {
     fn controls(&mut self, ui: &mut egui::Ui) {
         super::group(ui, "Figure");
         // the doll's figures: the playable races, then the extras (the
-        // pool's modelled bodies, `gs_field::doll_roster`) -- a creature's
+        // pool's modelled bodies, `injury_doll::roster`) -- a creature's
         // form is the field's, not the doll's
-        let roster = gs_field::doll_roster::roster();
+        let roster = injury_doll::roster::roster();
         let shown = roster.iter().find(|f| f.form == self.family).map_or_else(|| self.family.clone(), |f| f.label.clone());
         egui::ComboBox::from_id_salt("doll_family")
             .selected_text(shown)

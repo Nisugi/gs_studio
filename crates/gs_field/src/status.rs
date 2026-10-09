@@ -1,5 +1,5 @@
 //! The statuses a character or a creature is under, in one vocabulary
-//! (ADDITION; out of `doll_state`, which re-exports it): the status icons,
+//! (ADDITION; out of the doll's state, `injury_doll::state`, which re-exports it): the status icons,
 //! the ones the game says only in text and the named effects of the Debuffs
 //! list fold into [`Status`] ([`Status::from_name`]); a [`Statuses`] set is
 //! small and hashable. Shared by the injury doll and the creature field

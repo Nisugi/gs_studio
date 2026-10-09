@@ -900,12 +900,12 @@ an *x* to put it back:
   nerves stop glowing.
 - **Doll** (the toggle beside *Settings*, over any tab): the injury doll --
   one puppet in a window of its own, lit by the v2 pass as its own view
-  (`gs_field_egui::doll_view`, `field_gpu::paint_view`). *Light* > *Display*
-  (the default, `gs_field::doll_sky::display`) lights it as a display: a
+  (`injury_doll::view`, `field_gpu::paint_view`). *Light* > *Display*
+  (the default, `injury_doll::sky::display`) lights it as a display: a
   steady white key from the front left, a soft fill, a floor of light, on a
   plain dark backdrop -- every wound and status reads the same at any hour.
   *The sky* stands it under the sky round
-  the player (`gs_field::doll_sky`): the sun by day, the moons by night,
+  the player (`injury_doll::sky`): the sun by day, the moons by night,
   from where they are round the way the player faces, a room light
   indoors, and a floor of light so it reads at a new moon's midnight; that
   sky and the ground behind it, its shadow on the ground. Wound and scar
@@ -913,9 +913,9 @@ an *x* to put it back:
   do), every status it can be under, what it holds (`weapon[+shield]`),
   breathing; it flinches and eases between poses as the field's creatures
   do, and a hit on its back turns it round to show the wound for a moment.
-  It draws what a game client hands it (`gs_field::doll_state::DollState`,
+  It draws what a game client hands it (`injury_doll::state::DollState`,
   `DollState::from_game` over the game's wounds, scars and the names of
-  every status icon, text status and debuff; `doll_view::paint_state`),
+  every status icon, text status and debuff; `injury_doll::view::paint_state`),
   and the window's checklist is that state. Each status has a look:
 
   | How | Statuses |
@@ -924,7 +924,7 @@ an *x* to put it back:
   | on the skin (marks, baked with the wounds, `gs_puppet::wounds::status`) | poisoned (green veins, sickly tint), diseased (pallor, lesions, sores), bleeding (blood running from every wound), rooted (roots winding up the legs), bound (glowing bands round trunk and arms), hidden (in shadow), invisible (ghost-pale, shimmering), possessed (a dark cast, dark veins); frozen keeps its frost, webbed its web; a cut throat is a neck wound |
   | how it holds itself (`[posture.<name>]` in the pose files) | terrified cowers and trembles, demoralized slumps (feeble, less), crippled limps, staggered is off balance; dazed, confused and staggered sway |
   | how it breathes | frenzied and overexerted fast and deep, terrified quick, slowed slow; immobile, bound, rooted, frozen and unconscious hold still |
-  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding, unless the figure is layered splats, which build their blood), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed (the stars, the haze, the hush, the ring and the motes only on a figure that is not layered splats, which builds them on itself) |
+  | signs over it (`injury_doll::view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding, unless the figure is layered splats, which build their blood), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed (the stars, the haze, the hush, the ring and the motes only on a figure that is not layered splats, which builds them on itself) |
 
   The game's names fold into these (`Status::from_name`: `thorned` and
   *Major Poison* are poisoned, *Sheer Fear* and *Horrify* terrified, *Mind
@@ -944,7 +944,7 @@ an *x* to put it back:
   2-3 ms of CPU instead of 20-26, eyes, web and frost included. On by
   default; off draws the same figure on the CPU. *The field's sky* stands it under the stage's own scene, hour and
   facing instead of the window's sliders.
-  The doll's *Figure* is one of its roster (`gs_field::doll_roster`): the
+  The doll's *Figure* is one of its roster (`injury_doll::roster`): the
   playable races, then a few extras -- the modelled bodies in the pool's
   `global/bodies/`, each told how to show by a `doll.toml` beside it
   (`label`, `kind = "race" | "extra"`, `draw = "splats" | "mesh" | "made"`,
@@ -953,7 +953,7 @@ an *x* to put it back:
   playable race it is a figure of and which, `race = "Half-elf"`,
   `variant = "Male - grid"`), copied from `<data>/meshes/<form>/doll.toml` with the body.
   A game client's doll offers only the figures that say their race, by
-  race (`doll_roster::races`): Hydra's *Race* and *Figure*, for the
+  race (`injury_doll::roster::races`): Hydra's *Race* and *Figure*, for the
   half-elf male painted and on a grid so far. `gs-studio --install-doll
   <client data folder>` puts just those into a client's pool
   (`bodies::install_doll`): each figure's puppet, thin mesh, weights and
@@ -982,7 +982,7 @@ an *x* to put it back:
   form when the app starts. A form that brings its own puppet has its
   largest body installed too, into `<pool>/global/bodies/<form>/`
   (`bodies::install_bodies`; the pool keeps only the source's one cloud, `.spz` or `.ply`, so a retrain's new cloud is never shadowed by an old one), and
-  any doll -- this window's or a game client's (`doll_view`) -- draws such
+  any doll -- this window's or a game client's (`injury_doll::view`) -- draws such
   a form as its trained splats by itself (`creature_puppet::has_body`):
   the plan is `docs/gpu-doll-plan.md`. A body's pose is bones and a draw
   order, not pixels, so it is drawn at the window's own size, up to
@@ -993,7 +993,7 @@ an *x* to put it back:
   for the humanoid) turns it on, `GS_STUDIO_DOLL_BODY_AS=mesh` draws the
   mesh. Hurt, scarred, coated, dead or under a status drawn as marks
   (poisoned, diseased, bleeding...), a splat body is the layered cloud
-  below wearing its splats (`doll_view::layered_if_marked`, one rule for
+  below wearing its splats (`injury_doll::view::layered_if_marked`, one rule for
   every doll): made once when what is on the body changes, on a worker --
   the last one stands in until it is in, so a wound never stalls the
   frame -- then posed on the GPU like the rest. A hit's arrival is built

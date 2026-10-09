@@ -1,7 +1,7 @@
 //! A grid figure for the injury doll: a form's modelled body painted with
 //! a plain grid (the humanoid's grid skin's slate and pale 0.25 ft lines,
 //! `uv_sheet --grid`), as a form of its own -- an extra in the doll's
-//! roster (`gs_field::doll_roster`).
+//! roster (`injury_doll::roster`).
 //!
 //!     cargo run --release -p gs_puppet --example grid_body -- <mesh dir> <puppet.toml> <out dir> [<form>] [--size 2048] [--line 0.009]
 //!     cargo run --release -p gs_puppet --example grid_body -- data/meshes/half_elf/40k data/meshes/half_elf/puppet.toml data/meshes/grid_figure

@@ -1,6 +1,6 @@
 //! The light an injury doll stands in (ADDITION, not in VellumFE): the sun
 //! by day, the moons by night, from where they are round the way the player
-//! faces -- the direction they last walked ([`crate::sky::GameSky::facing`])
+//! faces -- the direction they last walked ([`gs_field::sky::GameSky::facing`])
 //! -- or one room light indoors; the sky and ground colours behind it; and a
 //! floor under it all, so the doll reads at a new moon's midnight.
 //!
@@ -9,7 +9,10 @@
 //! screen-left, +90 = screen-right, 180 = ahead of the viewer (behind the
 //! doll); elevation above the horizon. Colours are linear RGB.
 
-use crate::lighting::{lornon_light, moon_light, moon_sky_arc, night_share_in, Sky, LORNON_BLOOD_COLOUR, LORNON_COLOUR, LORNON_STRENGTH, MOON_COLOUR};
+use gs_field::sky_light::{lornon_light, moon_light, moon_sky_arc, night_share_in, LORNON_BLOOD_COLOUR, LORNON_COLOUR, LORNON_STRENGTH, MOON_COLOUR};
+/// The sky as the lights read it (the base's): what the doll's sky is made
+/// from.
+pub use gs_field::sky_light::Sky;
 
 /// One light from the sky (or the room's).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -133,7 +136,7 @@ pub fn display() -> DollSky {
 
 /// The doll's light under the game's own sky at `unix` (seconds): the
 /// Elanthian hour and date then, the sun and the moons where they stand
-/// (`crate::sky::GameSky`), seen facing `facing` (a compass bearing: 180
+/// (`gs_field::sky::GameSky`), seen facing `facing` (a compass bearing: 180
 /// looks south, where the sun and moons are highest). No cloud: the doll is
 /// read for its wounds, not the weather.
 pub fn game_doll_sky(unix: f64, facing: f32) -> DollSky {
@@ -145,9 +148,9 @@ pub fn game_doll_sky(unix: f64, facing: f32) -> DollSky {
 /// moons where they stand at `unix` -- the light a player picks for the
 /// doll on its page.
 pub fn game_doll_sky_at(unix: f64, hour: Option<f32>, facing: f32) -> DollSky {
-    let hour = hour.map_or_else(|| crate::elanthian_time::elanthian_hour_f(unix), |h| h.rem_euclid(24.0));
-    let (_, month, day) = crate::elanthian_time::eastern_date(unix as i64);
-    let sky = crate::sky::GameSky::default().sky(unix, month, day, hour);
+    let hour = hour.map_or_else(|| gs_field::elanthian_time::elanthian_hour_f(unix), |h| h.rem_euclid(24.0));
+    let (_, month, day) = gs_field::elanthian_time::eastern_date(unix as i64);
+    let sky = gs_field::sky::GameSky::default().sky(unix, month, day, hour);
     doll_sky(Some(hour), &Sky { clouds: 0.0, facing: Some(facing), ..sky }, true)
 }
 
@@ -291,7 +294,7 @@ mod tests {
     /// down at its midnight, and the night sky darker than the day's.
     #[test]
     fn the_game_sky_follows_the_game_clock() {
-        use crate::elanthian_time::elanthian_hour_f;
+        use gs_field::elanthian_time::elanthian_hour_f;
         // the instants nearest the game's noon and midnight in a day from a known time
         let base = 1_790_000_000.0f64;
         let at = |want: f32| (0..24 * 60).map(|m| base + m as f64 * 60.0).min_by(|a, b| {

@@ -4,13 +4,13 @@
 //! (bound, calmed, cutthroat, silenced, sleeping, thorned) and the named
 //! effects of the Debuffs list ("Major Bleed", "Staggered"...), all in one
 //! vocabulary ([`Status`], `status`, shared with the creature field). A host fills a [`DollState`] from its game state
-//! and hands it to the doll (`gs_field_egui::doll_view::paint_state`); how
+//! and hands it to the doll (`crate::view::paint_state`); how
 //! each status looks is the renderer's.
 //!
 //! Egui-free, like the rest of the crate.
 
-use crate::body::canonical_part;
-pub use crate::status::{Status, Statuses, PRECEDENCE};
+use gs_field::body::canonical_part;
+pub use gs_field::status::{Status, Statuses, PRECEDENCE};
 
 /// A character as the doll draws it.
 #[derive(Debug, Clone, Default, PartialEq)]

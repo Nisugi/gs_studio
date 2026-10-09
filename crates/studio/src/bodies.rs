@@ -139,7 +139,7 @@ fn install_bodies_of(data: &Path, bodies_dir: &Path, keep: &dyn Fn(&str) -> bool
                 }
             }
         }
-        // how the injury doll shows it (`gs_field::doll_roster`), kept with the form
+        // how the injury doll shows it (`injury_doll::roster`), kept with the form
         files.push((data.join("meshes").join(&body.form).join("doll.toml"), dst_dir.join("doll.toml")));
         if files.iter().any(|(s, d)| s.is_file() && !same(s, d)) {
             std::fs::create_dir_all(&dst_dir)?;
@@ -176,13 +176,13 @@ pub fn install_all(data: &Path) -> std::io::Result<Vec<String>> {
 }
 
 /// The forms whose `<data>/meshes/<form>/doll.toml` says the playable race
-/// they are a figure of (`gs_field::doll_roster`): what a game client's
+/// they are a figure of (`injury_doll::roster`): what a game client's
 /// doll offers.
 pub fn race_forms(data: &Path) -> Vec<String> {
     scan(data)
         .into_iter()
         .filter(|b| b.own_puppet)
-        .filter(|b| gs_field::doll_roster::read_figure(&b.form, &data.join("meshes").join(&b.form)).race.is_some())
+        .filter(|b| injury_doll::roster::read_figure(&b.form, &data.join("meshes").join(&b.form)).race.is_some())
         .map(|b| b.form)
         .collect()
 }

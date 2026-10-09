@@ -1,10 +1,10 @@
 //! The injury doll: one puppet in a window of its own -- its wounds, lost
 //! limbs, statuses, pose, breath and what it holds are all the
 //! [`PuppetKey`]'s -- lit by the v2 pass ([`field_gpu`]) by the [`DollSky`]
-//! it is given: as a display (`gs_field::doll_sky::display`, what a client
+//! it is given: as a display (`crate::sky::display`, what a client
 //! shows by default: a steady key and fill over a dark backdrop, so wounds
 //! and statuses read at any hour), or under the sky round the player
-//! (`gs_field::doll_sky::doll_sky`: the sun or the moons from where they
+//! (`crate::sky::doll_sky`: the sun or the moons from where they
 //! are round the way the player faces, a room light indoors) over that sky
 //! and the ground it stands on.
 //!
@@ -15,11 +15,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use gs_field::doll_sky::DollSky;
-use gs_field::doll_state::{DollState, Status, Statuses};
+use crate::sky::DollSky;
+use crate::state::{DollState, Status, Statuses};
 
-use crate::creature_puppet::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
-use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
+use gs_field_egui::puppet_cache::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
+use gs_field_egui::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
+
+/// The cache a doll is drawn from, and the key it is drawn by.
+pub use gs_field_egui::puppet_cache::{PuppetCache as DollCache, PuppetKey as DollKey};
 
 /// The doll's view of the pass.
 pub const DOLL_VIEW: u64 = 0xD011;
@@ -193,7 +196,7 @@ fn backdrop(sky: &DollSky, cam: &FieldCamera, contact: (egui::Pos2, f32, f32, f3
                 lit.extend_from_slice(&[l[0], l[1], l[2], 0]);
             }
         }
-        let geo = crate::figure_image::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
+        let geo = gs_field_egui::figure_image::ground_geo(cam, w, h, [0.0, 0.0, sw, sh]);
         LitImage { key, w: w as u32, h: h as u32, albedo: Arc::new(albedo), lit: Arc::new(lit), geo: Arc::new(geo) }
     })
 }
@@ -215,7 +218,7 @@ fn figure(posed: &PosedPuppet, sky: &DollSky, moving: bool) -> Option<Arc<LitIma
                 p[c] = l2s(s2l(p[c]) * sky.floor[c]);
             }
         }
-        crate::figure_image::skin_image(key, &dim, surface, M_PER_FT)
+        gs_field_egui::figure_image::skin_image(key, &dim, surface, M_PER_FT)
     };
     Some(if moving { Arc::new(make()) } else { cached(key, make) })
 }
@@ -249,7 +252,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     // unless the host said otherwise; hurt, scarred, coated or under a
     // status that marks the body, as the layered cloud
     if key.auto_body && cache.has_body(family) {
-        let draw = gs_field::doll_roster::figure(family).map_or(1, |f| f.draw.body_cloud());
+        let draw = crate::roster::figure(family).map_or(1, |f| f.draw.body_cloud());
         key = key.with_modelled(true, draw);
     }
     // a body's pose is bones, not pixels: drawn at the window's own size
@@ -258,7 +261,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
     }
     key = layered_if_marked(key);
     // hit on the back: turned round to show it, a moment
-    let back = gs_field::dolls::part_label("back");
+    let back = gs_field::body::part_label("back");
     let turning = id.and_then(|id| cache.last_hit(id)).filter(|(label, _)| Some(*label) == back).and_then(|(_, at)| show_back(now - at));
     if let Some(turn) = turning {
         key = key.with_facing(key.yaw() + turn);
@@ -324,7 +327,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         ctx.request_repaint_after(std::time::Duration::from_millis(40));
     }
     // a rank-3 nerve wound twitches every few seconds: look again soon
-    if id.is_some() && crate::creature_puppet::nerve_rank(&key) >= 3 {
+    if id.is_some() && gs_field_egui::puppet_cache::nerve_rank(&key) >= 3 {
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
     if moving {
@@ -345,7 +348,7 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         None
     } else if let Some((mesh, texture)) = &posed.mesh {
         let key = key_of(("doll gpu skin", mesh.key, sky.floor.map(f32::to_bits)));
-        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
+        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Skin { mesh: mesh.clone(), texture: texture.clone() }, lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
         let frame = gs_puppet::Skin { origin: mesh.origin, w: mesh.w, h: mesh.h, rgba: Vec::new() };
         let image = LitImage { key, w: mesh.w as u32, h: mesh.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
@@ -361,14 +364,14 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
             0.0
         };
         let key = key_of(("doll gpu body", body.key, sky.floor.map(f32::to_bits), arrival_age.to_bits(), clock.to_bits()));
-        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Body(body.clone()), lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age, clock }));
+        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Body(body.clone()), lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age, clock }));
         let frame = gs_puppet::Skin { origin: body.origin, w: body.w, h: body.h, rgba: Vec::new() };
         let image = LitImage { key, w: body.w as u32, h: body.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
     } else if let Some(cloud) = &posed.splats {
         // its splat cloud (the layered one), rasterised by the same pass
         let key = key_of(("doll gpu splats", cloud.key, sky.floor.map(f32::to_bits)));
-        crate::skin_gpu::submit(key, Arc::new(crate::skin_gpu::SkinJob { figure: crate::skin_gpu::Figure::Splats(cloud.clone()), lit: crate::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
+        gs_field_egui::skin_gpu::submit(key, Arc::new(gs_field_egui::skin_gpu::SkinJob { figure: gs_field_egui::skin_gpu::Figure::Splats(cloud.clone()), lit: gs_field_egui::skin_gpu::SkinLit::Floor(sky.floor), m_per_ft: M_PER_FT, arrival_age: -1.0, clock: 0.0 }));
         let frame = gs_puppet::Skin { origin: cloud.origin, w: cloud.w, h: cloud.h, rgba: Vec::new() };
         let image = LitImage { key, w: cloud.w as u32, h: cloud.h as u32, albedo: Arc::new(Vec::new()), lit: Arc::new(Vec::new()), geo: Arc::new(Vec::new()) };
         Some((Arc::new(image), place.skin_rect(&frame)))
@@ -658,7 +661,7 @@ mod tests {
         let key = key_for(&state);
         assert_eq!(key.pose, PoseChoice::Kneeling);
         assert!(key.effects.bleeding && !key.effects.webbed);
-        let label = |p: &str| gs_field::dolls::part_label(p).unwrap() as usize - 1;
+        let label = |p: &str| gs_field::body::part_label(p).unwrap() as usize - 1;
         assert_eq!(key.ranks[label("chest")], 2);
         assert_eq!(key.ranks[label("neck")], 0, "a cut throat is no neck wound rank: its own slash");
         assert!(key.effects.cutthroat);

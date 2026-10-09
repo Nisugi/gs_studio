@@ -3,7 +3,7 @@
 //! straight into a v2-pass layer's atlas slot -- the same albedo, lit base
 //! and geometry `field_gpu_stage::skin_image` makes from the CPU skin, with
 //! no pixels crossing back. The doll's, behind its *GPU skin* toggle
-//! (`doll_view`); a figure the mesh does not cover (unpainted, a status
+//! (`injury_doll::view`); a figure the mesh does not cover (unpainted, a status
 //! effect) is drawn on the CPU.
 
 use std::sync::{Arc, Mutex};

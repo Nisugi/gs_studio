@@ -25,6 +25,8 @@ gs_puppet_author = { path = "../gs_puppet_author" }
 gs_field = { path = "../gs_field" }
 # ... and the renderer + art cache the clients draw with.
 gs_field_egui = { path = "../gs_field_egui" }
+# The injury doll: its figures, sky, state and view (the Doll window).
+injury_doll = { path = "../injury_doll" }
 # Texture sheets and paint-over templates (editor::texture).
 png = "0.17"
 # marks.json and jobs.json for the texture generator (editor::texture).

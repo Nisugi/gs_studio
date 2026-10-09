@@ -647,3 +647,6 @@ itself. Egui-free.
   `data_dirs::base_generation`, and no longer loads the creature set.
 - S6: `bodies_dir` is `data_dirs`' (the base), `puppets::bodies_dir` its
   re-export.
+- S6: `doll_roster`, `doll_sky` and `doll_state` left for the injury doll's
+  crate (`injury_doll::roster`, `::sky`, `::state`): the field has no doll
+  in it.

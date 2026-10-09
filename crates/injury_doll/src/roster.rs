@@ -1,6 +1,6 @@
 //! The injury doll's figures (ADDITION): the playable races, and a few
 //! extras (a grid figure, odd ones), each a modelled body in the pool's
-//! `global/bodies/<form>/` (`crate::data_dirs::bodies_dir`). The doll is not
+//! `global/bodies/<form>/` (`gs_field::data_dirs::bodies_dir`). The doll is not
 //! the creature field: a creature's form (`humanoid`, `canine`...) is a
 //! ring puppet the field draws, and is no figure here.
 //!
@@ -182,8 +182,8 @@ pub fn invalidate() {
 /// doll never loads.
 pub fn roster() -> Arc<Vec<DollFigure>> {
     static KEPT: OnceLock<Kept> = OnceLock::new();
-    let Ok(dir) = crate::data_dirs::bodies_dir() else { return Arc::default() };
-    let generation = GENERATION.load(std::sync::atomic::Ordering::Relaxed).wrapping_add(crate::data_dirs::base_generation() << 32);
+    let Ok(dir) = gs_field::data_dirs::bodies_dir() else { return Arc::default() };
+    let generation = GENERATION.load(std::sync::atomic::Ordering::Relaxed).wrapping_add(gs_field::data_dirs::base_generation() << 32);
     let mut kept = KEPT.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     if let Some((g, d, list)) = kept.as_ref() {
         if *g == generation && *d == dir {

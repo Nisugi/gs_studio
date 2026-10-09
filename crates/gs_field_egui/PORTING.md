@@ -1695,3 +1695,5 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   `arms_hang`) are read by `gs_puppet::mesh::BodyMeta`; the cache no longer
   reads the doll's roster. Its tests write the doll's layering rule out
   rather than borrow `doll_view::layered_if_marked`.
+- `doll_view` left for the injury doll's crate (`injury_doll::view`), with
+  the doll's figures, sky and state; the field has no doll in it.

@@ -34,7 +34,7 @@ silhouette.
    `global/puppets/` as before. `gs_field_egui` finds a form's body there
    by itself (`creature_puppet::body_dir`), so Hydra needs no studio code:
    `set_body_dir` stays as an override.
-3. **The doll decides for itself.** `doll_view::key_for` turns `modelled`
+3. **The doll decides for itself.** `injury_doll::view::key_for` turns `modelled`
    on when the form has a body, and the rule that makes a hurt, scarred,
    coated or status-bearing figure a LAYERED one (`PuppetKey::with_layers`,
    studio's `DollWindow::key` until now) lives in `doll_view`, so Hydra
@@ -66,7 +66,7 @@ doll is unchanged until it names a race's form.
 
 Later the same day: webbed and frozen on a body (strands, threads and an
 ice coat, all see-through films), and the doll's own roster: the pool's
-bodies (`gs_field::doll_roster`), races then extras, with a grid figure
+bodies (`injury_doll::roster`), races then extras, with a grid figure
 as the first extra. The creature forms (`humanoid`...) are the field's.
 
 ## Known gaps left open (in order of value)
@@ -105,4 +105,4 @@ as the first extra. The creature forms (`humanoid`...) are the field's.
 - The stage (`creature_field.rs`) never submits `Figure::Body`: field
   creatures still draw the smooth skin.
 - Hydra still draws `humanoid` with a skin picker: it should list
-  `gs_field::doll_roster::roster()` and paint the chosen figure's form.
+  `injury_doll::roster::roster()` and paint the chosen figure's form.

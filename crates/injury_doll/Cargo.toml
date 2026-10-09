@@ -8,9 +8,15 @@ description = "The 3D injury doll a game client draws: its figures, its sky, the
 [lib]
 doctest = false
 
-# For now a facade over gs_field / gs_field_egui (docs/crate-split-plan.md,
-# S1): its paths are the ones the doll keeps, and its code moves in behind
-# them (S6, S7), so a client changes its imports once.
+# The doll's own code is here (docs/crate-split-plan.md, S6); the base data,
+# the puppet cache and the GPU pass it still reaches in gs_field /
+# gs_field_egui until they leave for crates of their own (S7).
 [dependencies]
 gs_field = { path = "../gs_field" }
 gs_field_egui = { path = "../gs_field_egui" }
+gs_puppet = { path = "../gs_puppet" }
+# MUST be the same egui the host links (one source for the workspace).
+egui = { workspace = true }
+# A figure's doll.toml.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
