@@ -47,6 +47,7 @@ pub mod pool;
 pub mod puppets;
 pub mod lighting;
 pub mod sky_light;
+pub mod status;
 pub mod scenes;
 pub mod skins;
 pub mod sky;
