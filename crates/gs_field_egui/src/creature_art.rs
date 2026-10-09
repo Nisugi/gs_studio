@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use gs_field::skins;
 
+use crate::field_puppets::FieldCache;
+
 /// Loaded art for one creature-card base image.
 #[derive(Clone)]
 pub struct CreatureArt {
@@ -217,7 +219,7 @@ impl CreatureArtCache {
                 let cal = {
                     let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
                     puppets.begin_frame(ctx.cumulative_frame_nr());
-                    crate::creature_puppet::calibration_for(
+                    crate::field_puppets::calibration_for(
                         &mut puppets,
                         &want.name,
                         want.noun.as_deref(),
@@ -358,7 +360,7 @@ fn puppets_generation() -> u64 {
 }
 
 /// ADDITION (not in VellumFE): does a puppet resolve for this creature, and
-/// does it wear paint made for it ([`crate::creature_puppet::PuppetCache::wears_own_paint`])?
+/// does it wear paint made for it ([`FieldCache::wears_own_paint`])?
 fn puppet_standing(ctx: &egui::Context, want: &WantedCreature) -> (bool, bool) {
     let shared = crate::creature_puppet::PuppetCache::shared(ctx);
     let mut puppets = shared.lock().unwrap_or_else(|e| e.into_inner());
@@ -1094,7 +1096,7 @@ mod tests {
             let shared = crate::creature_puppet::PuppetCache::shared(&env.ctx);
             let mut cache = shared.lock().unwrap();
             cache.begin_frame(0);
-            crate::creature_puppet::calibration_for(&mut cache, "hill troll", Some("troll"))
+            crate::field_puppets::calibration_for(&mut cache, "hill troll", Some("troll"))
                 .expect("the humanoid puppet is embedded")
         };
         assert_eq!(puppet.standing.size, None, "shape only");
@@ -1169,12 +1171,12 @@ mod tests {
         write_png(&pool_dir().join("creatures/hill_troll.png"), 4);
         write_png(&pool_dir().join("creatures/painted_mannequin.png"), 4);
         // No bestiary entry: the generic humanoid, in a skin of its own.
-        skin("humanoid", &crate::creature_puppet::creature_key("painted mannequin"));
+        skin("humanoid", &crate::field_puppets::creature_key("painted mannequin"));
         let puppet_of = |name: &str, noun: &str| {
             let shared = crate::creature_puppet::PuppetCache::shared(&env.ctx);
             let mut cache = shared.lock().unwrap();
             cache.begin_frame(env.ctx.cumulative_frame_nr());
-            (cache.wears_own_paint(name, Some(noun)), crate::creature_puppet::calibration_for(&mut cache, name, Some(noun)))
+            (cache.wears_own_paint(name, Some(noun)), crate::field_puppets::calibration_for(&mut cache, name, Some(noun)))
         };
         let (own, mannequin) = puppet_of("painted mannequin", "mannequin");
         assert!(own, "its skin loads for the figure");
@@ -1195,7 +1197,7 @@ mod tests {
         assert_eq!(resolve("painted mannequin"), mannequin, "sized as the puppet it draws as");
 
         // The troll gets a skin of its own: the next frame draws its puppet.
-        skin("troll", &crate::creature_puppet::creature_key("hill troll"));
+        skin("troll", &crate::field_puppets::creature_key("hill troll"));
         state.prepare_creature_art(&env.ctx, &all);
         assert!(state.shared.lock().unwrap().base("hill_troll").is_none(), "a new puppet set decides again");
     }

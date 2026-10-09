@@ -36,6 +36,9 @@ pub mod creature_light;
 /// preferred over the flat doll whenever a baked puppet resolves.
 pub mod puppet_cache;
 pub use puppet_cache as creature_puppet;
+/// Addition since the port (not in VellumFE): where the creature field's
+/// puppet cache gets its puppets, and what only the field asks of it.
+pub mod field_puppets;
 /// Addition since the port (not in VellumFE): the injury doll -- one
 /// puppet in a window of its own, lit by the sky round the player.
 pub mod doll_view;

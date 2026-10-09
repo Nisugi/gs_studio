@@ -1376,6 +1376,7 @@ fn paint_creature_puppet(
     animated: &mut bool,
 ) -> Option<egui::Rect> {
     use crate::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
+    use crate::field_puppets::FieldCache;
     let flags = creature.flags.as_ref();
     let dead = creature.is_dead();
     let noun = creature.noun.as_deref().unwrap_or("creature");

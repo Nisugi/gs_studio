@@ -156,7 +156,7 @@ pub fn has_art(name: &str, noun: Option<&str>) -> bool {
 
 /// A creature's bestiary name token, the key skins are filed under: its
 /// bestiary entry's (exact name, else a lone noun), else its own -- as the
-/// renderer keys them (`creature_puppet::creature_key`).
+/// renderer keys them (`gs_field_egui::field_puppets::creature_key`).
 fn creature_token(name: &str) -> String {
     let canonical = gs_field::naming::canonical_name(name);
     match gs_field::bestiary::shared().entry_for_name(&canonical) {

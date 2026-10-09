@@ -33,11 +33,12 @@
 //! puppet in it; `@<arms>` is what it holds. Creatures with neither share
 //! the bare family key, and everything built from it.
 
+use std::any::Any;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use gs_field::doll_state::{Status, Statuses};
-use gs_field::puppets::PuppetRigs;
+use gs_field::status::{Status, Statuses};
 use gs_puppet::{Look, Posed, Prim, Puppet, PoseSet};
 
 /// The texture detail, a graphics tier's: the longest side of sheet a
@@ -535,14 +536,6 @@ fn pinned(puppet: &Puppet, key: &PuppetKey, pose: gs_puppet::Pose) -> gs_puppet:
     }
 }
 
-/// The pose set `puppet` is posed by (its body type's), parsed afresh: what
-/// a worker making its layered cloud resolves a held pose from.
-fn pose_set_of(puppet: &Puppet) -> Option<PoseSet> {
-    let rigs = gs_field::puppets::puppets();
-    let rig = rigs.get(base_family(&puppet.family))?;
-    PoseSet::from_toml(&rigs.pose_file(&rig.body_type)?.toml).ok()
-}
-
 /// The layered clouds made (by body and state), the bodies one is being
 /// made for, and each body's last.
 #[derive(Default)]
@@ -567,7 +560,7 @@ const MARKED_KEPT: usize = 6;
 /// ([`build_marked`]): one at a time a body, the newest state asked for
 /// next, so a hit's arrival skips steps rather than stalls the frame; until
 /// it is in, [`Marked::Building`] hands over the last one.
-fn marked_body(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Marked {
+fn marked_body(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey, set: Option<&Arc<PoseSet>>) -> Marked {
     let id = Arc::as_ptr(body) as usize;
     let at = (id, marked_state(key));
     let mut jobs = marked_jobs().lock().unwrap_or_else(|e| e.into_inner());
@@ -580,9 +573,9 @@ fn marked_body(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pup
     }
     jobs.building.push(id);
     drop(jobs);
-    let (puppet, body, key) = (puppet.clone(), body.clone(), *key);
+    let (puppet, body, key, set) = (puppet.clone(), body.clone(), *key, set.cloned());
     let job = move || {
-        let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_marked(&puppet, &body, &key))).ok().flatten();
+        let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_marked(&puppet, &body, &key, set.as_deref()))).ok().flatten();
         let mut jobs = marked_jobs().lock().unwrap_or_else(|e| e.into_inner());
         jobs.building.retain(|b| *b != id);
         if jobs.kept.len() >= MARKED_KEPT {
@@ -655,8 +648,9 @@ fn anchor_vertices(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, cloud
 /// only what flew off is searched for. A hit arriving is built once for the
 /// GPU to play: the rest of the body (made once a hit, kept), the hit part
 /// at each of `layers::ARRIVAL_AGES` (`SplatBody::frame`), and what it
-/// throws off as particles (`SplatBody::particles`).
-fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey) -> Option<Arc<gs_puppet::mesh::SplatBody>> {
+/// throws off as particles (`SplatBody::particles`). `set` is the pose set
+/// it is posed by: a held or dead pose is resolved from it.
+fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &PuppetKey, set: Option<&PoseSet>) -> Option<Arc<gs_puppet::mesh::SplatBody>> {
     use gs_puppet::layers::{Cause, Fresh, LayerLook};
     let worn = worn_cloud(body, key);
     let params = key.splat.params();
@@ -671,12 +665,12 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
         .iter()
         .enumerate()
         .filter(|(_, c)| **c > 0)
-        .filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *Cause::ALL.get(*c as usize)?)))
+        .filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *Cause::ALL.get(*c as usize)?)))
         .collect();
-    let fresh = key.fresh.and_then(|(label, step)| Some(Fresh { part: gs_field::dolls::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
-    let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *c))).collect();
+    let fresh = key.fresh.and_then(|(label, step)| Some(Fresh { part: gs_field::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+    let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *c))).collect();
     // webbed, bound: held tight, and wrapped whole in that pose
-    let held_pose = (key.pose == PoseChoice::Webbed).then(|| pose_set_of(puppet)).flatten().and_then(|set| PoseChoice::Webbed.resolve(&set, 0).map(|(_, p)| puppet.pin_arms(&set.clamp(p))));
+    let held_pose = (key.pose == PoseChoice::Webbed).then_some(set).flatten().and_then(|set| PoseChoice::Webbed.resolve(set, 0).map(|(_, p)| puppet.pin_arms(&set.clamp(p))));
     let held = held_pose.as_ref().map(|p| puppet.pose(p));
     // what runs on it (blood) runs down as it stands: held, or standing --
     // or dead, as it lies (the doll's own pick of its dead poses)
@@ -684,7 +678,7 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
         PoseChoice::Dead { variant } => (key.pose, variant as u64),
         _ => (PoseChoice::Standing, 0),
     };
-    let standing = held.is_none().then(|| pose_set_of(puppet)).flatten().and_then(|set| shown_as.0.resolve(&set, shown_as.1).map(|(_, p)| puppet.pose(&set.clamp(p))));
+    let standing = held.is_none().then_some(set).flatten().and_then(|set| shown_as.0.resolve(set, shown_as.1).map(|(_, p)| puppet.pose(&set.clamp(p))));
     let still = LayerLook { look, effects: key.effects, texture: None, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh: None, fitted: Some(&fitted), held: held.as_ref(), stands: standing.as_ref() };
     // as drawn, unposed: every segment only lifted to the ground, which is taken back off
     let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
@@ -861,7 +855,7 @@ pub const FIELD_DISTANCE_HEIGHTS: f32 = 9.0;
 pub const FIELD_YAW_DEG: f32 = 24.0;
 
 /// Number of wound parts one key records: the doll part table's size.
-pub const PARTS: usize = crate::creature_doll::PARTS;
+pub const PARTS: usize = gs_field::body::PARTS.len();
 
 /// Which pose a creature's state asks for, independent of body type: the
 /// pose SET supplies the actual angles, and a body type that does not
@@ -1105,7 +1099,7 @@ impl PuppetKey {
     ) -> Self {
         let mut ranks = [0u8; PARTS];
         for (part, rank) in injuries {
-            if let Some(label) = gs_field::dolls::part_label(part) {
+            if let Some(label) = gs_field::body::part_label(part) {
                 let slot = &mut ranks[label as usize - 1];
                 *slot = (*slot).max((*rank).min(3));
             }
@@ -1222,7 +1216,7 @@ impl PuppetKey {
     /// The same key, its wounds made as `causes` say (part, cause).
     pub fn with_causes(mut self, causes: &[(String, gs_puppet::layers::Cause)]) -> Self {
         for (part, cause) in causes {
-            if let Some(label) = gs_field::dolls::part_label(part) {
+            if let Some(label) = gs_field::body::part_label(part) {
                 self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| c == cause).unwrap_or(0) as u8;
             }
         }
@@ -1237,7 +1231,7 @@ impl PuppetKey {
     /// ([`PuppetKey::new`]); a later hit on a part replaces an earlier one.
     pub fn with_hits(mut self, hits: &[Hit<'_>]) -> Self {
         for hit in hits {
-            let Some(label) = gs_field::dolls::part_label(hit.part) else { continue };
+            let Some(label) = gs_field::body::part_label(hit.part) else { continue };
             if let Some(cause) = gs_puppet::layers::Cause::from_name(hit.kind) {
                 self.causes[label as usize - 1] = gs_puppet::layers::Cause::ALL.iter().position(|c| *c == cause).unwrap_or(0) as u8;
             }
@@ -1264,7 +1258,7 @@ impl PuppetKey {
     pub fn with_scars(mut self, scars: &[(String, u8)]) -> Self {
         self.scars = [0; PARTS];
         for (part, rank) in scars {
-            if let Some(label) = gs_field::dolls::part_label(part) {
+            if let Some(label) = gs_field::body::part_label(part) {
                 let slot = &mut self.scars[label as usize - 1];
                 *slot = (*slot).max((*rank).min(3));
             }
@@ -1278,7 +1272,7 @@ impl PuppetKey {
             .iter()
             .enumerate()
             .filter(|(_, r)| **r > 0)
-            .filter_map(|(i, r)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *r)))
+            .filter_map(|(i, r)| Some((gs_field::body::label_part(i as u8 + 1)?, *r)))
             .collect()
     }
 
@@ -1326,7 +1320,7 @@ impl PuppetKey {
             .iter()
             .enumerate()
             .filter(|(_, r)| **r > 0)
-            .filter_map(|(i, r)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *r)))
+            .filter_map(|(i, r)| Some((gs_field::body::label_part(i as u8 + 1)?, *r)))
             .collect()
     }
 
@@ -1684,6 +1678,22 @@ fn unit_camera(height_ft: f32, px_per_ft: f32) -> gs_puppet::Camera {
     }
 }
 
+/// The light a skin is lit by as it is drawn on the CPU (ADDITION): the
+/// creature field's scene light (`creature_light::ResolvedLight`), or a
+/// host's own. The doll has none: the v2 pass lights it by itself.
+pub trait SkinLight: Send + Sync {
+    /// Which light this is: a skin lit by another is drawn again.
+    fn key(&self) -> u64;
+    /// The sun and sky that shade the skin, `toward` relative to the screen
+    /// (x right, y up, z toward the viewer; the skin turns it into its own
+    /// frame). None: the light alone.
+    fn sun(&self) -> Option<&gs_puppet::SceneLight>;
+    /// Light a whole standalone image (it is its own standing base).
+    fn light_image(&self, rgba: &mut [u8], w: usize);
+    /// The time of day alone, on an image already shaded by [`Self::sun`].
+    fn light_image_timed(&self, rgba: &mut [u8], w: usize);
+}
+
 /// Build one posed display list, with no caching. Exposed for tests and
 /// tools; the field goes through [`PuppetCache`].
 pub fn pose_puppet(puppet: &Puppet, pose: &gs_puppet::Pose, key: &PuppetKey) -> PosedPuppet {
@@ -1696,23 +1706,27 @@ pub fn pose_puppet_with(
     pose: &gs_puppet::Pose,
     key: &PuppetKey,
     skin: bool,
-    light: Option<&crate::creature_light::ResolvedLight>,
+    light: Option<&dyn SkinLight>,
     texture: Option<&gs_puppet::Texture>,
 ) -> PosedPuppet {
-    pose_puppet_inner(puppet, pose, key, skin, light, texture, None, Bare::No)
+    pose_puppet_inner(puppet, pose, key, skin, light, texture, None, Bare::No, None)
 }
 
 /// [`pose_puppet_with`]; `bare` keeps the skin's surface even unlit (the
-/// doll's: the v2 pass does all its lighting), or hands over the mesh.
+/// doll's: the v2 pass does all its lighting), or hands over the mesh;
+/// `set` is the pose set it is posed by (a modelled body's layered cloud
+/// is made standing in it).
+#[allow(clippy::too_many_arguments)]
 fn pose_puppet_inner(
     puppet: &Puppet,
     pose: &gs_puppet::Pose,
     key: &PuppetKey,
     skin: bool,
-    light: Option<&crate::creature_light::ResolvedLight>,
+    light: Option<&dyn SkinLight>,
     texture: Option<&gs_puppet::Texture>,
     texture_arc: Option<Arc<gs_puppet::Texture>>,
     bare: Bare,
+    set: Option<&Arc<PoseSet>>,
 ) -> PosedPuppet {
     let keep_surface = bare != Bare::No;
     let posed: Posed<'_> = puppet.pose(pose);
@@ -1761,7 +1775,7 @@ fn pose_puppet_inner(
         .then(|| {
             let b = body_of(puppet)?;
             let cloud = if key.layers {
-                match marked_body(puppet, &b, key) {
+                match marked_body(puppet, &b, key, set) {
                     Marked::Ready(c) => Some(c),
                     Marked::Failed => return None,
                     Marked::Building(last) => {
@@ -1793,10 +1807,10 @@ fn pose_puppet_inner(
                 .iter()
                 .enumerate()
                 .filter(|(_, c)| **c > 0)
-                .filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *gs_puppet::layers::Cause::ALL.get(*c as usize)?)))
+                .filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *gs_puppet::layers::Cause::ALL.get(*c as usize)?)))
                 .collect();
-            let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_field::dolls::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
-            let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::dolls::label_part(i as u8 + 1)?, *c))).collect();
+            let fresh = key.fresh.and_then(|(label, step)| Some(gs_puppet::layers::Fresh { part: gs_field::body::label_part(label)?, age: (step as f64 * FRESH_STEP_S) as f32 }));
+            let crits: Vec<(&str, u8)> = key.crits.iter().enumerate().filter(|(_, c)| **c > 0).filter_map(|(i, c)| Some((gs_field::body::label_part(i as u8 + 1)?, *c))).collect();
             // a modelled body's splat cloud is worn as the skin
             let fitted = key.modelled.then(|| body_of(puppet).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
             // held (webbed, bound), it is wrapped as it stands
@@ -1841,7 +1855,7 @@ fn pose_puppet_inner(
         // a sprite would be. What each pixel shows is kept for the lamps.
         let (mut skin, kept) = posed.skin_surface(&project, &look, texture, key.effects);
         if !skin.is_empty() {
-            match &light.sun {
+            match light.sun() {
                 // The flat hull: the paint shaded by the scene's sun and sky
                 // (turned from the screen into the skin's frame), then the
                 // time of day.
@@ -1921,8 +1935,81 @@ fn yawed_bounds_where(posed: &Posed<'_>, yaw_deg: f32, keep: impl Fn(&gs_puppet:
 
 // ---- the cache ----------------------------------------------------------
 
+/// Where a cache's puppets come from (ADDITION; docs/crate-split-plan.md,
+/// S5): the creature field's published set
+/// ([`crate::field_puppets::FieldSource`]), the injury doll's installed
+/// figures, a host's own. A cache reads one source, and keeps nothing it
+/// made from an older generation of it.
+///
+/// A key is `<form>[#<creature>][@<arms>]` ([`PuppetCache::puppet`]): the
+/// source dresses and arms its forms as the key says; one that dresses
+/// and arms no one serves bare forms, as the defaults do.
+pub trait PuppetSource: Send + 'static {
+    /// Take up what it serves now (once a frame,
+    /// [`PuppetCache::begin_frame`]) and say its generation: another one
+    /// than the last drops everything the cache made.
+    fn refresh(&mut self) -> u64;
+    /// The generation it would serve if taken up now.
+    fn generation_now(&self) -> u64;
+    /// `form`'s baked puppet, unparsed (`Puppet::from_baked_toml`), and
+    /// its body type.
+    fn baked(&self, form: &str) -> Option<(Arc<str>, String)>;
+    /// The pose file of `body_type` (`PoseSet::from_toml`), unparsed.
+    fn pose_file(&self, body_type: &str) -> Option<Arc<str>>;
+    /// The pattern sheet and normal sheet `form` wears, undecoded --
+    /// dressed as `creature`, when there is one.
+    fn sheets(&mut self, form: &str, creature: Option<&str>) -> Sheets;
+    /// `puppet` dressed as `creature`; None: it wears nothing of its own.
+    fn dress(&mut self, _puppet: &Puppet, _creature: &str) -> Option<Puppet> {
+        None
+    }
+    /// `puppet` holding `arms` (`<weapon>[+<shield>]`).
+    fn arm(&mut self, puppet: &Puppet, _arms: &str) -> Puppet {
+        puppet.clone()
+    }
+    /// Where `form`'s modelled body is (a folder holding its `body.obj`),
+    /// when it has one.
+    fn body_dir(&self, _form: &str) -> Option<PathBuf> {
+        None
+    }
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
+
+/// A skin's sheets as a [`PuppetSource`] hands them over, undecoded: the
+/// painted pattern sheet (`gs_puppet::uv`) and its normal sheet. None: the
+/// plain body colour; the skin's own geometry alone.
+#[derive(Debug, Clone, Default)]
+pub struct Sheets {
+    pub texture: Option<Arc<[u8]>>,
+    pub normal: Option<Arc<[u8]>>,
+}
+
+/// The source a cache reads: the creature field's published set unless a
+/// host gave it another ([`PuppetCache::over`]).
+struct Source(Box<dyn PuppetSource>);
+
+impl Default for Source {
+    fn default() -> Self {
+        Source(Box::new(crate::field_puppets::FieldSource::published()))
+    }
+}
+
+impl std::ops::Deref for Source {
+    type Target = dyn PuppetSource;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl std::ops::DerefMut for Source {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
+    }
+}
+
 /// The family of a puppet key (`<family>[#<creature>][@<arms>]`, see
-/// [`PuppetCache::family_for`]).
+/// [`PuppetCache::puppet`]).
 pub fn base_family(key: &str) -> &str {
     key.split(['#', '@']).next().unwrap_or(key)
 }
@@ -1936,16 +2023,6 @@ pub fn creature_of(key: &str) -> Option<&str> {
 /// A puppet key without what it holds: the figure a skin is laid out for.
 fn unarmed(key: &str) -> &str {
     key.split_once('@').map_or(key, |(dressed, _)| dressed)
-}
-
-/// A creature's bestiary name token, the key outfits and skins are filed
-/// under: its bestiary entry's (exact name, else a lone noun), else its own.
-pub fn creature_key(name: &str) -> String {
-    let canonical = gs_field::naming::canonical_name(name);
-    match gs_field::bestiary::shared().entry_for_name(&canonical) {
-        Some(entry) => gs_field::naming::name_token(&entry.name),
-        None => gs_field::naming::name_token(&canonical),
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1974,15 +2051,16 @@ pub enum Bare {
     Mesh,
 }
 
-/// Per-`egui::Context` puppet state: parsed puppets, the pose sets, the
-/// creature -> family resolutions, and the LRU of posed display lists.
-/// Everything is dropped when the published puppet set changes generation
-/// (`gs_field::puppets::invalidate_cache` or a moved base dir).
+/// Puppet state over one [`PuppetSource`]: parsed puppets, the pose sets,
+/// and the LRU of posed display lists. Everything is dropped when the
+/// source moves to another generation (the field's: its published set
+/// changed, `gs_field::puppets::invalidate_cache` or a moved base dir).
 #[derive(Default)]
 pub struct PuppetCache {
-    generation: u64,
+    /// The source's generation all this was made from (None: not begun).
+    generation: Option<u64>,
     frame: Option<u64>,
-    rigs: Option<Arc<PuppetRigs>>,
+    source: Source,
     puppets: HashMap<Arc<str>, Option<Arc<Puppet>>>,
     /// Decoded `<family>.texture.png` sheets (None = none, or unusable).
     textures: HashMap<Arc<str>, Option<Arc<gs_puppet::Texture>>>,
@@ -1990,23 +2068,14 @@ pub struct PuppetCache {
     texture_side: usize,
     parts: HashMap<Arc<str>, Arc<[String]>>,
     pose_sets: HashMap<Arc<str>, Option<Arc<PoseSet>>>,
-    resolved: HashMap<u64, Option<Arc<str>>>,
     posed: HashMap<PosedKey, (Arc<PosedPuppet>, u64)>,
     /// What `posed` weighs ([`PosedPuppet::heap_bytes`], summed), and the
     /// most it may (None: [`POSE_CACHE_BYTES`]).
     posed_bytes: usize,
     pose_budget: Option<usize>,
-    /// The held-props file of this puppet set, parsed once (inner None:
-    /// none, or it did not parse).
-    props: Option<Option<Arc<gs_puppet::PropSet>>>,
-    /// The clothing kit and who wears what, parsed once (inner None: they
-    /// did not parse).
-    outfits: Option<Option<Arc<gs_puppet::Outfits>>>,
-    /// Hold props at all ([`set_puppet_props`]; see [`PuppetCache::set_props`]).
-    hide_props: bool,
     tick: u64,
     /// The scene light in force (see [`PuppetCache::set_light`]).
-    light: Option<Arc<crate::creature_light::ResolvedLight>>,
+    light: Option<Arc<dyn SkinLight>>,
     /// Per creature id: what it was last drawn doing, and when it died in
     /// view (see [`PuppetCache::falling`]).
     lives: HashMap<String, Life>,
@@ -2069,12 +2138,12 @@ pub fn nerve_twitch(key: &PuppetKey, id: &str, now_s: f64) -> Option<(u8, f32)> 
     let cycle = (now_s + breath_phase(id) as f64 * NERVE_TWITCH_SECS) / NERVE_TWITCH_SECS;
     let t = (cycle.rem_euclid(1.0) * NERVE_TWITCH_SECS) as f32;
     let hand = if cycle.floor() as i64 % 2 == 0 { "rightHand" } else { "leftHand" };
-    (t < gs_puppet::FLINCH_SECS).then(|| gs_field::dolls::part_label(hand).map(|l| (l, t))).flatten()
+    (t < gs_puppet::FLINCH_SECS).then(|| gs_field::body::part_label(hand).map(|l| (l, t))).flatten()
 }
 
 /// `key`'s nerve wound rank (the `nsys` part), 0 = none.
 pub fn nerve_rank(key: &PuppetKey) -> u8 {
-    gs_field::dolls::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
+    gs_field::body::part_label("nsys").map_or(0, |l| key.ranks[l as usize - 1])
 }
 
 /// Seconds between a rank-3 nerve wound's twitches.
@@ -2092,7 +2161,7 @@ fn held(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey) -> gs_puppet::Po
     if !up {
         return pose.clone();
     }
-    let back = gs_field::dolls::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
+    let back = gs_field::body::part_label("back").map_or(0, |l| key.ranks[l as usize - 1]);
     let mut pose = if back > 0 { set.guarded(pose, "back", back) } else { pose.clone() };
     let s = key.statuses;
     if s.has(Status::Terrified) {
@@ -2142,7 +2211,7 @@ fn breathe(set: &PoseSet, pose: &gs_puppet::Pose, key: &PuppetKey, weight: f32) 
 /// itself). A left-side part mirrors the table.
 fn flinched(set: &PoseSet, pose: &gs_puppet::Pose, flinch: Option<(u8, f32)>) -> gs_puppet::Pose {
     let Some((label, t)) = flinch else { return pose.clone() };
-    let Some((region, left)) = gs_field::dolls::label_part(label).and_then(flinch_region) else { return pose.clone() };
+    let Some((region, left)) = gs_field::body::label_part(label).and_then(flinch_region) else { return pose.clone() };
     match set.flinch.get(region) {
         Some(offsets) => pose.flinched(offsets, gs_puppet::flinch_envelope(t), left),
         None => pose.clone(),
@@ -2204,25 +2273,21 @@ impl PuppetCache {
     /// older one. Does the work once per `frame` (pass
     /// `ctx.cumulative_frame_nr()`); further calls that frame are a compare.
     pub fn begin_frame(&mut self, frame: u64) {
-        if self.rigs.is_some() && self.frame == Some(frame) {
+        if self.generation.is_some() && self.frame == Some(frame) {
             return;
         }
         self.frame = Some(frame);
-        let rigs = gs_field::puppets::puppets();
-        if self.rigs.is_none() || self.generation != rigs.generation() {
-            self.generation = rigs.generation();
+        let generation = self.source.refresh();
+        if self.generation != Some(generation) {
+            self.generation = Some(generation);
             self.puppets.clear();
             self.textures.clear();
             self.parts.clear();
             self.pose_sets.clear();
-            self.resolved.clear();
             self.posed.clear();
             self.posed_bytes = 0;
-            self.props = None;
-            self.outfits = None;
             drop_loaded_bodies();
         }
-        self.rigs = Some(rigs);
         self.lives.retain(|_, l| l.seen + LIFE_FRAMES >= frame);
     }
 
@@ -2233,145 +2298,27 @@ impl PuppetCache {
     /// not per creature: it looks the published set up.
     pub fn begin_frame_current(&mut self, frame: u64) -> u64 {
         self.begin_frame(frame);
-        if self.generation != gs_field::puppets::puppets().generation() {
+        if self.generation != Some(self.source.generation_now()) {
             self.frame = None;
             self.begin_frame(frame);
         }
-        self.generation
+        self.generation.unwrap_or_default()
     }
 
-    fn rigs(&self) -> Arc<PuppetRigs> {
-        self.rigs
-            .clone()
-            .unwrap_or_else(gs_field::puppets::puppets)
+    /// A cache over `source` (the shared one, [`PuppetCache::shared`],
+    /// reads the creature field's published set).
+    pub fn over(source: impl PuppetSource) -> Self {
+        Self { source: Source(Box::new(source)), ..Self::default() }
     }
 
-    /// Hold props or not (the host's [`set_puppet_props`]); a change
-    /// re-resolves every creature.
-    pub fn set_props(&mut self, on: bool) {
-        if self.hide_props == on {
-            self.hide_props = !on;
-            self.resolved.clear();
-        }
+    /// The source this cache reads, as the kind it is (None: another kind).
+    pub fn source<S: PuppetSource>(&self) -> Option<&S> {
+        self.source.as_any().downcast_ref()
     }
 
-    /// The puppet a creature draws with (cached cascade result), or `None`
-    /// when no puppet resolves — the caller then draws the doll. The key is
-    /// `<family>[#<creature>][@<weapon>[+<shield>]]`: `#<creature>` when it
-    /// wears an outfit or has its own skin; armed, the family's puppet
-    /// holding the first weapon its bestiary entry attacks with (and a
-    /// shield if it bashes with one). Everything that takes the key reads
-    /// the family's rig and poses through [`base_family`].
-    pub fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>> {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (name, noun).hash(&mut hasher);
-        let key = hasher.finish();
-        if let Some(hit) = self.resolved.get(&key) {
-            return hit.clone();
-        }
-        let family = self.rigs().puppet_for(name, noun).map(|d| d.family).map(|family| {
-            let creature = creature_key(name);
-            let own = self.outfit(&creature).is_some() || self.rigs().skin(&family, &creature).is_some();
-            if own {
-                format!("{family}#{creature}")
-            } else {
-                family
-            }
-        });
-        let armed = family.map(|family| match self.arms_for(name) {
-            Some(arms) => Arc::<str>::from(format!("{family}@{arms}")),
-            None => Arc::<str>::from(family.as_str()),
-        });
-        self.resolved.insert(key, armed.clone());
-        armed
-    }
-
-    /// The held-props file of the current set, parsed once.
-    pub fn props(&mut self) -> Option<Arc<gs_puppet::PropSet>> {
-        if let Some(hit) = &self.props {
-            return hit.clone();
-        }
-        let rigs = self.rigs();
-        let set = if rigs.props().trim().is_empty() {
-            None
-        } else {
-            match gs_puppet::PropSet::from_toml(rigs.props()) {
-                Ok(set) => Some(Arc::new(set)),
-                Err(e) => {
-                    tracing::warn!("held props file did not load: {e}");
-                    None
-                }
-            }
-        };
-        self.props = Some(set.clone());
-        set
-    }
-
-    /// The kit and outfits of the current set, parsed once.
-    pub fn outfits(&mut self) -> Option<Arc<gs_puppet::Outfits>> {
-        if let Some(hit) = &self.outfits {
-            return hit.clone();
-        }
-        let rigs = self.rigs();
-        let parsed = (|| {
-            let kit = if rigs.kit().trim().is_empty() { gs_puppet::Kit::shipped().clone() } else { gs_puppet::Kit::from_toml(rigs.kit())? };
-            gs_puppet::Outfits::from_toml(rigs.outfits(), &kit)
-        })();
-        let set = match parsed {
-            Ok(set) => Some(Arc::new(set)),
-            Err(e) => {
-                tracing::warn!("outfits did not load: {e}");
-                None
-            }
-        };
-        self.outfits = Some(set.clone());
-        set
-    }
-
-    /// What a creature (its name token) wears; None = nothing.
-    fn outfit(&mut self, creature: &str) -> Option<gs_puppet::Outfit> {
-        self.outfits()?.get(creature).filter(|o| !o.pieces.is_empty()).cloned()
-    }
-
-    /// `<weapon>[+<shield>]` for a creature by name, from its bestiary
-    /// attacks: the first one the props file knows, and a medium shield if
-    /// it also bashes with one. None = empty-handed (or props are off).
-    fn arms_for(&mut self, name: &str) -> Option<String> {
-        if self.hide_props {
-            return None;
-        }
-        let props = self.props()?;
-        let attacks = gs_field::bestiary::shared().attacks_for_name(name);
-        let weapon = attacks.iter().find_map(|a| props.weapon(a).filter(|w| !w.base.contains("shield")));
-        let shield = attacks
-            .iter()
-            .any(|a| a.to_ascii_lowercase().contains("shield"))
-            .then(|| props.weapon("medium shield"))
-            .flatten();
-        match (weapon, shield) {
-            (Some(w), Some(s)) => Some(format!("{}+{}", w.key, s.key)),
-            (Some(w), None) => Some(w.key.clone()),
-            (None, Some(s)) => Some(format!("+{}", s.key)),
-            (None, None) => None,
-        }
-    }
-
-    /// `puppet` holding `arms` (`<weapon>[+<shield>]`): the weapon in the
-    /// right hand (a two-handed one too), the shield on the left arm.
-    fn arm(&mut self, puppet: &Puppet, arms: &str) -> Puppet {
-        let Some(props) = self.props() else { return puppet.clone() };
-        let (weapon, shield) = arms.split_once('+').unwrap_or((arms, ""));
-        let prop = |key: &str| props.weapons.get(key).and_then(|w| props.prop(w));
-        let (weapon, shield) = (prop(weapon), prop(shield));
-        let mut held = Vec::new();
-        if let Some(w) = &weapon {
-            held.push((gs_puppet::Hand::Right, w));
-        }
-        if let Some(s) = &shield {
-            held.push((gs_puppet::Hand::Left, s));
-        }
-        puppet.holding(&held)
+    /// [`Self::source`], to change.
+    pub fn source_mut<S: PuppetSource>(&mut self) -> Option<&mut S> {
+        self.source.as_any_mut().downcast_mut()
     }
 
     /// The parsed puppet for a family (parsed once; misses cached); for a
@@ -2384,22 +2331,18 @@ impl PuppetCache {
         }
         if let Some((base, arms)) = family.split_once('@') {
             let bare = self.puppet(&Arc::from(base));
-            let armed = bare.map(|p| Arc::new(self.arm(&p, arms)));
+            let armed = bare.map(|p| Arc::new(self.source.arm(&p, arms)));
             self.puppets.insert(family.clone(), armed.clone());
             return armed;
         }
         if let Some((base, creature)) = family.split_once('#') {
             let bare = self.puppet(&Arc::from(base));
-            let dressed = match self.outfit(creature) {
-                Some(outfit) => bare.map(|p| Arc::new(p.wearing(&outfit))),
-                None => bare,
-            };
+            let dressed = bare.map(|p| self.source.dress(&p, creature).map_or(p, Arc::new));
             self.puppets.insert(family.clone(), dressed.clone());
             return dressed;
         }
-        let rigs = self.rigs();
-        let puppet = rigs.get(family).and_then(|rig| {
-            match Puppet::from_baked_toml(&rig.baked) {
+        let puppet = self.source.baked(family).and_then(|(baked, _)| {
+            match Puppet::from_baked_toml(&baked) {
                 Ok(mut p) => {
                     // a modelled body's own rest for its arms (its
                     // doll.toml's `arms_hang`)
@@ -2435,12 +2378,11 @@ impl PuppetCache {
         }
     }
 
-    /// The painted texture a key wears, decoded once: the creature's own
-    /// skin, else (undressed) its family's. The sheet must be the size
+    /// The painted texture a key wears, decoded once: the sheet its source
+    /// hands over ([`PuppetSource::sheets`]). The sheet must be the size
     /// `UvLayout::fit(puppet, SHEET_SIDE)` lays out for THIS figure (a sheet
     /// painted for an older rig or another outfit is refused with a
-    /// warning). A creature in an outfit with no skin of its own wears none:
-    /// the family's sheet has no garments on it.
+    /// warning).
     pub fn texture(&mut self, family: &Arc<str>) -> Option<Arc<gs_puppet::Texture>> {
         self.follow_texture_detail();
         if let Some(hit) = self.textures.get(family) {
@@ -2457,17 +2399,9 @@ impl PuppetCache {
         let base = base_family(family);
         let creature = creature_of(family);
         let puppet = self.puppet(family);
-        let rigs = self.rigs();
-        // The normal sheet rides with whichever sheet is worn: a creature's
-        // own with its skin, the family's with the family's.
-        let (bytes, normal_bytes) = match creature {
-            Some(c) => match rigs.skin(base, c) {
-                Some(skin) => (Some(skin.clone()), rigs.skin_normal(base, c).cloned()),
-                None if self.outfit(c).is_some() => (None, None),
-                None => (rigs.get(base).and_then(|rig| rig.texture.clone()), rigs.get(base).and_then(|rig| rig.normal.clone())),
-            },
-            None => (rigs.get(base).and_then(|rig| rig.texture.clone()), rigs.get(base).and_then(|rig| rig.normal.clone())),
-        };
+        // what the source says the key wears (the field: the creature's own
+        // skin, else, undressed, its family's)
+        let Sheets { texture: bytes, normal: normal_bytes } = self.source.sheets(base, creature);
         let texture = match (puppet, bytes) {
             (Some(puppet), Some(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(img) => {
@@ -2534,22 +2468,6 @@ impl PuppetCache {
         texture
     }
 
-    /// Does this creature's puppet wear paint made for IT (ADDITION, not in
-    /// VellumFE): its own skin, or its form's sheet when its bestiary entry
-    /// names that form outright -- and does that sheet load for the figure?
-    /// Such a puppet draws ahead of the creature's sprite art. Any other
-    /// puppet (unpainted, or in the sheet of a family, a body type's default
-    /// or the generic biped, painted for no creature in particular) draws
-    /// only where no sprite of the creature's own resolves; see
-    /// `CreatureArtCache::prepare_creature_art`.
-    pub fn wears_own_paint(&mut self, name: &str, noun: Option<&str>) -> bool {
-        let Some(key) = self.family_for(name, noun) else { return false };
-        let rigs = self.rigs();
-        let own_skin = creature_of(&key).is_some_and(|c| rigs.skin(base_family(&key), c).is_some());
-        let named_form = rigs.puppet_for(name, noun).is_some_and(|d| d.tier == gs_field::dolls::DollTier::Form);
-        (own_skin || named_form) && self.texture(&key).is_some()
-    }
-
     /// The doll parts this family's puppet has segments for (computed once).
     /// Empty when the family has no puppet.
     pub fn parts(&mut self, family: &Arc<str>) -> Arc<[String]> {
@@ -2579,22 +2497,19 @@ impl PuppetCache {
         if let Some(hit) = self.pose_sets.get(family) {
             return hit.clone();
         }
-        let rigs = self.rigs();
         let base = base_family(family);
-        let set = rigs.get(base).and_then(|rig| {
-            let Some(file) = rigs.pose_file(&rig.body_type) else {
+        let set = self.source.baked(base).and_then(|(_, body_type)| {
+            let Some(file) = self.source.pose_file(&body_type) else {
                 tracing::warn!(
-                    "puppet '{family}': no pose set for body type '{}' -- drawing the flat doll instead",
-                    rig.body_type
+                    "puppet '{family}': no pose set for body type '{body_type}' -- drawing the flat doll instead"
                 );
                 return None;
             };
-            match PoseSet::from_toml(&file.toml) {
+            match PoseSet::from_toml(&file) {
                 Ok(set) => Some(Arc::new(set.for_family(base).into_owned())),
                 Err(e) => {
                     tracing::warn!(
-                        "puppet '{family}': pose set '{}' did not load: {e}",
-                        rig.body_type
+                        "puppet '{family}': pose set '{body_type}' did not load: {e}"
                     );
                     None
                 }
@@ -2618,8 +2533,8 @@ impl PuppetCache {
     /// apart.
     /// The scene light skins are lit with from now on (None = unlit):
     /// `creature_light::current_light`, once per frame.
-    pub fn set_light(&mut self, light: Option<Arc<crate::creature_light::ResolvedLight>>) {
-        self.light = light;
+    pub fn set_light<L: SkinLight + 'static>(&mut self, light: Option<Arc<L>>) {
+        self.light = light.map(|l| l as Arc<dyn SkinLight>);
     }
 
     pub fn posed_with(
@@ -2649,7 +2564,7 @@ impl PuppetCache {
             key: *key,
             skin,
             light: match bare {
-                Bare::No => light.as_ref().map_or(0, |l| l.key),
+                Bare::No => light.as_ref().map_or(0, |l| l.key()),
                 Bare::Surface => BARE_SURFACE,
                 Bare::Mesh => BARE_MESH,
             },
@@ -2670,7 +2585,7 @@ impl PuppetCache {
         // and held (webbed, bound), its arms pinned to its sides
         let pose = &pinned(&puppet, key, set.clamp(&pose));
         let texture = if skin { self.texture(family) } else { None };
-        let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare));
+        let posed = Arc::new(pose_puppet_inner(&puppet, pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set)));
         self.builds += 1;
         // a stand-in for a body still loading: drawn, not kept
         if posed.pending {
@@ -2850,7 +2765,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare)))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
     }
 
     /// The figure holding `key`'s pose (breathing as the key says) and
@@ -2873,7 +2788,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare)))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
     }
 
     /// The figure `t` seconds into falling dead from `from` into `key`'s
@@ -2902,7 +2817,7 @@ impl PuppetCache {
         let light = self.light.clone().filter(|_| skin && bare == Bare::No);
         let texture = if skin { self.texture(family) } else { None };
         self.builds += 1;
-        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare)))
+        Some(Arc::new(pose_puppet_inner(&puppet, &pose, key, skin, light.as_deref(), texture.as_deref(), texture.clone(), bare, Some(&set))))
     }
 
     /// The doll's figure now (ADDITION): as the stage draws a creature --
@@ -2958,70 +2873,16 @@ impl PuppetCache {
     }
 }
 
-/// The size a calibration's shape is measured at. Any step gives the same
-/// aspect and span — the figure is the same figure — so one fixed step keeps
-/// the calibration independent of how big a creature happens to be drawn,
-/// and it is a step ordinary cards ask for, so the two lists it poses are
-/// usually ones the renderer wanted anyway.
-pub const CALIBRATION_HEIGHT_PX: f32 = 110.0;
-
-/// The shape calibration of the puppet a creature would draw with, for
-/// feeding `geometry::calibrations()` when the creature has NO sprite art.
-/// SHAPE only, exactly as the doll's is (shared family art never sets a
-/// species' height): the standing pose's real aspect and contact span, and
-/// the prone pose's real aspect, span and pose-to-standing content ratio —
-/// measured from `posed.bounds()`, so a solver box is the box that is drawn.
-///
-/// The DEAD poses are not measured: every one of them lies along the ground,
-/// so the difference never crosses the granularity the solver cares about,
-/// and a calibration must not depend on a creature's id.
-pub fn calibration_for(
-    cache: &mut PuppetCache,
-    name: &str,
-    noun: Option<&str>,
-) -> Option<gs_field::geometry::ArtCalibration> {
-    use gs_field::geometry::{ArtCalibration, PoseCalibration};
-    let family = cache.family_for(name, noun)?;
-    let body = gs_puppet::BODY_DEFAULT;
-    // Shape only, so the size step is irrelevant to the answer: use a mid
-    // one, which is also the step a typical card asks for -- so the two
-    // lists this poses are usually the ones the renderer wants anyway.
-    let px = CALIBRATION_HEIGHT_PX;
-    let standing = cache.posed(
-        &family,
-        &PuppetKey::new(PoseChoice::Standing, &[], false, false, body, false, px),
-    )?;
-    let prone = cache.posed(
-        &family,
-        &PuppetKey::new(
-            PoseChoice::Prone { on_side: true },
-            &[],
-            false,
-            false,
-            body,
-            false,
-            px,
-        ),
-    );
-    Some(ArtCalibration {
-        standing: PoseCalibration {
-            size: None,
-            aspect: standing.aspect(),
-            span: standing.span(),
-            content_ratio: None,
-        },
-        prone: prone.map(|p| PoseCalibration {
-            size: None,
-            aspect: p.aspect(),
-            span: p.span(),
-            content_ratio: p.content_ratio(),
-        }),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field_puppets::{calibration_for, creature_key, FieldCache, FieldSource};
+    use gs_field::puppets::PuppetRigs;
+
+    /// The pose set `puppet`'s body type ships with.
+    fn shipped(puppet: &Puppet) -> Option<Arc<PoseSet>> {
+        PoseSet::shipped(&puppet.body_type).map(Arc::new)
+    }
 
     fn cache() -> PuppetCache {
         let mut cache = PuppetCache::default();
@@ -3121,8 +2982,8 @@ mod tests {
 
     /// A cache over `set` instead of the published one.
     fn cache_over(set: PuppetRigs) -> PuppetCache {
-        let mut cache = cache();
-        cache.rigs = Some(Arc::new(set));
+        let mut cache = PuppetCache::over(FieldSource::fixed(set));
+        cache.begin_frame(0);
         cache
     }
 
@@ -3257,10 +3118,7 @@ mod tests {
             normal: None,
         };
         let poses = PoseFile { body_type: "quadruped".into(), toml: quadruped.into(), source: PuppetSource::Embedded };
-        let mut cache = PuppetCache {
-            rigs: Some(Arc::new(PuppetRigs::from_rigs([rig("elephantid"), rig("canine")], [poses]))),
-            ..Default::default()
-        };
+        let mut cache = PuppetCache::over(FieldSource::fixed(PuppetRigs::from_rigs([rig("elephantid"), rig("canine")], [poses])));
         let elephantid = cache.pose_set(&Arc::from("elephantid")).unwrap();
         assert_ne!(elephantid.get("sit"), shared.get("sit"), "the elephantid sit override applies");
         assert_eq!(elephantid.get("stand"), shared.get("stand"), "poses it does not name are shared");
@@ -3445,7 +3303,7 @@ mod tests {
         // never match it against an injury.
         for part in parts.iter() {
             assert!(
-                gs_field::dolls::part_label(part).is_some(),
+                gs_field::body::part_label(part).is_some(),
                 "'{part}' is not a doll part"
             );
         }
@@ -3757,7 +3615,7 @@ mod tests {
         let t = std::time::Instant::now();
         let body = Arc::new(load_body(&dir, &puppet).unwrap());
         println!("{}: loaded in {:.2} s, {} trained splats", dir.display(), t.elapsed().as_secs_f64(), body.splats.as_ref().map_or(0, |c| c.len()));
-        let chest = gs_field::dolls::part_label("chest").unwrap();
+        let chest = gs_field::body::part_label("chest").unwrap();
         for (what, cloud) in [("trained", 1u8), ("made", 2)] {
             if cloud == 1 && body.splats.is_none() {
                 continue;
@@ -3765,11 +3623,11 @@ mod tests {
             let wounded = vec![("chest".to_string(), 2u8)];
             let key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, cloud));
             let t = std::time::Instant::now();
-            let first = build_marked(&puppet, &body, &key).expect("a marked body");
+            let first = build_marked(&puppet, &body, &key, shipped(&puppet).as_deref()).expect("a marked body");
             println!("{what}: first wound {:.0} ms ({} dots, {:.1} MB to upload)", t.elapsed().as_secs_f64() * 1e3, first.len(), first.len() as f64 * 144.0 / 1e6);
             for n in 0..2 {
                 let t = std::time::Instant::now();
-                let arrival = build_marked(&puppet, &body, &key.with_fresh(chest, 0.0)).expect("an arrival");
+                let arrival = build_marked(&puppet, &body, &key.with_fresh(chest, 0.0), shipped(&puppet).as_deref()).expect("an arrival");
                 println!(
                     "{what}: a hit's arrival built in {:.0} ms{} ({} dots, {} thrown, {:.1} MB to upload once)",
                     t.elapsed().as_secs_f64() * 1e3,
@@ -3797,7 +3655,7 @@ mod tests {
         let wounded = vec![("chest".to_string(), 2u8)];
         let mut key = crate::doll_view::layered_if_marked(PuppetKey::new(PoseChoice::Standing, &wounded, false, false, [150, 140, 130], false, 360.0).with_modelled(true, 1));
         key.effects.invisible = true;
-        let made = build_marked(&puppet, &body, &key).expect("a marked body");
+        let made = build_marked(&puppet, &body, &key, shipped(&puppet).as_deref()).expect("a marked body");
         let count = |f: &dyn Fn(&gs_puppet::splat::Gaussian) -> bool| made.rest.iter().filter(|g| f(g)).count();
         let (all, rim) = (made.len(), count(&|g| g.rim > 0.0));
         let rim_unfaced = count(&|g| g.rim > 0.0 && g.n == [0.0; 3]);
@@ -3879,7 +3737,7 @@ mod tests {
         let ready = |k: &PuppetKey| {
             let start = std::time::Instant::now();
             loop {
-                match marked_body(&puppet, &body, k) {
+                match marked_body(&puppet, &body, k, shipped(&puppet).as_ref()) {
                     Marked::Ready(c) => break c,
                     Marked::Failed => panic!("could not be made"),
                     Marked::Building(_) if start.elapsed().as_secs() < 60 => std::thread::sleep(std::time::Duration::from_millis(5)),
@@ -3887,12 +3745,12 @@ mod tests {
                 }
             }
         };
-        assert!(matches!(marked_body(&puppet, &body, &key), Marked::Building(None)), "first asked: being made, nothing to stand in");
+        assert!(matches!(marked_body(&puppet, &body, &key, shipped(&puppet).as_ref()), Marked::Building(None)), "first asked: being made, nothing to stand in");
         let hurt = ready(&key);
-        let chest = gs_field::dolls::part_label("chest").unwrap();
+        let chest = gs_field::body::part_label("chest").unwrap();
         // a second on: the wound is open, and what it threw off is in the air
         let step = key.with_fresh(chest, 1.0);
-        match marked_body(&puppet, &body, &step) {
+        match marked_body(&puppet, &body, &step, shipped(&puppet).as_ref()) {
             Marked::Building(Some(last)) => assert!(Arc::ptr_eq(&last, &hurt), "the last one stands in"),
             _ => panic!("a step is made on the worker too"),
         }
@@ -3902,11 +3760,11 @@ mod tests {
         assert_eq!(arriving.frame.len(), arriving.len());
         assert_eq!(arriving.frame.iter().copied().max(), Some(gs_puppet::layers::ARRIVAL_AGES.len() as u8));
         assert!(!arriving.particles.is_empty());
-        match marked_body(&puppet, &body, &key.with_fresh(chest, 2.5)) {
+        match marked_body(&puppet, &body, &key.with_fresh(chest, 2.5), shipped(&puppet).as_ref()) {
             Marked::Ready(later) => assert!(Arc::ptr_eq(&later, &arriving), "later in the hit: the same build"),
             _ => panic!("a hit is built once"),
         }
-        assert!(matches!(marked_body(&puppet, &body, &key), Marked::Ready(_)), "the hurt one is kept");
+        assert!(matches!(marked_body(&puppet, &body, &key, shipped(&puppet).as_ref()), Marked::Ready(_)), "the hurt one is kept");
     }
 
     /// A body loads on a worker: first asked for, it is loading; it
@@ -3990,7 +3848,7 @@ mod tests {
         cache.motion("a", PoseChoice::Standing, 1.0);
         let arm2 = ranks(&[("rightArm", 2)]);
         let (label, t) = cache.flinch("a", &arm2, 1.0).expect("flinches");
-        assert_eq!(gs_field::dolls::label_part(label), Some("rightArm"));
+        assert_eq!(gs_field::body::label_part(label), Some("rightArm"));
         assert_eq!(t, 0.0);
         let (_, t) = cache.flinch("a", &arm2, 1.2).unwrap();
         assert!((t - 0.2).abs() < 1e-5);
@@ -3998,7 +3856,7 @@ mod tests {
         // A new hit elsewhere restarts it on that part.
         let both = ranks(&[("rightArm", 2), ("head", 1)]);
         let (label, _) = cache.flinch("a", &both, 3.0).unwrap();
-        assert_eq!(gs_field::dolls::label_part(label), Some("head"));
+        assert_eq!(gs_field::body::label_part(label), Some("head"));
         assert!(cache.death_flinch("a").is_none(), "alive");
 
         // The flinched figure differs from the still one, and settles back.
@@ -4018,7 +3876,7 @@ mod tests {
         cache.flinch("a", &ranks(&[("rightArm", 2), ("head", 1), ("chest", 1)]), 10.0);
         assert!(matches!(cache.motion("a", dead, 10.1), Motion::Falling { .. }));
         let (label, t) = cache.death_flinch("a").expect("died mid-flinch");
-        assert_eq!(gs_field::dolls::label_part(label), Some("chest"));
+        assert_eq!(gs_field::body::label_part(label), Some("chest"));
         assert!((t - 0.1).abs() < 1e-5);
         assert!(cache.flinch("a", &ranks(&[("rightArm", 3), ("head", 1), ("chest", 1)]), 10.2).is_none(), "the dead do not flinch");
         let dk = PuppetKey::new(dead, &[], true, false, body(), false, 160.0);

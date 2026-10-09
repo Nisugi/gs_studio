@@ -1664,3 +1664,23 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   `Particle::at`). `shade`'s `Feet` is shared with `exposed`.
 - `doll_view`'s stars, hush, red ring and calm motes are for an unlayered
   figure alone.
+
+## The crate split, S5 (2026-10-09; docs/crate-split-plan.md)
+
+- `creature_puppet.rs` is `puppet_cache.rs` (`creature_puppet` stays as an
+  alias of the module until its users move).
+- `figure_image.rs`: a figure as the v2 pass's layer image (`ground_geo`,
+  `with_glow`, `skin_image`), out of `field_gpu_stage`.
+- The field publishes its own sky, `creature_light::FieldSkyNow`
+  (`publish_field_sky` / `field_sky_now`); `doll_view::publish_sky` is gone,
+  and studio's doll tool turns the field's sky into the doll's.
+- `PuppetCache` reads its puppets through a `PuppetSource` (a trait
+  object): `field_puppets::FieldSource` is the published set as before,
+  with its creatures dressed and armed; `PuppetCache::over(source)` makes a
+  cache over another. `family_for`, `set_props`, `props`, `outfits` and
+  `wears_own_paint` are `field_puppets::FieldCache`'s now, and
+  `creature_key` / `calibration_for` live in `field_puppets`. The scene
+  light is a `SkinLight` (`creature_light::ResolvedLight` is one). A
+  modelled body's layered cloud is made in the cache's pose set for its
+  family (it read the body type's raw set before; the same for every
+  form with a body).

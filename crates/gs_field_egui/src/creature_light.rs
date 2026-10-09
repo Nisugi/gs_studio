@@ -299,6 +299,25 @@ pub struct ResolvedLight {
     pub sun: Option<gs_puppet::SceneLight>,
 }
 
+/// The puppets' skins are lit by it on the CPU.
+impl crate::puppet_cache::SkinLight for ResolvedLight {
+    fn key(&self) -> u64 {
+        self.key
+    }
+
+    fn sun(&self) -> Option<&gs_puppet::SceneLight> {
+        self.sun.as_ref()
+    }
+
+    fn light_image(&self, rgba: &mut [u8], w: usize) {
+        ResolvedLight::light_image(self, rgba, w)
+    }
+
+    fn light_image_timed(&self, rgba: &mut [u8], w: usize) {
+        ResolvedLight::light_image_timed(self, rgba, w)
+    }
+}
+
 impl ResolvedLight {
     /// Light a whole standalone image (it is its own standing base).
     pub fn light_image(&self, rgba: &mut [u8], w: usize) {
