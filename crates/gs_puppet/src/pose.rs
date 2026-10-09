@@ -989,7 +989,10 @@ impl Puppet {
         self.pose_with(pose, false, false)
     }
 
-    pub(crate) fn pose_with(&self, pose: &Pose, hang: bool, girdle: bool) -> Posed<'_> {
+    /// [`Puppet::pose`] with its raised arms hung or not (`hang`), and its
+    /// collarbones lifted with a raised arm or not (`girdle`): the figure as
+    /// drawn, or hung for painting (`hung`).
+    pub fn pose_with(&self, pose: &Pose, hang: bool, girdle: bool) -> Posed<'_> {
         let mut xf: Vec<Xf> = Vec::with_capacity(self.segments.len());
         // A raised arm lifts its collarbone ([`crate::hang::clavicle_lift`]):
         // the collarbone turns up about its inner end and the arm turns back

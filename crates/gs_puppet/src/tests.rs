@@ -1183,3 +1183,19 @@ fn a_wing_flagged_membrane_is_a_thin_sheet_in_the_plane_of_its_joints() {
     let (chest, wing) = (front(&|b| b.starts_with("torso")), front(&|b| b.starts_with("wing")));
     assert!(wing <= chest + 0.1, "a wing reaches {wing:.2} ft forward, the chest {chest:.2}");
 }
+
+/// The humanoid's A-pose sheet: its arms hang for posing, but the fit
+/// against the sheet still sees them as drawn (raised).
+#[test]
+fn raised_arms_leave_the_fit_as_drawn() {
+    let rig = Rig::from_toml(include_str!("../../../data/rigs/humanoid.rig.toml")).expect("humanoid rig");
+    let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+    let p = Puppet::build(&rig, &outlines).expect("builds");
+    assert!(!p.arm_hang.is_empty(), "its arms hang");
+    let mask = |view| rig_bake::rasterize(&outlines.get(&p.family, view).unwrap().outline(), crate::MASK_PX);
+    let mut still = p.clone();
+    still.arm_hang.clear();
+    for view in [View::Front, View::Side] {
+        assert_eq!(crate::rest_iou(&p, view, &mask(view)), crate::rest_iou(&still, view, &mask(view)), "the fit sees the sheet");
+    }
+}
