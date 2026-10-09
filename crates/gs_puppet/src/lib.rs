@@ -66,6 +66,7 @@ pub mod layers;
 pub mod math;
 pub mod measure;
 pub mod mesh;
+pub mod mesh_measure;
 pub mod outfit;
 pub mod paint;
 pub mod pose;

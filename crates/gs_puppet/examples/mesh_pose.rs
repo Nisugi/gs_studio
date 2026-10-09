@@ -74,7 +74,7 @@ fn main() {
     let _ = body.fit_to_height(puppet.height);
     let paint = load_png(&dir.join("color.png"));
     let t0 = std::time::Instant::now();
-    std::fs::write(dir.join("bones.txt"), mesh::bones_text(&puppet)).expect("write bones.txt");
+    std::fs::write(dir.join("bones.txt"), gs_puppet::mesh_measure::bones_text(&puppet)).expect("write bones.txt");
     let file_verts = body.source.iter().max().map_or(0, |m| *m as usize + 1);
     let given = match mesh::load_weights(&dir.join("weights.txt"), &puppet) {
         _ if env("MESH_NEAREST").is_some() => Vec::new(),
