@@ -1155,6 +1155,14 @@ impl PuppetKey {
             possessed: has(Status::Possessed),
             cutthroat: has(Status::Cutthroat),
             blinded: has(Status::Blinded),
+            stunned: has(Status::Stunned),
+            dazed: has(Status::Dazed),
+            frenzied: has(Status::Frenzied),
+            overexerted: has(Status::Overexerted),
+            calmed: has(Status::Calmed),
+            vulnerable: has(Status::Vulnerable),
+            silenced: has(Status::Silenced),
+            immobile: has(Status::Immobile),
         }
     }
 

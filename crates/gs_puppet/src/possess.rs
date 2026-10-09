@@ -37,6 +37,12 @@ pub(crate) fn tinted(rgb: [f32; 3]) -> [f32; 3] {
 /// core just off the eye and a soft violet haze round it. Bound to the
 /// face nearest them (no anchor).
 pub(crate) fn eyes(posed: &Posed<'_>) -> Vec<Dot> {
+    lit_eyes(posed, EYE, EYE_HAZE, 1.0)
+}
+
+/// Eyes aglow: at each of the puppet's eyes as `posed`, a `core` just off
+/// the eye and a soft `haze` round it, as strong as `strength` (0..1).
+pub(crate) fn lit_eyes(posed: &Posed<'_>, core: [f32; 3], haze: [f32; 3], strength: f32) -> Vec<Dot> {
     let mut out = Vec::new();
     for eye in &posed.puppet.eyes {
         let Some(xf) = posed.xf.get(eye.segment) else { continue };
@@ -49,8 +55,8 @@ pub(crate) fn eyes(posed: &Posed<'_>) -> Vec<Dot> {
             source: None,
             g: Gaussian { c, axes: [[rr, 0.0, 0.0], [0.0, rr * 0.7, 0.0], [0.0, 0.0, rr * 0.5]], n: [0.0; 3], rgb, alpha, glow: 1.0, wet: 0.0, film, rim: 0.0 },
         };
-        out.push(dot(add(at, scale(n, r * 0.6)), r * 0.9, EYE, 0.95, false));
-        out.push(dot(add(at, scale(n, r * 0.9)), r * 2.6, EYE_HAZE, 0.4, true));
+        out.push(dot(add(at, scale(n, r * 0.6)), r * 0.9, core, 0.95 * strength, false));
+        out.push(dot(add(at, scale(n, r * 0.9)), r * 2.6, haze, 0.4 * strength, true));
     }
     out
 }

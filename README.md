@@ -924,7 +924,7 @@ an *x* to put it back:
   | on the skin (marks, baked with the wounds, `gs_puppet::wounds::status`) | poisoned (green veins, sickly tint), diseased (pallor, lesions, sores), bleeding (blood running from every wound), rooted (roots winding up the legs), bound (glowing bands round trunk and arms), hidden (in shadow), invisible (ghost-pale, shimmering), possessed (a dark cast, dark veins); frozen keeps its frost, webbed its web; a cut throat is a neck wound |
   | how it holds itself (`[posture.<name>]` in the pose files) | terrified cowers and trembles, demoralized slumps (feeble, less), crippled limps, staggered is off balance; dazed, confused and staggered sway |
   | how it breathes | frenzied and overexerted fast and deep, terrified quick, slowed slow; immobile, bound, rooted, frozen and unconscious hold still |
-  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding, unless the figure is layered splats, which build their blood), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed |
+  | signs over it (`doll_view`) | stars round a stunned or dazed head, a sleeper's Zs, a confused one's question marks, falling drops and a pool (bleeding, unless the figure is layered splats, which build their blood), rising bubbles (poisoned), a haze over blinded eyes, a hush by a silenced or cut throat, a red ring round the vulnerable's feet, pale motes round the calmed (the stars, the haze, the hush, the ring and the motes only on a figure that is not layered splats, which builds them on itself) |
 
   The game's names fold into these (`Status::from_name`: `thorned` and
   *Major Poison* are poisoned, *Sheer Fear* and *Horrify* terrified, *Mind
@@ -1039,7 +1039,15 @@ an *x* to put it back:
   set as far under its eyes as a throat is, not by the rig's rings -- opened
   to the flesh and bleeding down the chest to a pool, whatever else bleeds; blinded
   binds a band of dark mist over the eyes, round the front and sides of
-  the head, mist curling off it; invisible makes its
+  the head, mist curling off it; stunned circles gold stars over the head
+  (dazed: fewer, paler, slower); frenzied flushes its skin red, lights its
+  eyes red and raises steam off its head and shoulders, overexerted
+  flushes it pink, makes it shine with sweat and raises more steam;
+  calmed circles pale blue motes slowly round its middle; vulnerable lays
+  a ring of red light on the ground round its feet with red motes running
+  round it; silenced seals its mouth with a band of pale light; immobile
+  binds two bands of amber light round each ankle, sparks rising off
+  them; invisible makes its
   skin a pale film seen only edge-on, a glassy rim round a nearly empty
   middle, its wounds and whatever is built on it hanging in the air, and
   it throws no shadow (on a modelled body the rim is an outline drawn

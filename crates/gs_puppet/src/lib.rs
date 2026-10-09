@@ -42,6 +42,12 @@
 
 mod afflict;
 mod blind;
+mod calm;
+mod daze;
+mod exposed;
+mod fetter;
+mod heat;
+mod hush;
 pub mod baked;
 mod blood;
 pub mod camera;

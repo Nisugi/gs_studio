@@ -210,6 +210,9 @@ fn thrown(i: Inst, age: f32) -> Dot {
 // line): c where it leaves from; ax0.y how fast it rises in the world;
 // ax1.x its size, ax1.y its place in the loop, ax1.z the loop's length
 // (seconds). Where it has risen to is `mote_rise`, added in the world.
+// Or a mote circling where it leaves from (ax2.x 4: stunned stars, calm
+// motes): always there, aglow, twinkling, once round a loop -- ax0.x the
+// circle's radius, ax0.y how high it bobs.
 fn mote_t(i: Inst) -> f32 {
     let life = max(i.ax1.z, 0.1);
     let t = (u.arrive[3].z + i.ax1.y) % life;
@@ -220,6 +223,18 @@ fn mote(i: Inst) -> Dot {
     var d = Dot(false, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0), 0.0, 0.0, vec3<f32>(0.0), 0.0, false);
     let life = max(i.ax1.z, 0.1);
     let t = mote_t(i);
+    if (i.ax2.x > 3.5) {
+        let r = i.ax1.x;
+        d.ok = true;
+        d.c = i.c.xyz;
+        d.a0 = vec3<f32>(r, 0.0, 0.0);
+        d.a1 = vec3<f32>(0.0, r, 0.0);
+        d.a2 = vec3<f32>(0.0, 0.0, r);
+        d.rgb = i.color.rgb;
+        d.alpha = i.color.a * (0.7 + 0.3 * sin(u.arrive[3].z * 7.0 + i.ax1.y * 37.0));
+        d.glow = 1.0;
+        return d;
+    }
     let shadow = i.ax2.x > 2.5;
     let fade = smoothstep(0.0, 0.15 * life, t) * (1.0 - smoothstep(0.45 * life, life, t));
     let twinkle = select(0.55 + 0.45 * sin(u.arrive[3].z * 9.0 + i.ax1.y * 37.0), 1.0, shadow);
@@ -239,6 +254,10 @@ fn mote(i: Inst) -> Dot {
 
 fn mote_rise(i: Inst) -> vec3<f32> {
     let t = mote_t(i);
+    if (i.ax2.x > 3.5) {
+        let a = 6.2831853 * t / max(i.ax1.z, 0.1);
+        return vec3<f32>(i.ax0.x * cos(a), i.ax0.y * sin(2.0 * a), i.ax0.x * sin(a));
+    }
     let sway = select(0.02, 0.07, i.ax2.x > 2.5) * sin(t * 2.7 + i.ax1.y * 11.0);
     return vec3<f32>(sway, i.ax0.y * t, 0.6 * sway);
 }

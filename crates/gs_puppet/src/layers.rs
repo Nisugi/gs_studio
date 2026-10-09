@@ -534,8 +534,14 @@ pub enum ParticleGlow {
     /// A spark: bright, gone in a moment, never lands.
     Spark,
     /// A wisp of shadow (hidden, `shade`): dark, see-through (a film, never
-    /// the surface), unlit, swaying wide as it rises and spreads.
+    /// the surface), unlit, swaying wide as it rises and spreads. (Steam
+    /// off a frenzied figure is one too, pale: `heat`.)
     Shadow,
+    /// A mote circling where it leaves from, aglow and twinkling, on a loop
+    /// of its own (stunned stars, `daze`; calm motes, `calm`; the light
+    /// round a vulnerable figure's feet, `exposed`): `v` is [the circle's
+    /// radius, how high it bobs, 0], and its loop is one turn round.
+    Orbit,
 }
 
 /// A dot a hit throws off ([`Particle::at`]): where it leaves from and how
@@ -581,6 +587,13 @@ impl Particle {
             let shadow = self.glow == ParticleGlow::Shadow;
             let life = life.max(0.1);
             let t = (age + self.delay).rem_euclid(life);
+            // circling: once round a loop, bobbing twice, always there
+            if self.glow == ParticleGlow::Orbit {
+                let a = std::f32::consts::TAU * t / life;
+                let twinkle = 0.7 + 0.3 * (age * 7.0 + self.delay * 37.0).sin();
+                let c = add(self.from, [self.v[0] * a.cos(), self.v[1] * (2.0 * a).sin(), self.v[0] * a.sin()]);
+                return Some(Gaussian { c, axes: [[r, 0.0, 0.0], [0.0, r, 0.0], [0.0, 0.0, r]], n: [0.0; 3], rgb: self.rgb, alpha: self.alpha * twinkle, glow: 1.0, wet: 0.0, film: false, rim: 0.0 });
+            }
             let fade = smoothstep(0.0, 0.15 * life, t) * (1.0 - smoothstep(0.45 * life, life, t));
             let twinkle = if shadow { 1.0 } else { 0.55 + 0.45 * (age * 9.0 + self.delay * 37.0).sin() };
             if fade * twinkle <= 0.02 {
@@ -606,7 +619,7 @@ impl Particle {
         let (glow, fade) = match self.glow {
             ParticleGlow::Spark => (1.0, 1.0 - smoothstep(0.1, 0.45, age)),
             ParticleGlow::Ember => ((-age).exp(), stale),
-            ParticleGlow::None | ParticleGlow::Shadow => (0.0, stale),
+            ParticleGlow::None | ParticleGlow::Shadow | ParticleGlow::Orbit => (0.0, stale),
         };
         if fade <= 0.02 {
             return None;
@@ -1189,7 +1202,7 @@ impl LayerCloud {
     /// as [`LayerCloud::dots`].
     pub fn motes(&self, posed: &Posed<'_>, look: &LayerLook<'_>) -> Vec<Particle> {
         let fx = look.effects;
-        if !fx.invisible && !fx.hidden && !fx.possessed && !fx.blinded {
+        if !fx.moving() {
             return Vec::new();
         }
         let puppet = posed.puppet;
@@ -1212,6 +1225,24 @@ impl LayerCloud {
         }
         if look.effects.blinded {
             out.extend(crate::blind::wisps(&skin, &posed.xf, &shown.xf, posed, &parts, seed(0xB11D)));
+        }
+        if fx.stunned || fx.dazed {
+            out.extend(crate::daze::stars(&skin, &posed.xf, &shown.xf, &parts, fx.stunned, seed(0x57A2)));
+        }
+        if fx.frenzied || fx.overexerted {
+            out.extend(crate::heat::steam(&skin, &posed.xf, &shown.xf, &parts, fx.frenzied, seed(0x57EA)));
+        }
+        if fx.calmed {
+            out.extend(crate::calm::motes(&skin, &posed.xf, &shown.xf, &parts, seed(0xCA1A)));
+        }
+        if fx.vulnerable {
+            out.extend(crate::exposed::motes(&skin, &posed.xf, &shown.xf, &parts, seed(0xE705)));
+        }
+        if fx.silenced {
+            out.extend(crate::hush::glints(&skin, &posed.xf, &shown.xf, posed, seed(0x4054)));
+        }
+        if fx.immobile {
+            out.extend(crate::fetter::glints(&skin, &posed.xf, &shown.xf, &parts, seed(0xFE77)));
         }
         out
     }
@@ -1314,7 +1345,9 @@ impl LayerCloud {
         // dead, wearing a fitted cloud: how much of it is skin, anchor by
         // anchor (`dead_skin`), so the pallor goes on its skin and its
         // clothes keep their colours
-        let dead_skin = fitted.filter(|_| unturned.dead).and_then(|(skin, _)| dead_skin(puppet, &self.anchors, &skin.tone));
+        // (frenzied or overexerted, the same: its flush goes on its skin)
+        let flushed = look.effects.frenzied || look.effects.overexerted;
+        let dead_skin = fitted.filter(|_| unturned.dead || flushed).and_then(|(skin, _)| dead_skin(puppet, &self.anchors, &skin.tone));
         let per_surf = |surf: &Surface, out: &mut Vec<Dot>, hollows: &mut Vec<Hollow>, particles: &mut Vec<Particle>, wells: &mut Vec<crate::blood::Well>| {
             let i = surf.index;
             let Some(&(from, to)) = self.spans.get(i) else { return };
@@ -1604,6 +1637,12 @@ impl LayerCloud {
                 if look.effects.possessed && !stump[i] {
                     rgb = crate::possess::tinted(rgb);
                 }
+                // frenzied, overexerted: flushed (`heat`), its skin only
+                // where its skin can be told from its clothes
+                if flushed && !stump[i] {
+                    let skin = dead_skin.as_ref().map_or(1.0, |w| w[from + ai]);
+                    rgb = crate::heat::flushed(rgb, look.effects.frenzied, skin);
+                }
                 // poisoned, a sickly cast; diseased, a pallor
                 if look.effects.poisoned {
                     rgb = wounds::mix(rgb, wounds::POISON_TINT_RGB, 0.14);
@@ -1618,9 +1657,12 @@ impl LayerCloud {
                     (rgb, marks_glow, wet) = sheet.apply(rgb, feet);
                 }
                 // iced over: the surface under the ice shines as wet does
-                // poisoned: a sweat's sheen
+                // poisoned: a sweat's sheen; overexerted, more of one
                 if look.effects.poisoned {
                     wet = wet.max(POISON_SWEAT);
+                }
+                if look.effects.overexerted && !stump[i] {
+                    wet = wet.max(crate::heat::SWEAT * dead_skin.as_ref().map_or(1.0, |w| w[from + ai]));
                 }
                 if coat.is_some_and(|c| c.material == Material::Ice && c.height(a) > 0.0) {
                     wet = wet.max(ICE_SHINE);
@@ -2045,7 +2087,11 @@ impl LayerCloud {
         let bleeding = (look.effects.bleeding || unturned.dead || look.effects.cutthroat) && !wells.is_empty();
         let shaded = look.effects.hidden && only.is_none();
         let blinded = look.effects.blinded && only.is_none();
-        if bleeding || frosted || afflicted || shaded || blinded {
+        let sealed = look.effects.silenced && only.is_none();
+        let fettered = look.effects.immobile && only.is_none();
+        let exposed = look.effects.vulnerable && only.is_none();
+        let raging = look.effects.frenzied && only.is_none();
+        if bleeding || frosted || afflicted || shaded || blinded || sealed || fettered || exposed || raging {
             let shown = look.stands.or(look.held).unwrap_or(posed);
             let skin = self.skin_points(shown, &look.look, look.fitted);
             let rough: Vec<bool> = puppet.segments.iter().map(|s| s.part.as_deref().is_some_and(|q| q.ends_with("Hand"))).collect();
@@ -2097,6 +2143,25 @@ impl LayerCloud {
             if look.effects.blinded && only.is_none() {
                 let seed = puppet.family.bytes().fold(0xB11Du32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
                 dots.extend(crate::blind::band(&skin, &posed.xf, &shown.xf, posed, seed));
+            }
+            // frenzied: its eyes aglow red (`heat`)
+            if raging {
+                dots.extend(crate::heat::eyes(posed));
+            }
+            // silenced: a seal of light across its mouth (`hush`)
+            if sealed {
+                let seed = puppet.family.bytes().fold(0x4054u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                dots.extend(crate::hush::seal(&skin, &posed.xf, &shown.xf, posed, seed));
+            }
+            // immobile: bands of light round its ankles (`fetter`)
+            if fettered {
+                let seed = puppet.family.bytes().fold(0xFE77u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                dots.extend(crate::fetter::bands(&skin, &posed.xf, &shown.xf, &parts, seed));
+            }
+            // vulnerable: a ring of red light on the ground (`exposed`)
+            if exposed {
+                let seed = puppet.family.bytes().fold(0xE705u32, |a, b| a.wrapping_mul(31).wrapping_add(b as u32));
+                dots.extend(crate::exposed::ring(&skin, &posed.xf, &shown.xf, &parts, seed));
             }
         }
         hollows.truncate(own);

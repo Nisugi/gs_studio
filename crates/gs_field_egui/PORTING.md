@@ -1640,3 +1640,27 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   rig's stood 0.04-0.13 ft in front of them): measured from each trained
   cloud, the front-most splat at each eye (`a_bodys_face_against_its_puppets_eyes`
   prints it).
+
+## Stars, steam, motes, a ring, a seal, bands (2026-10-08)
+
+- `gs_puppet::Effects` gains `stunned`, `dazed`, `frenzied`, `overexerted`,
+  `calmed`, `vulnerable`, `silenced`, `immobile` (`effects_of_statuses`),
+  with `layered()` (anything the layered cloud builds: `doll_view::body_marked`
+  now asks it) and `moving()` (anything on a running clock: the doll's
+  clock now asks it, so possessed and blinded's wisps move too).
+- New in `gs_puppet`, each built as the figure is shown and carried onto
+  its part: `daze` (gold stars circling over a stunned head; fewer, paler,
+  slower for dazed), `heat` (frenzied: a red flush on the skin under its
+  marks, red eyes, steam off the head and shoulders; overexerted: a pink
+  flush, a sweat's sheen, more steam), `calm` (pale blue motes circling
+  the middle slowly, soft glints rising), `exposed` (a ring of red light
+  on the ground round the feet, a faint glow inside it, red motes running
+  round it), `hush` (a seal of pale light across the mouth, under the
+  puppet's eyes, round the front of the face), `fetter` (two bands of
+  amber light round each ankle and shin, sparks rising off them).
+- `ParticleGlow::Orbit`: a looping particle circling where it leaves from
+  (`v` = [radius, bob, 0], one turn a loop), aglow and twinkling, always
+  there (`cloud_gpu.wgsl` `mote` / `mote_rise`, glow code 4;
+  `Particle::at`). `shade`'s `Feet` is shared with `exposed`.
+- `doll_view`'s stars, hush, red ring and calm motes are for an unlayered
+  figure alone.

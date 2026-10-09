@@ -21,14 +21,14 @@ const HALF_WIDTH_FT: f32 = 0.05;
 
 /// Where the eyes are as shown: their middle, the way the face looks, and
 /// the head's up; and which segment the head is.
-struct Eyes {
-    mid: V3,
-    ahead: V3,
-    up: V3,
-    seg: usize,
+pub(crate) struct Eyes {
+    pub mid: V3,
+    pub ahead: V3,
+    pub up: V3,
+    pub seg: usize,
 }
 
-fn eyes(posed: &Posed<'_>, shown: &[Xf]) -> Option<Eyes> {
+pub(crate) fn eyes(posed: &Posed<'_>, shown: &[Xf]) -> Option<Eyes> {
     let list = &posed.puppet.eyes;
     let first = list.first()?;
     let xf = shown.get(first.segment)?;

@@ -143,6 +143,14 @@ fn main() {
         possessed: fx.contains("possess"),
         cutthroat: fx.contains("cutthroat"),
         blinded: fx.contains("blind"),
+        stunned: fx.contains("stun"),
+        dazed: fx.contains("daze"),
+        frenzied: fx.contains("frenz"),
+        overexerted: fx.contains("overex"),
+        calmed: fx.contains("calm"),
+        vulnerable: fx.contains("vulner"),
+        silenced: fx.contains("silence"),
+        immobile: fx.contains("immobile"),
     };
     let crits: Vec<(&str, u8)> = wounds.iter().map(|(part, _)| (*part, crit)).collect();
     // a part just hit: a row per age, the coating's first step on each

@@ -146,11 +146,44 @@ pub struct Effects {
     /// Blinded: a band of dark mist over the eyes (`layers`; the smooth skin
     /// draws nothing for it).
     pub blinded: bool,
+    /// Stunned: gold stars circling the head (`layers`, `daze`; the smooth
+    /// skin draws nothing for these below, the doll floats signs instead).
+    pub stunned: bool,
+    /// Dazed: fewer, paler stars, circling slower.
+    pub dazed: bool,
+    /// Frenzied: flushed red, eyes aglow red, steam off the head and
+    /// shoulders (`heat`).
+    pub frenzied: bool,
+    /// Overexerted: flushed, a sweat's sheen, steam off it (`heat`).
+    pub overexerted: bool,
+    /// Calmed: pale motes circling it slowly (`calm`).
+    pub calmed: bool,
+    /// Vulnerable: a ring of red light on the ground round its feet
+    /// (`exposed`).
+    pub vulnerable: bool,
+    /// Silenced: a seal of pale light across its mouth (`hush`).
+    pub silenced: bool,
+    /// Immobile: bands of light round its ankles, holding it (`fetter`).
+    pub immobile: bool,
 }
 
 impl Effects {
     pub fn any(&self) -> bool {
         self.webbed || self.frozen || self.cutthroat || self.blinded || self.marks_any()
+    }
+
+    /// Anything the layered cloud builds on the body ([`Effects::any`], and
+    /// what only it draws: the stars, the steam, the motes, the ring, the
+    /// seal, the bands).
+    pub fn layered(&self) -> bool {
+        self.any() || self.stunned || self.dazed || self.frenzied || self.overexerted || self.calmed || self.vulnerable || self.silenced || self.immobile
+    }
+
+    /// Anything the layered cloud gives that moves on a running clock
+    /// (`layers::Particle::loops`): glints, wisps, smoke, stars, steam,
+    /// motes.
+    pub fn moving(&self) -> bool {
+        self.invisible || self.hidden || self.possessed || self.blinded || self.stunned || self.dazed || self.frenzied || self.overexerted || self.calmed || self.vulnerable || self.silenced || self.immobile
     }
 
     /// The effects drawn as marks (`wounds::status`), not by the shader.

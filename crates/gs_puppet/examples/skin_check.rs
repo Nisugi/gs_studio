@@ -79,6 +79,14 @@ fn main() {
         possessed: wanted.contains("possess"),
         cutthroat: wanted.contains("cutthroat"),
         blinded: wanted.contains("blind"),
+        stunned: wanted.contains("stun"),
+        dazed: wanted.contains("daze"),
+        frenzied: wanted.contains("frenz"),
+        overexerted: wanted.contains("overex"),
+        calmed: wanted.contains("calm"),
+        vulnerable: wanted.contains("vulner"),
+        silenced: wanted.contains("silence"),
+        immobile: wanted.contains("immobile"),
     };
     let data = data_dir();
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");

@@ -367,11 +367,10 @@ pub fn paint_in_view(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, f
         Some((Arc::new(image), place.skin_rect(&frame)))
     } else if let Some(body) = &posed.body {
         // its modelled body, posed and rasterised by the GPU
-        // (a hit arriving: a new image every frame, at its age; invisible,
-        // hidden, possessed or blinded, its glints and shimmer or its wisps
+        // (a hit arriving: a new image every frame, at its age; under a
+        // status that moves -- glints, wisps, smoke, stars, steam, motes --
         // on a running clock, a new image a tick)
-        let fx = &key.effects;
-        let clock = if key.layers && (fx.invisible || fx.hidden || fx.possessed || fx.blinded) {
+        let clock = if key.layers && key.effects.moving() {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(GHOST_TICK_S));
             ((now / GHOST_TICK_S).floor() * GHOST_TICK_S % 3600.0) as f32
         } else {
@@ -461,7 +460,7 @@ pub const LAYERS_SPACING_FT: f32 = 0.015;
 /// cannot show: a wound, a scar, a coating, death, or a status drawn on
 /// the body (poison, disease, bleeding..., a web, ice).
 pub fn body_marked(key: &PuppetKey) -> bool {
-    key.ranks.iter().chain(&key.scars).any(|r| *r > 0) || key.coat.material > 0 || key.dead || key.effects.any()
+    key.ranks.iter().chain(&key.scars).any(|r| *r > 0) || key.coat.material > 0 || key.dead || key.effects.layered()
 }
 
 /// `key` as the doll draws it when it is a modelled body's splats
@@ -506,7 +505,8 @@ pub fn paint_state(ui: &egui::Ui, rect: egui::Rect, cache: &mut PuppetCache, fam
 /// mouth, a red ring round the feet of the vulnerable, pale motes round
 /// the calmed. Asks for the next frame while any shows. `built`: the
 /// figure is layered splats, which build its blood and its poison on it
-/// (`gs_puppet`'s `blood`, `afflict`), so it has no drops or bubbles
+/// (`gs_puppet`'s `blood`, `afflict`), its stars, its seal, its ring and
+/// its motes (`daze`, `hush`, `exposed`, `calm`), so it has none of those
 /// floated over it.
 #[allow(clippy::too_many_arguments)]
 fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool, posed: &PosedPuppet, foot: egui::Pos2, standing_px: f32, now: f64) {
@@ -533,7 +533,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool,
     let rgba = |r: u8, g: u8, b: u8, a: f32| Color32::from_rgba_unmultiplied(r, g, b, (a.clamp(0.0, 1.0) * 255.0) as u8);
     let mut shown = false;
 
-    if s.has(Status::Stunned) || s.has(Status::Dazed) {
+    if (s.has(Status::Stunned) || s.has(Status::Dazed)) && !built {
         shown = true;
         for k in 0..3 {
             let a = t * 2.4 + k as f32 * tau / 3.0;
@@ -609,7 +609,7 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool,
         }
     }
     // (a layered figure's cut throat is its own slash, bleeding)
-    if s.has(Status::Silenced) || (s.has(Status::Cutthroat) && !built) {
+    if (s.has(Status::Silenced) || s.has(Status::Cutthroat)) && !built {
         // a hush by the mouth: a small circle, struck through
         let c = pos2(head.x + head_r * 1.9, eyes_y + head_r * 0.7);
         let r = u * 0.022;
@@ -621,13 +621,13 @@ fn signs(ctx: &egui::Context, painter: &egui::Painter, s: Statuses, built: bool,
         painter.circle_stroke(c, r, light);
         painter.line_segment([pos2(c.x - r * 0.7, c.y + r * 0.7), pos2(c.x + r * 0.7, c.y - r * 0.7)], light);
     }
-    if s.has(Status::Vulnerable) {
+    if s.has(Status::Vulnerable) && !built {
         shown = true;
         let pulse = 0.5 + 0.5 * (t * 3.2).sin();
         let ring = (u * 0.14).max(half_w * 0.8);
         painter.add(Shape::ellipse_stroke(pos2(mid_x, foot.y), vec2(ring + u * 0.015 * pulse, u * 0.028 + u * 0.005 * pulse), Stroke::new(3.0, rgba(240, 40, 30, 0.6 + 0.4 * pulse))));
     }
-    if s.has(Status::Calmed) {
+    if s.has(Status::Calmed) && !built {
         shown = true;
         for k in 0..4 {
             let a = t * 0.6 + k as f32 * tau / 4.0;

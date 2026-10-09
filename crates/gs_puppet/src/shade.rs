@@ -53,14 +53,14 @@ const AURA_EVERY: usize = 6;
 
 /// Its feet as shown: the skin points low on it, the ground under them,
 /// and the middle and half size of the ground they cover.
-struct Feet {
-    low: Vec<u32>,
-    ground: f32,
-    centre: [f32; 2],
-    half: [f32; 2],
+pub(crate) struct Feet {
+    pub low: Vec<u32>,
+    pub ground: f32,
+    pub centre: [f32; 2],
+    pub half: [f32; 2],
 }
 
-fn feet(skin: &[SkinPoint], parts: &Parts) -> Option<Feet> {
+pub(crate) fn feet(skin: &[SkinPoint], parts: &Parts) -> Option<Feet> {
     let open = |s: &SkinPoint| !s.hidden && !parts.rough(s.seg);
     let ground = skin.iter().filter(|s| open(s)).map(|s| s.p[1]).min_by(f32::total_cmp)?;
     let low: Vec<u32> = (0..skin.len() as u32).filter(|&i| open(&skin[i as usize]) && skin[i as usize].p[1] < ground + 0.3).collect();
@@ -73,12 +73,12 @@ fn feet(skin: &[SkinPoint], parts: &Parts) -> Option<Feet> {
 
 impl Feet {
     /// The low skin point nearest `p`: what a thing on the ground there rides.
-    fn near(&self, skin: &[SkinPoint], p: V3) -> Option<u32> {
+    pub(crate) fn near(&self, skin: &[SkinPoint], p: V3) -> Option<u32> {
         self.low.iter().copied().min_by(|&a, &b| len(sub(skin[a as usize].p, p)).total_cmp(&len(sub(skin[b as usize].p, p))))
     }
 
     /// A point on the ground `reach` past its feet at most, by two hashes.
-    fn spot(&self, reach: f32, h1: f32, h2: f32) -> [f32; 2] {
+    pub(crate) fn spot(&self, reach: f32, h1: f32, h2: f32) -> [f32; 2] {
         let (d, a) = (h1.sqrt(), h2 * TAU);
         [self.centre[0] + (self.half[0] + reach) * d * a.cos(), self.centre[1] + (self.half[1] + reach) * d * a.sin()]
     }
