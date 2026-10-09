@@ -41,8 +41,8 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # The pose editor rewrites pose files in place, comments kept (editor::pose_edit).
 toml_edit = "0.22"
-egui ={ git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui" }
-eframe = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+egui = { workspace = true }
+eframe = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

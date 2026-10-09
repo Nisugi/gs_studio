@@ -79,6 +79,16 @@ pub mod splat;
 mod status_layers;
 mod wraps;
 pub mod uv;
+
+/// Test inputs for this crate's tests and the crates over it (their
+/// dev-dependencies turn on the `fixtures` feature): a baked humanoid
+/// puppet, frozen as published, so a test needs no data pool, no rig and
+/// no other crate's files.
+#[cfg(any(test, feature = "fixtures"))]
+pub mod fixtures {
+    /// The humanoid puppet as `gs_field` shipped it (2026-10-09).
+    pub const HUMANOID: &str = include_str!("../tests/data/humanoid.puppet.toml");
+}
 mod wounds;
 pub use wounds::MarksSheet;
 

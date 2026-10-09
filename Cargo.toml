@@ -1,6 +1,14 @@
 [workspace]
 resolver = "2"
-members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/vellum_light"]
+members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/vellum_light", "crates/hydra_contract"]
+
+# The egui fork, named once: every crate takes it from here, so contexts and
+# textures cross crate boundaries (one build of egui). Hydra pins the same
+# rev; move it only together with Hydra's.
+[workspace.dependencies]
+egui = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui" }
+egui-wgpu = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui-wgpu", default-features = false }
+eframe = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
 
 # The labeller is the hot loop behind every editor drag; keep it fast in
 # debug builds too (512 px: ~115 ms unoptimized vs ~18 ms).

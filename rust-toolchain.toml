@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned to Hydra's (G:\dev\hydra\rust-toolchain.toml): the runtime crates
+# here build into Hydra, which holds clippy at -D warnings, so both compile
+# and lint with one compiler.
+channel = "1.96.1"
+components = ["rustfmt", "clippy"]

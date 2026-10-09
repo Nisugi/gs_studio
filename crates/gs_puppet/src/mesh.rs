@@ -1292,7 +1292,7 @@ mod tests {
     /// lit by one is not dark; one facing along the bone is left alone.
     #[test]
     fn a_bound_mesh_faces_out() {
-        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid");
+        let puppet = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("shipped humanoid");
         let (mut pos, mut nrm, mut out) = (Vec::new(), Vec::new(), Vec::new());
         for s in puppet.segments.iter().filter(|s| s.kind.is_body()) {
             for st in &s.stations {
@@ -1364,7 +1364,7 @@ mod tests {
 
     #[test]
     fn weights_from_a_tool_are_read_by_bone_name() {
-        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid");
+        let puppet = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("shipped humanoid");
         let text = bones_text(&puppet);
         let names: Vec<&str> = text.lines().filter(|l| l.starts_with("bone ")).map(|l| l.split_whitespace().nth(1).unwrap()).collect();
         assert!(names.len() > 5, "{text}");
@@ -1425,7 +1425,7 @@ mod tests {
 
     #[test]
     fn a_frame_puts_vertices_where_posing_them_does() {
-        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid");
+        let puppet = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("shipped humanoid");
         // a few points about the body: by the chest, an elbow, a knee
         let at = |name: &str, t: f32| {
             let seg = puppet.segments.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("no {name}"));
@@ -1462,7 +1462,8 @@ mod tests {
         let cloud = SplatBody::bind(&body.bound, vec![g(near), g([40.0, 40.0, 40.0])]);
         assert_eq!(cloud.len(), 1, "the stray is dropped");
         assert_eq!(cloud.weights[0], body.bound.weights[1]);
-        assert_eq!(cloud.rest[0].n, body.bound.mesh.nrm[1]);
+        // (the mesh's facing round it, blended: here every vertex faces +z)
+        assert!(len(sub(cloud.rest[0].n, body.bound.mesh.nrm[1])) < 1e-5, "{:?}", cloud.rest[0].n);
         // a made cloud keeps its facing, and its strays
         let mut made = g(near);
         made.n = [0.0, 1.0, 0.0];
@@ -1505,7 +1506,7 @@ mod tests {
 
     #[test]
     fn rings_are_measured_from_the_mesh() {
-        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid");
+        let puppet = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("shipped humanoid");
         // a mesh that is the puppet's own rings, a third wider and half as deep
         let mut mesh = Mesh::default();
         for s in puppet.segments.iter().filter(|s| s.kind.is_body() && !s.hidden) {

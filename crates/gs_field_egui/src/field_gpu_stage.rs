@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     fn humanoid() -> gs_puppet::Puppet {
-        gs_puppet::Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+        gs_puppet::Puppet::from_baked_toml(gs_puppet::fixtures::HUMANOID).expect("shipped humanoid")
     }
 
     /// The review's case: a humanoid with a boss's outline, framed at 300

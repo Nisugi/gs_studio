@@ -1,0 +1,20 @@
+[package]
+name = "hydra_contract"
+version = "0.1.0"
+# Hydra's edition: its adapter code is copied here as it is written there.
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Hydra's calls into gs_studio's runtime crates, as Hydra makes them, compiled and tested here: a change that would break Hydra's build fails gs_studio's first."
+
+[lib]
+doctest = false
+
+[dependencies]
+gs_field = { path = "../gs_field" }
+gs_field_egui = { path = "../gs_field_egui" }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

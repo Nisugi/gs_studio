@@ -14,10 +14,15 @@ rig_bake = { path = "../rig_bake" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # Only `paint.rs` touches egui; everything else is egui-free.
-egui = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "egui" }
+egui = { workspace = true }
 # Pure Rust zstd decoder (Android-safe, no C): the `.spz` splat clouds.
 ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-eframe = { git = "https://github.com/Nisugi/egui.git", rev = "ed8b2649fd4b1c3351e38988b045f1bf33335f38", package = "eframe", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+eframe = { workspace = true }
 png = "0.17"
+
+[features]
+# `gs_puppet::fixtures`: test inputs for the crates over this one
+# (turned on from their dev-dependencies only).
+fixtures = []

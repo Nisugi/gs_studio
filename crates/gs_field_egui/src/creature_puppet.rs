@@ -3858,7 +3858,7 @@ mod tests {
     #[test]
     fn a_hurt_body_is_made_off_the_frame() {
         use gs_puppet::mesh::{BodyMesh, BoundMesh, Mesh, Paint, SplatBody};
-        let puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).unwrap();
+        let puppet = Puppet::from_baked_toml(gs_puppet::fixtures::HUMANOID).unwrap();
         // a stand-in body: its mesh and its trained cloud are the made skin's dots
         let cloud = layer_cloud(&puppet, &gs_puppet::splat::SplatParams::default());
         let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
@@ -3919,7 +3919,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("body.obj"), "v -0.5 0 0\nv 0.5 0 0\nv 0 6 0\nvt 0 0\nvt 1 0\nvt 0.5 1\nf 1/1 2/2 3/3\n").unwrap();
         image::RgbaImage::from_pixel(2, 2, image::Rgba([200, 150, 120, 255])).save(dir.join("color.png")).unwrap();
-        let mut puppet = Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).unwrap();
+        let mut puppet = Puppet::from_baked_toml(gs_puppet::fixtures::HUMANOID).unwrap();
         puppet.family = format!("body_load_test_{}", std::process::id());
         set_body_dir(&puppet.family, Some(dir.clone()));
         assert!(matches!(body_now(&puppet), BodyNow::Loading), "first asked: loading");

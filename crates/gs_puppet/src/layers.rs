@@ -2289,7 +2289,7 @@ mod tests {
     use crate::{Pose, PoseSet, SHIPPED_POSES};
 
     fn humanoid() -> Puppet {
-        Puppet::from_baked_toml(include_str!("../../gs_field/data/puppets/humanoid.puppet.toml")).expect("shipped humanoid")
+        Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("shipped humanoid")
     }
 
     fn count(dots: &[Dot], layer: Layer) -> usize {
