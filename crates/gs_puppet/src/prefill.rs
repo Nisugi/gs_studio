@@ -1418,4 +1418,104 @@ mod tests {
         assert!(seen * 20 < inside, "the front painting barely reaches the back: {seen} of {inside}");
         assert!(back_blank.chunks_exact(4).filter(|px| px[0] == 255).count() * 10 > inside * 9);
     }
+
+    #[test]
+    fn a_front_and_a_back_painting_land_on_the_front_and_the_back() {
+        use crate::{prefill, Painting, Paintings};
+        let p = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("the humanoid");
+        let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+        let front = outlines.get("humanoid", rig::View::Front).map(|e| rig_bake::rasterize(&e.outline(), crate::MASK_PX)).expect("front");
+        let g = front.grid;
+        let solid = |c: [u8; 3]| -> Vec<u8> { (0..g.w * g.h).flat_map(|_| [c[0], c[1], c[2], 255]).collect() };
+        let (red, green) = (solid([255, 0, 0]), solid([0, 255, 0]));
+        let paintings = Paintings {
+            front_grid: Some(g),
+            front: Some(Painting { rgba: &red, w: g.w, h: g.h }),
+            back: Some(Painting { rgba: &green, w: g.w, h: g.h }),
+            ..Paintings::default()
+        };
+        let layout = crate::UvLayout::new(&p, 30.0);
+        let sheet = prefill(&p, &layout, &paintings);
+        let chest = p.segments.iter().position(|s| s.part.as_deref() == Some("chest")).expect("a chest");
+        let s = &p.segments[chest];
+        let k = s.stations.len() as f32 / 2.0;
+        // The ring angles facing +z (front) and -z (back).
+        let facing = |z: f32| z * s.axis_d[2].signum() * std::f32::consts::FRAC_PI_2;
+        let colour = |theta: f32| {
+            let at = layout.locate(chest, k, theta).expect("on the sheet");
+            let i = (at[1] as usize * layout.w + at[0] as usize) * 4;
+            [sheet[i], sheet[i + 1], sheet[i + 2], sheet[i + 3]]
+        };
+        assert!(s.axis_d[2].abs() > 0.9, "the chest's depth axis is front-back");
+        assert_eq!(colour(facing(1.0)), [255, 0, 0, 255], "front of the chest");
+        // (The trunk's seam runs down the middle of its back: look just beside it.)
+        assert_eq!(colour(facing(-1.0) + 0.3), [0, 255, 0, 255], "back of the chest");
+        // Nothing on the sheet is left unpainted inside a patch.
+        let holes = (0..layout.h)
+            .flat_map(|y| (0..layout.w).map(move |x| (x, y)))
+            .filter(|&(x, y)| layout.address([x as f32 + 0.5, y as f32 + 0.5]).is_some() && sheet[(y * layout.w + x) * 4 + 3] == 0)
+            .count();
+        assert_eq!(holes, 0);
+    }
+
+    /// A normal sheet: a flat map projects to no deviation; a map leaning to
+    /// the picture's right leans the sheet's rest-space normals toward +x on
+    /// the chest, and the skin's normals (what lamps light) with them.
+    #[test]
+    fn a_normal_sheet_leans_the_skin_where_the_map_leans() {
+        use crate::prefill::{Painting, Paintings};
+        use crate::uv::{decode_normal, UvLayout};
+        let puppet = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("the humanoid");
+        let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
+        let grid = |view: rig::View| outlines.get("humanoid", view).map(|e| rig_bake::rasterize(&e.outline(), crate::MASK_PX).grid);
+        let (front_grid, side_grid) = (grid(rig::View::Front), grid(rig::View::Side));
+        let (w, h) = (front_grid.unwrap().w, front_grid.unwrap().h);
+        let flat: Vec<u8> = [128, 128, 255, 255].iter().copied().cycle().take(w * h * 4).collect();
+        // Leaning 45 degrees to the right: (0.707, 0, 0.707).
+        let lean: Vec<u8> = [218, 128, 218, 255].iter().copied().cycle().take(w * h * 4).collect();
+        let layout = UvLayout::fit(&puppet, 512);
+        let sheet = |map: &Vec<u8>| {
+            let maps = Paintings { front_grid, side_grid, front: Some(Painting { rgba: map, w, h }), side: None, back: None };
+            crate::prefill::prefill_normals(&puppet, &layout, &maps)
+        };
+        let (flat_sheet, lean_sheet) = (sheet(&flat), sheet(&lean));
+        let painted = flat_sheet.chunks(4).filter(|p| p[3] == 255).count();
+        assert!(painted > 1000, "{painted} pixels reached by the front map");
+        let mean = |sheet: &Vec<u8>| {
+            let (mut sum, mut n) = ([0.0f32; 3], 0.0);
+            for p in sheet.chunks(4).filter(|p| p[3] == 255) {
+                for k in 0..3 {
+                    sum[k] += decode_normal(p[k]);
+                }
+                n += 1.0;
+            }
+            sum.map(|v| v / n)
+        };
+        let f = mean(&flat_sheet);
+        assert!(f.iter().all(|v| v.abs() < 0.02), "flat map, no deviation: {f:?}");
+        let l = mean(&lean_sheet);
+        assert!(l[0] > 0.4 && l[1].abs() < 0.05 && l[2] < -0.1, "leans +x, away from +z: {l:?}");
+
+        // The skin's normals lean with it: over the chest, the surface faces
+        // more to +x with the leaning sheet than without.
+        let posed = puppet.pose(&crate::Pose::default());
+        let cam = crate::Camera::framing(puppet.height * 1.2, [200.0, 200.0]);
+        let project = |p: crate::math::V3| cam.project(p);
+        let rgba = vec![200u8; layout.w * layout.h * 4];
+        let bare = crate::Texture { layout: layout.clone(), rgba: rgba.clone(), normal: None };
+        let leaning = crate::Texture { layout: layout.clone(), rgba, normal: Some(lean_sheet) };
+        let look = crate::Look::default();
+        let (_, s0) = posed.skin_surface(&project, &look, Some(&bare), crate::skin::Effects::default());
+        let (skin, s1) = posed.skin_surface(&project, &look, Some(&leaning), crate::skin::Effects::default());
+        let (mut x0, mut x1, mut n) = (0.0f32, 0.0f32, 0.0f32);
+        for i in 0..skin.w * skin.h {
+            if let (Some(a), Some(b)) = (s0.normal_at(i), s1.normal_at(i)) {
+                x0 += a[0];
+                x1 += b[0];
+                n += 1.0;
+            }
+        }
+        assert!(n > 100.0);
+        assert!(x1 / n > x0 / n + 0.04, "the leaning sheet turns the skin toward +x: {} vs {}", x1 / n, x0 / n);
+    }
 }

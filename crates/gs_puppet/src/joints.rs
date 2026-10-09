@@ -146,9 +146,7 @@ mod tests {
     use crate::{Pose, PoseSet, SHIPPED_POSES};
 
     fn humanoid() -> Puppet {
-        let rig = rig::Rig::from_toml(include_str!("../../../data/rigs/humanoid.rig.toml")).expect("humanoid rig");
-        let outlines = rig::Outlines::from_json(include_str!("../../../data/outlines.json")).expect("outlines");
-        Puppet::build(&rig, &outlines).expect("builds")
+        Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("the humanoid")
     }
 
     /// A knee shares its bend: the rings either side of it turn about half

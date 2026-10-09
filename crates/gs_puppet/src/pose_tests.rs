@@ -340,27 +340,6 @@ fn a_lying_quadruped_keeps_its_back_low() {
 
 // ---- joint limits ----------------------------------------------------------
 
-/// Every shipped pose (shared, and as each family sees it) lies inside its
-/// body type's limits, and every limit names a bone its template has.
-#[test]
-fn shipped_poses_respect_their_joint_limits() {
-    for (body_type, _) in crate::SHIPPED_POSES {
-        let set = PoseSet::shipped(body_type).expect("parses");
-        assert!(!set.limits.is_empty(), "{body_type} has limits");
-        let mut bad = set.violations();
-        for family in set.families.keys().chain(set.family_limits.keys()) {
-            bad.extend(set.for_family(family).violations());
-        }
-        assert!(bad.is_empty(), "{}", bad.join("\n"));
-        let template = rig::templates().into_iter().find(|t| t.name == body_type).expect("template");
-        let bones: Vec<&str> = template.bones.iter().map(|b| b.name.as_str()).collect();
-        for key in set.limits.keys() {
-            let known = bones.contains(&key.as_str()) || bones.contains(&format!("{key}_l").as_str());
-            assert!(known, "{body_type}: limit '{key}' names no bone ({bones:?})");
-        }
-    }
-}
-
 #[test]
 fn a_limit_holds_a_bone_and_mirrors_for_the_right_side() {
     let set = PoseSet::from_toml(

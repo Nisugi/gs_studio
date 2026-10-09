@@ -63,6 +63,7 @@ pub mod hang;
 pub mod hung;
 pub mod joints;
 pub mod layers;
+mod layering_tests;
 pub mod math;
 pub mod measure;
 pub mod mesh;
