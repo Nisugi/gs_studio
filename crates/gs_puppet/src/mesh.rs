@@ -347,6 +347,14 @@ impl BoundMesh {
     /// The skeleton, the segments and their rings' count and places along
     /// the bones stay: a pose, a wound's address and the baked format mean
     /// what they did. A ring with too few vertices keeps its measure.
+    ///
+    /// A trunk ring between an arm's elbow and its shoulder ends sideways
+    /// at that shoulder joint: what lies past it is the arm, whatever the
+    /// weights say. A raised arm's inside, where the sleeve meets the side,
+    /// is heat-weighted to the chest on some meshes (half_elf_male's, out
+    /// to 0.9 ft), and a chest measured round it was so wide (0.73 ft a
+    /// side, against the half-elf female's 0.47) that the arm could not
+    /// hang beside it (`hang`) and stood out as modelled.
     pub fn measured(&self, puppet: &Puppet) -> Puppet {
         let mut out = puppet.clone();
         let mut of_seg: Vec<Vec<u32>> = vec![Vec::new(); puppet.segments.len()];
@@ -354,6 +362,13 @@ impl BoundMesh {
             of_seg[*s].push(v as u32);
         }
         let slab = crate::puppet::STATION_STEP_FT * 0.6;
+        // each arm's shoulder joint, and its elbow's height
+        let shoulders: Vec<(V3, f32)> = puppet
+            .segments
+            .iter()
+            .filter(|s| s.kind == crate::Kind::Limb && s.chain_index == 0 && s.part.as_deref().is_some_and(|p| p.ends_with("Arm")))
+            .map(|s| (s.head, s.tail[1]))
+            .collect();
         for (i, seg) in out.segments.iter_mut().enumerate() {
             if !seg.kind.is_body() || seg.hidden || of_seg[i].len() < RING_MIN_VERTICES {
                 continue;
@@ -361,12 +376,24 @@ impl BoundMesh {
             let axis = norm_or(sub(seg.tail, seg.head), [0.0, 1.0, 0.0]);
             let (aw, ad) = (seg.axis_w, seg.axis_d);
             let mut found: Vec<Option<(V3, f32, f32)>> = Vec::with_capacity(seg.stations.len());
+            let trunk = seg.kind == crate::Kind::Trunk;
             for st in &seg.stations {
+                // how far sideways a trunk ring here reaches at most: to the
+                // shoulder joint of an arm beside it
+                let walls: Vec<f32> = if trunk {
+                    shoulders.iter().filter(|(at, elbow)| st.c[1] > *elbow && st.c[1] < at[1]).map(|(at, _)| dot(sub(*at, st.c), aw)).collect()
+                } else {
+                    Vec::new()
+                };
                 let (mut us, mut vs): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
                 for &v in &of_seg[i] {
                     let e = sub(self.mesh.pos[v as usize], st.c);
                     if dot(e, axis).abs() <= slab {
-                        us.push(dot(e, aw));
+                        let u = dot(e, aw);
+                        if walls.iter().any(|&w| (w > 0.0 && u > w) || (w < 0.0 && u < w)) {
+                            continue;
+                        }
+                        us.push(u);
                         vs.push(dot(e, ad));
                     }
                 }
