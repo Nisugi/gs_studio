@@ -21,8 +21,46 @@ use crate::state::{DollState, Status, Statuses};
 use gs_field_egui::puppet_cache::{body_size_step, size_step, Bare, PoseChoice, PosedPuppet, PuppetCache, PuppetKey, PuppetPlacement};
 use gs_field_egui::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage, Piece, Placement};
 
-/// The cache a doll is drawn from, and the key it is drawn by.
-pub use gs_field_egui::puppet_cache::{PuppetCache as DollCache, PuppetKey as DollKey};
+/// The key a doll is drawn by.
+pub use gs_field_egui::puppet_cache::PuppetKey as DollKey;
+
+/// The doll's puppet cache: a [`PuppetCache`] over the installed figures
+/// ([`DollSource`](crate::source::DollSource)), one per egui context and
+/// apart from the creature field's -- the doll loads nothing of the
+/// field's, and neither's figures push out the other's. It is drawn from
+/// as the cache it holds ([`paint_in_view`] takes that).
+pub struct DollCache(PuppetCache);
+
+impl DollCache {
+    /// The doll's cache in this egui context (made on first use).
+    pub fn shared(ctx: &egui::Context) -> Arc<Mutex<DollCache>> {
+        ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("injury_doll::cache"), || Arc::new(Mutex::new(DollCache::new()))).clone())
+    }
+
+    /// A cache over the pool's figures.
+    pub fn new() -> Self {
+        DollCache(PuppetCache::over(crate::source::DollSource::default()))
+    }
+}
+
+impl Default for DollCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::ops::Deref for DollCache {
+    type Target = PuppetCache;
+    fn deref(&self) -> &PuppetCache {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for DollCache {
+    fn deref_mut(&mut self) -> &mut PuppetCache {
+        &mut self.0
+    }
+}
 
 /// The doll's view of the pass.
 pub const DOLL_VIEW: u64 = 0xD011;

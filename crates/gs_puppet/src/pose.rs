@@ -839,8 +839,12 @@ impl PoseSet {
 
     /// The embedded copy of `data/poses/<body_type>.toml`.
     pub fn shipped(body_type: &str) -> Option<PoseSet> {
-        let (_, text) = SHIPPED_POSES.iter().find(|(b, _)| *b == body_type)?;
-        PoseSet::from_toml(text).ok()
+        PoseSet::from_toml(PoseSet::shipped_toml(body_type)?).ok()
+    }
+
+    /// [`PoseSet::shipped`]'s file, unparsed.
+    pub fn shipped_toml(body_type: &str) -> Option<&'static str> {
+        SHIPPED_POSES.iter().find(|(b, _)| b.eq_ignore_ascii_case(body_type.trim())).map(|(_, text)| *text)
     }
 
     pub fn get(&self, name: &str) -> Option<&Pose> {

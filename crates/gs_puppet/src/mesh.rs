@@ -1227,16 +1227,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&form);
         std::fs::create_dir_all(&master).unwrap();
         assert_eq!(BodyMeta::read(&master), BodyMeta::default(), "no file: nothing said");
-        std::fs::write(form.join("doll.toml"), "label = \"Half-elf\"
-made_splats = 300000
-arms_hang = 14
-").unwrap();
+        std::fs::write(form.join("doll.toml"), "label = \"Half-elf\"\nmade_splats = 300000\narms_hang = 14\n").unwrap();
         assert_eq!(BodyMeta::read(&master), BodyMeta { made_splats: Some(300000), arms_hang: Some(14.0) }, "the form's file, over the body");
-        std::fs::write(master.join("doll.toml"), "draw = \"made\"
-").unwrap();
+        std::fs::write(master.join("doll.toml"), "draw = \"made\"\n").unwrap();
         assert_eq!(BodyMeta::read(&master), BodyMeta { made_splats: None, arms_hang: Some(14.0) }, "its own file first; the arms where one sets them");
-        std::fs::write(master.join("doll.toml"), "made_splats = \"many\"
-").unwrap();
+        std::fs::write(master.join("doll.toml"), "made_splats = \"many\"\n").unwrap();
         assert_eq!(BodyMeta::read(&master).made_splats, None, "a file that does not parse says nothing");
         std::fs::remove_dir_all(&form).ok();
     }

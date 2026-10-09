@@ -6,8 +6,9 @@
 //! it ([`sky`]) and draws it ([`view::paint_in_view`]) with the GPU pass set
 //! up once ([`gpu::init`]).
 //!
-//! The doll's own code is here: its figures ([`roster`]), its light
-//! ([`sky`]), the character's state ([`state`]) and the view ([`view`]).
+//! The doll's own code is here: its figures ([`roster`]) and where its
+//! cache reads them ([`source`]), its light ([`sky`]), the character's
+//! state ([`state`]) and the view ([`view`]).
 //! What it shares with the creature field -- the base data, the puppet
 //! cache, the GPU pass -- it reaches in `gs_field` / `gs_field_egui` until
 //! those leave for crates of their own (the split's S7); the paths here
@@ -15,6 +16,7 @@
 
 pub mod roster;
 pub mod sky;
+pub mod source;
 pub mod state;
 pub mod view;
 

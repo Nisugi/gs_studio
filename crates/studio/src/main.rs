@@ -44,6 +44,7 @@ mod calib;
 mod cli;
 mod data_home;
 mod data_root;
+mod doll_source;
 mod editor;
 mod notes;
 mod fs_cache;

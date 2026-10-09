@@ -1697,3 +1697,7 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   rather than borrow `doll_view::layered_if_marked`.
 - `doll_view` left for the injury doll's crate (`injury_doll::view`), with
   the doll's figures, sky and state; the field has no doll in it.
+- The injury doll draws from a cache of its own (`injury_doll::view::DollCache`,
+  over `injury_doll::source::DollSource`: the pool's installed figures
+  alone), not the field's `PuppetCache::shared`; studio's Doll window from
+  one over its pool figures, then the field's forms.

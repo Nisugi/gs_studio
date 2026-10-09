@@ -139,8 +139,12 @@ fn install_bodies_of(data: &Path, bodies_dir: &Path, keep: &dyn Fn(&str) -> bool
                 }
             }
         }
-        // how the injury doll shows it (`injury_doll::roster`), kept with the form
+        // how the injury doll shows it (`injury_doll::roster`), and its
+        // puppet, kept with the form: the folder is the whole figure
+        // (`injury_doll::source`; the puppet goes to `global/puppets` too,
+        // for a client from before the split)
         files.push((data.join("meshes").join(&body.form).join("doll.toml"), dst_dir.join("doll.toml")));
+        files.push((data.join("meshes").join(&body.form).join("puppet.toml"), dst_dir.join("puppet.toml")));
         if files.iter().any(|(s, d)| s.is_file() && !same(s, d)) {
             std::fs::create_dir_all(&dst_dir)?;
         }
@@ -239,6 +243,9 @@ race = \"Half-elf\"
         assert_eq!(there, ["grid_figure", "half_elf_male"]);
         assert!(pool.join("global/puppets/half_elf_male.puppet.toml").is_file() && !pool.join("global/puppets/dwarf_male.puppet.toml").exists());
         assert!(pool.join("global/bodies/half_elf_male/splat.spz").is_file() && pool.join("global/bodies/half_elf_male/doll.toml").is_file());
+        // the figure's folder is the whole figure: its puppet with it
+        assert_eq!(std::fs::read_to_string(pool.join("global/bodies/half_elf_male/puppet.toml")).unwrap(), "family = \"half_elf_male\"\n");
+        assert_eq!(injury_doll::source::DollSource::at(pool.join("global")).baked_toml("half_elf_male").as_deref(), Some("family = \"half_elf_male\"\n"));
         // its cloud is how a client draws it: no sheets, and old ones go
         std::fs::write(data.join("meshes/half_elf_male/master/color.png"), "png").unwrap();
         std::fs::write(pool.join("global/bodies/half_elf_male/normal.png"), "old").unwrap();

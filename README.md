@@ -980,10 +980,13 @@ an *x* to put it back:
   a form's own puppet -- its rings measured from the mesh -- in
   `<data>/meshes/<form>/puppet.toml`, installed into the pool as that
   form when the app starts. A form that brings its own puppet has its
-  largest body installed too, into `<pool>/global/bodies/<form>/`
-  (`bodies::install_bodies`; the pool keeps only the source's one cloud, `.spz` or `.ply`, so a retrain's new cloud is never shadowed by an old one), and
+  largest body installed too, with that puppet and its `doll.toml`, into
+  `<pool>/global/bodies/<form>/` -- the folder is the whole figure, all a
+  doll reads (`injury_doll::source::DollSource`; the puppet still goes to
+  `global/puppets/` as well, for a client from before the split;
+  `bodies::install_bodies`: the pool keeps only the source's one cloud, `.spz` or `.ply`, so a retrain's new cloud is never shadowed by an old one), and
   any doll -- this window's or a game client's (`injury_doll::view`) -- draws such
-  a form as its trained splats by itself (`creature_puppet::has_body`):
+  a form as its trained splats by itself (`PuppetCache::has_body`):
   the plan is `docs/gpu-doll-plan.md`. A body's pose is bones and a draw
   order, not pixels, so it is drawn at the window's own size, up to
   760 px tall (`BODY_SIZE_STEPS`; the smooth skin stops at 360), and a

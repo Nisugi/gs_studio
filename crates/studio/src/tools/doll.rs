@@ -113,7 +113,7 @@ impl Default for DollWindow {
     fn default() -> Self {
         DollWindow {
             open: false,
-            family: "humanoid".into(),
+            family: String::new(),
             hold: String::new(),
             ranks: vec![0; gs_field::skins::DOLL_PARTS.len()],
             scars: vec![0; gs_field::skins::DOLL_PARTS.len()],
@@ -149,6 +149,13 @@ impl Default for DollWindow {
             hit_crit: 5,
         }
     }
+}
+
+/// The Doll window's puppet cache: over the pool's figures, then the
+/// field's forms (`crate::doll_source::StudioDollSource`), apart from the
+/// stage's cache.
+fn doll_cache(ctx: &egui::Context) -> std::sync::Arc<std::sync::Mutex<PuppetCache>> {
+    ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("gs_studio::doll_cache"), || std::sync::Arc::new(std::sync::Mutex::new(PuppetCache::over(crate::doll_source::StudioDollSource::default())))).clone())
 }
 
 /// `GS_STUDIO_DOLL_BODY_AS=mesh|trained|made` (made where it does not say).
@@ -198,6 +205,11 @@ impl DollWindow {
         // body there (body.obj, color.png, weights.txt), posed on the GPU
         if let Some(dir) = std::env::var_os("GS_STUDIO_DOLL_BODY").filter(|v| !v.is_empty()) {
             w.body_named = Some(("humanoid".to_string(), dir.into()));
+            // the humanoid wears it: drawn in place of the roster's first
+            if !w.family_named {
+                w.family = "humanoid".into();
+                w.family_named = true;
+            }
             w.modelled = true;
             w.body_cloud = body_as_env();
         }
@@ -327,7 +339,7 @@ impl DollWindow {
 
     /// Hand the figure's chosen body to the puppet cache when it changes.
     fn follow_body(&mut self, ctx: &egui::Context) {
-        let name_body = |form: &str, dir: std::path::PathBuf| PuppetCache::shared(ctx).lock().unwrap_or_else(|e| e.into_inner()).set_body_dir(form, Some(dir));
+        let name_body = |form: &str, dir: std::path::PathBuf| doll_cache(ctx).lock().unwrap_or_else(|e| e.into_inner()).set_body_dir(form, Some(dir));
         if let Some((form, dir)) = self.body_named.take() {
             name_body(&form, dir);
         }
@@ -391,7 +403,7 @@ impl DollWindow {
                 }
                 drag.on_hover_text("Drag to turn it round");
                 let family: Arc<str> = if self.hold.trim().is_empty() { Arc::from(self.family.as_str()) } else { Arc::from(format!("{}@{}", self.family, self.hold.trim())) };
-                let cache = PuppetCache::shared(ctx);
+                let cache = doll_cache(ctx);
                 let started = std::time::Instant::now();
                 let drawn = {
                     let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -402,7 +414,8 @@ impl DollWindow {
                     eprintln!("doll frame {} {:.2} ms", self.frames, started.elapsed().as_secs_f64() * 1000.0);
                 }
                 if !drawn {
-                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, format!("no puppet for '{family}'"), egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
+                    let said = if family.is_empty() { "no figure installed: Save a form with a modelled body".to_string() } else { format!("no puppet for '{family}'") };
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, said, egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
                 }
                 ui.vertical(|ui| {
                     egui::ScrollArea::vertical().max_height(tall).show(ui, |ui| self.controls(ui));
