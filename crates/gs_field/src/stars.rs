@@ -13,7 +13,7 @@
 //! turns the way the sky does, upright at its highest and leaning as it
 //! rises and sets ([`tilt`]).
 
-use crate::lighting::{moon_light, moon_sky_arc, night_share_in, Sky, MOON_UP_HOURS};
+use crate::sky_light::{moon_light, moon_sky_arc, night_share_in, Sky, MOON_UP_HOURS};
 use serde::Deserialize;
 use std::sync::OnceLock;
 
@@ -136,7 +136,7 @@ pub fn constellations_up(game_hour: f32, year: f32, facing: Option<f32>) -> Vec<
 }
 
 /// The latitude the band's arc is seen from, degrees: the moons' arc
-/// (highest at [`crate::lighting::MOON_PEAK_DEG`], 55) is the sky's equator
+/// (highest at [`crate::sky_light::MOON_PEAK_DEG`], 55) is the sky's equator
 /// seen from 35 north.
 const LATITUDE_DEG: f32 = 35.0;
 

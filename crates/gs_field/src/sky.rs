@@ -34,7 +34,7 @@
 //!   drawn at random from its kind's pool, so a line says what falls, not
 //!   how hard (`data/sky.toml`).
 
-use crate::lighting::Sky;
+use crate::sky_light::Sky;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::f32::consts::TAU;
@@ -702,10 +702,10 @@ mod tests {
         assert!((rise - 5.5).abs() < 0.1 && (set - 20.5).abs() < 0.1, "{rise} {set}");
         let (rise, set) = sun_hours(1_797_811_200.0); // 2026-12-21
         assert!((rise - 8.4).abs() < 0.2 && (set - 17.6).abs() < 0.2, "{rise} {set}");
-        let sky = crate::lighting::Sky { sun: Some((8.0, 17.5)), ..Default::default() };
+        let sky = crate::sky_light::Sky { sun: Some((8.0, 17.5)), ..Default::default() };
         let b = sky.bounds();
         assert_eq!((b.dawn, b.day, b.dusk, b.night), (7.0, 9.0, 16.5, 18.5));
-        assert!(crate::lighting::night_share_in(18.0, b) > crate::lighting::night_share(18.0), "a winter evening is darker at six");
+        assert!(crate::sky_light::night_share_in(18.0, b) > crate::sky_light::night_share(18.0), "a winter evening is darker at six");
     }
 
     /// Each reply reads to its moon, phase and place; an unknown line, and

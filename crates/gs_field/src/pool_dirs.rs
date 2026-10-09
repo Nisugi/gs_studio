@@ -104,6 +104,20 @@ pub fn global_image_category_dir(category: &str) -> Result<PathBuf> {
     Ok(global_images_dir()?.join(category))
 }
 
+/// Write (or replace) the embedded metadata chunk in a PNG, atomically.
+/// Existing `vellum-meta` chunks are removed; the new chunk lands after
+/// IHDR so metadata-unaware tools that truncate trailing chunks still
+/// keep it. Pixels and all other chunks pass through untouched.
+pub fn write_png_meta(path: &Path, meta: &str) -> anyhow::Result<()> {
+    let bytes = std::fs::read(path)
+        .map_err(|err| anyhow::anyhow!("cannot read {}: {}", path.display(), err))?;
+    let updated = crate::png_meta::write_embedded_bytes(&bytes, meta)
+        .ok_or_else(|| anyhow::anyhow!("{} is not a valid PNG", path.display()))?;
+    write_atomic(path, updated)
+        .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod atomic_tests {
     use super::write_atomic;

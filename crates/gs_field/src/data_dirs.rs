@@ -38,8 +38,9 @@ static BASE_DIR_OVERRIDE: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock
 
 /// Point every path in this module at `dir` for the rest of the process,
 /// ahead of `VELLUM_FE_DIR` and the home-directory default. May be called
-/// again to move it. Callers that cache scans ([`crate::pool`]) should
-/// `pool::invalidate_cache()` after moving it.
+/// again to move it. A cache of what is under it keys on
+/// [`base_generation`], which this bumps (the field's image pool also wants
+/// its `pool::invalidate_cache()`).
 pub fn set_base_dir(dir: PathBuf) {
     *BASE_DIR_OVERRIDE.write().unwrap_or_else(|e| e.into_inner()) = Some(dir);
     BASE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

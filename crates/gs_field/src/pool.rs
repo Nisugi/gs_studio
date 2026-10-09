@@ -1183,7 +1183,7 @@ fn write_sidecar_tables(
         .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
     // The listing cache carries has_sidecar; a fresh sidecar must show now.
     invalidate_cache();
-    if let Err(err) = crate::png_meta::write_embedded(image_abs_path, &toml) {
+    if let Err(err) = crate::pool_dirs::write_png_meta(image_abs_path, &toml) {
         tracing::debug!(
             "not embedding metadata in {}: {}",
             image_abs_path.display(),
@@ -1689,7 +1689,7 @@ mod tests {
         std::fs::write(&image, crate::png_meta::test_png::tiny_png_bytes()).unwrap();
 
         // A shared image arrives with metadata inside and no sidecar file.
-        crate::png_meta::write_embedded(
+        crate::pool_dirs::write_png_meta(
             &image,
             "kind = \"creature\"\nsize = 2.0\n[anchors]\nfeet = [0.5, 0.9]\n",
         )

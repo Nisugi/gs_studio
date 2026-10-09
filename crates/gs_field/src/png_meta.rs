@@ -50,21 +50,8 @@ pub fn read_text_bytes(bytes: &[u8], keyword: &str) -> Option<String> {
     None
 }
 
-/// Write (or replace) the embedded metadata chunk in a PNG, atomically.
-/// Existing `vellum-meta` chunks are removed; the new chunk lands after
-/// IHDR so metadata-unaware tools that truncate trailing chunks still
-/// keep it. Pixels and all other chunks pass through untouched.
-pub fn write_embedded(path: &Path, meta: &str) -> anyhow::Result<()> {
-    let bytes = std::fs::read(path)
-        .map_err(|err| anyhow::anyhow!("cannot read {}: {}", path.display(), err))?;
-    let updated = write_embedded_bytes(&bytes, meta)
-        .ok_or_else(|| anyhow::anyhow!("{} is not a valid PNG", path.display()))?;
-    crate::pool_dirs::write_atomic(path, updated)
-        .map_err(|err| anyhow::anyhow!("cannot write {}: {}", path.display(), err))?;
-    Ok(())
-}
 
-/// In-memory form of [`write_embedded`], for callers building archives
+/// In-memory form of `pool_dirs::write_png_meta`, for callers building archives
 /// (skin-pack export bakes each PNG's sidecar in before zipping). None
 /// when the bytes are not a valid PNG.
 pub fn write_embedded_bytes(bytes: &[u8], meta: &str) -> Option<Vec<u8>> {
