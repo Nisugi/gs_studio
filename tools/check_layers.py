@@ -17,8 +17,8 @@ AUTHORING = ["rig", "rig_bake", "gs_puppet_author", "gs_calibrators", "studio"]
 RULES = {
     # Hydra's dependency: the doll, its base and nothing of the field or of authoring
     "injury_doll": AUTHORING + ["include_dir", "regex", "toml_edit", "serde_json", "gs_field", "gs_field_egui", "creature_field", "creature_field_egui", "eframe"],
-    # what Hydra's doll pulls in today (its calls, through gs_field and gs_field_egui)
-    "hydra_contract": AUTHORING + ["include_dir"],
+    # Hydra's calls: what Hydra's doll pulls in, through injury_doll
+    "hydra_contract": AUTHORING + ["include_dir", "gs_field", "gs_field_egui"],
     "creature_field_egui": AUTHORING + ["injury_doll"],
     "creature_field": AUTHORING + ["injury_doll", "egui", "wgpu"],
     "gs_render": AUTHORING + ["include_dir", "gs_field", "creature_field"],

@@ -1,0 +1,16 @@
+[package]
+name = "injury_doll"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The 3D injury doll a game client draws: its figures, its sky, the character's state, and the doll view. Hydra's only dependency on gs_studio."
+
+[lib]
+doctest = false
+
+# For now a facade over gs_field / gs_field_egui (docs/crate-split-plan.md,
+# S1): its paths are the ones the doll keeps, and its code moves in behind
+# them (S6, S7), so a client changes its imports once.
+[dependencies]
+gs_field = { path = "../gs_field" }
+gs_field_egui = { path = "../gs_field_egui" }

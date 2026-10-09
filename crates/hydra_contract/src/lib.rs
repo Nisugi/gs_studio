@@ -15,16 +15,15 @@
 
 use std::sync::Arc;
 
-use gs_field::doll_roster::DollRace;
-use gs_field::doll_sky::{DollSky, display, doll_sky, game_doll_sky_at, hex_linear};
-use gs_field::doll_state::{DollState, Status};
-use gs_field::lighting::Sky;
-use gs_field_egui::creature_puppet::PuppetCache;
-use gs_field_egui::{doll_view, field_gpu};
+use injury_doll::roster::DollRace;
+use injury_doll::sky::{DollSky, Sky, display, doll_sky, game_doll_sky_at, hex_linear};
+use injury_doll::state::{DollState, Status};
+use injury_doll::view::DollCache;
+use injury_doll::{gpu, view};
 
 /// The playable races gs_studio installed in Hydra's data folder.
 pub fn races() -> Vec<DollRace> {
-    gs_field::doll_roster::races()
+    injury_doll::roster::races()
 }
 
 /// The figure (its form) drawn for `chosen`: that one where it is one of
@@ -111,7 +110,7 @@ pub fn doll_state<'a>(wounds: impl IntoIterator<Item = (&'a str, u8)>, scars: im
 /// The game's hour at `now` (unix seconds): the settings page's time of
 /// day before the player moves it.
 pub fn hour_now(now: u32) -> f32 {
-    gs_field::elanthian_time::elanthian_hour_f(f64::from(now))
+    injury_doll::base::elanthian_time::elanthian_hour_f(f64::from(now))
 }
 
 /// The statuses Hydra's settings page offers as buttons, by group (its
@@ -133,9 +132,9 @@ pub const STATUS_GROUPS: [(&str, &[Status]); 5] = {
 /// Set up as Hydra's window opens: gs_studio's files in Hydra's data
 /// folder, and the GPU pass (Hydra's `open`).
 pub fn open(ctx: &egui::Context, render: Option<&egui_wgpu::RenderState>, data: &std::path::Path) {
-    gs_field::data_dirs::set_base_dir(data.to_path_buf());
+    injury_doll::base::data_dirs::set_base_dir(data.to_path_buf());
     if let Some(render) = render {
-        field_gpu::init(ctx, render);
+        gpu::init(ctx, render);
     }
 }
 
@@ -144,17 +143,17 @@ pub fn open(ctx: &egui::Context, render: Option<&egui_wgpu::RenderState>, data: 
 pub fn paint(ui: &egui::Ui, rect: egui::Rect, form: &str, doll: &DollState, facing: i16, sky: &DollSky, id: egui::Id) -> bool {
     let context = ui.ctx().clone();
     let form: Arc<str> = Arc::from(form);
-    let shared = PuppetCache::shared(&context);
+    let shared = DollCache::shared(&context);
     let mut cache = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let name = format!("doll:{}", id.value());
-    let key = doll_view::key_for(doll).with_facing(f32::from(facing));
-    doll_view::paint_in_view(ui, rect, &mut cache, &form, key, sky, Some(&name), field_gpu::available(&context), id.value())
+    let key = view::key_for(doll).with_facing(f32::from(facing));
+    view::paint_in_view(ui, rect, &mut cache, &form, key, sky, Some(&name), gpu::available(&context), id.value())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gs_field::doll_roster::{DollFigure, FigureDraw, FigureKind};
+    use injury_doll::roster::{DollFigure, FigureDraw, FigureKind};
 
     /// The doll stands in the day, the display, or the display's light
     /// over black or the colour picked (Hydra's test).

@@ -11,8 +11,7 @@ description = "Hydra's calls into gs_studio's runtime crates, as Hydra makes the
 doctest = false
 
 [dependencies]
-gs_field = { path = "../gs_field" }
-gs_field_egui = { path = "../gs_field_egui" }
+injury_doll = { path = "../injury_doll" }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 
