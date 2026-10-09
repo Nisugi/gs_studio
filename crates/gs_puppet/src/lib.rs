@@ -82,6 +82,7 @@ pub mod splat;
 mod status_layers;
 mod wraps;
 pub mod uv;
+pub mod uv_sheet;
 
 /// Test inputs for this crate's tests and the crates over it (their
 /// dev-dependencies turn on the `fixtures` feature): a baked humanoid
@@ -110,7 +111,8 @@ pub use prefill::{depth_guide, dressed_silhouette, normal_guide, prefill, projec
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinCorner, SkinMesh, SkinShading, SkinSurface, SKIN_SS};
-pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
+pub use uv::{Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
+pub use uv_sheet::{sheet_side_for, silhouette_template};
 pub use build::{plan_shift, side_for_plan, turned_head_up, MASK_PX};
 pub use model::{Eye, Kind, Puppet, PuppetError, Segment, Station, View};
 
