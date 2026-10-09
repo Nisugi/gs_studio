@@ -354,7 +354,11 @@ impl BoundMesh {
     /// is heat-weighted to the chest on some meshes (half_elf_male's, out
     /// to 0.9 ft), and a chest measured round it was so wide (0.73 ft a
     /// side, against the half-elf female's 0.47) that the arm could not
-    /// hang beside it (`hang`) and stood out as modelled.
+    /// hang beside it (`hang`) and stood out as modelled. And an arm's ring
+    /// keeps to its side of its shoulder joint: the side of the chest the
+    /// weights give an arm (in to 0.23 ft of the middle) pulled its rings
+    /// 0.13 ft in toward the body, and on a broad chest a hanging arm met
+    /// the chest while still well out.
     pub fn measured(&self, puppet: &Puppet) -> Puppet {
         let mut out = puppet.clone();
         let mut of_seg: Vec<Vec<u32>> = vec![Vec::new(); puppet.segments.len()];
@@ -377,6 +381,11 @@ impl BoundMesh {
             let (aw, ad) = (seg.axis_w, seg.axis_d);
             let mut found: Vec<Option<(V3, f32, f32)>> = Vec::with_capacity(seg.stations.len());
             let trunk = seg.kind == crate::Kind::Trunk;
+            // an arm: the shoulder joint on its side, nothing nearer the
+            // body's middle than it
+            let arm_side = (seg.kind == crate::Kind::Limb && seg.part.as_deref().is_some_and(|p| p.ends_with("Arm")))
+                .then(|| shoulders.iter().find(|(at, _)| at[0] * seg.head[0] > 0.0).map(|(at, _)| at[0]))
+                .flatten();
             for st in &seg.stations {
                 // how far sideways a trunk ring here reaches at most: to the
                 // shoulder joint of an arm beside it
@@ -391,6 +400,9 @@ impl BoundMesh {
                     if dot(e, axis).abs() <= slab {
                         let u = dot(e, aw);
                         if walls.iter().any(|&w| (w > 0.0 && u > w) || (w < 0.0 && u < w)) {
+                            continue;
+                        }
+                        if arm_side.is_some_and(|x| self.mesh.pos[v as usize][0] * x.signum() < x.abs()) {
                             continue;
                         }
                         us.push(u);

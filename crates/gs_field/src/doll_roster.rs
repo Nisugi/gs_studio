@@ -19,6 +19,11 @@
 //! made_splats = 300000 # how many splats "made" makes (default: the
 //!                      # renderer's own, 800k): every wound on the figure
 //!                      # is rebuilt over them, so fewer is quicker
+//! arms_hang = 17       # how far out its arms hang at rest, degrees from
+//!                      # straight down (its upper arms' bones): a figure
+//!                      # modelled with its arms raised has them lowered to
+//!                      # where they clear its body, and a broad chest keeps
+//!                      # them out; this sets it (`arms_hang`)
 //! ```
 //!
 //! No egui here.
@@ -96,6 +101,19 @@ struct DollToml {
     made_splats: Option<usize>,
     race: Option<String>,
     variant: Option<String>,
+    arms_hang: Option<f32>,
+}
+
+/// How far out the arms of the figure whose body is in `dir` hang at rest,
+/// degrees from straight down, when its `doll.toml` says (`arms_hang`):
+/// the puppet's own clearing otherwise. The file beside the body, else
+/// the one in the folder over it (a source's `<form>/master/` body, its
+/// `doll.toml` in `<form>/`).
+pub fn arms_hang(dir: &Path) -> Option<f32> {
+    [Some(dir), dir.parent()].into_iter().flatten().find_map(|d| {
+        let text = std::fs::read_to_string(d.join("doll.toml")).ok()?;
+        toml::from_str::<DollToml>(&text).ok()?.arms_hang.filter(|deg| deg.is_finite())
+    })
 }
 
 /// `half_elf` -> "Half elf".

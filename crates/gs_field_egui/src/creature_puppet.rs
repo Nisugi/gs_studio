@@ -308,6 +308,15 @@ fn bodies() -> &'static Bodies {
     BODIES.get_or_init(Default::default)
 }
 
+/// How far out `family`'s modelled body has its arms hang at rest, when its
+/// `doll.toml` says (`gs_field::doll_roster::arms_hang`): the folder a host
+/// named for it, else the pool's.
+fn body_arms_hang(family: &str) -> Option<f32> {
+    let form = body_family(family);
+    let named = bodies().lock().unwrap_or_else(|e| e.into_inner()).iter().find(|e| e.family == form).and_then(|e| e.dir.clone());
+    gs_field::doll_roster::arms_hang(&named.or_else(|| pool_body_dir(form))?)
+}
+
 /// The pool's body for `family` (`<pool>/global/bodies/<family>/body.obj`,
 /// `gs_field::puppets::bodies_dir`), when it is there.
 fn pool_body_dir(family: &str) -> Option<std::path::PathBuf> {
@@ -2391,7 +2400,14 @@ impl PuppetCache {
         let rigs = self.rigs();
         let puppet = rigs.get(family).and_then(|rig| {
             match Puppet::from_baked_toml(&rig.baked) {
-                Ok(p) => Some(Arc::new(p)),
+                Ok(mut p) => {
+                    // a modelled body's own rest for its arms (its
+                    // doll.toml's `arms_hang`)
+                    if let Some(deg) = body_arms_hang(family) {
+                        p.arm_hang = p.arm_hangs_at(deg);
+                    }
+                    Some(Arc::new(p))
+                }
                 Err(e) => {
                     tracing::warn!("puppet '{family}': baked file did not load: {e}");
                     None

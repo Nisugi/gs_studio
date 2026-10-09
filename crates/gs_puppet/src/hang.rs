@@ -105,6 +105,20 @@ impl Puppet {
     /// the legs, at the same height and depth); an arm that would turn less
     /// than [`HANG_MIN_DEG`] is drawn hanging and gets none.
     pub fn arm_hangs(&self) -> Vec<(usize, M3)> {
+        self.hangs(None)
+    }
+
+    /// [`Puppet::arm_hangs`] with every raised arm hanging `deg` out from
+    /// straight down (its upper arm's bone), whatever it clears: a figure's
+    /// own rest where clearing leaves its arms too far out -- a broad chest
+    /// under the armpit a real arm rests against, flesh giving, where the
+    /// puppet's rings do not (half_elf_male: cleared at 24 degrees, the
+    /// half-elf female at 12). Set by a body's `doll.toml`, `arms_hang`.
+    pub fn arm_hangs_at(&self, deg: f32) -> Vec<(usize, M3)> {
+        self.hangs(Some(deg))
+    }
+
+    fn hangs(&self, fixed: Option<f32>) -> Vec<(usize, M3)> {
         if !self.arms_raised {
             return Vec::new();
         }
@@ -138,6 +152,10 @@ impl Puppet {
             });
             let turned = |deg: f32| axis_angle([0.0, 0.0, 1.0], side * (deg - drawn));
             let clear = |r: &M3| self.arm_clear(&chain, a, pivot, r, side, &body, forearm.as_ref());
+            if let Some(deg) = fixed {
+                found.push((a, side, deg.clamp(0.0, drawn), forearm));
+                continue;
+            }
             if !clear(&turned(drawn)) {
                 continue;
             }
