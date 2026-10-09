@@ -1,7 +1,7 @@
 //! The depth-editing pass: the coordinate the rig's own view cannot see.
 //!
 //! A rig is clicked onto ONE silhouette, so every joint has only two of its
-//! three coordinates. `gs_puppet::guess_depths` reads the third off the
+//! three coordinates. `gs_puppet_author::guess_depths` reads the third off the
 //! family's OTHER silhouette; an artist corrects the guesses here, and only
 //! the CORRECTIONS are written to the rig file's `[depth]` table, so a later,
 //! better guess still applies to everything left alone.
@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 
-use gs_puppet::{guess_depths_mask, DepthGuess};
+use gs_puppet_author::{guess_depths_mask, DepthGuess};
 use rig::{Pt, Rig, View};
 use rig_bake::Mask;
 
@@ -115,8 +115,8 @@ impl DepthModel {
         // head up and slid along the plan, as the builder reads it: heights
         // run left-right, row for row with the plan.
         let other = other.map(|m| match (rig.from_above, plan) {
-            (true, Some(plan)) => gs_puppet::side_for_plan(&m, plan),
-            (true, None) => gs_puppet::turned_head_up(&m),
+            (true, Some(plan)) => gs_puppet_author::side_for_plan(&m, plan),
+            (true, None) => gs_puppet_author::turned_head_up(&m),
             _ => m,
         });
         DepthModel { guesses: guess_depths_mask(rig, other.as_ref()), other_mask: other }
@@ -148,7 +148,7 @@ impl DepthModel {
 
     /// How the guess was arrived at, in words, for a tooltip.
     pub fn guess_source(&self, joint: &str) -> Option<&'static str> {
-        use gs_puppet::GuessSource::*;
+        use gs_puppet_author::GuessSource::*;
         Some(match self.guesses.get(joint)?.source {
             SpanCentre => "centre of the other view's widest span on this row",
             ForwardEnd => "the forward end of the ground span (a toe)",

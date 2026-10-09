@@ -27,7 +27,7 @@
 //! # The pieces
 //!
 //! ```text
-//! Puppet::build(&rig, &outlines)?      rasterise + measure, once (editor / bake time)
+//! Puppet::build(&rig, &outlines)?      rasterise + measure, once (gs_puppet_author, editor / bake time)
 //! puppet.to_baked_toml()?              -> <family>.puppet.toml for a game client
 //! Puppet::from_baked_toml(text)?       the client's way in: no silhouettes, no rig
 //! PoseSet::load(dir, body_type)?       data/poses/<body_type>.toml (or PoseSet::shipped)
@@ -35,10 +35,11 @@
 //! posed.bounds()                       world AABB, for placement
 //! posed.draw_list(&project, &look)     egui-free primitives, in paint order
 //! posed.skin(&project, &look)          the same body as one smooth surface, RGBA
-//! paint(&painter, offset, &prims)      the only egui in the crate
 //! ```
 //!
-//! Plain data and functions throughout; everything but `paint` is egui-free.
+//! Plain data and functions throughout, egui-free. Building a puppet (from a
+//! rig and silhouettes), its texture prefill and the editor's painter are
+//! authoring: `gs_puppet_author`.
 
 mod afflict;
 mod blind;
@@ -51,29 +52,20 @@ mod hush;
 pub mod baked;
 mod blood;
 pub mod camera;
-pub mod depth;
 pub mod draw;
 pub mod fall;
-pub mod fit;
 mod frost;
 mod ghost;
 mod possess;
 mod shade;
 pub mod hang;
-pub mod hung;
 pub mod joints;
 pub mod layers;
-mod layering_tests;
 pub mod math;
-pub mod measure;
 pub mod mesh;
-pub mod mesh_measure;
 pub mod outfit;
-pub mod paint;
 pub mod pose;
-pub mod prefill;
 pub mod prop;
-pub mod build;
 pub mod model;
 pub mod raster;
 pub mod shadow;
@@ -83,7 +75,6 @@ pub mod splat;
 mod status_layers;
 mod wraps;
 pub mod uv;
-pub mod uv_sheet;
 
 /// Test inputs for this crate's tests and the crates over it (their
 /// dev-dependencies turn on the `fixtures` feature): a baked humanoid
@@ -99,27 +90,18 @@ pub use wounds::MarksSheet;
 
 pub use baked::{BakedEye, BakedPuppet, BakedSegment, BAKED_VERSION};
 pub use camera::Camera;
-pub use depth::{depth_of, guess_depths, guess_depths_mask, joints3, snap_limb_joints, DepthGuess, GuessSource};
 pub use fall::Fall;
 pub use draw::{ground_grid, Look, Prim, Rgba, Shape, BODY_DEAD, BODY_DEFAULT, WOUND_COLORS};
-pub use fit::{rest_iou, rest_prims};
 pub use outfit::{Cut, Hang, Kit, Outfit, Outfits, Piece, SHIPPED_KIT};
-pub use paint::paint;
-pub use prefill::prefill_normals;
 pub use uv::bump_sheet;
 pub use pose::{flinch_envelope, BonePose, FamilyPoses, Idle, IdleBone, Limit, Pose, PoseOverride, PoseSet, Posed, FLINCH_REGIONS, FLINCH_SECS, SHIPPED_POSES};
-pub use prefill::{depth_guide, dressed_silhouette, normal_guide, prefill, project_view, puppet_eyes, side_silhouette, PaintView, Painting, Paintings, GRAZING};
 pub use prop::{Grip, Hand, Prop, PropSet, Weapon, SHIPPED_PROPS};
 pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinCorner, SkinMesh, SkinShading, SkinSurface, SKIN_SS};
 pub use uv::{Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
-pub use uv_sheet::{sheet_side_for, silhouette_template};
-pub use build::{plan_shift, side_for_plan, turned_head_up, MASK_PX};
 pub use model::{Eye, Kind, Puppet, PuppetError, Segment, Station, View};
 
 #[cfg(test)]
 mod pose_tests;
 #[cfg(test)]
 mod skin_tests;
-#[cfg(test)]
-mod tests;

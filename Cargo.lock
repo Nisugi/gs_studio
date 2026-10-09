@@ -1064,14 +1064,22 @@ dependencies = [
 name = "gs_puppet"
 version = "0.1.0"
 dependencies = [
- "eframe",
- "egui",
  "png 0.17.16",
- "rig",
- "rig_bake",
  "ruzstd",
  "serde",
  "toml",
+]
+
+[[package]]
+name = "gs_puppet_author"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "gs_puppet",
+ "png 0.17.16",
+ "rig",
+ "rig_bake",
 ]
 
 [[package]]
@@ -2682,6 +2690,7 @@ dependencies = [
  "gs_field",
  "gs_field_egui",
  "gs_puppet",
+ "gs_puppet_author",
  "png 0.17.16",
  "rig",
  "rig_bake",

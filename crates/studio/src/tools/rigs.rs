@@ -1057,7 +1057,7 @@ impl RigTool {
                                 crate::editor::texture::Dressed::creature(&data_root, &puppet, outlines, &family, creature)
                                     .map(|d| (d, crate::editor::texture::creature_dir(&data_root, &family, creature)))
                             };
-                            dressed.and_then(|(d, folder)| crate::editor::texture::export_projected(&folder, &d, view, gs_puppet::GRAZING, order)).map(|files| {
+                            dressed.and_then(|(d, folder)| crate::editor::texture::export_projected(&folder, &d, view, gs_puppet_author::GRAZING, order)).map(|files| {
                                 format!("Projected: {}", files.iter().map(|f| f.display().to_string()).collect::<Vec<_>>().join(", "))
                             })
                         }
@@ -1325,8 +1325,8 @@ impl RigTool {
                 };
                 let posed = puppet.pose(&shown);
                 let project = |p: gs_puppet::math::V3| cam.project(p);
-                gs_puppet::paint(&painter, Vec2::ZERO, &posed.ground_shadow(&project, &look, shadow));
-                gs_puppet::paint(&painter, Vec2::ZERO, &gs_puppet::ground_grid(&project, 5, grid, 1.0));
+                gs_puppet_author::paint(&painter, Vec2::ZERO, &posed.ground_shadow(&project, &look, shadow));
+                gs_puppet_author::paint(&painter, Vec2::ZERO, &gs_puppet::ground_grid(&project, 5, grid, 1.0));
                 if self.puppet_view.skin {
                     // Rendered about the panel's own corner, so moving the
                     // panel does not re-render it.
@@ -1398,7 +1398,7 @@ impl RigTool {
                         painter.image(tex.id(), at, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                     }
                 } else {
-                    gs_puppet::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
+                    gs_puppet_author::paint(&painter, Vec2::ZERO, &posed.draw_list(&project, &look));
                 }
                 if self.pose_edit {
                     // Click a bone to edit it; the edited one is outlined.

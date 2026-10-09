@@ -10,7 +10,7 @@
 //!
 //! | File | Who writes it | What it is |
 //! |---|---|---|
-//! | `front_paint.png`, `side_paint.png`, `back_paint.png` | Export | the silhouettes to paint over (the back is the front mirrored; the side with any arm drawn raised hanging, `gs_puppet::side_silhouette`), dressed in the outfit's |
+//! | `front_paint.png`, `side_paint.png`, `back_paint.png` | Export | the silhouettes to paint over (the back is the front mirrored; the side with any arm drawn raised hanging, `gs_puppet_author::side_silhouette`), dressed in the outfit's |
 //! | `front_depth.png`, `side_depth.png`, `back_depth.png` | Export | the rest body's depth in each template's frame, at [`DEPTH_SCALE`] times its size: a depth guide for an image generator |
 //! | `marks.json` | Export | where the puppet's eyes are in each template (a painting puts the eyes there) |
 //! | `pattern.png`, `patches.txt` | Export | the skin cut open (`gs_puppet::uv`): the sheet's layout |
@@ -18,7 +18,7 @@
 //! | `front_normal.png`, `side_normal.png`, `back_normal.png` | the generator | tangent-space normal maps of the paintings (any subset), the same framing |
 //! | `projected/<view>_render.png`, `<view>_unpainted.png` | Project | projection-first: what the paintings so far show from the next view in the family's order ([`projection_order`]), and what is left to paint |
 //! | `sheet.png` | Build sheet, then the artist | the texture itself: the paintings projected onto the pattern, touched up by hand |
-//! | `normal.png` | Build sheet | the normal sheet: the normal maps projected onto the pattern (`gs_puppet::prefill_normals`); only with a map to project (without one, the renderer makes the relief from the sheet's own paint, `gs_puppet::bump_sheet`) |
+//! | `normal.png` | Build sheet | the normal sheet: the normal maps projected onto the pattern (`gs_puppet_author::prefill_normals`); only with a map to project (without one, the renderer makes the relief from the sheet's own paint, `gs_puppet::bump_sheet`) |
 //!
 //! Save installs the family's `sheet.png` as
 //! `<pool>/global/puppets/<family>.texture.png` (and `normal.png` as
@@ -28,12 +28,11 @@
 //! from the puppet wherever it is used, so a sheet painted for an older rig
 //! (another size) is refused rather than smeared.
 
+use gs_puppet_author::prelude::*;
 use std::path::{Path, PathBuf};
 
-use gs_puppet::{
-    depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, side_silhouette, silhouette_template, Kit, Outfit, Outfits, PaintView, Painting,
-    Paintings, Puppet, Texture, UvLayout, LAYOUT_KEYWORD, MASK_PX, SHEET_SIDE,
-};
+use gs_puppet::{Kit, Outfit, Outfits, Puppet, Texture, UvLayout, LAYOUT_KEYWORD, SHEET_SIDE};
+use gs_puppet_author::{depth_guide, dressed_silhouette, prefill, prefill_normals, project_view, puppet_eyes, side_silhouette, silhouette_template, PaintView, Painting, Paintings, MASK_PX};
 use rig::{Outlines, View};
 use rig_bake::Mask;
 
@@ -139,7 +138,7 @@ impl Dressed {
     /// The family bare, or wearing `outfit`.
     pub fn new(puppet: &Puppet, outlines: &Outlines, family: &str, outfit: Option<(&Outfit, &Kit)>) -> Dressed {
         let (front, side) = masks(outlines, family);
-        // an A-pose's side is painted with its arms hanging (gs_puppet::prefill)
+        // an A-pose's side is painted with its arms hanging (gs_puppet_author::prefill)
         let side = side.map(|m| side_silhouette(puppet, &m));
         let Some((outfit, kit)) = outfit.filter(|(o, _)| !o.pieces.is_empty()) else {
             return Dressed { puppet: puppet.clone(), front, side, outfit: None };
@@ -369,7 +368,7 @@ pub fn build_sheet_in(folder: &Path, d: &Dressed) -> Result<(PathBuf, usize), St
     let paintings = d.paintings(as_painting(&front_px), as_painting(&side_px), as_painting(&back_px));
     // paintings from a second pass (2160 tall) go on a bigger sheet
     let tallest = [&front_px, &side_px, &back_px].iter().filter_map(|p| p.as_ref().map(|(_, h, _)| *h)).max().unwrap_or(0);
-    let layout = UvLayout::fit(&d.puppet, gs_puppet::sheet_side_for(tallest));
+    let layout = UvLayout::fit(&d.puppet, gs_puppet_author::sheet_side_for(tallest));
     let rgba = prefill(&d.puppet, &layout, &paintings);
     let path = folder.join(SHEET);
     write_png(&path, layout.w, layout.h, &rgba)?;
@@ -808,7 +807,7 @@ pub fn project_cli(data_root: &Path, target: &str, grazing: Option<f32>) -> Resu
         Some(c) => (Dressed::creature(data_root, &puppet, &outlines, family, c)?, creature_dir(data_root, family, c)),
         None => (Dressed::new(&puppet, &outlines, family, None), dir(data_root, family)),
     };
-    export_projected(&folder, &d, view, grazing.unwrap_or(gs_puppet::GRAZING), projection_order(data_root, family)?)
+    export_projected(&folder, &d, view, grazing.unwrap_or(gs_puppet_author::GRAZING), projection_order(data_root, family)?)
 }
 
 /// `--build-sheet <family>[/<creature>]`: [`build_sheet_in`] for that
@@ -1020,9 +1019,9 @@ mod tests {
         let data = scratch("project");
         let folder = export_templates(&data, "humanoid", &puppet, &outlines).unwrap();
         let d = Dressed::new(&puppet, &outlines, "humanoid", None);
-        assert!(export_projected(&folder, &d, PaintView::Back, gs_puppet::GRAZING, DEFAULT_ORDER).unwrap_err().contains("front"));
+        assert!(export_projected(&folder, &d, PaintView::Back, gs_puppet_author::GRAZING, DEFAULT_ORDER).unwrap_err().contains("front"));
         paint_red(&folder.join("front_paint.png"), &folder.join("front.png"));
-        let files = export_projected(&folder, &d, PaintView::Side, gs_puppet::GRAZING, DEFAULT_ORDER).unwrap();
+        let files = export_projected(&folder, &d, PaintView::Side, gs_puppet_author::GRAZING, DEFAULT_ORDER).unwrap();
         let (tw, th, _) = read_png(&folder.join("side_paint.png")).unwrap();
         for f in &files {
             let (w, h, _) = read_png(f).unwrap();
@@ -1041,10 +1040,10 @@ mod tests {
         let folder = export_templates(&data, "humanoid", &puppet, &outlines).unwrap();
         let d = Dressed::new(&puppet, &outlines, "humanoid", None);
         let order = [PaintView::Side, PaintView::Front, PaintView::Back];
-        assert!(export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap_err().contains("paint the side first"));
-        assert!(export_projected(&folder, &d, PaintView::Side, gs_puppet::GRAZING, order).unwrap_err().contains("painted first"));
+        assert!(export_projected(&folder, &d, PaintView::Front, gs_puppet_author::GRAZING, order).unwrap_err().contains("paint the side first"));
+        assert!(export_projected(&folder, &d, PaintView::Side, gs_puppet_author::GRAZING, order).unwrap_err().contains("painted first"));
         paint_red(&folder.join("side_paint.png"), &folder.join("side.png"));
-        let files = export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap();
+        let files = export_projected(&folder, &d, PaintView::Front, gs_puppet_author::GRAZING, order).unwrap();
         assert!(files[0].ends_with("projected/front_render.png"), "{}", files[0].display());
         let (_, _, render) = read_png(&files[0]).unwrap();
         let red = render.chunks_exact(4).filter(|c| c[3] > 0 && c[0] > 180 && c[1] < 80).count();
@@ -1053,7 +1052,7 @@ mod tests {
         let (w, h, px) = read_png(&folder.join("front_paint.png")).unwrap();
         let blue: Vec<u8> = px.chunks_exact(4).flat_map(|c| if c[3] > 0 { [0, 0, 255, 255] } else { [0, 0, 0, 0] }).collect();
         write_png(&folder.join("front.png"), w, h, &blue).unwrap();
-        let again = export_projected(&folder, &d, PaintView::Front, gs_puppet::GRAZING, order).unwrap();
+        let again = export_projected(&folder, &d, PaintView::Front, gs_puppet_author::GRAZING, order).unwrap();
         let (_, _, render) = read_png(&again[0]).unwrap();
         assert!(!render.chunks_exact(4).any(|c| c[3] > 0 && c[2] > 200 && c[0] < 60), "the old front painting leaked into its own render");
         let _ = std::fs::remove_dir_all(&data);

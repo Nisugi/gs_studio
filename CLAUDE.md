@@ -82,7 +82,8 @@ note with a `[[note.reply]]` (`by`, `text`, `made`) under it, and set
 `done = true` once it is dealt with.
 
 Crate examples (`cargo run -p <crate> --example <name>`) are the visual test
-harnesses: `gs_puppet` `puppet_demo`, `audit` (every rig: stale bakes and
+harnesses (the puppet's are in `gs_puppet_author`, the authoring crate, but
+`arm_hang` and `ply_preview`, which stay in `gs_puppet`): `gs_puppet_author` `puppet_demo`, `audit` (every rig: stale bakes and
 puppets, and skin pieces floating free in any pose -- run it after a rig
 or puppet-builder change), `turnaround` (one family's smooth skin from every
 side, in one pose), `dump_segments` (a family's
@@ -132,16 +133,24 @@ prints timings.
 
 ## Architecture
 
-Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
-`opt-level = 3` in dev builds, see root `Cargo.toml`):
+Dependency chain (bottom up; `rig_bake`, `gs_puppet`, `gs_puppet_author` and `vellum_light` are
+`opt-level = 3` in dev builds, see root `Cargo.toml`). The crates are being split
+into runtime (what a game client builds: `gs_puppet`, `injury_doll`, later the base
+and field crates) and authoring (gs-studio's alone) -- `docs/crate-split-plan.md`
+is the plan and its stages; a runtime crate never depends on an authoring one
+(`tools/check_layers.py`, `hydra_contract` holds Hydra's calls):
 
 - `rig_bake` -- zero-dependency labeller: silhouette + bones -> per-pixel part
   label (R) and owning bone (G). It is the hot loop behind every editor drag,
   so it is built at `opt-level = 3` even in dev (root `Cargo.toml`).
 - `rig` -- rig file format, body-type templates (as data, `templates.rs`),
   `outlines.json` loader, bake-to-files.
-- `gs_puppet` -- measured 3D puppet from a rig + BOTH silhouettes (front and
-  side), posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
+- `gs_puppet` -- the runtime puppet (a game client's): read from its baked file
+  (`model.rs` + `baked.rs`), no rig, no egui; BUILT -- measured from a rig + BOTH
+  silhouettes (front and side) -- by `gs_puppet_author` (`build.rs`, with `depth`,
+  `fit`, `measure`, the texture `prefill`, `uv_sheet`, `mesh_measure`, `hung` and
+  the editor's egui `paint`; its traits add `Puppet::build` & co. to gs_puppet's
+  types: `use gs_puppet_author::prelude::*`). The puppet is posed by angle-only pose sets (`data/poses/<body_type>.toml`) and
   drawn either as 2D shapes (`draw.rs`) or as one smooth z-buffered surface
   rendered to RGBA (`skin.rs`, what the stage uses; `examples/skin_check`
   compares the two; it is rasterised in bands on every core, `GS_PUPPET_THREADS=1`
@@ -166,8 +175,8 @@ Dependency chain (bottom up; `rig_bake`, `gs_puppet` and `vellum_light` are
   death fall (`examples/fall_strip` films it); `Pose::breathe` is the idle
   breathing cycle (`[idle]` in the pose files; `examples/breath_strip` films it
   with a peak-vs-trough difference tile) and `Pose::flinched` the hit
-  reaction (`[flinch.<region>]`; `examples/flinch_strip` films one). Everything
-  except `paint.rs` is egui-free. The world
+  reaction (`[flinch.<region>]`; `examples/flinch_strip` films one). gs_puppet
+  is egui-free (only `gs_puppet_author::paint` touches egui). The world
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `vellum_light` -- zero-dependency, Android-safe port of Niffy's
   `relight.py`: scene light + time-of-day phase light applied per pixel to

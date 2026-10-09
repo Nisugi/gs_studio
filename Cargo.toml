@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/vellum_light", "crates/hydra_contract", "crates/injury_doll"]
+members = ["crates/rig_bake", "crates/rig", "crates/studio", "crates/gs_field", "crates/gs_field_egui", "crates/gs_calibrators", "crates/gs_puppet", "crates/gs_puppet_author", "crates/vellum_light", "crates/hydra_contract", "crates/injury_doll"]
 
 # The egui fork, named once: every crate takes it from here, so contexts and
 # textures cross crate boundaries (one build of egui). Hydra pins the same
@@ -18,6 +18,10 @@ opt-level = 3
 # The rig editor's 3D preview rebuilds the puppet on every rig change
 # (elephantid: ~10 ms unoptimized vs ~1.5 ms).
 [profile.dev.package.gs_puppet]
+opt-level = 3
+
+# The builder behind every rig edit (it moved here from gs_puppet).
+[profile.dev.package.gs_puppet_author]
 opt-level = 3
 
 # Relighting runs per opaque pixel of every creature layer and backdrop.

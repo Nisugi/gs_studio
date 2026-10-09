@@ -1,6 +1,7 @@
 //! The open document: which family, its silhouette, the editor, the cached
 //! bake, and the save / open / discard rules.
 
+use gs_puppet_author::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -342,7 +343,7 @@ impl Session {
 
     /// [`Session::other_outline`] as DEPTH mode draws it: for a rig drawn
     /// from above, turned head up (world (z, y) -> (-y, z)) and slid along
-    /// the plan so the two are centre on centre (`gs_puppet::plan_shift`,
+    /// the plan so the two are centre on centre (`gs_puppet_author::plan_shift`,
     /// here from the outlines' boxes), the frame its depths are read and
     /// edited in.
     pub fn other_outline_shown(&self) -> Option<OutlineEntry> {
@@ -389,7 +390,7 @@ impl Session {
 
     /// The rig's 3D puppet, rebuilt only when the rig has changed since the
     /// last call. Built from the same full-size masks the bake and the depth
-    /// guesses use (`FULL_PX` = `gs_puppet::MASK_PX`), so it is exactly what
+    /// guesses use (`FULL_PX` = `gs_puppet_author::MASK_PX`), so it is exactly what
     /// Save would write. Err says why there is none yet.
     pub fn puppet(&mut self) -> &Result<Puppet, String> {
         let revision = self.editor.revision();

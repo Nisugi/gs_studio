@@ -316,3 +316,23 @@ fn wet_blood_reaches_the_surface() {
     let bleeding = wet(&[("chest", 2), ("abdomen", 2)], crate::Effects { bleeding: true, ..Default::default() });
     assert!(bleeding > pooled, "bleeding runs wet: {bleeding} vs {pooled}");
 }
+
+/// A severed limb's stump wears its wound colour like any wounded part (it
+/// was left the plain body colour, the one untinted piece of a wounded
+/// figure), and its cut end a darker raw red, so the cut still reads.
+#[test]
+fn a_severed_stump_wears_its_wound_colour() {
+    let p = humanoid();
+    let posed = p.pose(&Pose::default());
+    let wounds = [("rightArm", 3u8)];
+    let look = Look { wounds: &wounds, ..Look::default() };
+    let surfaces = crate::draw::surfaces(&posed, &look);
+    let arm = p.segments.iter().position(|s| s.part.as_deref() == Some("rightArm")).expect("an arm");
+    let stump = surfaces.iter().find(|s| s.index == arm).expect("the stump shows");
+    assert_eq!(stump.base, crate::draw::WOUND_COLORS[2]);
+    let end = stump.rings.last().expect("rings");
+    assert!(end.red, "the stump ends in a raw cut");
+    assert_eq!(end.color(look.body, stump.base), crate::draw::RAW_END);
+    let forearm = p.segments.iter().rposition(|s| s.part.as_deref() == Some("rightArm")).expect("a forearm");
+    assert!(forearm != arm && !surfaces.iter().any(|s| s.index == forearm), "the rest of the arm is gone");
+}

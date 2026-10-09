@@ -1091,7 +1091,7 @@ an *x* to put it back:
   grows. The cloud goes through the stage's splat rasteriser
   (`skin_gpu::Figure::Splats`) into the same lit pass. Web, frost, eyes
   and the contour are not drawn in this mode yet.
-  `cargo run --release -p gs_puppet --example layers_preview -- <out.png> humanoid`
+  `cargo run --release -p gs_puppet_author --example layers_preview -- <out.png> humanoid`
   draws it on the CPU (`LAYERS_WOUNDS=chest:3,leftArm:3`,
   `LAYERS_COAT=ice:0,0.45,1`: a row per step).
 

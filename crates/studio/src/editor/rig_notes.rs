@@ -202,6 +202,7 @@ pub fn on_screen(posed: &Posed, note: &Note, yaw: f32, project: &dyn Fn(V3) -> (
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gs_puppet_author::prelude::*;
 
     fn humanoid() -> gs_puppet::Puppet {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");

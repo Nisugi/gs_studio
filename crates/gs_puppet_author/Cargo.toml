@@ -1,0 +1,21 @@
+[package]
+name = "gs_puppet_author"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Building gs_puppet's puppets (authoring): from a rig and its two silhouettes, measured, fitted, textured from paintings, measured from a modelled mesh. gs-studio's; never in a game client."
+
+[lib]
+doctest = false
+
+[dependencies]
+gs_puppet = { path = "../gs_puppet" }
+rig = { path = "../rig" }
+rig_bake = { path = "../rig_bake" }
+# Only `paint.rs` (the editor's preview painter) touches egui.
+egui = { workspace = true }
+
+[dev-dependencies]
+gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
+eframe = { workspace = true }
+png = "0.17"

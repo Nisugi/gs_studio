@@ -3,23 +3,19 @@ name = "gs_puppet"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "A poseable 3D puppet built from a rig plus a front and a side silhouette (measured cross-sections), drawn with plain 2D shapes."
+description = "A poseable 3D puppet -- read from its baked file, posed, drawn as shapes, a smooth skin or splats, its injury doll layers built on it. The runtime half; building one is gs_puppet_author."
 
 [lib]
 doctest = false
 
 [dependencies]
-rig = { path = "../rig" }
-rig_bake = { path = "../rig_bake" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-# Only `paint.rs` touches egui; everything else is egui-free.
-egui = { workspace = true }
 # Pure Rust zstd decoder (Android-safe, no C): the `.spz` splat clouds.
 ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-eframe = { workspace = true }
+toml = "0.8"
 png = "0.17"
 
 [features]
