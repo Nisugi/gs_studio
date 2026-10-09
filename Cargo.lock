@@ -1332,8 +1332,12 @@ dependencies = [
 name = "injury_doll"
 version = "0.1.0"
 dependencies = [
+ "egui",
  "gs_field",
  "gs_field_egui",
+ "gs_puppet",
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -2691,6 +2695,7 @@ dependencies = [
  "gs_field_egui",
  "gs_puppet",
  "gs_puppet_author",
+ "injury_doll",
  "png 0.17.16",
  "rig",
  "rig_bake",
