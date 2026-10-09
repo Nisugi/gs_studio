@@ -109,7 +109,7 @@ pub use shadow::{Shadow, ShadowCaster};
 pub use skin::{Beam, Effects, Lamp, SceneLight, Skin, SkinCorner, SkinMesh, SkinShading, SkinSurface, SKIN_SS};
 pub use uv::{sheet_side_for, silhouette_template, Texture, UvLayout, LAYOUT_KEYWORD, LAYOUT_SLACK_PX, PACKED_ARC_SAMPLES, SHEET_SIDE, SHEET_SIDES};
 pub use build::{plan_shift, side_for_plan, turned_head_up, MASK_PX};
-pub use model::{Eye, Kind, Puppet, PuppetError, Segment, Station};
+pub use model::{Eye, Kind, Puppet, PuppetError, Segment, Station, View};
 
 #[cfg(test)]
 mod pose_tests;

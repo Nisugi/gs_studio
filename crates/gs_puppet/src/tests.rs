@@ -1081,7 +1081,7 @@ fn the_fit_counts_the_figure_beyond_the_silhouette_s_grid() {
 fn twin_limbs_of_a_side_view_rig_match() {
     for family in ["canine", "caprine", "equine", "feline", "reptilian", "suine", "ursine", "elephantid", "avian"] {
         let p = shipped(family);
-        assert_eq!(p.view, rig::View::Side, "{family}");
+        assert_eq!(p.view, crate::model::View::Side, "{family}");
         for s in p.segments.iter().filter(|s| s.kind == Kind::Limb && s.name.contains("_r")) {
             let twin = s.name.replace("_r", "_l");
             let Some(t) = p.segments.iter().find(|t| t.name == twin) else { continue };

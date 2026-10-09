@@ -269,6 +269,14 @@ pub(crate) fn q3(v: V3) -> V3 {
     [q(v[0]), q(v[1]), q(v[2])]
 }
 
+/// A rig's view as its puppet keeps it ([`crate::model::View`]).
+pub fn view_of(view: View) -> crate::model::View {
+    match view {
+        View::Front => crate::model::View::Front,
+        View::Side => crate::model::View::Side,
+    }
+}
+
 fn flat(view: View, p: V3) -> [f32; 2] {
     match view {
         View::Front => [p[0], p[1]],
@@ -1445,7 +1453,7 @@ impl Puppet {
         let mut puppet = Puppet {
             family: rig.family.clone(),
             body_type: rig.body_type.clone(),
-            view: rig.view,
+            view: view_of(rig.view),
             from_above: rig.from_above,
             side_shift: q(side_shift),
             arms_raised: rig.arms_raised,

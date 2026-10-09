@@ -6,9 +6,19 @@
 
 use std::fmt;
 
-use rig::View;
+use serde::{Deserialize, Serialize};
 
 use crate::math::{M3, V3};
+
+/// The silhouette a puppet's rig was drawn on, as its baked file says it
+/// (`front` / `side`, spelled as the rig's own): kept for the tools that fit
+/// a puppet back against its outlines; posing never reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum View {
+    Front,
+    Side,
+}
 
 /// Stations are sampled about this far apart along a segment (the builder
 /// measures them so; a wound's place and a skin's layout count in them).

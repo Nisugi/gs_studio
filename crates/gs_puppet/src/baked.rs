@@ -6,10 +6,9 @@
 //! a foot (through f64), and that is what is written, so
 //! `from_baked(to_baked(p)) == p` exactly and both draw identical lists.
 
-use rig::View;
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Eye, Kind, Puppet, PuppetError, Segment, Station};
+use crate::model::{Eye, Kind, Puppet, PuppetError, Segment, Station, View};
 
 pub const BAKED_VERSION: u32 = 1;
 
@@ -249,5 +248,22 @@ impl Puppet {
 
     pub fn from_baked_toml(text: &str) -> Result<Puppet, PuppetError> {
         Puppet::from_baked(&BakedPuppet::from_toml(text)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A puppet baked before gs_puppet had its own `View` reads, and the
+    /// writer still writes its view the way an older reader needs it (a
+    /// client pinned to an older commit reads newly installed files).
+    #[test]
+    fn a_puppet_baked_before_the_split_reads_and_writes_its_view() {
+        let p = Puppet::from_baked_toml(crate::fixtures::HUMANOID).expect("the frozen humanoid");
+        assert_eq!(p.view, View::Front);
+        let text = p.to_baked_toml().expect("baked");
+        assert!(text.lines().any(|l| l.trim() == "view = \"front\""), "the view is written");
+        assert_eq!(Puppet::from_baked_toml(&text).expect("read back"), p);
     }
 }
