@@ -154,10 +154,13 @@ pub fn game_doll_sky_at(unix: f64, hour: Option<f32>, facing: f32) -> DollSky {
     doll_sky(Some(hour), &Sky { clouds: 0.0, facing: Some(facing), ..sky }, true)
 }
 
-/// [`display`]'s key and fill light, and its floor.
-const DISPLAY_KEY: f32 = 1.0;
-const DISPLAY_FILL: f32 = 0.35;
-const DISPLAY_FLOOR: f32 = 0.42;
+/// [`display`]'s key and fill light, and its floor: together a surface
+/// facing the key shows its own colour (x1), no more. A figure's colours
+/// are its sheet's, delighted to albedo (image-gen's `delight_sheet.py`), and
+/// at 1.4x (the old 1.0 / 0.35 / 0.42) pale skin washed out to white.
+const DISPLAY_KEY: f32 = 0.72;
+const DISPLAY_FILL: f32 = 0.25;
+const DISPLAY_FLOOR: f32 = 0.30;
 
 /// The doll's light at `hour` under `sky` (its moons, cloud, day and the
 /// player's facing), outdoors or not. No hour: a steady day, the sun high
