@@ -1,5 +1,35 @@
 # Splitting gs_studio into runtime and authoring crates (plan, 2026-10-09)
 
+## Status (2026-10-09)
+
+S0-S9 are done, on main (466427a .. fadc32f), each stage's tests, clippy
+and `tools/check_layers.py --enforce` passing, its doll and stage shots
+matching the build before it within run-to-run noise, and Hydra's doll
+code (the S1 patch) passing clippy `-D warnings` against it.
+
+- Hydra's dependency is `injury_doll` alone, over `gs_base`, `gs_puppet`
+  and `gs_render`: none of the field, rig, include_dir or the art in its
+  tree. Its release binary is 72.0 MB against 105.3 MB before (S7).
+- Nothing of the creature art is compiled in: it is the forms pack,
+  `packs/forms/` (committed), which a pool installs (S8).
+- Not done, deferred on purpose:
+  - **The writers** (S9): the sidecar writers, the scene / lighting /
+    field-config `save`s and `write_atomic` are still in `creature_field`.
+    They cost Hydra nothing until it takes the field; move them then (S10).
+  - **S5's GPU options**: a `LitImage` carrying its own job (no global
+    skin_gpu queue) and pipelines built lazily -- behaviour changes, not
+    part of the split's structure.
+  - **Engine data inside its crate**: gs_puppet still reads the
+    workspace's `data/poses`, `data/props`, `data/outfits/kit.toml`
+    (`../../../data/...`), which works for a git dependency; copies inside
+    the crate (with a test that they match) wait for a crates.io release.
+  - **toml 0.8 -> 1** (optional).
+- Hydra's side waits on a push: the S1 patch (`injury_doll` in place of
+  `gs_field` / `gs_field_egui`) and its lock bump go in together -- main no
+  longer has crates by those names. After a lock re-resolve, check
+  gpu-allocator still takes `windows` 0.62.2 (a re-resolve once moved it to
+  0.58 and broke wgpu-hal).
+
 ## Context
 
 gs_studio's crates grew together. Today Hydra (the game client), for its injury doll alone, builds:
