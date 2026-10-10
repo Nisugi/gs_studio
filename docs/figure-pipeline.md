@@ -33,21 +33,25 @@ Local (`image-gen/pack_figure.sh <key> <form>`, `HANDS=0` is the rule):
    1. `mesh_repaint.py` — skin the bake left on the shirt and trousers
       painted as cloth.
    2. `delight_sheet.py` — the bake's lighting divided out, in linear
-      light. Light is read on each point's brightest channel (red, on
-      skin), so a blush is not taken for shadow. Each material is its own
-      class: skin (skull, neck and hands by bone, and skin by colour), the
-      shirt, the trousers (the waist split at the hips *and* by which
-      garment's colour is nearer), the head's other light parts, hair and
-      boots (dark, above and below 0.6 of the height). Only points the
-      orbit cameras can see set the light (the mesh z-buffered from 32
-      directions: the bust is many shells, the scalp runs on under the
-      hair). Per class, each point is scaled to the class's lit side (the
-      70th percentile of its light over a 5%-of-height neighbourhood in
-      3D), clamped 0.6..2.5. Albedo. The first version (2026-10-08,
-      `_backup/delight_sheet.2026-10-09.py`) averaged R, G and B and
-      levelled every cloth to one target: it read the blush as shadow and
-      lifted the face round it to white, and raised khaki trousers to the
-      white shirt's brightness — the whitewashed doll of 2026-10-09.
+      light. The generator lit the figure with one soft light, so how
+      bright it left a surface is a smooth function of which way the
+      surface faces: that function is fitted on the shirt (still white)
+      and the trousers, which every figure wears and which are seen from
+      every side (log brightness = the garment's own + the light's,
+      spherical harmonics to order 2 of the mesh's normals, robust), on
+      each point's brightest channel, from the points the orbit cameras
+      can see (the mesh z-buffered from 32 directions). Every point, skin
+      and hair too, is scaled by the lit side's light over its own, one
+      scalar for all three channels, painted triangle by triangle at its
+      UVs. Albedo. The head takes the body's light: its skin cannot be
+      told from blond hair. Earlier versions (`_backup/`) read the light
+      as a 3D neighbourhood's mean: v1 (2026-10-08) averaged R, G and B,
+      read the blush as shadow and lifted the face round it to white, and
+      raised khaki trousers to the white shirt's brightness — the
+      whitewashed doll of 2026-10-09; v2 took the shadow under the jaw for
+      the chin's paint and greyed it, and counted blond hair as skin. Both
+      blurred the scale 6 px across the sheet, bleeding over its island
+      seams (light scratches).
    3. `hand_repaint.py` — only `--hands`, for a figure whose hands the
       generator painted wrong (the half-elf's were red): past the wrists,
       skin dyed the neck's tone, anything else painted plain cuff.
