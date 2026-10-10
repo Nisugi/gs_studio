@@ -34,8 +34,6 @@ use serde::Deserialize;
 
 use crate::geometry::{ArtCalibration, PoseCalibration};
 
-static EMBEDDED_RIGS: include_dir::Dir<'static> =
-    include_dir::include_dir!("$CARGO_MANIFEST_DIR/data/rigs");
 
 /// The default injury/scar severity palette, indexed by level 0..=6
 /// (0 = uninjured, 1-3 injuries brown→orange→red, 4-6 scars light→dark
@@ -219,9 +217,10 @@ impl DollMeta {
 /// Where a rig came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DollSource {
-    /// Compiled in from `crates/gs_field/data/rigs/`.
+    /// The forms pack committed in the repo, under the pool in a test build
+    /// (`puppets::test_forms`); nothing is compiled in.
     Embedded,
-    /// Read from `<base dir>/global/rigs/` (replaces an embedded namesake).
+    /// Read from `<base dir>/global/rigs/`.
     Override,
 }
 
@@ -286,25 +285,10 @@ impl DollRigs {
     }
 }
 
-/// The rigs compiled into this crate: (family, png bytes, parsed metadata).
-/// A `.toml` without its `.png` (or that does not parse) is skipped with a
-/// warning; `<family>.rig.toml` sources are not baked output and are ignored.
-pub fn embedded() -> impl Iterator<Item = (&'static str, &'static [u8], DollMeta)> {
-    EMBEDDED_RIGS.files().filter_map(|file| {
-        let name = file.path().file_name()?.to_str()?;
-        let stem = name.strip_suffix(".toml")?;
-        if stem.ends_with(".rig") {
-            return None;
-        }
-        let png = EMBEDDED_RIGS.get_file(format!("{stem}.png"))?;
-        match file.contents_utf8().map(DollMeta::from_toml) {
-            Some(Ok(meta)) => Some((stem, png.contents(), meta)),
-            other => {
-                tracing::warn!("embedded doll rig '{stem}' skipped: {other:?}");
-                None
-            }
-        }
-    })
+/// The forms pack's 2D rigs in a test build (`puppets::test_forms`);
+/// none in any other.
+pub fn test_forms_rigs() -> Vec<DollRig> {
+    crate::puppets::test_forms().map(|g| load_dir(&g.join("rigs"))).unwrap_or_default()
 }
 
 /// `<base dir>/global/rigs/` — the runtime override layer.
@@ -362,8 +346,8 @@ fn cache() -> &'static Mutex<Option<Cached>> {
 
 static GENERATION: AtomicU64 = AtomicU64::new(1);
 
-/// The published rig set: embedded rigs with `<base dir>/global/rigs/` laid
-/// over them. Cached; rebuilt after [`invalidate_cache`] or when the base
+/// The published rig set: `<base dir>/global/rigs/` (and in a test build
+/// the committed forms pack's under it, `puppets::test_forms`). Cached; rebuilt after [`invalidate_cache`] or when the base
 /// dir is re-pointed. Cheap enough to call once per frame (one base-dir
 /// lookup and an `Arc` clone) — do not call it per creature.
 pub fn rigs() -> Arc<DollRigs> {
@@ -375,20 +359,10 @@ pub fn rigs() -> Arc<DollRigs> {
         }
     }
     let mut set = DollRigs::default();
-    for (family, png, meta) in embedded() {
-        set.by_family.insert(
-            family.to_ascii_lowercase(),
-            Arc::new(DollRig {
-                family: family.to_ascii_lowercase(),
-                meta,
-                png: png.into(),
-                source: DollSource::Embedded,
-            }),
-        );
-    }
-    if let Some(base) = &base {
-        for rig in load_dir(&base.join("global").join("rigs")) {
-            set.by_family.insert(rig.family.clone(), Arc::new(rig));
+    let layers = crate::puppets::test_forms().map(|g| (g, DollSource::Embedded)).into_iter().chain(base.as_ref().map(|b| (b.join("global"), DollSource::Override)));
+    for (global, source) in layers {
+        for rig in load_dir(&global.join("rigs")) {
+            set.by_family.insert(rig.family.clone(), Arc::new(DollRig { source, ..rig }));
         }
     }
     set.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -605,7 +579,8 @@ fn bestiary_field(name: &str, noun: Option<&str>, field: fn(&crate::bestiary::Cr
         .filter(|n| !n.trim().is_empty())
         .map(str::to_string)
         .or_else(|| canonical.split_whitespace().last().map(str::to_string))?;
-    let entries = crate::bestiary::shared().by_noun(&noun);
+    let db = crate::bestiary::shared();
+    let entries = db.by_noun(&noun);
     let of = |e: &crate::bestiary::CreatureEntry| -> Option<String> {
         field(e)
             .map(|f| f.trim().to_ascii_lowercase())
@@ -644,17 +619,14 @@ mod tests {
 
     const HUMANOID_TOML: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/data/rigs/humanoid.toml"
+        "/../../packs/forms/global/rigs/humanoid.toml"
     ));
 
     #[test]
-    fn humanoid_is_embedded_and_parses() {
-        let all: Vec<_> = embedded().collect();
-        let (family, png, meta) = all
-            .iter()
-            .find(|(f, _, _)| *f == "humanoid")
-            .expect("humanoid rig embedded");
-        assert_eq!(*family, "humanoid");
+    fn humanoid_is_in_the_forms_pack_and_parses() {
+        let all = test_forms_rigs();
+        let rig = all.iter().find(|r| r.family == "humanoid").expect("humanoid rig in the forms pack");
+        let (png, meta) = (&rig.png, &rig.meta);
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
         assert_eq!(meta.family, "humanoid");
         assert_eq!(meta.view, "front");
@@ -853,13 +825,14 @@ mod tests {
         }
     }
 
-    /// Coverage over the embedded bestiary. Run with `-- --nocapture` to see
+    /// Coverage over the forms pack's bestiary. Run with `-- --nocapture` to see
     /// the per-tier / per-family counts, today and with all 22 rigs.
     #[test]
     fn coverage_every_bestiary_creature_resolves_while_humanoid_exists() {
         let db = crate::bestiary::shared();
         assert!(db.len() > 100);
-        let published: Vec<&str> = embedded().map(|(f, _, _)| f).collect();
+        let forms = test_forms_rigs();
+        let published: Vec<&str> = forms.iter().map(|r| r.family.as_str()).collect();
         assert!(published.contains(&"humanoid"));
 
         let tally = |label: &str, has: &dyn Fn(&str) -> bool| {
@@ -927,7 +900,7 @@ mod tests {
         assert_eq!(humanoid.source, DollSource::Override);
         assert_eq!(humanoid.meta.aspect, Some(0.5));
         assert!(!after.has("wyrm"));
-        assert_eq!(after.len(), embedded().count(), "canine replaced, nothing added");
+        assert_eq!(after.len(), test_forms_rigs().len(), "canine replaced, nothing added");
 
         // A wolf now draws as the canine rig (tier 2 until `canine` is its
         // bestiary family... which it is: tier 1).

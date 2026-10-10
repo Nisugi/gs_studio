@@ -25,9 +25,11 @@ pub const FULL_PX: usize = 512;
 pub const PUBLISH_ENV_VAR: &str = "GS_STUDIO_PUBLISH";
 
 /// Where Publish ships to: a directory holding `rigs/`, `puppets/` and
-/// `poses/`, the layout of `crates/gs_field/data` (whose contents game
-/// clients compile in). `override_dir` if given, else that directory found
-/// relative to the data root (`<data>/../crates/gs_field/data`).
+/// `outfits/` -- the forms pack's `global/` (docs/crate-split-plan.md, S8),
+/// in the pool's own layout, which a pool installs (`gs-studio
+/// --install-pack`) and nothing compiles in. `override_dir` if given, else
+/// that directory found relative to the data root
+/// (`<data>/../packs/forms/global`).
 ///
 /// An override that names a `rigs` directory (the old meaning of
 /// `GS_STUDIO_PUBLISH`) means its parent.
@@ -35,7 +37,7 @@ pub fn resolve_publish_dir(data_root: &Path, override_dir: Option<&Path>) -> Pat
     match override_dir.filter(|d| !d.as_os_str().is_empty()) {
         Some(dir) if dir.file_name().is_some_and(|n| n == "rigs") => dir.parent().unwrap_or(dir).to_path_buf(),
         Some(dir) => dir.to_path_buf(),
-        None => data_root.join("..").join("crates").join("gs_field").join("data"),
+        None => data_root.join("..").join("packs").join("forms").join("global"),
     }
 }
 
@@ -460,12 +462,12 @@ impl Session {
 
     /// Ship the SAVED bake (`rigs/<family>.png` + `.toml`), the saved puppet
     /// (`puppets/<family>.puppet.toml`), its painted textures (the family's
-    /// and its creatures', `puppets/skins/<family>/`), every pose set in
-    /// `<data>/poses/` (`poses/`), the held-props file (`props/weapons.toml`)
-    /// and the clothing kit and outfits (`outfits/`) into the publish
-    /// directory. Never the
-    /// `.rig.toml` source. Publishes what is on disk: unsaved edits are not
-    /// in it.
+    /// and its creatures', `puppets/skins/<family>/`) and who wears what
+    /// (`outfits/outfits.toml`) into the publish directory, the forms pack.
+    /// Never the `.rig.toml` source, nor the pose sets, the held props or
+    /// the clothing kit: those are engine data gs_puppet compiles in from
+    /// `<data>/` itself. Publishes what is on disk: unsaved edits are not in
+    /// it.
     pub fn publish(&mut self) -> Result<PathBuf, String> {
         let dir = self.publish_target()?;
         let family = self.editor.rig().family.clone();
@@ -525,24 +527,8 @@ impl Session {
         if skins > 0 {
             shipped.push(format!("{skins} creature skin(s)"));
         }
-        for name in super::texture::ship_outfits(&self.data_root, &dir.join("outfits"))? {
+        for name in super::texture::ship_outfits(&self.data_root, &dir.join("outfits"), false)? {
             shipped.push(format!("outfits/{name}"));
-        }
-        let mut pose_count = 0;
-        for entry in std::fs::read_dir(self.data_root.join("poses")).into_iter().flatten().flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "toml") {
-                copy_into(&path, &dir.join("poses"))?;
-                pose_count += 1;
-            }
-        }
-        if pose_count > 0 {
-            shipped.push(format!("{pose_count} pose sets"));
-        }
-        let props = self.props_path();
-        if props.is_file() {
-            copy_into(&props, &dir.join("props"))?;
-            shipped.push("props/weapons.toml".into());
         }
         self.status = format!("Published {} to {}", shipped.join(", "), dir.display());
         if !removed.is_empty() {
@@ -697,7 +683,7 @@ impl Session {
             Some((_, Err(e))) => broken.push(format!("props/weapons.toml: {e}")),
             None => {}
         }
-        if let Err(e) = super::texture::ship_outfits(&self.data_root, &pool.join("global").join("outfits")) {
+        if let Err(e) = super::texture::ship_outfits(&self.data_root, &pool.join("global").join("outfits"), true) {
             broken.push(e);
         }
         crate::pool_dir::invalidate_caches();
@@ -1006,8 +992,9 @@ neck = { rot = [1.0, 0.0, 0.0] }
     }
 
     /// A hand-edited file that does not parse stops the whole publish before
-    /// anything is copied: the good published pose set, and the rest of the
-    /// last publish, stay as they were.
+    /// anything is copied: the last publish stays as it was. (The pose sets
+    /// themselves are not published -- gs_puppet compiles them in -- but a
+    /// broken one still holds Publish back.)
     #[test]
     fn publish_ships_nothing_while_a_pose_set_does_not_parse() {
         let data = TempData::new("publish_broken");
@@ -1020,7 +1007,6 @@ neck = { rot = [1.0, 0.0, 0.0] }
         s.editor.place_current([0.0, 5.8]);
         s.save().unwrap();
         s.publish().unwrap();
-        let good = std::fs::read(out.join("poses/biped.toml")).unwrap();
         let bake = std::fs::read(out.join("rigs/humanoid.toml")).unwrap();
 
         std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n[pose.sit\n").unwrap();
@@ -1028,8 +1014,8 @@ neck = { rot = [1.0, 0.0, 0.0] }
         s.save().unwrap();
         let err = s.publish().unwrap_err();
         assert!(err.contains("nothing published") && err.contains("poses/biped.toml"), "{err}");
-        assert_eq!(std::fs::read(out.join("poses/biped.toml")).unwrap(), good, "the good pose set stays");
-        assert_eq!(std::fs::read(out.join("rigs/humanoid.toml")).unwrap(), bake, "nothing else moved either");
+        assert_eq!(std::fs::read(out.join("rigs/humanoid.toml")).unwrap(), bake, "nothing moved");
+        assert!(!out.join("poses").exists(), "the pose sets are never published");
 
         std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n").unwrap();
         std::fs::create_dir_all(data.0.join("props")).unwrap();
@@ -1041,9 +1027,9 @@ neck = { rot = [1.0, 0.0, 0.0] }
     }
 
     #[test]
-    fn the_publish_dir_is_the_workspace_crate_unless_overridden() {
+    fn the_publish_dir_is_the_forms_pack_unless_overridden() {
         let default = resolve_publish_dir(Path::new("ws/data"), None);
-        assert!(default.ends_with("crates/gs_field/data") && default.starts_with("ws/data/.."), "{default:?}");
+        assert!(default.ends_with("packs/forms/global") && default.starts_with("ws/data/.."), "{default:?}");
         assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(Path::new(""))), default);
         assert_eq!(resolve_publish_dir(Path::new("ws/data"), Some(Path::new("out/ship"))), PathBuf::from("out/ship"));
         // The old meaning (the rigs directory itself) still lands right.
@@ -1058,7 +1044,7 @@ neck = { rot = [1.0, 0.0, 0.0] }
     }
 
     #[test]
-    fn save_publishes_the_baked_pair_and_the_poses_but_never_the_source() {
+    fn save_publishes_the_baked_pair_but_never_the_source() {
         let data = TempData::new("pub");
         std::fs::create_dir_all(data.0.join("poses")).unwrap();
         std::fs::write(data.0.join("poses/biped.toml"), "body_type = \"biped\"\n").unwrap();
@@ -1079,13 +1065,12 @@ neck = { rot = [1.0, 0.0, 0.0] }
         assert!(s.status.contains("published to"), "{}", s.status);
         // Two joints already make one bone, so a (one-piece) puppet ships.
         assert!(s.status.contains("puppet built"), "{}", s.status);
-        assert_eq!(names(&out), ["outfits", "poses", "puppets", "rigs"]);
-        // no outfits in the data root: the shipped kit and nobody dressed,
-        // as the editor has it (not the embedded assignments left standing)
-        assert_eq!(names(&out.join("outfits")), ["kit.toml", "outfits.toml"]);
+        assert_eq!(names(&out), ["outfits", "puppets", "rigs"], "the forms pack: no engine data in it");
+        // no outfits in the data root: nobody dressed, as the editor has it
+        // (not the old assignments left standing); the kit is gs_puppet's
+        assert_eq!(names(&out.join("outfits")), ["outfits.toml"]);
         assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml"]);
         assert_eq!(names(&out.join("rigs")), ["humanoid.png", "humanoid.toml"]);
-        assert_eq!(names(&out.join("poses")), ["biped.toml"]);
         let read = |p: PathBuf| std::fs::read(p).unwrap();
         assert_eq!(read(out.join("rigs/humanoid.png")), read(data.0.join("rigs/humanoid.png")));
 
@@ -1232,8 +1217,9 @@ torso_upper = { rot = [40.0, 0.0, 0.0] }
         let file = set.pose_file("biped").unwrap();
         assert_eq!(file.source, gs_field::puppets::PuppetSource::Override);
         assert!(gs_puppet::PoseSet::from_toml(&file.toml).unwrap().get("bow").is_some());
-        // The broken avian file did not replace the built-in set.
-        assert_eq!(set.pose_file("avian").unwrap().source, gs_field::puppets::PuppetSource::Embedded);
+        // The broken avian file did not replace the built-in set: the pool
+        // has none, so the field poses with gs_puppet's.
+        assert!(set.pose_file("avian").is_none());
         gs_field::data_dirs::clear_base_dir();
         crate::pool_dir::invalidate_caches();
     }

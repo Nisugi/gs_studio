@@ -25,3 +25,7 @@ data/textures/**/normal.png
 data/textures/*/_*/
 # gs-studio --scene-report output
 /scene-reports/
+# Asset packs built by `gs-studio --pack` (the figures are 719 MB); the
+# forms pack's source is committed (docs/crate-split-plan.md, S8).
+/packs/*
+!/packs/forms/

@@ -250,11 +250,20 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
   `global/rigs/` and `global/puppets/`, and the outfit files into
   `global/outfits/`, and calls `pool_dir::invalidate_caches()` so the stage
   picks them up live. `humanoid.*` is the test fixture.
-- Publish copies the saved bake, puppet, textures, `<data>/poses/*.toml`,
-  props and outfits into the publish dir (`rigs/`, `puppets/`, `poses/`,
-  `props/`, `outfits/`), by default
-  `crates/gs_field/data`, which is compiled into `gs_field`. Those files are
-  never hand-edited; the puppet contract is `gs_puppet::BAKED_VERSION`.
+- Publish copies the saved bake, puppet, textures, creature skins and who
+  wears what (`outfits.toml`) into the publish dir (`rigs/`, `puppets/`,
+  `outfits/`), by default the forms pack's `packs/forms/global` (committed;
+  `packs/forms/pack.toml` says what it is). Nothing of it is compiled into
+  any crate: a pool installs it (`gs-studio --install-pack`,
+  `gs_base::packs`, which keeps a ledger and never replaces a file the
+  user changed), and gs-studio installs it into its own pool as it starts
+  (`packs::seed_pool`). Tests read it from disk through gs_field's
+  dev-only `test-forms` feature. Those files are never hand-edited; the
+  puppet contract is `gs_puppet::BAKED_VERSION`. The pose sets, held props
+  and clothing kit are engine data gs_puppet compiles in from `<data>/`
+  itself: never published. `gs-studio --pack forms|figures` zips a pack
+  into `packs/<id>.zip` (`figures`, the doll's races, is built from
+  `<data>/meshes` first; `packs/*` but `forms` is gitignored).
 - Anything that writes into the pool behind gs_field's back must call
   `pool_dir::invalidate_caches()` (doll and puppet sets only reload on it or
   on a base-dir change).

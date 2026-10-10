@@ -102,14 +102,15 @@ impl FieldSource {
         armed
     }
 
-    /// The held-props file of the current set, parsed once.
+    /// The held props: the pool's file, else the ones `gs_puppet` ships;
+    /// parsed once.
     pub fn props(&mut self) -> Option<Arc<gs_puppet::PropSet>> {
         if let Some(hit) = &self.props {
             return hit.clone();
         }
         let rigs = self.rigs();
         let set = if rigs.props().trim().is_empty() {
-            None
+            Some(Arc::new(gs_puppet::PropSet::shipped().clone()))
         } else {
             match gs_puppet::PropSet::from_toml(rigs.props()) {
                 Ok(set) => Some(Arc::new(set)),
@@ -197,8 +198,10 @@ impl PuppetSource for FieldSource {
         self.rigs().get(form).map(|rig| (rig.baked.clone(), rig.body_type.clone()))
     }
 
+    /// The pool's pose set for the body type, else the one `gs_puppet`
+    /// ships.
     fn pose_file(&self, body_type: &str) -> Option<Arc<str>> {
-        self.rigs().pose_file(body_type).map(|file| file.toml.clone())
+        self.rigs().pose_file(body_type).map(|file| file.toml.clone()).or_else(|| gs_puppet::PoseSet::shipped_toml(body_type).map(Arc::from))
     }
 
     /// The creature's own skin, else (undressed) its family's sheet; the
@@ -521,41 +524,18 @@ mod tests {
         assert!(cache.pose_set(&wolf).is_some(), "poses as its family");
     }
 
-    /// `gs_field` embeds a copy of the workspace's `data/outfits/`.
+    /// The forms pack carries who wears what as Publish copied it from
+    /// `data/outfits/outfits.toml`: the two must not drift. (The kit, the
+    /// pose sets and the props are engine data `gs_puppet` compiles in from
+    /// `data/` itself: one copy.)
     #[test]
-    fn the_embedded_outfits_match_the_workspace_ones() {
+    fn the_forms_packs_outfits_match_the_workspace_ones() {
         let norm = |t: &str| t.replace("\r\n", "\n");
-        let workspace = |f: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/outfits").join(f)).unwrap();
-        assert!(norm(gs_field::puppets::EMBEDDED_KIT) == norm(&workspace("kit.toml")), "crates/gs_field/data/outfits/kit.toml differs from data/outfits/: re-copy it (or Publish)");
+        let read = |path: &str| std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap();
         assert!(
-            norm(gs_field::puppets::EMBEDDED_OUTFITS) == norm(&workspace("outfits.toml")),
-            "crates/gs_field/data/outfits/outfits.toml differs from data/outfits/: re-copy it (or Publish)"
+            norm(&read("../../packs/forms/global/outfits/outfits.toml")) == norm(&read("../../data/outfits/outfits.toml")),
+            "packs/forms/global/outfits/outfits.toml differs from data/outfits/outfits.toml: Publish"
         );
-    }
-
-    /// `gs_field` embeds a copy of the workspace's `data/props/weapons.toml`.
-    #[test]
-    fn the_embedded_props_match_the_workspace_ones() {
-        let norm = |t: &str| t.replace("\r\n", "\n");
-        assert!(
-            norm(gs_field::puppets::EMBEDDED_PROPS) == norm(gs_puppet::SHIPPED_PROPS),
-            "crates/gs_field/data/props/weapons.toml differs from data/props/weapons.toml: re-copy it (or Publish)"
-        );
-    }
-
-    /// `gs_field` embeds copies of the workspace's `data/poses/`; they must
-    /// not drift from what `gs_puppet` ships (Publish re-copies them).
-    #[test]
-    fn the_embedded_pose_sets_match_the_workspace_ones() {
-        let norm = |t: &str| t.replace("\r\n", "\n");
-        let embedded: HashMap<&str, &str> = gs_field::puppets::embedded_poses().collect();
-        for (body_type, shipped) in gs_puppet::SHIPPED_POSES {
-            let got = embedded.get(body_type).unwrap_or_else(|| panic!("{body_type}.toml not embedded"));
-            assert!(
-                norm(got) == norm(shipped),
-                "crates/gs_field/data/poses/{body_type}.toml differs from data/poses/{body_type}.toml: re-copy it (or Publish)"
-            );
-        }
     }
 
     /// A family's `[family.<name>]` overrides reach the drawn pose; a family
@@ -563,7 +543,8 @@ mod tests {
     #[test]
     fn a_family_poses_with_its_own_overrides() {
         use gs_field::puppets::{PoseFile, PuppetRig, PuppetSource};
-        let canine = gs_field::puppets::embedded().find(|(f, _)| *f == "canine").unwrap().1;
+        let forms = gs_field::puppets::test_forms_puppets();
+        let canine: &str = &forms.iter().find(|r| r.family == "canine").unwrap().baked;
         let quadruped = gs_puppet::SHIPPED_POSES.iter().find(|(b, _)| *b == "quadruped").unwrap().1;
         let shared = PoseSet::from_toml(quadruped).unwrap();
         let rig = |family: &str| PuppetRig {

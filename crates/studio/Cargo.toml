@@ -27,6 +27,10 @@ gs_field = { path = "../gs_field" }
 gs_field_egui = { path = "../gs_field_egui" }
 # The injury doll: its figures, sky, state and view (the Doll window).
 injury_doll = { path = "../injury_doll" }
+# Asset packs: one installed into a pool (gs_base::packs), one zipped for
+# release (`--pack`).
+gs_base = { path = "../gs_base" }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Texture sheets and paint-over templates (editor::texture).
 png = "0.17"
 # marks.json and jobs.json for the texture generator (editor::texture).
@@ -48,4 +52,6 @@ egui = { workspace = true }
 eframe = { workspace = true }
 
 [dev-dependencies]
+# Tests read the committed forms pack from disk (nothing is compiled in).
+gs_field = { path = "../gs_field", features = ["test-forms"] }
 tempfile = "3"

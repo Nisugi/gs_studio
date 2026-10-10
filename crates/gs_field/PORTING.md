@@ -655,3 +655,14 @@ itself. Egui-free.
   `data/constellations.toml` left for the `gs_base` crate; this crate
   re-exports them under the same paths (`base_layering`'s check is the
   crate boundary now; the tests' PNG helpers are `test_png`).
+- S8: no creature art is compiled in. `data/puppets`, `data/rigs`,
+  `data/outfits/outfits.toml` and `data/bestiary.json` are the forms pack,
+  `packs/forms/global/` (committed; a pool installs it, `gs_base::packs`);
+  `data/poses`, `data/props` and `data/outfits/kit.toml` are gone (engine
+  data gs_puppet compiles in from the workspace's `data/`). `puppets()`,
+  `dolls::rigs()` and `bestiary::shared()` (now an `Arc`, read again when
+  the base dir moves or after `bestiary::invalidate`) read the pool; in a
+  test build the committed pack lies under it (`puppets::test_forms`, the
+  `test-forms` feature for a dependent's tests). The `include_dir`
+  dependency is gone. `PuppetRigs::props` / `kit` / `pose_file` are the
+  pool's alone (empty, None: gs_puppet's own).

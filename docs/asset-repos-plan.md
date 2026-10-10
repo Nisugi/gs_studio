@@ -75,7 +75,7 @@ Checked on 2026-09-28:
 - [ ] **Licence:** every crate says `license = "GPL-3.0-or-later"`, but there's no `LICENSE` file. Add the GPL text.
 - [ ] **Local paths:** six tracked files contain paths like `G:\dev\...` (CLAUDE.md and docs). They're harmless, but scrub or generalise them if you'd rather.
 - [ ] **README and CLAUDE.md:** they still say to keep VellumFE compatibility. VellumFE is retiring for Hydra, so update them.
-- [ ] **Game content:** decide what the repo says about it (decision 2). `crates/gs_field/data` holds the bestiary and creature names from GemStone IV.
+- [ ] **Game content:** decide what the repo says about it (decision 2). `packs/forms` (the forms pack, committed until this repo takes it) holds the bestiary and creature names from GemStone IV.
 
 ### 3.2 Workflows
 

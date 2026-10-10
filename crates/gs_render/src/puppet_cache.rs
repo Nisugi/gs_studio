@@ -2951,7 +2951,7 @@ mod tests {
         }
 
         fn pose_file(&self, body_type: &str) -> Option<Arc<str>> {
-            self.rigs().pose_file(body_type).map(|file| file.toml.clone())
+            self.rigs().pose_file(body_type).map(|file| file.toml.clone()).or_else(|| PoseSet::shipped_toml(body_type).map(Arc::from))
         }
 
         fn sheets(&mut self, form: &str, creature: Option<&str>) -> Sheets {
@@ -3021,7 +3021,7 @@ mod tests {
     #[test]
     fn every_embedded_puppet_parses_and_poses() {
         let mut cache = cache();
-        let families: Vec<String> = gs_field::puppets::embedded().map(|(f, _)| f.to_string()).collect();
+        let families: Vec<String> = gs_field::puppets::test_forms_puppets().into_iter().map(|r| r.family).collect();
         assert!(families.len() >= 22, "{families:?}");
         for family in &families {
             let fam: Arc<str> = Arc::from(family.as_str());

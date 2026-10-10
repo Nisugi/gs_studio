@@ -324,7 +324,8 @@ pub fn convention_status_overlays(existing: &[CardOverlay]) -> Vec<CardOverlay> 
 /// guessing a family). Sanitized for the resolve cascade's file paths:
 /// lowercase, spaces -> underscores.
 pub fn family_for_noun(noun: &str) -> Option<String> {
-    let entries = crate::bestiary::shared().by_noun(noun);
+    let db = crate::bestiary::shared();
+    let entries = db.by_noun(noun);
     let mut families = entries.iter().filter_map(|e| e.family.as_deref());
     let first = families.next()?;
     if families.all(|f| f.eq_ignore_ascii_case(first)) {

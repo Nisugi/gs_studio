@@ -1712,3 +1712,10 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   names it with the trait in scope). The cache's tests of dressing,
   arming, creature keys and calibration are `field_puppets`' now; the rest
   stayed with it, posing the published set.
+
+## The crate split, S8 (2026-10-09)
+
+- `FieldSource` falls back to gs_puppet's shipped pose sets and held props
+  when the pool has none (nothing of either is compiled into gs_field any
+  more). The cache's tests read the committed forms pack (`packs/forms`)
+  through gs_field's `test-forms` feature.

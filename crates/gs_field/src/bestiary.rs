@@ -7,22 +7,26 @@
 //! `.bestiary` formatter) does NOT come along. This entry struct reads the
 //! same `bestiary.json`; serde ignores every field it does not name.
 //!
-//! [`shared`] loads the bundled copy on first use. A host carrying a newer
-//! file calls [`set_shared`] before anything touches [`shared`].
+//! [`shared`] is the pool's `global/bestiary.json` -- the forms pack's
+//! (docs/crate-split-plan.md, S8: nothing is compiled in) -- read again
+//! when the base dir moves or after [`invalidate`]. A host carrying its own
+//! file calls [`set_shared`], which wins over the pool's.
 
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-/// The bundled bestiary file (VellumFE `defaults/bestiary.json` at 60c84a79).
-/// Public so a host that also needs the full stat blocks can parse the same
-/// text rather than embedding a second copy.
-pub const EMBEDDED_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/data/bestiary.json"
-));
+/// Where the pool keeps the bestiary: `<base dir>/global/bestiary.json`
+/// (VellumFE's `defaults/bestiary.json` at 60c84a79, as the forms pack
+/// carries it). A host that also needs the full stat blocks reads the same
+/// file.
+pub fn bestiary_path() -> Result<PathBuf> {
+    Ok(crate::data_dirs::global_dir()?.join("bestiary.json"))
+}
 
 /// Families and body types the bundled file leaves blank, filled on load
 /// where the owner has named the creature's shape, so the rig cascade draws
@@ -139,11 +143,6 @@ impl BestiaryDb {
         db
     }
 
-    /// Load the bundled default file (data/bestiary.json).
-    pub fn embedded() -> Result<Self> {
-        Self::from_json(EMBEDDED_JSON)
-    }
-
     pub fn from_json(text: &str) -> Result<Self> {
         let file: BestiaryFile = serde_json::from_str(text).context("parsing bestiary json")?;
         Ok(Self::from_entries(file.entries))
@@ -201,31 +200,66 @@ impl BestiaryDb {
     }
 }
 
-static DB: OnceLock<BestiaryDb> = OnceLock::new();
+/// A host's own database ([`set_shared`]): ahead of the pool's.
+static HOST: OnceLock<Arc<BestiaryDb>> = OnceLock::new();
 
-/// Shared database instance, loaded from the bundled file on first use
-/// (unless [`set_shared`] supplied one first).
-pub fn shared() -> &'static BestiaryDb {
-    DB.get_or_init(|| {
-        BestiaryDb::embedded().unwrap_or_else(|e| {
-            tracing::error!("bundled bestiary failed to load: {e}");
-            BestiaryDb::default()
+/// The pool's, as last read: for which base dir and [`invalidate`] count.
+struct Loaded {
+    base: Option<PathBuf>,
+    generation: u64,
+    db: Arc<BestiaryDb>,
+}
+
+static LOADED: Mutex<Option<Loaded>> = Mutex::new(None);
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// The shared database: a host's own ([`set_shared`]), else the pool's
+/// `global/bestiary.json` ([`bestiary_path`]; in a test build the committed
+/// forms pack's when the pool has none, `puppets::test_forms`). Read once
+/// per base dir and [`invalidate`]; empty when there is none -- then
+/// nothing resolves by bestiary facts.
+pub fn shared() -> Arc<BestiaryDb> {
+    if let Some(db) = HOST.get() {
+        return db.clone();
+    }
+    let base = crate::data_dirs::base_dir().ok();
+    let generation = GENERATION.load(Ordering::Relaxed);
+    let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(l) = loaded.as_ref().filter(|l| l.base == base && l.generation == generation) {
+        return l.db.clone();
+    }
+    let files = base.iter().map(|b| b.join("global").join("bestiary.json")).chain(crate::puppets::test_forms().map(|g| g.join("bestiary.json")));
+    let db = files
+        .filter_map(|file| std::fs::read_to_string(&file).ok().map(|text| (file, text)))
+        .next()
+        .map(|(file, text)| {
+            BestiaryDb::from_json(&text).unwrap_or_else(|e| {
+                tracing::error!("bestiary {} did not load: {e}", file.display());
+                BestiaryDb::default()
+            })
         })
-    })
+        .unwrap_or_default();
+    let db = Arc::new(db);
+    *loaded = Some(Loaded { base, generation, db: db.clone() });
+    db
+}
+
+/// Read the pool's bestiary again at the next [`shared`] (a pack installed
+/// a new one).
+pub fn invalidate() {
+    GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Supply the process-wide bestiary from a host's own (newer) JSON, in the
-/// same `{version, entries}` format. Must run before the first [`shared`]
-/// call: errors when the text does not parse, or when the shared instance
-/// already exists (the bundled file, or an earlier override) — it is never
-/// swapped once anything may hold a reference into it.
+/// same `{version, entries}` format: it wins over the pool's from then on.
+/// Errors when the text does not parse, or when a host already gave one.
 pub fn set_shared(json: &str) -> Result<()> {
     set_shared_db(BestiaryDb::from_json(json)?)
 }
 
 /// [`set_shared`] for a host that already built its database.
 pub fn set_shared_db(db: BestiaryDb) -> Result<()> {
-    DB.set(db)
+    HOST.set(Arc::new(db))
         .map_err(|_| anyhow::anyhow!("shared bestiary is already initialized"))
 }
 
@@ -233,9 +267,12 @@ pub fn set_shared_db(db: BestiaryDb) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// The forms pack's bestiary, committed in the repo.
+    const PACK_JSON: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../packs/forms/global/bestiary.json"));
+
     #[test]
     fn embedded_file_parses_despite_the_fields_this_struct_omits() {
-        let db = BestiaryDb::embedded().expect("bundled bestiary parses");
+        let db = BestiaryDb::from_json(PACK_JSON).expect("bundled bestiary parses");
         assert!(db.len() > 100, "got {} entries", db.len());
         assert!(!db.by_noun("kobold").is_empty());
         assert!(!db.by_noun("  KOBOLD ").is_empty(), "trimmed, case-insensitive");
@@ -245,7 +282,7 @@ mod tests {
     /// the rig of the shape the owner named.
     #[test]
     fn filled_facts_put_untyped_creatures_on_the_right_rig() {
-        let db = BestiaryDb::embedded().unwrap();
+        let db = BestiaryDb::from_json(PACK_JSON).unwrap();
         let rig = |name: &str| {
             let e = db.entries().iter().find(|e| e.name.eq_ignore_ascii_case(name)).unwrap_or_else(|| panic!("{name}"));
             crate::dolls::resolve_doll(e.family.as_deref(), e.creature_type.as_deref(), &|_| true).unwrap().family

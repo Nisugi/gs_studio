@@ -66,7 +66,7 @@ impl ToolId {
 pub struct Startup {
     pub data: DataRoot,
     pub pool: PoolDir,
-    /// Where Publish ships (`rigs/`, `puppets/`, `poses/` under it).
+    /// Where Publish ships (`rigs/`, `puppets/`, `outfits/` under it: the forms pack).
     pub publish: PathBuf,
     /// The silhouette chart, if one is known (`settings.toml`).
     pub chart: Option<PathBuf>,
@@ -296,8 +296,8 @@ impl StudioApp {
 
         ui.label("Publish to");
         ui.add_sized([BOX, 20.0], egui::TextEdit::singleline(&mut self.publish_edit)).on_hover_text(
-            "Where Publish ships baked rigs, puppets and pose sets for game clients: a folder holding \
-             rigs/, puppets/, poses/ (the workspace's crates/gs_field/data). Also: --publish or GS_STUDIO_PUBLISH",
+            "Where Publish ships baked rigs, puppets, skins and outfits for game clients: a folder holding \
+             rigs/, puppets/, outfits/ (the forms pack's global/, packs/forms/global; a pool installs it). Also: --publish or GS_STUDIO_PUBLISH",
         );
         if ui.button("Set").clicked() {
             let text = self.publish_edit.trim();

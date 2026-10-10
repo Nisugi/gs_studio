@@ -208,6 +208,35 @@ pub fn install_doll(data: &Path, pool: &Path) -> std::io::Result<Vec<String>> {
     Ok(forms)
 }
 
+/// The figures pack (docs/crate-split-plan.md, S8): the playable races'
+/// figures ([`race_forms`]) as a client's doll draws them -- each its own
+/// folder, `global/bodies/<form>/`: puppet, thin mesh, weights, one cloud,
+/// `doll.toml`, no sheets ([`install_doll`]'s) -- with its `pack.toml`,
+/// into `out` (a figure no longer a race is taken out). The forms written.
+pub fn figures_pack(data: &Path, out: &Path) -> std::io::Result<Vec<String>> {
+    let races = race_forms(data);
+    let keep = |form: &str| races.iter().any(|r| r == form);
+    let bodies = out.join("global").join("bodies");
+    std::fs::create_dir_all(&bodies)?;
+    for dir in std::fs::read_dir(&bodies)?.flatten() {
+        if dir.path().is_dir() && !keep(&dir.file_name().to_string_lossy()) {
+            std::fs::remove_dir_all(dir.path())?;
+        }
+    }
+    std::fs::write(out.join("pack.toml"), FIGURES_PACK_TOML)?;
+    install_bodies_of(data, &bodies, &keep, true)
+}
+
+/// The figures pack's `pack.toml`.
+const FIGURES_PACK_TOML: &str = r#"# The injury doll's figures: the playable races' modelled bodies, each
+# its own folder (gs-studio --pack figures builds it from the data root).
+id = "figures"
+title = "Injury doll figures"
+kind = "figures"
+version = "1"
+format = 1
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;

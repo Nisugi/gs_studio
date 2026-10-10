@@ -118,6 +118,7 @@ pub fn invalidate_caches() {
     gs_field::geometry::invalidate_calibrations();
     gs_field::dolls::invalidate_cache();
     gs_field::puppets::invalidate_cache();
+    gs_field::bestiary::invalidate();
     injury_doll::roster::invalidate();
 }
 

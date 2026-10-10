@@ -118,7 +118,7 @@ pub fn bestiary_matches(db: &gs_field::bestiary::BestiaryDb, query: &str, limit:
 
 /// [`bestiary_matches`] against the shared database.
 pub fn suggest(query: &str, limit: usize) -> Vec<BestiaryPick> {
-    bestiary_matches(gs_field::bestiary::shared(), query, limit)
+    bestiary_matches(&gs_field::bestiary::shared(), query, limit)
 }
 
 /// The noun a free-typed name spawns with: its last word.
@@ -228,7 +228,7 @@ pub fn puppet_showcase_bare_in(
 pub fn puppet_showcase(family: &str) -> Result<BestiaryPick, String> {
     let set = gs_field::puppets::puppets();
     puppet_showcase_bare_in(
-        gs_field::bestiary::shared(),
+        &gs_field::bestiary::shared(),
         family,
         |n, noun| has_art(n, Some(noun)),
         |n, _| set.skin(family, &gs_field::naming::name_token(n)).is_some(),
@@ -331,7 +331,7 @@ pub fn puppet_tree() -> Vec<PuppetFamily> {
         })
         .collect();
     let skins: Vec<(String, String)> = set.skins().map(|(f, c)| (f.to_string(), c.to_string())).collect();
-    puppet_tree_in(gs_field::bestiary::shared(), &forms, &skins, |n, noun| puppet_family(n, Some(noun)))
+    puppet_tree_in(&gs_field::bestiary::shared(), &forms, &skins, |n, noun| puppet_family(n, Some(noun)))
 }
 
 /// Everything the spawn-by-name box shows for what is typed: whether the

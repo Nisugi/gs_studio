@@ -316,7 +316,7 @@ neck = { rot = [-40.0, 0.0, 0.0] }
 #[test]
 fn a_lying_quadruped_keeps_its_back_low() {
     let set = PoseSet::from_toml(include_str!("../../../data/poses/quadruped.toml")).unwrap();
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../gs_field/data/puppets/");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packs/forms/global/puppets/");
     for family in ["canine", "ursine", "equine", "caprine", "suine"] {
         let text = std::fs::read_to_string(format!("{dir}{family}.puppet.toml")).unwrap();
         let p = crate::Puppet::from_baked_toml(&text).unwrap();

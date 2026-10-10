@@ -3,7 +3,7 @@ name = "gs_base"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "What the injury doll and the creature field both stand on: the data folder, the game's clock and sky, the stars, the sky as the lights read it, the body's parts, the statuses, PNG metadata."
+description = "What the injury doll and the creature field both stand on: the data folder, the game's clock and sky, the stars, the sky as the lights read it, the body's parts, the statuses, PNG metadata, and the asset packs a pool installs."
 
 [lib]
 doctest = false
@@ -21,6 +21,9 @@ toml = "0.8"
 anyhow = "1"
 # `~` for the default data dir (a host sets its own: set_base_dir).
 dirs = "5"
+# Asset packs (`packs`): a pack's zip (pure-Rust deflate) and its SHA-256.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+sha2 = "0.11"
 
 [dev-dependencies]
 # png_meta's tests build and re-decode real PNGs.

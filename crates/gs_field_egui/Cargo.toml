@@ -31,6 +31,8 @@ vellum_light = { path = "../vellum_light" }
 egui-wgpu = { workspace = true }
 
 [dev-dependencies]
+# Tests read the committed forms pack from disk (nothing is compiled in).
+gs_field = { path = "../gs_field", features = ["test-forms"] }
 gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
 tempfile = "3"
 # examples/stage_demo.rs only. Same source, branch and features as the hosts.

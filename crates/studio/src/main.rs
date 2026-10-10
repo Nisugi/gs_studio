@@ -8,6 +8,8 @@
 //!   gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>] --save <family>[,<family>...]
 //!   gs-studio [--data <dir>] --import-chart <scale-chart.html>
 //!   gs-studio [--data <dir>] --export-jobs
+//!   gs-studio [--data <dir>] --pack forms|figures|<pack folder>
+//!   gs-studio [--pool <dir>] --install-pack <pack.zip|pack folder>
 //!
 //! Both run headless, for a texture generator to call, and exit: `--project`
 //! writes the projection-first renders it paints the side and back from
@@ -47,6 +49,7 @@ mod data_root;
 mod doll_source;
 mod editor;
 mod notes;
+mod packs;
 mod fs_cache;
 mod perf_log;
 mod pool_dir;
@@ -82,6 +85,23 @@ fn seed_from_bundle(data: &data_root::DataRoot, pool: &pool_dir::PoolDir) {
         }
     }
     pool_dir::invalidate_caches();
+}
+
+/// The forms pack beside the data root (`packs/forms`, what Publish writes)
+/// into the pool: what the creature field draws from, now that nothing is
+/// compiled in. The pool keeps what it had of its own and what the user
+/// changed (`gs_base::packs`).
+fn seed_from_packs(data: &data_root::DataRoot, pool: &pool_dir::PoolDir) {
+    match packs::seed_pool(&data.path, &pool.path) {
+        Some(Ok(report)) => {
+            if !(report.added.is_empty() && report.updated.is_empty() && report.removed.is_empty()) {
+                eprintln!("gs-studio: pack {}", report.summary());
+                pool_dir::invalidate_caches();
+            }
+        }
+        Some(Err(e)) => eprintln!("gs-studio: the forms pack: {e}"),
+        None => {}
+    }
 }
 
 fn main() -> eframe::Result {
@@ -163,6 +183,15 @@ fn main() -> eframe::Result {
             Err(e) => fail(&format!("gs-studio: --install-doll: {e}")),
         }
     }
+    if let Some(what) = &cli.pack {
+        match packs::build(what, &data.path) {
+            Ok(built) => {
+                println!("{} ({} bytes)\nsha256 {}", built.zip.display(), built.bytes, built.sha256);
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --pack: {e}")),
+        }
+    }
     if cli.export_jobs {
         let outlines = rig::Outlines::load(&data.path.join("outlines.json")).unwrap_or_else(|e| fail(&format!("gs-studio: outlines.json: {e}")));
         match editor::texture::export_jobs(&data.path, &outlines) {
@@ -181,7 +210,20 @@ fn main() -> eframe::Result {
     let publish = editor::resolve_publish_dir(&data.path, publish_override.as_deref());
     eprintln!("gs-studio: publish to {}", publish.display());
     let pool = pool_dir::from_environment(cli.pool, saved.pool);
+    if let Some(pack) = &cli.install_pack {
+        match packs::install(pack, &pool.path) {
+            Ok(report) => {
+                println!("{}: {}", pool.path.display(), report.summary());
+                for kept in &report.kept {
+                    println!("  kept as the pool has it: {kept}");
+                }
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --install-pack: {e}")),
+        }
+    }
     seed_from_bundle(&data, &pool);
+    seed_from_packs(&data, &pool);
     eprintln!("gs-studio: {}", pool.status());
     if let Some(families) = &cli.save {
         // The Rigs tab's Save, headless: bake, puppet, skins and outfits into

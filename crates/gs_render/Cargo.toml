@@ -25,8 +25,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 tracing = "0.1"
 
 [dev-dependencies]
-# The cache's tests pose the creature field's published forms.
-gs_field = { path = "../gs_field" }
+# The cache's tests pose the creature field's published forms (the
+# committed forms pack, read from disk).
+gs_field = { path = "../gs_field", features = ["test-forms"] }
 gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
 # Validates the WGSL offline (tests): the same naga wgpu builds on.
 naga = { version = "29.0.4", features = ["wgsl-in"] }

@@ -23,6 +23,8 @@ anyhow = "1"
 tracing = "0.1"
 
 [dev-dependencies]
+# Tests read the committed forms pack from disk (nothing is compiled in).
+gs_field = { path = "../gs_field", features = ["test-forms"] }
 tempfile = "3"
 # examples/calibrators_demo.rs only. Same source, branch and features as the hosts.
 eframe = { workspace = true }

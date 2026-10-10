@@ -5,7 +5,7 @@
 #[test]
 fn the_base_depends_on_its_allowed_crates_alone() {
     let manifest = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
-    let allowed = ["vellum_light", "serde", "toml", "anyhow", "dirs"];
+    let allowed = ["vellum_light", "serde", "toml", "anyhow", "dirs", "zip", "sha2"];
     let mut section = "";
     let mut found = Vec::new();
     for line in manifest.lines().map(str::trim) {

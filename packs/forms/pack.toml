@@ -1,0 +1,15 @@
+# The creature forms: their baked puppets, painted sheets and creature
+# skins (global/puppets), the 2D label-map rigs (global/rigs), who wears
+# what (global/outfits/outfits.toml) and the bestiary (global/bestiary.json)
+# -- what the creature field draws from. Nothing of it is compiled into any
+# binary (docs/crate-split-plan.md, S8): a pool installs it
+# (`gs-studio --install-pack`, `gs_base::packs`).
+#
+# gs-studio's Publish writes global/; this folder is committed until the
+# asset repo (docs/asset-repos-plan.md) takes it. `gs-studio --pack forms`
+# zips it.
+id = "forms"
+title = "Creature forms"
+kind = "forms"
+version = "2026.10.09"
+format = 1

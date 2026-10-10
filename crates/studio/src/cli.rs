@@ -22,7 +22,11 @@ pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publi
     \x20      gs-studio [--data <dir>] --export-jobs\n\
     \x20                (headless: every template and textures/jobs.json for the generator, then exit)\n\
     \x20      gs-studio [--data <dir>] --install-doll <pool dir>\n\
-    \x20                (headless: the playable races' figures -- puppets and bodies -- into a client's pool, then exit)";
+    \x20                (headless: the playable races' figures -- puppets and bodies -- into a client's pool, then exit)\n\
+    \x20      gs-studio [--data <dir>] --pack forms|figures|<pack folder>\n\
+    \x20                (headless: the pack zipped into <data>/../packs/<id>.zip, with its SHA-256, then exit)\n\
+    \x20      gs-studio [--pool <dir>] --install-pack <pack.zip|pack folder>\n\
+    \x20                (headless: the pack into the pool, keeping what the user changed, then exit)";
 
 /// Environment fallback for `--tab`.
 pub const TAB_ENV_VAR: &str = "GS_STUDIO_TAB";
@@ -67,13 +71,19 @@ pub struct Cli {
     /// `--install-doll <pool dir>`: the playable races' figures into a
     /// game client's pool (`bodies::install_doll`) and exit, no window.
     pub install_doll: Option<PathBuf>,
+    /// `--pack forms|figures|<pack folder>`: zip that pack into
+    /// `<data>/../packs/` (`packs::build`) and exit, no window.
+    pub pack: Option<String>,
+    /// `--install-pack <pack.zip|pack folder>`: install it into the pool
+    /// (`--pool`, else gs-studio's own: `packs::install`) and exit.
+    pub install_pack: Option<PathBuf>,
 }
 
 /// Err carries a usage message.
 pub fn parse_args(args: &[String]) -> Result<Cli, String> {
-    const OPTIONS: [&str; 14] = [
+    const OPTIONS: [&str; 16] = [
         "--data", "--pool", "--publish", "--tab", "--room-uid", "--room-title", "--room-location", "--project", "--grazing", "--build-sheet", "--import-chart", "--save",
-        "--scene-report", "--install-doll",
+        "--scene-report", "--install-doll", "--pack", "--install-pack",
     ];
     let mut cli = Cli::default();
     let mut it = args.iter();
@@ -108,6 +118,8 @@ pub fn parse_args(args: &[String]) -> Result<Cli, String> {
             "--scene-report" => cli.scene_report = Some(value),
             "--import-chart" => cli.import_chart = Some(PathBuf::from(value)),
             "--install-doll" => cli.install_doll = Some(PathBuf::from(value)),
+            "--pack" => cli.pack = Some(value),
+            "--install-pack" => cli.install_pack = Some(PathBuf::from(value)),
             "--grazing" => {
                 cli.grazing = Some(value.parse().map_err(|_| format!("--grazing needs a number, got '{value}'"))?);
             }
@@ -145,6 +157,8 @@ mod tests {
         assert_eq!(parse_args(&args(&["--build-sheet", "troll/cave_troll"])).unwrap().build_sheet.as_deref(), Some("troll/cave_troll"));
         assert_eq!(parse_args(&args(&["--save", "humanoid,troll"])).unwrap().save.as_deref(), Some("humanoid,troll"));
         assert_eq!(parse_args(&args(&["--install-doll", "G:/hydra/data"])).unwrap().install_doll, Some("G:/hydra/data".into()));
+        assert_eq!(parse_args(&args(&["--pack", "forms"])).unwrap().pack.as_deref(), Some("forms"));
+        assert_eq!(parse_args(&args(&["--install-pack=packs/forms.zip", "--pool", "p"])).unwrap().install_pack, Some("packs/forms.zip".into()));
         assert_eq!(parse_args(&args(&["--scene-report=7503305 - Bonfire"])).unwrap().scene_report.as_deref(), Some("7503305 - Bonfire"));
         assert_eq!(parse_args(&args(&["--import-chart", "x/scale-chart.html"])).unwrap().import_chart, Some(PathBuf::from("x/scale-chart.html")));
     }

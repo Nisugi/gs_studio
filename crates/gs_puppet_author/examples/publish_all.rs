@@ -1,16 +1,16 @@
 //! publish_all: what the rig editor's Save + Publish do, for every rig at
 //! once, without the app.
 //!
-//!   cargo run --release -p gs_puppet --example publish_all [-- <publish_dir>]
+//!   cargo run --release -p gs_puppet_author --example publish_all [-- <publish_dir>]
 //!
 //! For each `data/rigs/<family>.rig.toml`: bake `<family>.png` + `.toml` and
 //! build `<family>.puppet.toml` beside it (the `.rig.toml` is never
 //! rewritten), then copy those into `<publish_dir>/rigs/` and
-//! `<publish_dir>/puppets/`, and every `data/poses/*.toml` into
-//! `<publish_dir>/poses/`. Default publish dir: `crates/gs_field/data`.
-//! `PUBLISH_ONLY=elephantid,canine` limits it to those families (poses are
-//! still copied). A pose set that does not parse stops it before anything
-//! is written.
+//! `<publish_dir>/puppets/`. Default publish dir: the forms pack,
+//! `packs/forms/global` (the pose sets are engine data gs_puppet compiles
+//! in from `data/poses/`: never published). `PUBLISH_ONLY=elephantid,canine`
+//! limits it to those families. A pose set that does not parse stops it
+//! before anything is written.
 
 use gs_puppet_author::prelude::*;
 use std::path::{Path, PathBuf};
@@ -43,7 +43,7 @@ fn copy_into(file: &Path, dir: &Path) {
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let data = root.join("data");
-    let publish: PathBuf = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("crates/gs_field/data"));
+    let publish: PathBuf = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| root.join("packs/forms/global"));
     let outlines = Outlines::load(&data.join("outlines.json")).expect("outlines.json");
     let rigs_dir = data.join("rigs");
     let mut families: Vec<String> = std::fs::read_dir(&rigs_dir)
@@ -102,10 +102,7 @@ fn main() {
         copy_into(&puppet_path, &publish.join("puppets"));
         println!("published {family}");
     }
-    for path in &poses {
-        copy_into(path, &publish.join("poses"));
-    }
-    println!("{} rigs published to {}, poses copied", families.len() - failed.len(), publish.display());
+    println!("{} rigs published to {}", families.len() - failed.len(), publish.display());
     for f in &failed {
         println!("FAILED {f}");
     }

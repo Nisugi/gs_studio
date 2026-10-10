@@ -566,15 +566,8 @@ mod tests {
     use super::*;
 
     fn humanoid() -> DollMap {
-        let rigs = DollRigs::from_rigs(gs_field::dolls::embedded().map(|(family, png, meta)| {
-            gs_field::dolls::DollRig {
-                family: family.to_string(),
-                meta,
-                png: png.into(),
-                source: gs_field::dolls::DollSource::Embedded,
-            }
-        }));
-        let rig = rigs.get("humanoid").expect("humanoid embedded");
+        let rigs = DollRigs::from_rigs(gs_field::dolls::test_forms_rigs());
+        let rig = rigs.get("humanoid").expect("humanoid in the forms pack");
         DollMap::decode(&rig.png, rig.meta.clone()).expect("decodes")
     }
 
@@ -894,7 +887,7 @@ mod tests {
             );
         }
         let t = std::time::Instant::now();
-        let rig_png: Vec<u8> = gs_field::dolls::embedded().next().unwrap().1.to_vec();
+        let rig_png: Vec<u8> = gs_field::dolls::test_forms_rigs()[0].png.to_vec();
         std::hint::black_box(DollMap::decode(&rig_png, map.meta.clone()));
         println!("decode label png: {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
     }

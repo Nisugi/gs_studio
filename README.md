@@ -57,7 +57,7 @@ strip), along with the silhouette chart:
 |---|---|---|---|---|
 | **Data** root | `outlines.json`, `rigs/` (rig sources, bakes, puppets), `poses/` | Rigs | `--data <dir>`, `GS_STUDIO_DATA`, Settings' Data box + Open | a `data/outlines.json` found walking up from the working directory, then from the executable, else `<gs-studio home>/data` |
 | **Pool** | `global/images/<category>/` (creatures, scenery, scenes, frames, dolls, ...), `global/scenes/*.toml`, and the live `global/rigs/` + `global/puppets/` a rig save installs | every tab but Rigs | `--pool <dir>`, `GS_STUDIO_POOL`, Settings' Pool box + Set | **gs-studio's own data home** (below) |
-| **Publish** | `rigs/`, `puppets/`, `poses/`: what game clients compile in | Rigs (Publish) | `--publish <dir>`, `GS_STUDIO_PUBLISH`, Settings' *Publish to* box + Set | `<data>/../crates/gs_field/data` |
+| **Publish** | `rigs/`, `puppets/`, `outfits/`: the forms pack a pool installs (nothing is compiled in) | Rigs (Publish) | `--publish <dir>`, `GS_STUDIO_PUBLISH`, Settings' *Publish to* box + Set | `<data>/../packs/forms/global` |
 
 Every folder resolves `--flag` > environment variable > **remembered** >
 default. A folder changed in the app (Data Open, Pool Set, Publish Set, and
@@ -561,10 +561,16 @@ the next time it is saved.
 **Publish** removes from the publish directory what the family no longer
 has (a puppet its rig can no longer build, a texture or creature skin whose
 sheet is gone) and says so; the pool install does the same. It copies what is SAVED -- `rigs/<family>.png` + `.toml`, the
-puppet `puppets/<family>.puppet.toml`, and every pose set in `<data>/poses/`
-into `poses/` -- never the `.rig.toml` source, into the publish directory:
-the folder whose contents game clients embed. Default
-`<data>/../crates/gs_field/data`; `--publish`, `GS_STUDIO_PUBLISH` or
+puppet `puppets/<family>.puppet.toml`, its painted sheets and creature
+skins, and who wears what (`outfits/outfits.toml`) -- never the `.rig.toml`
+source, nor the pose sets, held props or clothing kit (engine data gs_puppet
+compiles in from `<data>/` itself) -- into the publish directory: the forms
+pack's `global/` (`packs/forms`, committed), which a pool installs and no
+binary compiles in. gs-studio installs it into its own pool as it starts;
+`gs-studio --install-pack <zip|folder>` puts it (or any pack) into another
+pool, keeping what the user changed there, and `gs-studio --pack
+forms|figures` zips one into `packs/<id>.zip`. Default
+`<data>/../packs/forms/global`; `--publish`, `GS_STUDIO_PUBLISH` or
 Settings' *Publish to* box override it (a path naming a `rigs` directory, the old
 meaning, is taken as its parent). A pose set, `props/weapons.toml` or
 outfit file that does not parse stops Publish before anything is copied,
