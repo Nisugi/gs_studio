@@ -35,7 +35,7 @@ pub const TAB_ENV_VAR: &str = "GS_STUDIO_TAB";
 pub struct Cli {
     /// `--data`: the rig data root (outlines.json, rigs/).
     pub data: Option<PathBuf>,
-    /// `--pool`: the art pool / scenes directory (gs_field's base dir).
+    /// `--pool`: the art pool / scenes directory (creature_field's base dir).
     pub pool: Option<PathBuf>,
     /// Where Save publishes baked rigs for clients to embed.
     pub publish: Option<PathBuf>,

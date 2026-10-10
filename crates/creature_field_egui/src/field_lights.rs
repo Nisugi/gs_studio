@@ -50,7 +50,7 @@
 use std::cell::RefCell;
 
 use egui::{pos2, vec2, Color32, Pos2};
-use gs_field::lighting::{LampKind, LightTarget, PointLight};
+use creature_field::lighting::{LampKind, LightTarget, PointLight};
 
 /// Strongest the fire's copy of a creature ever gets.
 const MAX_GLOW: f32 = 0.8;
@@ -158,7 +158,7 @@ pub(crate) fn flame_height(kind: LampKind) -> f32 {
 
 /// Where a light is now: its floor point plus its drift (stage x, world
 /// depth), and how high its light sits above the floor (world units).
-fn at(field: &gs_field::solver::CreatureField, light: &PointLight, index: usize, t: f32) -> (f32, f32, f32) {
+fn at(field: &creature_field::solver::CreatureField, light: &PointLight, index: usize, t: f32) -> (f32, f32, f32) {
     let d = light.drift(index, t);
     let (_, ppu) = field.project_ground(light.x, light.z);
     (light.x + d[0] * ppu, light.z + d[2], flame_height(light.kind) + d[1])
@@ -179,7 +179,7 @@ pub fn flicker(light: &PointLight, index: usize, t: f32) -> f32 {
 
 /// How strongly `light` reaches a point on the floor, 0..1 (smooth falloff
 /// to nothing at its radius), and which way it lies (-1 left .. 1 right).
-fn reach(field: &gs_field::solver::CreatureField, light: &PointLight, index: usize, t: f32, x: f32, z: f32) -> (f32, f32) {
+fn reach(field: &creature_field::solver::CreatureField, light: &PointLight, index: usize, t: f32, x: f32, z: f32) -> (f32, f32) {
     let (lx, lz, _) = at(field, light, index, t);
     let (_, ppu_l) = field.project_ground(lx, lz);
     let (_, ppu_c) = field.project_ground(x, z);
@@ -194,9 +194,9 @@ fn reach(field: &gs_field::solver::CreatureField, light: &PointLight, index: usi
 /// The creature about to be drawn stands on `unit`: work out its fire glow
 /// (None when no light reaches it) for [`paint_sprite_glow`] and friends.
 pub fn set_creature(
-    scene: Option<&gs_field::scenes::StageScene>,
-    field: &gs_field::solver::CreatureField,
-    unit: &gs_field::solver::Unit,
+    scene: Option<&creature_field::scenes::StageScene>,
+    field: &creature_field::solver::CreatureField,
+    unit: &creature_field::solver::Unit,
     now_ms: f64,
 ) {
     let (fx, _) = field.foot(unit);
@@ -211,7 +211,7 @@ pub fn set_creature(
 /// The lamps that may reach a creature standing at floor point (x, z):
 /// those that light creatures, within their reach, with room for a body's
 /// own size.
-fn near_lamps(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Vec<Near> {
+fn near_lamps(lights: &[PointLight], field: &creature_field::solver::CreatureField, x: f32, z: f32, t: f32) -> Vec<Near> {
     let (_, ppu_c) = field.project_ground(x, z);
     lights
         .iter()
@@ -263,7 +263,7 @@ pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, Vec<gs_puppet::L
                 // of 90 points away from the viewer, to -z.
                 beam: (l.spread < 360.0).then(|| {
                     let (s, c) = l.aim.to_radians().sin_cos();
-                    gs_puppet::Beam { dir: [c, 0.0, -s], spread: l.spread, soft: gs_field::lighting::BEAM_SOFT_DEG }
+                    gs_puppet::Beam { dir: [c, 0.0, -s], spread: l.spread, soft: creature_field::lighting::BEAM_SOFT_DEG }
                 }),
             })
             .collect::<Vec<_>>();
@@ -276,7 +276,7 @@ pub fn puppet_lamps(ft_per_unit: f32) -> (Vec<gs_puppet::Lamp>, Vec<gs_puppet::L
 
 /// The fire glow on something standing at floor point (x, z) at time `t`,
 /// from the lamps that light `what` it is.
-fn glow_at(lights: &[PointLight], field: &gs_field::solver::CreatureField, x: f32, z: f32, t: f32, what: LightTarget) -> Option<FireGlow> {
+fn glow_at(lights: &[PointLight], field: &creature_field::solver::CreatureField, x: f32, z: f32, t: f32, what: LightTarget) -> Option<FireGlow> {
     let (mut left, mut right, mut rgb, mut best) = (0.0f32, 0.0f32, [255u8; 3], 0.0f32);
     for (i, light) in lights.iter().enumerate() {
         if !light.lights(what) {
@@ -342,8 +342,8 @@ pub fn paint_sprite_glow(
 pub fn paint_prop_glow(
     painter: &egui::Painter,
     cache: &crate::creature_art::CreatureArtCache,
-    field: &gs_field::solver::CreatureField,
-    prop: &gs_field::scenes::SceneProp,
+    field: &creature_field::solver::CreatureField,
+    prop: &creature_field::scenes::SceneProp,
     drawn: &egui::TextureHandle,
     dest: egui::Rect,
 ) {
@@ -357,7 +357,7 @@ pub fn paint_prop_glow(
 
 /// Screen pixels per world unit at a floor point, and the point on screen.
 fn place(
-    field: &gs_field::solver::CreatureField,
+    field: &creature_field::solver::CreatureField,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
     x: f32,
@@ -373,7 +373,7 @@ fn place(
 /// one, the fire's colour laid on.
 fn ground_pool(
     painter: &egui::Painter,
-    field: &gs_field::solver::CreatureField,
+    field: &creature_field::solver::CreatureField,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
     light: &PointLight,
@@ -434,7 +434,7 @@ fn ground_pool(
         }
     }
     // A backdrop's texture must not show past the stage's edges.
-    let stage = egui::Rect::from_two_pos(to_screen(0.0, 0.0), to_screen(gs_field::solver::STAGE_W, gs_field::solver::STAGE_H));
+    let stage = egui::Rect::from_two_pos(to_screen(0.0, 0.0), to_screen(creature_field::solver::STAGE_W, creature_field::solver::STAGE_H));
     painter.with_clip_rect(painter.clip_rect().intersect(stage)).add(egui::Shape::mesh(mesh));
 }
 
@@ -513,7 +513,7 @@ fn flame(painter: &egui::Painter, base: Pos2, h: f32, t: f32, seed: f32, f: f32,
     }
 }
 
-pub(crate) fn paint_lamp(painter: &egui::Painter, field: &gs_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
+pub(crate) fn paint_lamp(painter: &egui::Painter, field: &creature_field::solver::CreatureField, to_screen: &dyn Fn(f32, f32) -> Pos2, scale: f32, light: &PointLight, i: usize, t: f32) {
     if in_pass(i) && matches!(light.kind, LampKind::Torch | LampKind::Wisp) {
         return;
     }
@@ -574,8 +574,8 @@ pub fn paint_back(
     painter: &egui::Painter,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
-    field: &gs_field::solver::CreatureField,
-    scene: Option<&gs_field::scenes::StageScene>,
+    field: &creature_field::solver::CreatureField,
+    scene: Option<&creature_field::scenes::StageScene>,
     backdrop: Option<Backdrop>,
     ctx: &egui::Context,
 ) -> bool {
@@ -609,8 +609,8 @@ pub fn paint_lamps_behind(
     painter: &egui::Painter,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
-    field: &gs_field::solver::CreatureField,
-    scene: Option<&gs_field::scenes::StageScene>,
+    field: &creature_field::solver::CreatureField,
+    scene: Option<&creature_field::scenes::StageScene>,
     z: f32,
     ctx: &egui::Context,
 ) {
@@ -626,8 +626,8 @@ pub fn paint_front(
     painter: &egui::Painter,
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
-    field: &gs_field::solver::CreatureField,
-    scene: Option<&gs_field::scenes::StageScene>,
+    field: &creature_field::solver::CreatureField,
+    scene: Option<&creature_field::scenes::StageScene>,
     ctx: &egui::Context,
 ) {
     let Some(scene) = scene.filter(|s| !s.lights.is_empty()) else { return };
@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn a_fire_reaches_near_creatures_on_the_side_facing_it() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let light = PointLight::new(LampKind::Campfire, 440.0, 3.0);
         let (at, _) = reach(&field, &light, 0, 0.0, 440.0, 3.0);
         assert!((at - 1.0).abs() < 1e-4, "full strength at the fire");
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn a_puppet_sees_a_lamp_where_it_stands() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let lights = vec![
             PointLight::new(LampKind::Campfire, 400.0, 3.5),
             PointLight::new(LampKind::Torch, 480.0, 2.5),
@@ -729,7 +729,7 @@ mod tests {
     /// lamps that light creatures, and scenery.
     #[test]
     fn a_lamp_glows_only_on_what_it_lights() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let mut lamp = PointLight::new(LampKind::Campfire, 440.0, 3.0);
         assert!(glow_at(std::slice::from_ref(&lamp), &field, 420.0, 3.0, 0.0, LightTarget::Creatures).is_some());
         lamp.set_lights(LightTarget::Creatures, false);
@@ -743,14 +743,14 @@ mod tests {
     /// where it was planted.
     #[test]
     fn a_wisp_wanders_and_a_torch_stays_put() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let torch = PointLight::new(LampKind::Torch, 440.0, 3.0);
         assert_eq!(at(&field, &torch, 0, 0.0), at(&field, &torch, 0, 5.0));
         let wisp = PointLight::new(LampKind::Wisp, 440.0, 3.0);
         let (x0, z0, up0) = at(&field, &wisp, 0, 0.0);
         let (x1, z1, _) = at(&field, &wisp, 0, 2.5);
         assert!((x1 - x0).abs() > 0.5 || (z1 - z0).abs() > 0.02, "it moved: {x0},{z0} -> {x1},{z1}");
-        assert!((up0 - WISP_H).abs() <= gs_field::lighting::WISP_BOB + 1e-6, "afloat at {up0}");
+        assert!((up0 - WISP_H).abs() <= creature_field::lighting::WISP_BOB + 1e-6, "afloat at {up0}");
         let near = near_lamps(std::slice::from_ref(&wisp), &field, 440.0, 3.0, 0.0);
         assert_eq!(near.len(), 1);
         assert!(near[0].up > flame_height(LampKind::Torch), "a wisp lights from above a torch's flame");

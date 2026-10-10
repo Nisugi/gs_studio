@@ -10,8 +10,8 @@
 
 pub mod cast;
 pub mod color;
-/// The game's clock: in `gs_field` now, which a game client's doll shares.
-pub use gs_field::elanthian_time;
+/// The game's clock: in `creature_field` now, which a game client's doll shares.
+pub use creature_field::elanthian_time;
 pub mod eval;
 pub mod naming;
 pub mod report;
@@ -26,7 +26,7 @@ pub use state::{ClassFlag, SceneAction, StageState};
 
 #[cfg(test)]
 pub mod test_support {
-    /// A temporary gs_field base dir for one test. Holds gs_field's
+    /// A temporary creature_field base dir for one test. Holds creature_field's
     /// process-wide lock for its whole life: the base dir is global state.
     pub struct TempBase {
         _dir: tempfile::TempDir,
@@ -35,10 +35,10 @@ pub mod test_support {
 
     impl TempBase {
         pub fn new() -> TempBase {
-            let guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let dir = tempfile::tempdir().unwrap();
-            gs_field::data_dirs::set_base_dir(dir.path().to_path_buf());
-            gs_field::pool::invalidate_cache();
+            creature_field::data_dirs::set_base_dir(dir.path().to_path_buf());
+            creature_field::pool::invalidate_cache();
             TempBase { _dir: dir, _guard: guard }
         }
 
@@ -50,8 +50,8 @@ pub mod test_support {
 
     impl Drop for TempBase {
         fn drop(&mut self) {
-            gs_field::data_dirs::clear_base_dir();
-            gs_field::pool::invalidate_cache();
+            creature_field::data_dirs::clear_base_dir();
+            creature_field::pool::invalidate_cache();
         }
     }
 }

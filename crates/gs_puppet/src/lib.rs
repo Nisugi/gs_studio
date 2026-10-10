@@ -82,7 +82,7 @@ pub mod uv;
 /// no other crate's files.
 #[cfg(any(test, feature = "fixtures"))]
 pub mod fixtures {
-    /// The humanoid puppet as `gs_field` shipped it (2026-10-09).
+    /// The humanoid puppet as `creature_field` shipped it (2026-10-09).
     pub const HUMANOID: &str = include_str!("../tests/data/humanoid.puppet.toml");
 }
 mod wounds;

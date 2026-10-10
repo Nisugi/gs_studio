@@ -1,5 +1,5 @@
 [package]
-name = "gs_field_egui"
+name = "creature_field_egui"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
@@ -9,7 +9,7 @@ description = "Draws the GemStone IV creature field with egui: the creature-art 
 doctest = false
 
 [dependencies]
-gs_field = { path = "../gs_field" }
+creature_field = { path = "../creature_field" }
 # ADDITION (not in VellumFE): the baked 3D creature puppets the no-art draw
 # path prefers over the flat doll.
 gs_puppet = { path = "../gs_puppet" }
@@ -32,7 +32,7 @@ egui-wgpu = { workspace = true }
 
 [dev-dependencies]
 # Tests read the committed forms pack from disk (nothing is compiled in).
-gs_field = { path = "../gs_field", features = ["test-forms"] }
+creature_field = { path = "../creature_field", features = ["test-forms"] }
 gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
 tempfile = "3"
 # examples/stage_demo.rs only. Same source, branch and features as the hosts.

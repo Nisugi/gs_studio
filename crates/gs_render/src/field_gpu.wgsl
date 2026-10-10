@@ -300,7 +300,7 @@ fn shadow_all(P: vec3<f32>, LP: vec3<f32>, start_dist: f32, light_r: f32) -> f32
 // ---- one local light on a surface, added on top of the night pass in linear light
 // How much of a light's beam reaches P: 1 inside, fading to 0 over
 // BEAM_SOFT_DEG at its edge, measured across the floor (a wedge standing on
-// it, gs_field's PointLight::beam); 1 all round and at the light itself.
+// it, creature_field's PointLight::beam); 1 all round and at the light itself.
 const BEAM_SOFT_DEG: f32 = 14.0;
 fn beam_gain(P: vec3<f32>, Lt: Light) -> f32 {
     if (Lt.beam.w >= 180.0) { return 1.0; }

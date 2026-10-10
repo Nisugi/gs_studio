@@ -1,4 +1,4 @@
-# How the game's own text reads to `gs_field::sky`. Compiled in.
+# How the game's own text reads to `gs_base::sky`. Compiled in.
 #
 # Seen in play (Lich logs, Sept 2026, and the older log archive); add what
 # is new as it turns up. A weather line matches whole (runs of spaces count

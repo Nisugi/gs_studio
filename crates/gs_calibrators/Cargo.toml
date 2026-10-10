@@ -9,13 +9,13 @@ description = "The GemStone IV art calibrators as embeddable egui windows: creat
 doctest = false
 
 [dependencies]
-gs_field = { path = "../gs_field" }
-gs_field_egui = { path = "../gs_field_egui" }
+creature_field = { path = "../creature_field" }
+creature_field_egui = { path = "../creature_field_egui" }
 # MUST be the same egui the host apps link (VellumFE, gs-studio): contexts
 # and textures cross the crate boundary.
 egui = { workspace = true }
 # The creature calibrator's alpha bounding box (content bbox of a sprite).
-# Same version and codec set as VellumFE / gs_field_egui.
+# Same version and codec set as VellumFE / creature_field_egui.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
 # DollEntry::save -> anyhow::Result.
 anyhow = "1"
@@ -24,7 +24,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 # Tests read the committed forms pack from disk (nothing is compiled in).
-gs_field = { path = "../gs_field", features = ["test-forms"] }
+creature_field = { path = "../creature_field", features = ["test-forms"] }
 tempfile = "3"
 # examples/calibrators_demo.rs only. Same source, branch and features as the hosts.
 eframe = { workspace = true }

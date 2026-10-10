@@ -11,8 +11,8 @@ use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gs_field_egui::field_puppets::FieldSource;
-use gs_field_egui::puppet_cache::{PuppetSource, Sheets};
+use creature_field_egui::field_puppets::FieldSource;
+use creature_field_egui::puppet_cache::{PuppetSource, Sheets};
 use gs_puppet::Puppet;
 use injury_doll::source::DollSource;
 

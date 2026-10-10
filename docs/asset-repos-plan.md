@@ -11,7 +11,7 @@ Two public repositories:
 
 | Repo | Holds | Publishes |
 | --- | --- | --- |
-| `gs_studio` (this one) | Source code: the app, the shared crates (`gs_field`, `gs_field_egui`, `gs_puppet`, ...), rigs, poses, the built-in puppets | App releases: `gs-studio.exe`, a Linux build of the same binary for the asset pipeline, checksums |
+| `gs_studio` (this one) | Source code: the app, the shared crates (`creature_field`, `creature_field_egui`, `gs_puppet`, ...), rigs, poses, the built-in puppets | App releases: `gs-studio.exe`, a Linux build of the same binary for the asset pipeline, checksums |
 | `gs_studio_assets` (new) | Art, sorted into packs: backdrops and scenes, scenery props, creature skins, creature art | Asset packs as release zips, plus one `catalogue.json` listing every pack |
 
 The flow for art:
@@ -34,7 +34,7 @@ tag v<x.y.z>           --> release workflow --> GitHub release with the binaries
 
 The two meet in two places:
 - The asset repo's Actions run tools from a pinned `gs_studio` release (`tools/pins.toml` in the asset repo).
-- Both clients install packs with the same code, `gs_field::packs`.
+- Both clients install packs with the same code, `creature_field::packs`.
 
 ## 2. Start from vellum-assets
 
@@ -100,7 +100,7 @@ that release.
 
 ### 3.3 Code to write in gs_studio
 
-**a. `gs_field::packs`** installs packs, for both gs-studio and Hydra.
+**a. `creature_field::packs`** installs packs, for both gs-studio and Hydra.
 - It fits the crate's rules: Android-safe, no drawing, no HTTP. It needs a zip reader and a SHA-256 hash, both pure Rust.
 - It reads the catalogue and the manifest, checks a download's SHA-256, and installs, updates or removes packs in the pool.
 - It keeps a ledger at `<pool>/packs/installed.toml`, recording each pack's version and the hash of every file it installed.
@@ -315,7 +315,7 @@ character is standing in.
 
 **Both clients:**
 - Fetch the catalogue over HTTPS; no token needed.
-- Verify every zip's SHA-256 before unpacking, and install through `gs_field::packs` into the pool.
+- Verify every zip's SHA-256 before unpacking, and install through `creature_field::packs` into the pool.
 - Nothing downloads on its own: every install or update is the user's choice, or an update setting they turned on. VellumFE's jinx client has the same rule.
 
 **gs-studio:**
@@ -323,7 +323,7 @@ character is standing in.
 - On first run with an empty pool, it offers the starter packs.
 
 **Hydra (Cena):**
-- Doesn't use `gs_field` yet: the creature field is still ahead in its GUI plan (`plan/47`). When it does, it reads packs through `gs_field::packs`.
+- Doesn't use `creature_field` yet: the creature field is still ahead in its GUI plan (`plan/47`). When it does, it reads packs through `creature_field::packs`.
 - Downloads with the `reqwest` it already has (`cena-platform`).
 - Can offer "a scene pack covers this area" from the catalogue's `rooms`.
 - The catalogue URL is a setting, so a fork or mirror can serve its own.
@@ -339,7 +339,7 @@ Hydra wants the Jinx protocol (decision 8).
 | --- | --- | --- |
 | 0 | Answer section 9. Create `gs_studio_assets` with README, CONTRIBUTING, LICENSE and CODEOWNERS. | Decisions recorded in this file |
 | 1 | gs_studio public: LICENSE, `ci.yml`, `release.yml`, the Linux build checked | A tag produces a release that Niffy downloads instead of an exe passed along by hand |
-| 2 | `gs_field::packs`, the Packs panel, `--pack` and `--catalogue`. The first packs are cut from today's pool, and `release-packs.yml` publishes them. | A fresh gs-studio installs `ojandhaart` and the skin packs from the catalogue, and an update replaces files the user hasn't changed |
+| 2 | `creature_field::packs`, the Packs panel, `--pack` and `--catalogue`. The first packs are cut from today's pool, and `release-packs.yml` publishes them. | A fresh gs-studio installs `ojandhaart` and the skin packs from the catalogue, and an update replaces files the user hasn't changed |
 | 3 | `--validate` and `--sky` (Rust port); depth in CI with runner timings measured; the Backdrops view in the Scenery tab | A backdrop processed on a runner matches one processed locally |
 | 4 | Issue forms, `submission.yml` (process and propose), the bot app, `pr-check.yml`, the ruleset. Backdrops and props first, then skins. | A test submission goes from issue to merged pack with nobody touching files |
 | 5 | `rebuild.yml`; export-for-submission buttons | A rig change produces a PR with the rebuilt skins |
@@ -358,7 +358,7 @@ Hydra wants the Jinx protocol (decision 8).
 4. **Pack size and budget:** one pack per area, per form's skins, per region's creatures? What's the largest size a pack may reach?
 5. **Spam gate:** process every submission as it arrives (as vellum-assets does), or wait for a collaborator to add an `ok-to-process` label to a first-time submitter's issue? It's a public repo, and anyone can open issues.
 6. **Where the catalogue lives:** Releases (recommended, one mechanism) or GitHub Pages like vellum-assets.
-7. **Puppet textures:** they're built into `gs_field` today: the humanoid and lurk sheets plus 20 creature skins, about 29 MB in every binary, Android's included.
+7. **Puppet textures:** they're built into `creature_field` today: the humanoid and lurk sheets plus 20 creature skins, about 29 MB in every binary, Android's included.
    - Move the skins into packs and keep only the plain family textures built in, as the "art ships as packs" rule suggests?
    - Or keep them built in?
 8. **vellum-assets:** keep its UI categories there, or fold them into `gs_studio_assets`? And does Hydra want Jinx manifests?

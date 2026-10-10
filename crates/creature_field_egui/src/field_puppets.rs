@@ -1,6 +1,6 @@
 //! The creature field's puppets (ADDITION; docs/crate-split-plan.md, S5):
 //! the source the field's [`PuppetCache`] reads -- the published set
-//! (`gs_field::puppets`), its creatures dressed in their outfits and
+//! (`creature_field::puppets`), its creatures dressed in their outfits and
 //! holding what their bestiary entries attack with -- and what only the
 //! field asks of the cache: which puppet a creature draws as
 //! ([`FieldCache`]), and the shape a solver box is measured from
@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use gs_field::puppets::PuppetRigs;
+use creature_field::puppets::PuppetRigs;
 use gs_puppet::Puppet;
 
 use crate::puppet_cache::{base_family, creature_of, PoseChoice, PuppetCache, PuppetKey, PuppetSource, SharedPuppetCache, Sheets};
@@ -52,7 +52,7 @@ impl FieldSource {
 
     /// The set in force (the published one, before any is taken up).
     pub fn rigs(&self) -> Arc<PuppetRigs> {
-        self.rigs.clone().unwrap_or_else(gs_field::puppets::puppets)
+        self.rigs.clone().unwrap_or_else(creature_field::puppets::puppets)
     }
 
     /// Forget what was made from the last set.
@@ -158,7 +158,7 @@ impl FieldSource {
             return None;
         }
         let props = self.props()?;
-        let attacks = gs_field::bestiary::shared().attacks_for_name(name);
+        let attacks = creature_field::bestiary::shared().attacks_for_name(name);
         let weapon = attacks.iter().find_map(|a| props.weapon(a).filter(|w| !w.base.contains("shield")));
         let shield = attacks
             .iter()
@@ -177,7 +177,7 @@ impl FieldSource {
 impl PuppetSource for FieldSource {
     fn refresh(&mut self) -> u64 {
         if !self.fixed {
-            let rigs = gs_field::puppets::puppets();
+            let rigs = creature_field::puppets::puppets();
             if self.rigs.as_ref().is_none_or(|r| r.generation() != rigs.generation()) {
                 self.forget();
             }
@@ -190,7 +190,7 @@ impl PuppetSource for FieldSource {
         if self.fixed {
             self.rigs().generation()
         } else {
-            gs_field::puppets::puppets().generation()
+            creature_field::puppets::puppets().generation()
         }
     }
 
@@ -243,9 +243,9 @@ impl PuppetSource for FieldSource {
     }
 
     /// The pool's (`<pool>/global/bodies/<form>/body.obj`,
-    /// `gs_field::data_dirs::bodies_dir`), when it is there.
+    /// `creature_field::data_dirs::bodies_dir`), when it is there.
     fn body_dir(&self, form: &str) -> Option<PathBuf> {
-        let dir = gs_field::data_dirs::bodies_dir().ok()?.join(form);
+        let dir = creature_field::data_dirs::bodies_dir().ok()?.join(form);
         dir.join("body.obj").is_file().then_some(dir)
     }
 
@@ -289,7 +289,7 @@ pub trait FieldCache {
 
 impl FieldCache for PuppetCache {
     fn shared(ctx: &egui::Context) -> SharedPuppetCache {
-        ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("gs_field_egui::puppets"), || Arc::new(Mutex::new(PuppetCache::over(FieldSource::published())))).clone())
+        ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("creature_field_egui::puppets"), || Arc::new(Mutex::new(PuppetCache::over(FieldSource::published())))).clone())
     }
 
     fn family_for(&mut self, name: &str, noun: Option<&str>) -> Option<Arc<str>> {
@@ -314,7 +314,7 @@ impl FieldCache for PuppetCache {
         let Some(key) = self.family_for(name, noun) else { return false };
         let Some(rigs) = self.source::<FieldSource>().map(FieldSource::rigs) else { return false };
         let own_skin = creature_of(&key).is_some_and(|c| rigs.skin(base_family(&key), c).is_some());
-        let named_form = rigs.puppet_for(name, noun).is_some_and(|d| d.tier == gs_field::dolls::DollTier::Form);
+        let named_form = rigs.puppet_for(name, noun).is_some_and(|d| d.tier == creature_field::dolls::DollTier::Form);
         (own_skin || named_form) && self.texture(&key).is_some()
     }
 }
@@ -322,10 +322,10 @@ impl FieldCache for PuppetCache {
 /// A creature's bestiary name token, the key outfits and skins are filed
 /// under: its bestiary entry's (exact name, else a lone noun), else its own.
 pub fn creature_key(name: &str) -> String {
-    let canonical = gs_field::naming::canonical_name(name);
-    match gs_field::bestiary::shared().entry_for_name(&canonical) {
-        Some(entry) => gs_field::naming::name_token(&entry.name),
-        None => gs_field::naming::name_token(&canonical),
+    let canonical = creature_field::naming::canonical_name(name);
+    match creature_field::bestiary::shared().entry_for_name(&canonical) {
+        Some(entry) => creature_field::naming::name_token(&entry.name),
+        None => creature_field::naming::name_token(&canonical),
     }
 }
 
@@ -350,8 +350,8 @@ pub fn calibration_for(
     cache: &mut PuppetCache,
     name: &str,
     noun: Option<&str>,
-) -> Option<gs_field::geometry::ArtCalibration> {
-    use gs_field::geometry::{ArtCalibration, PoseCalibration};
+) -> Option<creature_field::geometry::ArtCalibration> {
+    use creature_field::geometry::{ArtCalibration, PoseCalibration};
     let family = cache.family_for(name, noun)?;
     let body = gs_puppet::BODY_DEFAULT;
     // Shape only, so the size step is irrelevant to the answer: use a mid
@@ -394,7 +394,7 @@ pub fn calibration_for(
 mod tests {
     use super::*;
     use crate::puppet_cache::*;
-    use gs_field::puppets::PuppetRigs;
+    use creature_field::puppets::PuppetRigs;
     use gs_puppet::{PoseSet, Puppet};
 
     fn cache() -> PuppetCache {
@@ -472,7 +472,7 @@ mod tests {
     /// wears no texture until it has a skin of its own.
     #[test]
     fn a_creature_in_an_outfit_is_dressed_on_the_stage() {
-        let published = gs_field::puppets::puppets();
+        let published = creature_field::puppets::puppets();
         let giant = Puppet::from_baked_toml(&published.get("giant").unwrap().baked).unwrap();
         // The family's own sheet: the bare giant wears it, the dressed one cannot.
         let rigs = published.families().map(|f| {
@@ -501,7 +501,7 @@ mod tests {
     /// key wears it too; a sheet of the wrong size is refused.
     #[test]
     fn a_creature_wears_its_own_skin() {
-        let published = gs_field::puppets::puppets();
+        let published = creature_field::puppets::puppets();
         let mut cache = cache();
         cache.set_props(false);
         let dressed = cache.puppet(&Arc::from("giant#grim_gigas_skald")).unwrap();
@@ -542,8 +542,8 @@ mod tests {
     /// without a section gets the shared set.
     #[test]
     fn a_family_poses_with_its_own_overrides() {
-        use gs_field::puppets::{PoseFile, PuppetRig, PuppetSource};
-        let forms = gs_field::puppets::test_forms_puppets();
+        use creature_field::puppets::{PoseFile, PuppetRig, PuppetSource};
+        let forms = creature_field::puppets::test_forms_puppets();
         let canine: &str = &forms.iter().find(|r| r.family == "canine").unwrap().baked;
         let quadruped = gs_puppet::SHIPPED_POSES.iter().find(|(b, _)| *b == "quadruped").unwrap().1;
         let shared = PoseSet::from_toml(quadruped).unwrap();
@@ -577,7 +577,7 @@ mod tests {
 
         // Through the shared contract: a small creature and a large one keep
         // their own heights, and the prone box is the drawn prone pose.
-        let creature = |name: &str, noun: &str| gs_field::Creature {
+        let creature = |name: &str, noun: &str| creature_field::Creature {
             name: name.into(),
             noun: Some(noun.into()),
             id: "1".into(),
@@ -588,7 +588,7 @@ mod tests {
             ("mongrel kobold", "kobold", 0.6),
             ("agresh troll chieftain", "chieftain", 1.8),
         ] {
-            let g = gs_field::geometry::resolve_geometry(&creature(name, noun), Some(&cal));
+            let g = creature_field::geometry::resolve_geometry(&creature(name, noun), Some(&cal));
             assert!((g.world_h - h).abs() < 1e-3, "{name}: {}", g.world_h);
             assert!(
                 (g.prone.h - h * prone.content_ratio.unwrap()).abs() < 1e-3,
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn pose_cache_builds_once_per_key_and_is_capped() {
         // Other tests re-point VELLUM_FE_DIR, which reloads the puppet set.
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();

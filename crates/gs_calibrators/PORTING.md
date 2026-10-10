@@ -311,3 +311,7 @@ VellumFE's behaviour too; it is a pool feature, not a calibrator save.
   calibrators) are deleted, with `skin_paint`'s injury-dot painting and
   gs-studio's Dolls tab. Hydra calibrates its own doll pictures
   (`play/calibrator.rs`), in the same `vellum-meta` format.
+
+The split's map: this crate is authoring-only (gs-studio's); it reads the
+creature field as `creature_field` (renamed from `gs_field`, S9). This log
+closes with the split.

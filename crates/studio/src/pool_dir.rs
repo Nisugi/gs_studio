@@ -3,13 +3,13 @@
 //! environment variable, then **gs-studio's own data home**
 //! (`crate::data_home`).
 //!
-//! It is deliberately NOT gs_field's own default. `gs_field::data_dirs`
+//! It is deliberately NOT creature_field's own default. `creature_field::data_dirs`
 //! resolves to `VELLUM_FE_DIR`, else `~/.vellum-fe`, because VellumFE is
 //! adopting that crate and depends on that behaviour; but gs-studio is a
 //! separate app and must not read the game client's artwork unless the user
 //! explicitly points it there. So the HOST installs its own default at
 //! startup through `data_dirs::set_base_dir`, which the crate already
-//! provides for exactly this. gs_field's unset behaviour is untouched.
+//! provides for exactly this. creature_field's unset behaviour is untouched.
 //!
 //! This is NOT the data root (`data_root.rs`): that one holds
 //! `outlines.json` and `rigs/` and belongs to the rig editor.
@@ -84,10 +84,10 @@ pub fn resolve(cli: Option<PathBuf>, env: Option<PathBuf>, saved: Option<PathBuf
     PoolDir { path: studio_home, source: PoolSource::StudioHome }
 }
 
-/// [`resolve`] against the real process environment, applied to gs_field.
+/// [`resolve`] against the real process environment, applied to creature_field.
 ///
 /// ALWAYS calls [`apply`]: even the default case is an override, because
-/// gs_field's own unset default is `~/.vellum-fe` and this app must never
+/// creature_field's own unset default is `~/.vellum-fe` and this app must never
 /// land there by accident. The home directory is created when it is the
 /// one being used, so a first run has somewhere to put art.
 pub fn from_environment(cli: Option<PathBuf>, saved: Option<PathBuf>) -> PoolDir {
@@ -102,23 +102,23 @@ pub fn from_environment(cli: Option<PathBuf>, saved: Option<PathBuf>) -> PoolDir
     pool
 }
 
-/// Point gs_field at `dir` and drop everything it cached from the old one.
+/// Point creature_field at `dir` and drop everything it cached from the old one.
 /// The caller resets its art store.
 pub fn apply(dir: &Path) {
-    gs_field::data_dirs::set_base_dir(dir.to_path_buf());
+    creature_field::data_dirs::set_base_dir(dir.to_path_buf());
     invalidate_caches();
 }
 
-/// Drop everything gs_field cached from the pool: the image scan, the art
+/// Drop everything creature_field cached from the pool: the image scan, the art
 /// calibrations, and the doll and puppet sets (whose override layers live
 /// in `global/rigs/` and `global/puppets/`). Call after anything writes
-/// into the pool behind gs_field's back -- an import, a rig save.
+/// into the pool behind creature_field's back -- an import, a rig save.
 pub fn invalidate_caches() {
-    gs_field::pool::invalidate_cache();
-    gs_field::geometry::invalidate_calibrations();
-    gs_field::dolls::invalidate_cache();
-    gs_field::puppets::invalidate_cache();
-    gs_field::bestiary::invalidate();
+    creature_field::pool::invalidate_cache();
+    creature_field::geometry::invalidate_calibrations();
+    creature_field::dolls::invalidate_cache();
+    creature_field::puppets::invalidate_cache();
+    creature_field::bestiary::invalidate();
     injury_doll::roster::invalidate();
 }
 
@@ -162,12 +162,12 @@ mod tests {
         let text = pool.path.to_string_lossy().to_ascii_lowercase();
         assert!(!text.contains(".vellum-fe"), "{:?}", pool.path);
         assert!(text.ends_with(data_home::APP_DIR), "{:?}", pool.path);
-        // ... not even when VELLUM_FE_DIR is set, which only steers gs_field's
+        // ... not even when VELLUM_FE_DIR is set, which only steers creature_field's
         // own (unchanged) default -- a default this app never uses.
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("VELLUM_FE_DIR", "/somebodys/.vellum-fe");
-        gs_field::data_dirs::clear_base_dir();
-        assert_eq!(gs_field::data_dirs::base_dir().unwrap(), Path::new("/somebodys/.vellum-fe"), "gs_field unchanged");
+        creature_field::data_dirs::clear_base_dir();
+        assert_eq!(creature_field::data_dirs::base_dir().unwrap(), Path::new("/somebodys/.vellum-fe"), "creature_field unchanged");
         let pool = resolve(None, None, None, data_home::default_home_or_local());
         assert_ne!(pool.path, Path::new("/somebodys/.vellum-fe"));
         std::env::remove_var("VELLUM_FE_DIR");
@@ -183,14 +183,14 @@ mod tests {
 
     #[test]
     fn setting_it_in_the_app_moves_gs_fields_directories() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         assert!(set_in_app("   ").is_err());
         let pool = set_in_app(&format!("  {}  ", dir.path().display())).unwrap();
         assert_eq!((pool.path.as_path(), pool.source), (dir.path(), PoolSource::SetInApp));
-        assert_eq!(gs_field::data_dirs::base_dir().unwrap(), dir.path());
-        assert!(gs_field::pool_dirs::global_images_dir().unwrap().starts_with(dir.path()));
-        gs_field::data_dirs::clear_base_dir();
-        gs_field::pool::invalidate_cache();
+        assert_eq!(creature_field::data_dirs::base_dir().unwrap(), dir.path());
+        assert!(creature_field::pool_dirs::global_images_dir().unwrap().starts_with(dir.path()));
+        creature_field::data_dirs::clear_base_dir();
+        creature_field::pool::invalidate_cache();
     }
 }

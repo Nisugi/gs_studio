@@ -6,10 +6,10 @@
 //! ([`figure_image`]).
 //!
 //! It reaches neither the doll nor the field. The modules came out of
-//! `gs_field_egui`, which re-exports them under their old paths; their
-//! history before the split is in `gs_field_egui/PORTING.md`.
+//! `creature_field_egui`, which re-exports them under their old paths; their
+//! history before the split is in `creature_field_egui/PORTING.md`.
 
-// The allowances these modules had in gs_field_egui.
+// The allowances these modules had in creature_field_egui.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod field_gpu;

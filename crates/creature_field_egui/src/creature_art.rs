@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use gs_field::skins;
+use creature_field::skins;
 
 use crate::field_puppets::FieldCache;
 
@@ -33,7 +33,7 @@ pub struct CreatureArt {
     /// image fractions. Empty when no sidecar.
     pub anchors: HashMap<String, [f32; 2]>,
     /// Sidecar-authored floor footprint (contact-shadow ellipse), if any.
-    pub footprint: Option<gs_field::pool::CreatureFootprint>,
+    pub footprint: Option<creature_field::pool::CreatureFootprint>,
     /// Sidecar-authored world-unit height for THIS image, overriding the
     /// per-family size the field otherwise applies.
     pub size: Option<f32>,
@@ -109,7 +109,7 @@ pub struct CreatureArtCache {
     /// creature with no sprite art draws as — its puppet, else its doll
     /// (None = neither resolves). Valid for `doll_generation`, which mixes
     /// the published puppet and rig set generations.
-    doll_calibrations: HashMap<String, Option<gs_field::geometry::ArtCalibration>>,
+    doll_calibrations: HashMap<String, Option<creature_field::geometry::ArtCalibration>>,
     doll_generation: u64,
     /// ADDITION (not in VellumFE): the puppet set generation `bases` was
     /// resolved against (a puppet in its own paint sets a sprite aside),
@@ -154,13 +154,13 @@ impl CreatureArtCache {
     pub fn new(root: &Path, skin_name: &str) -> Self {
         let mut card = skins::CreatureCardSkin::default();
         card.overlays
-            .extend(gs_field::cards::convention_status_overlays(
+            .extend(creature_field::cards::convention_status_overlays(
                 &card.overlays,
             ));
         // Global wound art (creatures/wounds/<part><rank>.png) fills
         // the part tables; tiers with their own wound extras ignore
         // them (tier locking).
-        gs_field::cards::convention_wound_parts(&mut card.parts);
+        creature_field::cards::convention_wound_parts(&mut card.parts);
         Self {
             card,
             root: root.to_path_buf(),
@@ -182,7 +182,7 @@ impl CreatureArtCache {
         // Art (and its sidecars) may have changed on disk: drop the core
         // geometry-calibration store so it re-seeds; placed units
         // recalibrate in place on the revision bump (nobody moves).
-        gs_field::geometry::calibrations()
+        creature_field::geometry::calibrations()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .invalidate();
@@ -226,14 +226,14 @@ impl CreatureArtCache {
                     )
                 }
                 .or_else(|| {
-                    gs_field::dolls::calibration_for(&want.name, want.noun.as_deref())
+                    creature_field::dolls::calibration_for(&want.name, want.noun.as_deref())
                 });
                 self.doll_calibrations.insert(token.to_string(), cal);
                 cal
             }
         };
         if let Some(cal) = cal {
-            gs_field::geometry::calibrations()
+            creature_field::geometry::calibrations()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .refine(token, cal);
@@ -340,9 +340,9 @@ pub fn content_height_px(bbox: [f32; 4], tex_h: f32) -> f32 {
 fn pose_calibration(
     art: &CreatureArt,
     base: Option<&CreatureArt>,
-) -> gs_field::geometry::PoseCalibration {
+) -> creature_field::geometry::PoseCalibration {
     let ts = art.texture.size_vec2();
-    gs_field::geometry::PoseCalibration {
+    creature_field::geometry::PoseCalibration {
         size: art.size.filter(|s| s.is_finite() && *s > 0.0),
         aspect: Some(content_aspect(art.bbox, ts.x, ts.y)),
         span: art.footprint.map(|fp| (fp.rx * 2.0).clamp(0.2, 1.0)),
@@ -356,7 +356,7 @@ fn pose_calibration(
 /// ADDITION (not in VellumFE): the published rig and puppet sets'
 /// generations together, for what depends on which puppet a creature gets.
 fn puppets_generation() -> u64 {
-    gs_field::dolls::rigs().generation() ^ gs_field::puppets::puppets().generation().rotate_left(32)
+    creature_field::dolls::rigs().generation() ^ creature_field::puppets::puppets().generation().rotate_left(32)
 }
 
 /// ADDITION (not in VellumFE): does a puppet resolve for this creature, and
@@ -403,11 +403,11 @@ pub struct CreatureArtStore {
 }
 
 impl Default for CreatureArtStore {
-    /// Rooted at `gs_field::pool_dirs::global_images_dir()` with the label
+    /// Rooted at `creature_field::pool_dirs::global_images_dir()` with the label
     /// "pool" -- exactly what `SkinState::apply_if_changed` passed.
     fn default() -> Self {
         Self::new(
-            &gs_field::pool_dirs::global_images_dir().unwrap_or_default(),
+            &creature_field::pool_dirs::global_images_dir().unwrap_or_default(),
             "pool",
         )
     }
@@ -464,7 +464,7 @@ impl CreatureArtStore {
     /// `resolve_tier_art`; pose and wound overlay textures for each
     /// creature's current state load on demand and stay path-cached.
     pub fn prepare_creature_art(&mut self, ctx: &egui::Context, wanted: &[WantedCreature]) {
-        use gs_field::naming;
+        use creature_field::naming;
         let cache = self.shared.clone();
         let mut cache = cache.lock().expect("creature art lock");
         // ADDITION (not in VellumFE): which sprite a token keeps depends on
@@ -493,7 +493,7 @@ impl CreatureArtStore {
                 // sprite set aside leaves the token with no art, so the card
                 // draws the puppet and the no-art calibration sizes it.
                 let (has_puppet, own_paint) = puppet_standing(ctx, want);
-                let art = gs_field::cards::resolve_tier_art(
+                let art = creature_field::cards::resolve_tier_art(
                     &cache.root,
                     &cache.card,
                     Some(&want.name),
@@ -582,11 +582,11 @@ impl CreatureArtStore {
                     .and_then(|p| cache.variant_bases.get(p.to_string_lossy().as_ref()))
                     .and_then(|a| a.as_ref())
                     .map(|prone| pose_calibration(prone, Some(art)));
-                let cal = gs_field::geometry::ArtCalibration {
+                let cal = creature_field::geometry::ArtCalibration {
                     standing: pose_calibration(art, None),
                     prone: prone_cal,
                 };
-                gs_field::geometry::calibrations()
+                creature_field::geometry::calibrations()
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .refine(&token, cal);
@@ -597,8 +597,8 @@ impl CreatureArtStore {
                     let name = cache.skin_name.clone();
                     // Anchored tier wounds size by the art's calibrated
                     // overlay_scale, exactly like the shared wounds pool.
-                    if let Some(scale) = gs_field::pool::read_sidecar::<
-                        gs_field::pool::CreatureSidecar,
+                    if let Some(scale) = creature_field::pool::read_sidecar::<
+                        creature_field::pool::CreatureSidecar,
                     >(&path)
                     .and_then(|sidecar| sidecar.overlay_scale)
                     {
@@ -708,8 +708,8 @@ impl CreatureArtStore {
             let abs = skins::resolve_image_path(&cache.root, &path);
             // Calibrated size rides the art's sidecar, like everything
             // else about an image's physical reality.
-            if let Some(scale) = gs_field::pool::read_sidecar::<
-                gs_field::pool::CreatureSidecar,
+            if let Some(scale) = creature_field::pool::read_sidecar::<
+                creature_field::pool::CreatureSidecar,
             >(&abs)
             .and_then(|sidecar| sidecar.overlay_scale)
             {
@@ -729,7 +729,7 @@ impl CreatureArtStore {
     /// creature-art cache, misses included, so a settled scene costs hash
     /// lookups only. Called per frame by whoever renders with a scene (the
     /// Studio Stage today; the game passes no scene and never calls this).
-    pub fn prepare_scene_art(&mut self, ctx: &egui::Context, scene: &gs_field::scenes::StageScene) {
+    pub fn prepare_scene_art(&mut self, ctx: &egui::Context, scene: &creature_field::scenes::StageScene) {
         let cache = self.shared.clone();
         let mut cache = cache.lock().expect("creature art lock");
         if let Some(bg) = &scene.background {
@@ -824,7 +824,7 @@ impl CreatureArtStore {
 
     /// ADDITION (not in VellumFE): replace the time-of-day defaults
     /// (`global/lighting.toml`, loaded on first use otherwise).
-    pub fn set_global_lighting(&mut self, global: gs_field::lighting::GlobalLighting) {
+    pub fn set_global_lighting(&mut self, global: creature_field::lighting::GlobalLighting) {
         self.shared.lock().expect("creature art lock").light.set_global(global);
     }
 
@@ -893,7 +893,7 @@ fn load_creature_art_px(
     );
     // Sidecar metadata travels with the image: authored anchors replace
     // the derived head/feet, and the footprint drives the contact shadow.
-    let sidecar = gs_field::pool::read_sidecar::<gs_field::pool::CreatureSidecar>(path)
+    let sidecar = creature_field::pool::read_sidecar::<creature_field::pool::CreatureSidecar>(path)
         .unwrap_or_default();
     // Tier extras: images beside the base named "{token}_<suffix>" (pose
     // art, per-wound overlays), discovered once per load. Tier locking:
@@ -950,7 +950,7 @@ fn load_creature_art_px(
     // renderer needs no second path.
     let template_ppf = sidecar.px_per_foot.filter(|ppf| *ppf > 0.0);
     let template_size = template_ppf.map(|ppf| {
-        (bbox[3] - bbox[1]) * h as f32 / ppf * gs_field::cards::UNITS_PER_FOOT
+        (bbox[3] - bbox[1]) * h as f32 / ppf * creature_field::cards::UNITS_PER_FOOT
     });
     let template_feet = template_ppf.map(|_| [mid_x, 1.0]);
     let px = crate::creature_light::Px::from_image(&rgba);
@@ -989,12 +989,12 @@ mod tests {
     }
 
     fn test_env() -> TestEnv {
-        let guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+        let guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("VELLUM_FE_DIR", dir.path());
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         TestEnv {
             _guard: guard,
             _dir: dir,
@@ -1013,7 +1013,7 @@ mod tests {
     }
 
     fn pool_dir() -> PathBuf {
-        gs_field::pool_dirs::global_images_dir().unwrap()
+        creature_field::pool_dirs::global_images_dir().unwrap()
     }
 
     #[test]
@@ -1054,7 +1054,7 @@ mod tests {
             .expect("convention overlay present");
         assert!(matches!(
             &overlay.when,
-            gs_field::Condition::CrtrStatus { id, active: true } if id == "rooted"
+            creature_field::Condition::CrtrStatus { id, active: true } if id == "rooted"
         ));
         assert!(cache
             .overlays
@@ -1074,8 +1074,8 @@ mod tests {
     #[test]
     fn no_art_calibration_prefers_the_puppet_and_yields_to_sprite_art() {
         let env = test_env();
-        gs_field::dolls::invalidate_cache();
-        gs_field::puppets::invalidate_cache();
+        creature_field::dolls::invalidate_cache();
+        creature_field::puppets::invalidate_cache();
         write_png(&pool_dir().join("creatures/jackal.png"), 2);
         let wanted = |name: &str| WantedCreature {
             name: name.to_string(),
@@ -1084,12 +1084,12 @@ mod tests {
             injuries: Vec::new(),
         };
         let resolve = |name: &str| {
-            gs_field::geometry::calibrations()
+            creature_field::geometry::calibrations()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .resolve(&gs_field::naming::name_token(name))
+                .resolve(&creature_field::naming::name_token(name))
         };
-        let doll = gs_field::dolls::calibration_for("hill troll", Some("troll"))
+        let doll = creature_field::dolls::calibration_for("hill troll", Some("troll"))
             .expect("humanoid rig is embedded");
         assert_eq!(doll.standing.size, None, "shape only");
         let puppet = {
@@ -1116,26 +1116,26 @@ mod tests {
         assert_eq!(jackal.prone, None);
 
         // Settled frames do not churn the store.
-        let rev = gs_field::geometry::calibrations().lock().unwrap().revision();
+        let rev = creature_field::geometry::calibrations().lock().unwrap().revision();
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll"), wanted("jackal")]);
-        assert_eq!(gs_field::geometry::calibrations().lock().unwrap().revision(), rev);
+        assert_eq!(creature_field::geometry::calibrations().lock().unwrap().revision(), rev);
 
         // The store is dropped behind the cache's back: it re-feeds.
-        gs_field::geometry::invalidate_calibrations();
+        creature_field::geometry::invalidate_calibrations();
         assert_eq!(resolve("hill troll"), None);
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         assert_eq!(resolve("hill troll"), Some(puppet));
 
         // Art appears (the host reloads art): the sprite takes the token.
         write_png(&pool_dir().join("creatures/hill_troll.png"), 2);
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         state.reset();
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         let sprite = resolve("hill troll").expect("sprite calibration");
         assert_eq!(sprite.standing.aspect, Some(1.0));
         assert_eq!(sprite.prone, None, "the puppet's posed prone box is gone");
         // Even with no reset in between, a sprite refine replaces the entry.
-        gs_field::geometry::calibrations().lock().unwrap().refine("hill_troll", puppet);
+        creature_field::geometry::calibrations().lock().unwrap().refine("hill_troll", puppet);
         state.prepare_creature_art(&env.ctx, &[wanted("hill troll")]);
         assert_eq!(resolve("hill troll"), Some(sprite));
     }
@@ -1148,18 +1148,18 @@ mod tests {
     #[test]
     fn a_puppet_in_its_own_paint_comes_before_sprite_art() {
         let env = test_env();
-        gs_field::dolls::invalidate_cache();
-        gs_field::puppets::invalidate_cache();
+        creature_field::dolls::invalidate_cache();
+        creature_field::puppets::invalidate_cache();
         // A sheet laid out for a published family's bare puppet, as a skin.
         let skin = |family: &str, creature: &str| {
-            let published = gs_field::puppets::puppets();
+            let published = creature_field::puppets::puppets();
             let puppet = gs_puppet::Puppet::from_baked_toml(&published.get(family).expect("published").baked).unwrap();
             let layout = gs_puppet::UvLayout::fit(&puppet, gs_puppet::SHEET_SIDE);
-            let path = gs_field::puppets::puppets_dir().unwrap().join("skins").join(family).join(format!("{creature}.png"));
+            let path = creature_field::puppets::puppets_dir().unwrap().join("skins").join(family).join(format!("{creature}.png"));
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let pixels = vec![0x80u8; layout.w * layout.h * 4];
             image::save_buffer(&path, &pixels, layout.w as u32, layout.h as u32, image::ExtendedColorType::Rgba8).unwrap();
-            gs_field::puppets::invalidate_cache();
+            creature_field::puppets::invalidate_cache();
         };
         let wanted = |name: &str| WantedCreature {
             name: name.to_string(),
@@ -1193,7 +1193,7 @@ mod tests {
             assert_eq!(cache.base("hill_troll").map(|a| a.texture.size()), Some([4, 4]), "its own sprite beats an unpainted puppet");
             assert!(cache.base("plain_mannequin").is_none(), "any puppet beats the default stand-in");
         }
-        let resolve = |name: &str| gs_field::geometry::calibrations().lock().unwrap_or_else(|e| e.into_inner()).resolve(&gs_field::naming::name_token(name));
+        let resolve = |name: &str| creature_field::geometry::calibrations().lock().unwrap_or_else(|e| e.into_inner()).resolve(&creature_field::naming::name_token(name));
         assert_eq!(resolve("painted mannequin"), mannequin, "sized as the puppet it draws as");
 
         // The troll gets a skin of its own: the next frame draws its puppet.
@@ -1208,14 +1208,14 @@ mod tests {
     #[test]
     fn the_doll_is_still_the_fallback_when_no_puppet_resolves() {
         let _env = test_env();
-        gs_field::dolls::invalidate_cache();
-        gs_field::puppets::invalidate_cache();
+        creature_field::dolls::invalidate_cache();
+        creature_field::puppets::invalidate_cache();
         // A set with nothing published resolves to nothing at all, which is
         // exactly the condition `feed_no_art_calibration` falls through on.
-        let empty = gs_field::puppets::PuppetRigs::default();
+        let empty = creature_field::puppets::PuppetRigs::default();
         assert_eq!(empty.puppet_for("hill troll", Some("troll")), None);
         // And the doll's own calibration is still there to fall through to.
-        let doll = gs_field::dolls::calibration_for("hill troll", Some("troll"))
+        let doll = creature_field::dolls::calibration_for("hill troll", Some("troll"))
             .expect("humanoid rig is embedded");
         assert_eq!(doll.standing.size, None, "shape only");
         assert!(doll.prone.is_some(), "the doll's derived prone pose");

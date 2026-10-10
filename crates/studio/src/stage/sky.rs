@@ -1,10 +1,10 @@
-//! The sky the stage shows: the game's own moons (`gs_field::sky`) at the
+//! The sky the stage shows: the game's own moons (`creature_field::sky`) at the
 //! hour shown, or the Moon slider's one moon.
 
 use super::elanthian_time::{eastern_date, elanthian_hour_f};
 use super::state::StageState;
-use gs_field::lighting::Sky;
-use gs_field::sky::{elongation, moon_age, moon_place, phase_name, place_words, GameSky, Moon};
+use creature_field::lighting::Sky;
+use creature_field::sky::{elongation, moon_age, moon_place, phase_name, place_words, GameSky, Moon};
 
 impl StageState {
     /// The instant the game's moons are taken at: pinned, else `now` moved

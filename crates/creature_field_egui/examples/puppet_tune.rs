@@ -1,15 +1,15 @@
 //! puppet_tune: a contact sheet of the creature puppet at the sizes and
 //! poses the creature field actually draws it at, for judging the look.
 //!
-//!   PUPPET_TUNE_SHOT=sheet.png cargo run -p gs_field_egui --example puppet_tune
+//!   PUPPET_TUNE_SHOT=sheet.png cargo run -p creature_field_egui --example puppet_tune
 //!
 //! Rows are the drawn standing heights a card asks for; columns are the
 //! poses and states. Nothing here is part of the renderer -- it calls the
 //! same `creature_puppet` code the field does, so what it shows is what the
 //! field draws.
 
-use gs_field_egui::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
-use gs_field_egui::field_puppets::FieldCache;
+use creature_field_egui::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
+use creature_field_egui::field_puppets::FieldCache;
 
 const HEIGHTS: [f32; 4] = [36.0, 64.0, 110.0, 190.0];
 
@@ -62,7 +62,7 @@ impl eframe::App for Sheet {
                 painter.text(
                     egui::pos2(full.left() + 4.0, y),
                     egui::Align2::LEFT_TOP,
-                    format!("{h:.0}px -> step {}", gs_field_egui::creature_puppet::size_step(h)),
+                    format!("{h:.0}px -> step {}", creature_field_egui::creature_puppet::size_step(h)),
                     egui::FontId::monospace(11.0),
                     egui::Color32::from_gray(150),
                 );

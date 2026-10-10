@@ -1,4 +1,4 @@
-//! gs_field — the GemStone IV "creature field" without the drawing.
+//! creature_field — the GemStone IV "creature field" without the drawing.
 //!
 //! The creature field is a pseudo-3D stage where a room's creatures stand as
 //! cards. This crate holds everything a client needs to lay that out and

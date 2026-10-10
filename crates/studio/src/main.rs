@@ -262,13 +262,13 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             // The v2 field lighting pass needs the wgpu renderer.
             if let Some(rs) = cc.wgpu_render_state.as_ref() {
-                gs_field_egui::field_gpu::init(&cc.egui_ctx, rs);
+                creature_field_egui::field_gpu::init(&cc.egui_ctx, rs);
             }
             // on as last ticked in the Preview tab, or for one run by the variable
             // (=0, false or off turns it off for the run, whatever was ticked)
             let v2 = std::env::var("GS_STUDIO_V2_LIGHT").ok().map(|v| !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "off" | ""));
             if v2.unwrap_or(gpu_light) {
-                gs_field_egui::field_gpu_stage::set_enabled(&cc.egui_ctx, true);
+                creature_field_egui::field_gpu_stage::set_enabled(&cc.egui_ctx, true);
             }
             Ok(Box::new(app::StudioApp::new(startup)))
         }),

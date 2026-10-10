@@ -1,15 +1,15 @@
-//! The scene's walk mask read for the solver (`gs_field::walk`): the PNG
-//! beside the backdrop decoded here, since gs_field decodes no images.
+//! The scene's walk mask read for the solver (`creature_field::walk`): the PNG
+//! beside the backdrop decoded here, since creature_field decodes no images.
 //! White (and opaque) = ground a creature may stand on; dark or clear = not.
 
 use std::path::Path;
 
-use gs_field::walk::{walk_path, WalkMask};
+use creature_field::walk::{walk_path, WalkMask};
 
 /// The walk mask of `background` (a pool path, `scenes/<stem>.png`): None
 /// when it has none; Err when it has one that cannot be read.
 pub fn load(background: &str) -> Result<Option<WalkMask>, String> {
-    let images = gs_field::pool_dirs::global_images_dir().map_err(|e| e.to_string())?;
+    let images = creature_field::pool_dirs::global_images_dir().map_err(|e| e.to_string())?;
     let path = images.join(walk_path(background));
     if !path.is_file() {
         return Ok(None);
@@ -41,7 +41,7 @@ mod tests {
     #[test]
     fn a_walk_mask_loads_beside_its_backdrop() {
         let _base = TempBase::new();
-        let scenes = gs_field::pool_dirs::global_images_dir().unwrap().join("scenes");
+        let scenes = creature_field::pool_dirs::global_images_dir().unwrap().join("scenes");
         std::fs::create_dir_all(&scenes).unwrap();
         crate::editor::texture::write_png(&scenes.join("road.png"), 88, 47, &vec![90; 88 * 47 * 4]).unwrap();
         assert_eq!(load("scenes/road.png").unwrap(), None);

@@ -2,7 +2,7 @@
 //! golden cases -- relight.py's own outputs -- by the same measure its CPU
 //! port is held to: the worst OKLab dE over every pixel shown <= 0.01.
 //!
-//!   cargo run --release -p gs_field_egui --example relight_golden [-- <golden dir>]
+//!   cargo run --release -p creature_field_egui --example relight_golden [-- <golden dir>]
 //!
 //! Single-light cases test the kernel alone; pipeline cases the scene pass,
 //! the frame measured again on its bytes, and the time-of-day keyframes
@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 
 use egui_wgpu::wgpu;
-use gs_field_egui::relight_gpu::{relight_pixels, Pass, Plan};
+use creature_field_egui::relight_gpu::{relight_pixels, Pass, Plan};
 use vellum_light::golden::parse_case;
 use vellum_light::{default_phase_light, phase_keyframes, with_intensity, Derived, PhaseBoundaries};
 

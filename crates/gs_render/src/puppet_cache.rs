@@ -1,5 +1,5 @@
 //! The creature puppet: what a creature with NO sprite art is drawn as when
-//! its family has a baked 3D puppet (`gs_field::puppets`) — a measured,
+//! its family has a baked 3D puppet (`creature_field::puppets`) — a measured,
 //! poseable figure (`gs_puppet`) shaded and depth-sorted, in place of the
 //! flat doll.
 //!
@@ -109,12 +109,12 @@ pub fn puppet_skin(ctx: &egui::Context) -> bool {
 /// `relight_gpu`) when the v2 pass is drawing the stage and the scene is
 /// lit; the CPU skin otherwise. Off unless the host turns it on.
 pub fn set_puppet_gpu_skin(ctx: &egui::Context, on: bool) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("gs_field_egui::puppet_gpu_skin"), on));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("creature_field_egui::puppet_gpu_skin"), on));
 }
 
 /// See [`set_puppet_gpu_skin`].
 pub fn puppet_gpu_skin(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("gs_field_egui::puppet_gpu_skin"))).unwrap_or(false)
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("creature_field_egui::puppet_gpu_skin"))).unwrap_or(false)
 }
 
 /// Puppets hold the weapon their bestiary entry attacks with (see
@@ -129,15 +129,15 @@ pub fn puppet_props(ctx: &egui::Context) -> bool {
 }
 
 fn props_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_props")
+    egui::Id::new("creature_field_egui::puppet_props")
 }
 
 fn skin_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_skin")
+    egui::Id::new("creature_field_egui::puppet_skin")
 }
 
 fn breath_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_breath")
+    egui::Id::new("creature_field_egui::puppet_breath")
 }
 
 /// Living puppets breathe (the pose set's `[idle]` cycle, see
@@ -152,7 +152,7 @@ pub fn puppet_breath(ctx: &egui::Context) -> bool {
 }
 
 fn splats_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_splats")
+    egui::Id::new("creature_field_egui::puppet_splats")
 }
 
 /// Puppets draw as Gaussian splat clouds (`gs_puppet::splat`) instead of
@@ -168,7 +168,7 @@ pub fn puppet_splats(ctx: &egui::Context) -> bool {
 }
 
 fn splat_params_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_splat_params")
+    egui::Id::new("creature_field_egui::puppet_splat_params")
 }
 
 /// The splat cloud's shape ([`gs_puppet::splat::SplatParams`]) for a
@@ -802,11 +802,11 @@ fn layer_cloud(puppet: &Puppet, params: &gs_puppet::splat::SplatParams) -> Arc<g
 }
 
 fn facing_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::puppet_facings")
+    egui::Id::new("creature_field_egui::puppet_facings")
 }
 
 fn forced_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::forced_puppets")
+    egui::Id::new("creature_field_egui::forced_puppets")
 }
 
 /// How many posed display lists one context keeps, at most.
@@ -1919,7 +1919,7 @@ fn yawed_bounds_where(posed: &Posed<'_>, yaw_deg: f32, keep: impl Fn(&gs_puppet:
 
 /// Where a cache's puppets come from (ADDITION; docs/crate-split-plan.md,
 /// S5): the creature field's published set
-/// (`gs_field_egui::field_puppets::FieldSource`), the injury doll's
+/// (`creature_field_egui::field_puppets::FieldSource`), the injury doll's
 /// installed figures (`injury_doll::source::DollSource`), a host's own. A cache reads one source, and keeps nothing it
 /// made from an older generation of it.
 ///
@@ -2069,7 +2069,7 @@ pub enum Bare {
 /// Puppet state over one [`PuppetSource`]: parsed puppets, the pose sets,
 /// and the LRU of posed display lists. Everything is dropped when the
 /// source moves to another generation (the field's: its published set
-/// changed, `gs_field::puppets::invalidate_cache` or a moved base dir).
+/// changed, `creature_field::puppets::invalidate_cache` or a moved base dir).
 #[derive(Default)]
 pub struct PuppetCache {
     /// The source's generation all this was made from (None: not begun).
@@ -2313,7 +2313,7 @@ impl PuppetCache {
     }
 
     /// A cache over `source` (the creature field's in each egui context:
-    /// `gs_field_egui::field_puppets::FieldCache::shared`; the doll's:
+    /// `creature_field_egui::field_puppets::FieldCache::shared`; the doll's:
     /// `injury_doll::view::DollCache`).
     pub fn over(source: impl PuppetSource) -> Self {
         Self { source: Source(Box::new(source)), ..Self::default() }
@@ -2922,28 +2922,28 @@ impl PuppetCache {
 mod tests {
     use super::*;
 
-    /// The creature field's published set (`gs_field`, a dev-dependency):
+    /// The creature field's published set (`creature_field`, a dev-dependency):
     /// its forms, pose sets and sheets as the field serves them, short of
-    /// dressing and arming (`gs_field_egui::field_puppets` tests those).
+    /// dressing and arming (`creature_field_egui::field_puppets` tests those).
     #[derive(Default)]
-    struct Published(Option<Arc<gs_field::puppets::PuppetRigs>>);
+    struct Published(Option<Arc<creature_field::puppets::PuppetRigs>>);
 
     impl Published {
-        fn rigs(&self) -> Arc<gs_field::puppets::PuppetRigs> {
-            self.0.clone().unwrap_or_else(gs_field::puppets::puppets)
+        fn rigs(&self) -> Arc<creature_field::puppets::PuppetRigs> {
+            self.0.clone().unwrap_or_else(creature_field::puppets::puppets)
         }
     }
 
     impl PuppetSource for Published {
         fn refresh(&mut self) -> u64 {
-            let rigs = gs_field::puppets::puppets();
+            let rigs = creature_field::puppets::puppets();
             let generation = rigs.generation();
             self.0 = Some(rigs);
             generation
         }
 
         fn generation_now(&self) -> u64 {
-            gs_field::puppets::puppets().generation()
+            creature_field::puppets::puppets().generation()
         }
 
         fn baked(&self, form: &str) -> Option<(Arc<str>, String)> {
@@ -3021,7 +3021,7 @@ mod tests {
     #[test]
     fn every_embedded_puppet_parses_and_poses() {
         let mut cache = cache();
-        let families: Vec<String> = gs_field::puppets::test_forms_puppets().into_iter().map(|r| r.family).collect();
+        let families: Vec<String> = creature_field::puppets::test_forms_puppets().into_iter().map(|r| r.family).collect();
         assert!(families.len() >= 22, "{families:?}");
         for family in &families {
             let fam: Arc<str> = Arc::from(family.as_str());
@@ -3412,11 +3412,11 @@ mod tests {
         assert!(cache.falling("a", dead, 21.0).is_some());
     }
 
-    /// What one pose weighs, the doll's way: `cargo test -p gs_field_egui
+    /// What one pose weighs, the doll's way: `cargo test -p creature_field_egui
     /// a_pose_weighs -- --nocapture` prints it per size step and build.
     #[test]
     fn a_pose_weighs_what_its_pixels_do() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = gs_base::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut cache = cache();
         let family: Arc<str> = "humanoid".into();
         for step in [160u16, 240, 360] {
@@ -3638,7 +3638,7 @@ mod tests {
 
     #[test]
     fn the_pose_cache_keeps_to_its_byte_budget() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = gs_base::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut cache = cache();
         let family: Arc<str> = "humanoid".into();
         let mut k = key(PoseChoice::Standing, &[]);
@@ -3788,13 +3788,13 @@ mod tests {
     }
 
     /// Cost of one pose + draw-list build, and of parsing a baked puppet.
-    /// `cargo test -p gs_field_egui --release pose_cost -- --nocapture`.
+    /// `cargo test -p creature_field_egui --release pose_cost -- --nocapture`.
     #[test]
     fn pose_cost() {
         let mut cache = cache();
         for family in ["humanoid", "canine"] {
             let family: Arc<str> = Arc::from(family);
-            let rigs = gs_field::puppets::puppets();
+            let rigs = creature_field::puppets::puppets();
             let baked = rigs.get(&family).unwrap().baked.clone();
             let t = std::time::Instant::now();
             let n = 20;

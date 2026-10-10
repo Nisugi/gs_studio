@@ -507,8 +507,8 @@ impl Session {
         let figure = saved.as_ref();
         let mut refused = Vec::new();
         let sheets = [
-            (super::texture::sheet_path(&self.data_root, &family), gs_field::puppets::texture_file_name(&family)),
-            (super::texture::normal_sheet_path(&self.data_root, &family), gs_field::puppets::normal_file_name(&family)),
+            (super::texture::sheet_path(&self.data_root, &family), creature_field::puppets::texture_file_name(&family)),
+            (super::texture::normal_sheet_path(&self.data_root, &family), creature_field::puppets::normal_file_name(&family)),
         ];
         for (sheet, published) in sheets {
             let stale = figure.filter(|_| sheet.is_file()).and_then(|p| super::texture::stale_sheet_for(&sheet, p));
@@ -660,7 +660,7 @@ impl Session {
     /// Put every pose set in `<data>/poses/` into `<pool>/global/puppets/`,
     /// where it replaces the built-in set of that body type on the stage, the
     /// held-props file into `<pool>/global/props/`, and the clothing kit and
-    /// outfits into `<pool>/global/outfits/`; then drop gs_field's
+    /// outfits into `<pool>/global/outfits/`; then drop creature_field's
     /// caches so the stage re-reads them. A file that does not parse is left
     /// out (the stage keeps what it had) and named in the error. Returns how
     /// many pose sets were installed.
@@ -697,7 +697,7 @@ impl Session {
     /// Copy the saved bake into `<pool>/global/rigs/` and the saved puppet,
     /// its painted texture and its creatures' skins into
     /// `<pool>/global/puppets/` (removing what this family no longer has),
-    /// then drop gs_field's caches so they are read again.
+    /// then drop creature_field's caches so they are read again.
     /// Sheets built for another layout of the rig are not installed (and an
     /// installed copy is taken away): the list says which.
     fn install_in_pool(&self, family: &str, pool: &Path) -> Result<Vec<String>, String> {
@@ -715,8 +715,8 @@ impl Session {
         let figure = saved.as_ref();
         let mut refused = Vec::new();
         let sheets = [
-            (super::texture::sheet_path(&self.data_root, family), gs_field::puppets::texture_file_name(family)),
-            (super::texture::normal_sheet_path(&self.data_root, family), gs_field::puppets::normal_file_name(family)),
+            (super::texture::sheet_path(&self.data_root, family), creature_field::puppets::texture_file_name(family)),
+            (super::texture::normal_sheet_path(&self.data_root, family), creature_field::puppets::normal_file_name(family)),
         ];
         for (sheet, name) in sheets {
             let installed = global.join("puppets").join(name);
@@ -1093,7 +1093,7 @@ neck = { rot = [1.0, 0.0, 0.0] }
     /// puppet, installs bake + puppet into the pool, and Publish ships it.
     #[test]
     fn save_builds_the_puppet_and_puts_it_on_the_stage() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let data = TempData::new("puppet");
         std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
@@ -1110,12 +1110,12 @@ neck = { rot = [1.0, 0.0, 0.0] }
         assert_eq!(names(&pool.join("global/rigs")), ["humanoid.png", "humanoid.toml"]);
         assert_eq!(names(&out.join("puppets")), ["humanoid.puppet.toml"]);
 
-        // The pool copy is what gs_field now serves.
-        gs_field::data_dirs::set_base_dir(pool.clone());
+        // The pool copy is what creature_field now serves.
+        creature_field::data_dirs::set_base_dir(pool.clone());
         crate::pool_dir::invalidate_caches();
-        let set = gs_field::puppets::puppets();
-        assert_eq!(set.get("humanoid").unwrap().source, gs_field::puppets::PuppetSource::Override);
-        gs_field::data_dirs::clear_base_dir();
+        let set = creature_field::puppets::puppets();
+        assert_eq!(set.get("humanoid").unwrap().source, creature_field::puppets::PuppetSource::Override);
+        creature_field::data_dirs::clear_base_dir();
         crate::pool_dir::invalidate_caches();
 
         // A rig that can no longer make a puppet (one joint: no bone) takes
@@ -1134,7 +1134,7 @@ neck = { rot = [1.0, 0.0, 0.0] }
     /// the stage's dressed figure, rebuilt from the bake.
     #[test]
     fn a_creature_skin_reaches_the_stage_on_its_dressed_puppet() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let data = TempData::new("skins");
         std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
@@ -1163,12 +1163,12 @@ neck = { rot = [1.0, 0.0, 0.0] }
         assert!(pool.join("global/outfits/outfits.toml").is_file());
         assert!(out.join("puppets").join(&skin).is_file() && out.join("outfits/outfits.toml").is_file(), "{}", s.status);
 
-        // What the stage does with it (gs_field_egui's PuppetCache): the
+        // What the stage does with it (creature_field_egui's PuppetCache): the
         // installed bake, dressed from the installed outfits, lays out a
         // sheet exactly the size of the installed skin.
-        gs_field::data_dirs::set_base_dir(pool.clone());
+        creature_field::data_dirs::set_base_dir(pool.clone());
         crate::pool_dir::invalidate_caches();
-        let set = gs_field::puppets::puppets();
+        let set = creature_field::puppets::puppets();
         assert!(set.puppet_for("squamous reptilian mutant", Some("mutant")).is_some_and(|d| d.family == "humanoid"));
         let kit = gs_puppet::Kit::from_toml(set.kit()).unwrap();
         let outfit = gs_puppet::Outfits::from_toml(set.outfits(), &kit).unwrap().get(creature).cloned().unwrap();
@@ -1178,7 +1178,7 @@ neck = { rot = [1.0, 0.0, 0.0] }
         assert_eq!(set.skin("humanoid", creature).map(|b| b.to_vec()), Some(installed));
         let (w, h, _) = super::super::texture::read_png(&pool.join("global/puppets").join(&skin)).unwrap();
         assert_eq!((w, h), (layout.w, layout.h), "the studio's sheet fits the stage's dressed figure");
-        gs_field::data_dirs::clear_base_dir();
+        creature_field::data_dirs::clear_base_dir();
         crate::pool_dir::invalidate_caches();
 
         // No sheet any more: the next Save takes the skin off the stage.
@@ -1192,7 +1192,7 @@ neck = { rot = [1.0, 0.0, 0.0] }
     /// them; a file that does not parse stays out and is named.
     #[test]
     fn edited_poses_reach_the_stage_and_broken_ones_do_not() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data");
         let data = TempData::new("poses");
         std::fs::copy(repo.join("outlines.json"), data.0.join("outlines.json")).unwrap();
@@ -1211,16 +1211,16 @@ torso_upper = { rot = [40.0, 0.0, 0.0] }
         assert!(err.contains("1 pose sets installed") && err.contains("avian.toml"), "{err}");
         assert_eq!(names(&pool.join("global/puppets")), ["biped.toml"]);
 
-        gs_field::data_dirs::set_base_dir(pool.clone());
+        creature_field::data_dirs::set_base_dir(pool.clone());
         crate::pool_dir::invalidate_caches();
-        let set = gs_field::puppets::puppets();
+        let set = creature_field::puppets::puppets();
         let file = set.pose_file("biped").unwrap();
-        assert_eq!(file.source, gs_field::puppets::PuppetSource::Override);
+        assert_eq!(file.source, creature_field::puppets::PuppetSource::Override);
         assert!(gs_puppet::PoseSet::from_toml(&file.toml).unwrap().get("bow").is_some());
         // The broken avian file did not replace the built-in set: the pool
         // has none, so the field poses with gs_puppet's.
         assert!(set.pose_file("avian").is_none());
-        gs_field::data_dirs::clear_base_dir();
+        creature_field::data_dirs::clear_base_dir();
         crate::pool_dir::invalidate_caches();
     }
 

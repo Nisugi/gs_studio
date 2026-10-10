@@ -58,7 +58,7 @@ indoor = 0.88
 
 # The moons over outdoor scenes. Liabo, the great moon: a full one rises at
 # 18:00, is highest at midnight and sets at 06:00, and each moon runs later as
-# it wanes (gs_field::sky). Where the GPU pass draws each is a light from the
+# it wanes (creature_field::sky). Where the GPU pass draws each is a light from the
 # sky with shadows; elsewhere they lift the darkness evenly, by `lift` at a
 # full Liabo in a clear sky. strength: 0 = no moonlight .. 1 = as shipped.
 # Lornon, the dark moon, is a cloudy grey, crimson by Lornon's Eve;

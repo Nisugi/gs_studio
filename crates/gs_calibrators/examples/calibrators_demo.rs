@@ -5,7 +5,7 @@
 //! A tab strip hosts each calibrator through `ui_contents(ui)` in the
 //! central panel (the gs-studio form); the "pop out" toggle hosts them
 //! through the `ui(ctx)` floating-window wrapper instead (the VellumFE
-//! form). Each opens against the image pool (gs_field's
+//! form). Each opens against the image pool (creature_field's
 //! default base dir, `~/.vellum-fe` or `VELLUM_FE_DIR`; override with
 //! `GS_STUDIO_POOL=<dir>`). The bottom list shows every
 //! `CalibrationOutcome.messages` line plus reload/close events.
@@ -38,10 +38,10 @@ struct Demo {
 impl Demo {
     fn new() -> Self {
         if let Ok(dir) = std::env::var("GS_STUDIO_POOL") {
-            gs_field::data_dirs::set_base_dir(std::path::PathBuf::from(dir));
-            gs_field::pool::invalidate_cache();
+            creature_field::data_dirs::set_base_dir(std::path::PathBuf::from(dir));
+            creature_field::pool::invalidate_cache();
         }
-        let base = gs_field::pool_dirs::global_images_dir()
+        let base = creature_field::pool_dirs::global_images_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|e| format!("<unresolved: {e}>"));
         eprintln!("calibrators_demo: pool = {base}");

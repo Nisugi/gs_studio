@@ -80,7 +80,7 @@ pub struct StudioApp {
     data: DataRoot,
     /// The data-root text box (applied with "Open").
     data_edit: String,
-    /// The art pool / scenes directory (gs_field's base dir).
+    /// The art pool / scenes directory (creature_field's base dir).
     pool: PoolDir,
     /// The pool text box (applied with "Set").
     pool_edit: String,
@@ -196,7 +196,7 @@ impl StudioApp {
                 if let Some(stage) = &mut self.stage {
                     stage.pool_changed();
                 }
-                // gs_field points at the new pool now: every calibrator
+                // creature_field points at the new pool now: every calibrator
                 // state belongs to the old one.
                 self.calibrators.pool_changed();
             }
@@ -345,8 +345,8 @@ impl StudioApp {
             return;
         };
         let render = frame.wgpu_render_state();
-        let pass = gs_field_egui::field_gpu_stage::with_current(|g| g.snapshot()).flatten().map(|snap| {
-            let timings = render.map(|r| gs_field_egui::field_gpu_stage::time_lamps(&r.device, &r.queue, &snap, 150));
+        let pass = creature_field_egui::field_gpu_stage::with_current(|g| g.snapshot()).flatten().map(|snap| {
+            let timings = render.map(|r| creature_field_egui::field_gpu_stage::time_lamps(&r.device, &r.queue, &snap, 150));
             let gpu = render.map_or("(unknown GPU)".to_owned(), |r| r.adapter.get_info().name);
             stage.pass_facts(&snap, timings.as_ref(), gpu)
         });
@@ -370,9 +370,9 @@ impl StudioApp {
         }
         match &mut self.stage {
             Some(stage) => stage.art_changed(effects.invalidate_obstacles),
-            // No stage yet, so no art or obstacles are cached; gs_field's
+            // No stage yet, so no art or obstacles are cached; creature_field's
             // process-wide calibration store still is.
-            None => gs_field::geometry::invalidate_calibrations(),
+            None => creature_field::geometry::invalidate_calibrations(),
         }
     }
 
@@ -581,7 +581,7 @@ impl StudioApp {
     fn frame(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         if let Some(shot) = &mut self.shot {
             // a modelled body loading on a worker: not counted, the shot is of it
-            if !gs_field_egui::creature_puppet::bodies_loading() {
+            if !creature_field_egui::creature_puppet::bodies_loading() {
                 shot.frames += 1;
             } else {
                 ui.ctx().request_repaint();
@@ -754,7 +754,7 @@ mod tests {
     /// a `global/`, and it never targets the VellumFE directory itself.
     #[test]
     fn the_import_source_must_be_a_real_vellum_fe_directory() {
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("nothing-here");
         std::env::set_var("VELLUM_FE_DIR", &fake);

@@ -1,5 +1,5 @@
 //! The Preview stage's egui layer: VellumFE's Studio "Stage", drawn by the
-//! renderer the clients use (`gs_field_egui`). It draws `stage::StageState`
+//! renderer the clients use (`creature_field_egui`). It draws `stage::StageState`
 //! and forwards input to it; every rule lives in `crate::stage`.
 //!
 //! One tool, two tabs. **Scenes** and **Preview** share this one
@@ -10,12 +10,12 @@
 //! Ported from VellumFE (GPL-3.0-or-later) `src/frontend/gui/studio.rs` at
 //! commit 60c84a79.
 
-use gs_field::condition::INJURY_AREAS;
-use gs_field::creature::CRTR_STATUS_FLAGS;
-use gs_field::scenes::{self, SceneBinding};
-use gs_field::solver::{camera_limits, SeparationBasis};
-use gs_field::{Creature, CreatureFlags};
-use gs_field_egui::{
+use creature_field::condition::INJURY_AREAS;
+use creature_field::creature::CRTR_STATUS_FLAGS;
+use creature_field::scenes::{self, SceneBinding};
+use creature_field::solver::{camera_limits, SeparationBasis};
+use creature_field::{Creature, CreatureFlags};
+use creature_field_egui::{
     creature_field_stage_pos, render_creature_field_content, CreatureArtStore, CreatureFieldView, SharedCreatureArt,
     WantedCreature,
 };
@@ -37,7 +37,7 @@ pub struct StageTool {
     stage: StageState,
     art: CreatureArtStore,
     /// `global/lighting.toml` (time-of-day defaults), read once.
-    lighting: gs_field::lighting::GlobalLighting,
+    lighting: creature_field::lighting::GlobalLighting,
 }
 
 /// Art wanted for the current roster -- same recipe as the game's update
@@ -49,7 +49,7 @@ fn wanted_art(creatures: &[Creature]) -> Vec<WantedCreature> {
         .map(|c| WantedCreature {
             name: c.name.clone(),
             noun: c.noun.clone(),
-            family: c.noun.as_deref().and_then(gs_field::cards::family_for_noun),
+            family: c.noun.as_deref().and_then(creature_field::cards::family_for_noun),
             injuries: c.flags.as_ref().map(|f| f.injuries.clone()).unwrap_or_default(),
         })
         .collect()
@@ -93,11 +93,11 @@ impl StageTool {
             // at the back right throwing its beam left, and makes the wisp
             // an Arcane one.
             if let Some(which) = std::env::var_os("GS_STUDIO_SMOKE_LIGHTS") {
-                use gs_field::lighting::{LampKind, SceneLight};
+                use creature_field::lighting::{LampKind, SceneLight};
                 // GS_STUDIO_SUN=<azimuth>,<elevation>: where its sun is
                 let sun = std::env::var("GS_STUDIO_SUN").ok().and_then(|v| {
                     let (a, e) = v.split_once(',')?;
-                    Some(gs_field::lighting::SunDir { azimuth: a.trim().parse().ok()?, elevation: e.trim().parse().ok()? })
+                    Some(creature_field::lighting::SunDir { azimuth: a.trim().parse().ok()?, elevation: e.trim().parse().ok()? })
                 });
                 stage.scene_mut().light = Some(SceneLight { sun, ..SceneLight::default() });
                 let mut lamps = vec![(LampKind::Torch, 170.0, 430.0), (LampKind::Wisp, 640.0, 330.0)];
@@ -110,7 +110,7 @@ impl StageTool {
                     stage.drag_selected_light_to(sx, sy);
                     let lamp = stage.selected_light.and_then(|k| stage.scene_mut().lights.get_mut(k));
                     match (all, kind, lamp) {
-                        (true, LampKind::Wisp, Some(l)) => l.color = gs_field_egui::field_gpu::MOTE_PRESETS[1].1[1].into(),
+                        (true, LampKind::Wisp, Some(l)) => l.color = creature_field_egui::field_gpu::MOTE_PRESETS[1].1[1].into(),
                         (true, LampKind::Lantern, Some(l)) => l.aim = 195.0,
                         _ => {}
                     }
@@ -165,7 +165,7 @@ impl StageTool {
         // Storm, Snow, Sleet, Blood rain, Fog, Sand; any case).
         if let Ok(w) = std::env::var("GS_STUDIO_WEATHER") {
             let (kind, amount) = w.split_once(':').map_or((w.as_str(), None), |(k, a)| (k, a.trim().parse::<f32>().ok()));
-            let kinds = gs_field_egui::field_weather::WeatherKind::ALL;
+            let kinds = creature_field_egui::field_weather::WeatherKind::ALL;
             if let Some(k) = kinds.iter().position(|k| k.label().eq_ignore_ascii_case(kind.trim())) {
                 stage.weather_kind = k + 1;
                 if let Some(a) = amount {
@@ -195,10 +195,10 @@ impl StageTool {
             stage.lornons_eve = true;
         }
         // GS_STUDIO_FACING=<n|ne|e|...|w|nw>: the way the view faces
-        if let Some(b) = std::env::var("GS_STUDIO_FACING").ok().and_then(|f| gs_field::sky::bearing_of(&f)) {
+        if let Some(b) = std::env::var("GS_STUDIO_FACING").ok().and_then(|f| creature_field::sky::bearing_of(&f)) {
             stage.facing = Some(b);
         }
-        let lighting = gs_field::lighting::GlobalLighting::load();
+        let lighting = creature_field::lighting::GlobalLighting::load();
         art.set_global_lighting(lighting.clone());
         StageTool { stage, art, lighting }
     }
@@ -209,8 +209,8 @@ impl StageTool {
     /// (when timed) what the frame and each lamp cost.
     pub fn pass_facts(
         &self,
-        snap: &gs_field_egui::field_gpu_stage::PassSnapshot,
-        timings: Option<&gs_field_egui::field_gpu_stage::PassTimings>,
+        snap: &creature_field_egui::field_gpu_stage::PassSnapshot,
+        timings: Option<&creature_field_egui::field_gpu_stage::PassTimings>,
         gpu: String,
     ) -> crate::stage::report::PassFacts {
         use crate::stage::report::{LampFacts, PassFacts};
@@ -223,7 +223,7 @@ impl StageTool {
             .map(|(k, lamp)| {
                 let cost = timings.and_then(|t| t.lamps.get(k)).copied().unwrap_or((None, None));
                 LampFacts {
-                    reach_m: gs_field_egui::field_gpu_stage::lamp_range(lamp),
+                    reach_m: creature_field_egui::field_gpu_stage::lamp_range(lamp),
                     in_pass: snap.in_pass.get(k).copied().unwrap_or(false),
                     shadow_given: snap.shadow_given(k),
                     cost_ms: cost.0,
@@ -238,8 +238,8 @@ impl StageTool {
             k: snap.k,
             f: snap.f,
             moons: snap.moons(),
-            shadow_slots: gs_field_egui::field_gpu::MAX_SHADOW_LIGHTS,
-            light_slots: gs_field_egui::field_gpu::MAX_LIGHTS,
+            shadow_slots: creature_field_egui::field_gpu::MAX_SHADOW_LIGHTS,
+            light_slots: creature_field_egui::field_gpu::MAX_LIGHTS,
             lamps,
         }
     }
@@ -262,13 +262,13 @@ impl StageTool {
 
     /// The pool directory moved: re-root the art, re-scan the cast.
     pub fn pool_changed(&mut self) {
-        let root = gs_field::pool_dirs::global_images_dir().unwrap_or_default();
+        let root = creature_field::pool_dirs::global_images_dir().unwrap_or_default();
         self.art.reset_with_root(&root);
         self.stage.pool_changed();
     }
 
     /// A calibrator saved: art and sidecars changed on disk. Reloads the
-    /// art store -- which also drops gs_field's geometry-calibration store,
+    /// art store -- which also drops creature_field's geometry-calibration store,
     /// as VellumFE's `skin_state.force_reload()` did -- and, after a SCENERY
     /// save, the solver obstacles (exclusion spans read the prop sidecar).
     pub fn art_changed(&mut self, invalidate_obstacles: bool) {
@@ -373,7 +373,7 @@ impl StageTool {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0.0, |d| d.as_secs_f64());
         let game_hour = stage.light_hour.unwrap_or_else(|| crate::stage::elanthian_time::elanthian_hour_f(now));
-        use gs_field_egui::field_weather::{set_weather, Weather, WeatherKind};
+        use creature_field_egui::field_weather::{set_weather, Weather, WeatherKind};
         let weather = stage.weather_kind.checked_sub(1).and_then(|k| WeatherKind::ALL.get(k)).map(|&kind| Weather {
             kind,
             intensity: stage.weather_intensity,
@@ -381,7 +381,7 @@ impl StageTool {
         });
         // the sky's own cloud, or the weather's if it brings more
         let clouds = stage.light_clouds.max(weather.map_or(0.0, |w| w.cloud_cover()));
-        self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
+        self.art.set_light_clock(creature_field_egui::creature_light::LightClock {
             game_hour: Some(game_hour),
             strength: stage.light_strength,
             outdoor_guess: None,
@@ -390,12 +390,12 @@ impl StageTool {
         });
         self.art.prepare_scene_art(&ctx, stage.scene());
         set_weather(&ctx, weather);
-        gs_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
-        gs_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
-        gs_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
-        gs_field_egui::creature_puppet::set_puppet_splats(&ctx, stage.show_splats);
-        gs_field_egui::creature_puppet::set_puppet_gpu_skin(&ctx, stage.gpu_skins);
-        gs_field_egui::creature_puppet::set_puppet_splat_params(&ctx, stage.splat_params);
+        creature_field_egui::field_occluders::set_show_occluders(&ctx, stage.show_occluders && panel == StagePanel::Scenes);
+        creature_field_egui::creature_puppet::set_puppet_props(&ctx, stage.show_props);
+        creature_field_egui::creature_puppet::set_puppet_breath(&ctx, stage.show_breath);
+        creature_field_egui::creature_puppet::set_puppet_splats(&ctx, stage.show_splats);
+        creature_field_egui::creature_puppet::set_puppet_gpu_skin(&ctx, stage.gpu_skins);
+        creature_field_egui::creature_puppet::set_puppet_splat_params(&ctx, stage.splat_params);
         if self.art.lighting_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         } else if stage.scene().light.is_some() && stage.light_hour.is_none() {
@@ -469,16 +469,16 @@ impl crate::quit::QuitGuard for StageTool {
 
 // ------------------------------------------------------------------ scene
 
-/// The backdrop's occluder mask (`gs_field_egui::field_occluders`): what
+/// The backdrop's occluder mask (`creature_field_egui::field_occluders`): what
 /// the painting holds in front of creatures.
-fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::creature_art::SharedCreatureArt) {
+fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &creature_field_egui::creature_art::SharedCreatureArt) {
     let Some(bg) = stage.scene().background.clone() else { return };
-    let mask = gs_field_egui::field_occluders::mask_path(&bg);
+    let mask = creature_field_egui::field_occluders::mask_path(&bg);
     let (count, size) = {
         let cache = art.lock().unwrap_or_else(|e| e.into_inner());
         (cache.occluders(&bg).map(|o| o.blobs.len()), cache.scene_background(&bg).map(|t| t.size()))
     };
-    let abs = gs_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
+    let abs = creature_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
     let exists = abs.as_ref().is_some_and(|p| p.is_file());
     match (count, exists) {
         (Some(n), _) => ui.label(format!("{mask}: {n} occluder(s)")),
@@ -508,12 +508,12 @@ fn occluders_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::
     });
 }
 
-/// The backdrop's walk mask (`gs_field::walk`): where on the painting a
+/// The backdrop's walk mask (`creature_field::walk`): where on the painting a
 /// creature may stand.
-fn walk_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &gs_field_egui::creature_art::SharedCreatureArt) {
+fn walk_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &creature_field_egui::creature_art::SharedCreatureArt) {
     let Some(bg) = stage.scene().background.clone() else { return };
-    let mask = gs_field::walk::walk_path(&bg);
-    let abs = gs_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
+    let mask = creature_field::walk::walk_path(&bg);
+    let abs = creature_field::pool_dirs::global_images_dir().ok().map(|d| d.join(&mask));
     let exists = abs.as_ref().is_some_and(|p| p.is_file());
     match (stage.field.walk(), &stage.walk_error) {
         (_, Some(e)) => ui.colored_label(ui.visuals().warn_fg_color, e.clone()),
@@ -591,10 +591,10 @@ fn outline_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
     });
     ui.weak(stage.outline(game_hour));
     // The v2 pass: lamps light the backdrop and every body on the GPU, with
-    // real falloff and shadows, and it draws the sky (gs_field_egui::field_gpu_stage).
+    // real falloff and shadows, and it draws the sky (creature_field_egui::field_gpu_stage).
     let ctx = ui.ctx().clone();
-    if gs_field_egui::field_gpu::available(&ctx) {
-        let mut v2 = gs_field_egui::field_gpu_stage::enabled(&ctx);
+    if creature_field_egui::field_gpu::available(&ctx) {
+        let mut v2 = creature_field_egui::field_gpu_stage::enabled(&ctx);
         if ui
             .checkbox(&mut v2, "Light on the GPU (v2)")
             .on_hover_text(
@@ -603,7 +603,7 @@ fn outline_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
             )
             .changed()
         {
-            gs_field_egui::field_gpu_stage::set_enabled(&ctx, v2);
+            creature_field_egui::field_gpu_stage::set_enabled(&ctx, v2);
             // remembered for the next run (settings.toml)
             if let Some(e) = crate::settings::remember(|s| s.gpu_light = Some(v2)) {
                 eprintln!("gs-studio: {e}");
@@ -628,9 +628,9 @@ fn light_ui(
     stage: &mut StageState,
     ui: &mut egui::Ui,
     auto: Option<&vellum_light::SceneColours>,
-    global: &gs_field::lighting::GlobalLighting,
+    global: &creature_field::lighting::GlobalLighting,
 ) {
-    use gs_field::lighting::SceneLight;
+    use creature_field::lighting::SceneLight;
 
     let light = stage.scene().light.clone();
     let mut edited = light.clone();
@@ -663,11 +663,11 @@ fn light_ui(
 
 fn light_body(
     ui: &mut egui::Ui,
-    e: &mut gs_field::lighting::SceneLight,
+    e: &mut creature_field::lighting::SceneLight,
     auto: Option<&vellum_light::SceneColours>,
-    global: &gs_field::lighting::GlobalLighting,
+    global: &creature_field::lighting::GlobalLighting,
 ) {
-    use gs_field::lighting::{LightChroma, SCENE_BOUNCE_STRENGTH, SCENE_STRENGTH};
+    use creature_field::lighting::{LightChroma, SCENE_BOUNCE_STRENGTH, SCENE_STRENGTH};
 
     if auto.is_none() {
         ui.weak("No backdrop to read: \"auto\" values use a neutral daylight.");
@@ -768,8 +768,8 @@ fn light_body(
 /// The scene's own dawn, day, dusk and night: a column each, ticked "own"
 /// to lay its key, ambient and intensity over Every scene's (shown greyed
 /// until then).
-fn phase_table(ui: &mut egui::Ui, e: &mut gs_field::lighting::SceneLight, global: &gs_field::lighting::GlobalLighting) {
-    let defaults: Vec<gs_field::lighting::LightFields> = PHASES.iter().map(|(p, _)| global.phase.get(*p).cloned().unwrap_or_default()).collect();
+fn phase_table(ui: &mut egui::Ui, e: &mut creature_field::lighting::SceneLight, global: &creature_field::lighting::GlobalLighting) {
+    let defaults: Vec<creature_field::lighting::LightFields> = PHASES.iter().map(|(p, _)| global.phase.get(*p).cloned().unwrap_or_default()).collect();
     let mut slots = [&mut e.dawn, &mut e.day, &mut e.dusk, &mut e.night];
     egui::Grid::new("light_phases").num_columns(5).show(ui, |ui| {
         ui.label("");
@@ -843,7 +843,7 @@ const FACINGS: [(&str, Option<f32>); 9] = [
 /// slider, facing, cloud) and the weather. None of it is saved with the
 /// scene: the game sets it from the clock and the room.
 fn time_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
-    use gs_field_egui::field_weather::WeatherKind;
+    use creature_field_egui::field_weather::WeatherKind;
 
     super::group(ui, "Clock");
     if stage.scene().light.is_none() {
@@ -934,11 +934,11 @@ fn time_ui(stage: &mut StageState, ui: &mut egui::Ui, game_hour: f32) {
 fn light_colour_row(
     ui: &mut egui::Ui,
     label: &str,
-    value: &mut gs_field::lighting::LightColour,
+    value: &mut creature_field::lighting::LightColour,
     auto: Option<&str>,
     hint: &str,
 ) {
-    use gs_field::lighting::LightColour;
+    use creature_field::lighting::LightColour;
     ui.label(label).on_hover_text(hint);
     let shown = match value {
         LightColour::Hex(h) => Some(h.clone()),
@@ -983,8 +983,8 @@ fn opt_slider_row(ui: &mut egui::Ui, label: &str, value: &mut Option<f32>, defau
 /// `global/lighting.toml`: the darkness, moon and time of day every scene
 /// takes unless it sets its own (Niffy's "Settings > Lighting"). Edits apply
 /// live; Save writes the file. Returns true when anything changed.
-fn global_light_ui(ui: &mut egui::Ui, global: &mut gs_field::lighting::GlobalLighting, stage: &mut StageState) -> bool {
-    use gs_field::lighting::LightFields;
+fn global_light_ui(ui: &mut egui::Ui, global: &mut creature_field::lighting::GlobalLighting, stage: &mut StageState) -> bool {
+    use creature_field::lighting::LightFields;
     let mut changed = false;
     ui.weak("What every scene takes unless it sets its own: global/lighting.toml. Edits show at once; Save keeps them.");
 
@@ -1083,7 +1083,7 @@ fn global_light_ui(ui: &mut egui::Ui, global: &mut gs_field::lighting::GlobalLig
             stage.push_status(msg);
         }
         if ui.button("Restore shipped defaults").clicked() {
-            *global = gs_field::lighting::GlobalLighting::default();
+            *global = creature_field::lighting::GlobalLighting::default();
             changed = true;
         }
     });
@@ -1137,7 +1137,7 @@ fn scene_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         }
     }
 
-    let backgrounds = gs_field::pool::list_category("scenes");
+    let backgrounds = creature_field::pool::list_category("scenes");
     super::group(ui, "Backdrop");
     egui::Grid::new("scene_backdrop").num_columns(2).show(ui, |ui| {
         ui.label("Image");
@@ -1184,8 +1184,8 @@ fn props_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
         .button("Calibrate scenery...")
         .on_hover_text("Feet anchor, world size, exclusion edges -- per image. Opens the Scenery tab; the stage is kept.")
         .clicked();
-    let pool = gs_field::pool::list_category("scenery");
-    if pool.is_empty() && gs_field::pool::list_category("scenes").is_empty() {
+    let pool = creature_field::pool::list_category("scenery");
+    if pool.is_empty() && creature_field::pool::list_category("scenes").is_empty() {
         ui.weak(
             "Drop PNGs into global/images/scenes (backgrounds, author at 880x470) \
              or global/images/scenery (props)",
@@ -1275,7 +1275,7 @@ fn props_ui(stage: &mut StageState, ui: &mut egui::Ui) -> bool {
 
 /// Point lights on the floor: campfires, torches, glows (`[[lights]]`).
 fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
-    use gs_field::lighting::LampKind;
+    use creature_field::lighting::LampKind;
     ui.horizontal_wrapped(|ui| {
         for (label, kind) in [
             ("+ Campfire", LampKind::Campfire),
@@ -1330,7 +1330,7 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         }
     });
     let shadowed = edited.iter().filter(|l| l.casts_shadows()).count();
-    let cap = gs_field_egui::field_gpu::MAX_SHADOW_LIGHTS;
+    let cap = creature_field_egui::field_gpu::MAX_SHADOW_LIGHTS;
     if shadowed > cap {
         ui.colored_label(ui.visuals().warn_fg_color, format!("{shadowed} lamps ask for shadows; the GPU shadows only the first {cap}."));
     }
@@ -1366,7 +1366,7 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
             // toward its own brighter and dimmer shades as it pulses.
             ui.label("Preset");
             ui.horizontal_wrapped(|ui| {
-                for (name, [_, base, _]) in gs_field_egui::field_gpu::MOTE_PRESETS {
+                for (name, [_, base, _]) in creature_field_egui::field_gpu::MOTE_PRESETS {
                     if ui.small_button(name).on_hover_text("Its colour; on the GPU (v2) it pulses toward the preset's own shades").clicked() {
                         edited.color = base.to_string();
                     }
@@ -1407,7 +1407,7 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
         }
         ui.label("Lights");
         ui.horizontal_wrapped(|ui| {
-            use gs_field::lighting::LightTarget;
+            use creature_field::lighting::LightTarget;
             for (target, name, tip) in [
                 (LightTarget::Backdrop, "Backdrop", "The painted ground and walls"),
                 (LightTarget::Scenery, "Scenery", "The scenery props placed on the stage"),
@@ -1428,7 +1428,7 @@ fn lights_ui(stage: &mut StageState, ui: &mut egui::Ui) {
     }
 }
 
-fn kind_name(kind: gs_field::lighting::LampKind) -> &'static str {
+fn kind_name(kind: creature_field::lighting::LampKind) -> &'static str {
     crate::stage::scene_notes::lamp_label(kind)
 }
 
@@ -1644,7 +1644,7 @@ fn display_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 
 /// The weather now, as a note records it ("" = clear).
 fn weather_label(stage: &StageState) -> String {
-    use gs_field_egui::field_weather::WeatherKind;
+    use creature_field_egui::field_weather::WeatherKind;
     stage.weather_kind.checked_sub(1).and_then(|k| WeatherKind::ALL.get(k)).map_or(String::new(), |w| w.label().to_owned())
 }
 
@@ -1757,7 +1757,7 @@ fn notes_ui(stage: &mut StageState, ui: &mut egui::Ui) {
 /// Put the stage back to where a note was seen: its hour and weather, its
 /// lamp or prop selected (when the list still has it), its pin ringed.
 fn show_scene_note(stage: &mut StageState, note: &crate::stage::scene_notes::SceneNote) {
-    use gs_field_egui::field_weather::WeatherKind;
+    use creature_field_egui::field_weather::WeatherKind;
     stage.notes.focus = Some(note.id);
     if note.hour.is_some() {
         stage.light_hour = note.hour;
@@ -2050,7 +2050,7 @@ fn simulator_ui(stage: &mut StageState, ui: &mut egui::Ui, id: &str) {
     }
     ui.horizontal(|ui| {
         let custom = stage.facing(id);
-        let mut deg = custom.unwrap_or(gs_field_egui::creature_puppet::FIELD_YAW_DEG);
+        let mut deg = custom.unwrap_or(creature_field_egui::creature_puppet::FIELD_YAW_DEG);
         let slider = ui
             .add(egui::Slider::new(&mut deg, -180.0..=180.0).step_by(5.0).suffix(" deg").text("Facing"))
             .on_hover_text("Turns this creature's 3D puppet (0 = facing you, 90 = its front to the right). Sprites are flat and do not turn.");
@@ -2141,8 +2141,8 @@ fn field_ui(stage: &mut StageState, ui: &mut egui::Ui, art: &SharedCreatureArt, 
     // creature state comes from the fabricated roster. There is no game
     // state: conditions go through the sandbox evaluator and no creature
     // has a derived-effect severity.
-    gs_field_egui::creature_puppet::set_forced_puppets(ui.ctx(), stage.forced_puppets().cloned());
-    gs_field_egui::creature_puppet::set_puppet_facings(ui.ctx(), stage.facings().map(|(id, d)| (id.clone(), *d)));
+    creature_field_egui::creature_puppet::set_forced_puppets(ui.ctx(), stage.forced_puppets().cloned());
+    creature_field_egui::creature_puppet::set_puppet_facings(ui.ctx(), stage.facings().map(|(id, d)| (id.clone(), *d)));
     let click = {
         let view = CreatureFieldView {
             field: &stage.field,

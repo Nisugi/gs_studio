@@ -15,7 +15,7 @@ pub enum CalibKind {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HostEffects {
     /// A calibrator saved: art and sidecars changed on disk. The stage's
-    /// art store must reload and gs_field's calibration store re-seed
+    /// art store must reload and creature_field's calibration store re-seed
     /// (VellumFE: `drain_outcome` -> `skin_state.force_reload()`).
     pub reload_art: bool,
     /// The SCENERY calibrator saved: prop exclusion spans read the sidecar,

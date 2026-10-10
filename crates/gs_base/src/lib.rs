@@ -6,10 +6,10 @@
 //! a pool installs ([`packs`]).
 //!
 //! It reaches neither the doll nor the field, and draws nothing: no egui.
-//! The modules came out of `gs_field`, which re-exports them under their
-//! old paths; their history before the split is in `gs_field/PORTING.md`.
+//! The modules came out of `creature_field`, which re-exports them under their
+//! old paths; their history before the split is in `creature_field/PORTING.md`.
 
-// Ported code is kept byte-close to VellumFE (gs_field's allowances).
+// Ported code is kept byte-close to VellumFE (creature_field's allowances).
 #![allow(
     clippy::too_many_arguments,
     clippy::type_complexity,

@@ -9,7 +9,7 @@ description = "What the injury doll and the creature field both stand on: the da
 doctest = false
 
 # docs/crate-split-plan.md, S7: the doll (`injury_doll`) and the field
-# (`gs_field`) each depend on this; it depends on neither, nor on egui
+# (`creature_field`) each depend on this; it depends on neither, nor on egui
 # (`tests/layering.rs` holds it to these).
 [dependencies]
 # The sky's light (moon arcs, night share) is vellum_light's maths.

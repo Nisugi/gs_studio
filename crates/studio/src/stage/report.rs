@@ -53,7 +53,7 @@ impl PassFacts {
     /// view's centre line, and away.
     pub fn metres(&self, x: f32, z: f32) -> [f32; 2] {
         let away = z.max(0.4) * self.k;
-        [(x - gs_field::solver::STAGE_W * 0.5) * away / self.f.max(1e-3), away]
+        [(x - creature_field::solver::STAGE_W * 0.5) * away / self.f.max(1e-3), away]
     }
 
     fn apart(&self, a: (f32, f32), b: (f32, f32)) -> f32 {
@@ -140,7 +140,7 @@ pub fn scene_report(stage: &StageState, game_hour: f32, pass: Option<&PassFacts>
         };
         let mut near: Vec<(f32, String)> = Vec::new();
         for (i, t) in things.iter().enumerate() {
-            let lit = if t.scenery { lamp.lights(gs_field::lighting::LightTarget::Scenery) } else { lamp.lights(gs_field::lighting::LightTarget::Creatures) };
+            let lit = if t.scenery { lamp.lights(creature_field::lighting::LightTarget::Scenery) } else { lamp.lights(creature_field::lighting::LightTarget::Creatures) };
             let d = pass.apart((lamp.x, lamp.z), t.at);
             if lit && d <= facts.reach_m {
                 reached[i] = true;
@@ -227,7 +227,7 @@ mod tests {
     fn the_report_says_what_each_lamp_reaches_and_costs() {
         let mut s = StageState::with_cast(StudioRoomContext::default(), Vec::new());
         s.scene_mut().light = Some(Default::default());
-        s.add_light(gs_field::lighting::LampKind::Campfire);
+        s.add_light(creature_field::lighting::LampKind::Campfire);
         {
             let l = &mut s.scene_mut().lights[0];
             l.x = 440.0;

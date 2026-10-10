@@ -64,8 +64,8 @@ pub struct ScenePin {
 }
 
 /// A lamp kind's name, as the Lamps list and a note's `about` show it.
-pub fn lamp_label(kind: gs_field::lighting::LampKind) -> &'static str {
-    use gs_field::lighting::LampKind;
+pub fn lamp_label(kind: creature_field::lighting::LampKind) -> &'static str {
+    use creature_field::lighting::LampKind;
     match kind {
         LampKind::Campfire => "Campfire",
         LampKind::Torch => "Torch",
@@ -91,7 +91,7 @@ impl SceneNotes {
         if scene.is_empty() || scene.contains(['/', '\\']) {
             return Err(format!("no notes for an unnamed scene ('{scene}'): save it first"));
         }
-        let dir = gs_field::pool_dirs::scenes_dir().map_err(|e| e.to_string())?;
+        let dir = creature_field::pool_dirs::scenes_dir().map_err(|e| e.to_string())?;
         Ok(dir.join("notes").join(format!("{scene}.toml")))
     }
 
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(back.get(1).unwrap().text, "the bench takes no firelight");
         assert_eq!(back.get(1).unwrap().replies.len(), 1);
         // the notes folder is not a scene
-        assert!(!gs_field::scenes::list_scenes().iter().any(|s| s.contains("notes")));
+        assert!(!creature_field::scenes::list_scenes().iter().any(|s| s.contains("notes")));
 
         let mut notes = back;
         let two = notes.add(ScenePin::default(), "b", "", "2026-09-28");

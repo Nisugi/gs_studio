@@ -12,9 +12,9 @@
 use std::collections::HashMap;
 
 use crate::CalibrationOutcome;
-use gs_field::pool::{self, CreatureFootprint, CreatureSidecar};
-use gs_field::cards::UNITS_PER_FOOT;
-use gs_field_egui::image_store;
+use creature_field::pool::{self, CreatureFootprint, CreatureSidecar};
+use creature_field::cards::UNITS_PER_FOOT;
+use creature_field_egui::image_store;
 
 
 /// Anchor names offered up front; any other name can be added freely.
@@ -42,7 +42,7 @@ const BODY_TYPES: &[(&str, &str)] = &[
 /// (`art.anchor(part)`), so placing them here positions wound markers and
 /// `{token}_{part}{rank}` art per creature.
 fn wound_anchor_names() -> impl Iterator<Item = &'static str> {
-    gs_field::condition::INJURY_AREAS.iter().copied()
+    creature_field::condition::INJURY_AREAS.iter().copied()
 }
 
 struct CreatureChoice {
@@ -157,7 +157,7 @@ impl CreatureCalibrationState {
         }
         // Area grouping from the bestiary; a creature in several areas
         // lists under each, unknown names land in "Other".
-        let db = gs_field::bestiary::shared();
+        let db = creature_field::bestiary::shared();
         let mut by_area: std::collections::BTreeMap<String, Vec<usize>> =
             std::collections::BTreeMap::new();
         for (index, choice) in choices.iter().enumerate() {
@@ -1034,7 +1034,7 @@ fn bestiary_for_label(label: &str) -> Option<(Option<f32>, Option<String>)> {
     let stem = label.rsplit('/').next().unwrap_or(label).trim();
     let folder = label.split('/').next().filter(|_| label.contains('/'));
     let stripped = stem.strip_suffix("_prone").unwrap_or(stem);
-    let db = gs_field::bestiary::shared();
+    let db = creature_field::bestiary::shared();
     for candidate in [Some(stripped), folder.map(str::trim)].into_iter().flatten() {
         let name = candidate.replace('_', " ").to_ascii_lowercase();
         let Some(noun) = name.split_whitespace().last().map(str::to_string) else {

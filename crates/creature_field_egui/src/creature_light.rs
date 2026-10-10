@@ -39,7 +39,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
 
-use gs_field::lighting::{lornon_light, moon_light, moon_sky_arc, GlobalLighting, SceneLight, SceneLighting, Sky};
+use creature_field::lighting::{lornon_light, moon_light, moon_sky_arc, GlobalLighting, SceneLight, SceneLighting, Sky};
 use vellum_light::{
     apply, apply_backdrop, auto_scene_light, with_intensity, LightEnv, LightFrame, SceneColours, Srgb8Lut, YMap,
 };
@@ -121,7 +121,7 @@ pub struct LightClock {
     /// The room's indoor/outdoor guess when the scene does not say.
     pub outdoor_guess: Option<bool>,
     /// The moons' fullness and hours and the cloud over them (outdoors, at
-    /// night): the game's own from [`gs_field::sky::GameSky::sky`].
+    /// night): the game's own from [`creature_field::sky::GameSky::sky`].
     pub sky: Sky,
     /// Shade puppet skins by the scene's sun and sky -- the paint flat,
     /// the light from the scene -- instead of by their own fixed cel light
@@ -136,7 +136,7 @@ impl Default for LightClock {
 }
 
 // A sun-lit skin's sun is where the scene says (`[light] sun`,
-// `gs_field::lighting::SunDir`: high and to the front left unless the
+// `creature_field::lighting::SunDir`: high and to the front left unless the
 // painting is lit from elsewhere). Its light and the sky's are the
 // prototype's day (a warm white sun, a cool fill), tinted toward the hues of
 // the scene's key and ambient colours by the scene light's strength.
@@ -146,7 +146,7 @@ const SUN_STRENGTH: f32 = 1.0;
 const SUN_FILL: f32 = 0.45;
 
 /// The sun and sky a sun-lit skin is shaded by under the scene light `env`,
-/// the sun `toward` (screen-relative, [`gs_field::lighting::SunDir::toward`]).
+/// the sun `toward` (screen-relative, [`creature_field::lighting::SunDir::toward`]).
 fn scene_sun(env: &LightEnv, toward: [f32; 3]) -> gs_puppet::SceneLight {
     let t = (env.strength * env.intensity).clamp(0.0, 1.0);
     // A backdrop's key and ambient are the average colours of its lit and
@@ -175,7 +175,7 @@ fn scene_sun(env: &LightEnv, toward: [f32; 3]) -> gs_puppet::SceneLight {
 /// The moon as the v2 pass lights it now ([`LightState::moon_now`]).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoonNow {
-    /// Degrees ([`gs_field::lighting::moon_arc`]): azimuth 0 = behind
+    /// Degrees ([`creature_field::lighting::moon_arc`]): azimuth 0 = behind
     /// the viewer, -90 screen-left; elevation above the horizon.
     pub azimuth: f32,
     pub elevation: f32,
@@ -202,8 +202,8 @@ pub struct StarsNow {
     pub light: f32,
     /// How much of the sky the clouds cover, 0..1.
     pub clouds: f32,
-    /// The constellations up now (`gs_field::stars`).
-    pub up: Vec<gs_field::stars::Placed>,
+    /// The constellations up now (`creature_field::stars`).
+    pub up: Vec<creature_field::stars::Placed>,
     /// How far the sky has turned round the viewer, degrees: the faint
     /// stars between the constellations drift with it.
     pub turn: f32,
@@ -407,7 +407,7 @@ pub fn worn(
             let fy = art
                 .anchor(name)
                 .or(if name == "head" { Some(art.head) } else { None })
-                .or_else(|| gs_field::skins::default_creature_anchor(name))
+                .or_else(|| creature_field::skins::default_creature_anchor(name))
                 .map_or(0.5, |a| a[1]);
             let scale = cache.overlay_scale(image).unwrap_or(1.0);
             YMap::anchored(fy, art_w, art_h, scale, layer.px.w, layer.px.h)
@@ -426,7 +426,7 @@ pub fn worn(
 }
 
 fn light_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::creature_light")
+    egui::Id::new("creature_field_egui::creature_light")
 }
 
 /// Share the lights in force with the rest of the renderer (the puppets).
@@ -477,10 +477,10 @@ impl LightState {
         }
         let sky = &self.clock.sky;
         let year = sky.year?;
-        let shown = gs_field::stars::star_light(hour, sky)? * self.clock.strength.clamp(0.0, 1.0);
+        let shown = creature_field::stars::star_light(hour, sky)? * self.clock.strength.clamp(0.0, 1.0);
         // the sky turns a full circle a day, and a day further in a year
         let turn = ((hour / 24.0 + year) * 360.0 - sky.facing.unwrap_or(180.0)).rem_euclid(360.0);
-        (shown > 0.0).then(|| StarsNow { light: shown, clouds: sky.clouds.clamp(0.0, 1.0), up: gs_field::stars::constellations_up(hour, year, sky.facing), turn })
+        (shown > 0.0).then(|| StarsNow { light: shown, clouds: sky.clouds.clamp(0.0, 1.0), up: creature_field::stars::constellations_up(hour, year, sky.facing), turn })
     }
 
     /// How much of the sky the cloud covers now, for the v2 pass to draw by
@@ -616,7 +616,7 @@ impl LightState {
             None => SceneColours { key: "#c8b89c".into(), ambient: "#a4b0c0".into(), bounce: "#a89880".into(), chroma: 0.9 },
         };
         let global = self.global.get_or_insert_with(GlobalLighting::load).clone();
-        let scene = gs_field::scenes::StageScene { light: Some(light), background, ..Default::default() };
+        let scene = creature_field::scenes::StageScene { light: Some(light), background, ..Default::default() };
         // Quantize the hour so the weights move in 1/QUANTUM steps.
         let hour = self.clock.game_hour.map(|h| (h * WEIGHT_QUANTUM).round() / WEIGHT_QUANTUM);
         // The v2 pass lights the moon itself (a light with shadows); without
@@ -981,7 +981,7 @@ fn blend_keyframes(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FieldSkyNow {
     pub game_hour: Option<f32>,
-    pub sky: gs_field::lighting::Sky,
+    pub sky: creature_field::lighting::Sky,
     pub outdoor: bool,
 }
 
@@ -998,7 +998,7 @@ impl LightState {
 }
 
 fn field_sky_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::creature_light::field_sky")
+    egui::Id::new("creature_field_egui::creature_light::field_sky")
 }
 
 /// Publish the field's sky now ([`FieldSkyNow`]): the art cache does, every
@@ -1149,10 +1149,10 @@ mod tests {
         let lit = state.current().unwrap();
         let sun = lit.sun.expect("a sun");
         assert_ne!(lit.key, plain.key, "the skins re-key");
-        assert_eq!(sun.toward, gs_field::lighting::SunDir::default().toward());
+        assert_eq!(sun.toward, creature_field::lighting::SunDir::default().toward());
         assert!(sun.rgb.iter().copied().max() >= Some(200), "a bright sun, only tinted: {:?}", sun.rgb);
         // a scene lit from the right: its skins' sun is on the right, re-keyed
-        let from_right = gs_field::lighting::SunDir { azimuth: 80.0, elevation: 20.0 };
+        let from_right = creature_field::lighting::SunDir { azimuth: 80.0, elevation: 20.0 };
         state.set_scene(Some(SceneLight { sun: Some(from_right), ..SceneLight::default() }), Some("scenes/test.png".into()));
         state.update(&ctx);
         let right = state.current().unwrap();
@@ -1175,18 +1175,18 @@ mod tests {
         let both = state.moons_now();
         assert_eq!(both.len(), 2);
         assert!(both[1].azimuth > both[0].azimuth, "past its height, further west");
-        assert!((both[1].brightness - gs_field::lighting::LORNON_STRENGTH * both[0].brightness).abs() < 0.05);
-        assert_eq!(both[1].colour, gs_field::lighting::LORNON_BLOOD_COLOUR);
+        assert!((both[1].brightness - creature_field::lighting::LORNON_STRENGTH * both[0].brightness).abs() < 0.05);
+        assert_eq!(both[1].colour, creature_field::lighting::LORNON_BLOOD_COLOUR);
         state.set_clock(clock(12.0, true));
         assert!(state.moon_now().is_none(), "down by day");
         // the stars: only with a date; by night, half the band up
         state.set_clock(clock(23.0, true));
         assert!(state.stars_now().is_none(), "no date, no stars");
-        let dated = Sky { moon: 0.0, year: Some(gs_field::stars::year_turn(9, 27, 23.0)), facing: Some(180.0), ..Sky::default() };
+        let dated = Sky { moon: 0.0, year: Some(creature_field::stars::year_turn(9, 27, 23.0)), facing: Some(180.0), ..Sky::default() };
         state.set_clock(LightClock { sky: dated, ..clock(23.0, true) });
         let stars = state.stars_now().expect("stars at 23:00");
         assert!(stars.light > 0.9 && (11..=14).contains(&stars.up.len()), "{} up, light {}", stars.up.len(), stars.light);
-        let queen = gs_field::stars::constellations().iter().position(|c| c.name == "The Queen of Enlightenment").unwrap();
+        let queen = creature_field::stars::constellations().iter().position(|c| c.name == "The Queen of Enlightenment").unwrap();
         let q = stars.up.iter().find(|p| p.index == queen).expect("the Queen is up");
         assert!((q.azimuth.abs() - 180.0).abs() < 15.0 && q.elevation > 50.0, "near her highest, ahead: {q:?}");
         state.set_clock(LightClock { sky: dated, ..clock(12.0, true) });
@@ -1250,7 +1250,7 @@ mod tests {
     fn shared_overlays_are_lit_per_wearer_and_corpses_are_grey() {
         // Building an art cache scans the pool: hold the lock the pool
         // tests take while they re-point it.
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();
         let mut cache = crate::creature_art::CreatureArtCache::new(std::path::Path::new("."), "test");
         let body: Vec<u8> = (0..8 * 16).flat_map(|i| [150, (i * 2) as u8, 70, 255]).collect();

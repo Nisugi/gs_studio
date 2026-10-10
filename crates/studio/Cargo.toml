@@ -22,9 +22,9 @@ rig_bake = { path = "../rig_bake" }
 gs_puppet = { path = "../gs_puppet" }
 gs_puppet_author = { path = "../gs_puppet_author" }
 # The creature field: solver, scenes, pool, bestiary (no egui) ...
-gs_field = { path = "../gs_field" }
+creature_field = { path = "../creature_field" }
 # ... and the renderer + art cache the clients draw with.
-gs_field_egui = { path = "../gs_field_egui" }
+creature_field_egui = { path = "../creature_field_egui" }
 # The injury doll: its figures, sky, state and view (the Doll window).
 injury_doll = { path = "../injury_doll" }
 # Asset packs: one installed into a pool (gs_base::packs), one zipped for
@@ -37,11 +37,11 @@ png = "0.17"
 serde_json = "1"
 # Scene lighting types for the Stage editor.
 vellum_light = { path = "../vellum_light" }
-# The five art calibrators, hosted as tabs through `ui_contents`.
+# The art calibrators, hosted as tabs through `ui_contents`.
 gs_calibrators = { path = "../gs_calibrators" }
 # gs-studio's own data home (`data_home.rs`): the platform config directory,
 # so this standalone app does not squat in VellumFE's. Same crate and major
-# gs_field uses for `~`.
+# gs_base uses for `~`.
 dirs = "5"
 # settings.toml (remembered folders).
 serde = { version = "1", features = ["derive"] }
@@ -53,5 +53,5 @@ eframe = { workspace = true }
 
 [dev-dependencies]
 # Tests read the committed forms pack from disk (nothing is compiled in).
-gs_field = { path = "../gs_field", features = ["test-forms"] }
+creature_field = { path = "../creature_field", features = ["test-forms"] }
 tempfile = "3"

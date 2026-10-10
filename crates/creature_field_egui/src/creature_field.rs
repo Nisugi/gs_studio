@@ -1,5 +1,5 @@
 //! The creature field: the room's hostiles as cards on a perspective
-//! floor, placed by `gs_field::solver`. P3 renders generated
+//! floor, placed by `creature_field::solver`. P3 renders generated
 //! placeholder cards (vector standees); sprite art replaces them when the
 //! `[creature_card]` resolve cascade finds files (P4/P5).
 //!
@@ -10,10 +10,10 @@
 //! Ported from VellumFE `src/frontend/gui/app/widgets/creature_field.rs`
 //! @60c84a79, where these were associated fns of `VellumGuiApp` (no `self`).
 
-use gs_field::scenes::StageScene;
-use gs_field::Condition;
-use gs_field::solver::{CreatureField, ScreenRect, Unit, STAGE_H, STAGE_W};
-use gs_field::{Creature, CreatureFlags};
+use creature_field::scenes::StageScene;
+use creature_field::Condition;
+use creature_field::solver::{CreatureField, ScreenRect, Unit, STAGE_H, STAGE_W};
+use creature_field::{Creature, CreatureFlags};
 use crate::creature_art::SharedCreatureArt;
 use egui::{Color32, Stroke};
 
@@ -31,7 +31,7 @@ pub struct CreatureFieldView<'a> {
     pub current_target: &'a str,
     /// Does this skin "show when…" condition hold for this creature? The
     /// host owns the game state the answer comes from; the renderer only
-    /// asks (via `gs_field::cards::resolve_card_with`).
+    /// asks (via `creature_field::cards::resolve_card_with`).
     pub eval_condition: Box<dyn Fn(&Condition, &CreatureFlags) -> bool + 'a>,
     /// Derived-effect severity for (creature exist id, effect name).
     pub effect_severity: Box<dyn Fn(&str, &str) -> Option<u8> + 'a>,
@@ -268,7 +268,7 @@ pub fn render_creature_field_content(
     // occluder mask), placed by where each meets the floor.
     let occluders = crate::field_occluders::Prepared::new(ui.ctx(), scene, art_cache, &backdrop_stage_rect, field);
 // <<<doll
-    let props: &[gs_field::scenes::SceneProp] =
+    let props: &[creature_field::scenes::SceneProp] =
         scene.map(|s| s.props.as_slice()).unwrap_or_default();
 
     // A scene keeps painting with nobody home; the game (scene = None)
@@ -448,8 +448,8 @@ pub fn creature_field_stage_pos(
 fn paint_scene_prop(
     painter: &egui::Painter,
     map: &StageMap,
-    field: &gs_field::solver::CreatureField,
-    prop: &gs_field::scenes::SceneProp,
+    field: &creature_field::solver::CreatureField,
+    prop: &creature_field::scenes::SceneProp,
     art_cache: Option<&crate::creature_art::CreatureArtCache>,
 ) {
 // >>>doll
@@ -534,7 +534,7 @@ fn paint_scene_prop(
 fn paint_field_floor(
     painter: &egui::Painter,
     map: &StageMap,
-    field: &gs_field::solver::CreatureField,
+    field: &creature_field::solver::CreatureField,
 ) {
     let grid = Stroke::new(1.0, Color32::from_white_alpha(14));
     let edge = Stroke::new(1.4, Color32::from_white_alpha(26));
@@ -573,9 +573,9 @@ fn paint_field_floor(
 fn paint_creature_card(
     painter: &egui::Painter,
     map: &StageMap,
-    field: &gs_field::solver::CreatureField,
+    field: &creature_field::solver::CreatureField,
     unit: &Unit,
-    creature: &gs_field::Creature,
+    creature: &creature_field::Creature,
     is_target: bool,
     now_ms: f64,
     dark: bool,
@@ -590,10 +590,10 @@ fn paint_creature_card(
     // lift, overlays), all evaluated host-style through resolve_card.
     // Art keys on the NAME token (boon-stripped slug — matches the
     // tiered art folders), same normalization the prepare pass used.
-    let token = gs_field::naming::name_token(&creature.name);
+    let token = creature_field::naming::name_token(&creature.name);
     let art = art_cache.and_then(|c| c.base(&token));
     let resolved = match (art_cache, flags) {
-        (Some(cache), Some(flags)) => Some(gs_field::cards::resolve_card_with(
+        (Some(cache), Some(flags)) => Some(creature_field::cards::resolve_card_with(
             &cache.card,
             flags,
             &*view.eval_condition,
@@ -1057,13 +1057,13 @@ fn paint_creature_card(
 fn paint_card_overlays(
     painter: &egui::Painter,
     cache: &crate::creature_art::CreatureArtCache,
-    resolved: &gs_field::cards::ResolvedCard<'_>,
+    resolved: &creature_field::cards::ResolvedCard<'_>,
     art: &crate::creature_art::CreatureArt,
     dest: egui::Rect,
     now_ms: f64,
     severity_of: &dyn Fn(&str) -> Option<u8>,
 ) -> bool {
-    use gs_field::skins::{AnimateKind, OverlaySpace};
+    use creature_field::skins::{AnimateKind, OverlaySpace};
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     let mut animated = false;
     // The art's alpha bbox mapped into the dest rect: what body-wrap
@@ -1091,7 +1091,7 @@ fn paint_card_overlays(
                 "feet" => Some(art.feet),
                 _ => None,
             })
-            .or_else(|| gs_field::skins::default_creature_anchor(name))
+            .or_else(|| creature_field::skins::default_creature_anchor(name))
             .unwrap_or([0.5, 0.5]);
         egui::pos2(
             dest.left() + frac[0] * dest.width(),
@@ -1213,7 +1213,7 @@ fn paint_card_overlays(
 fn paint_wound_overlays(
     painter: &egui::Painter,
     cache: &crate::creature_art::CreatureArtCache,
-    resolved: &gs_field::cards::ResolvedCard<'_>,
+    resolved: &creature_field::cards::ResolvedCard<'_>,
     art: &crate::creature_art::CreatureArt,
     dest: egui::Rect,
     injuries: &[(String, u8)],
@@ -1236,12 +1236,12 @@ fn paint_wound_overlays(
             .authored_anchor(part)
             .or_else(|| art.anchor(part));
         let frac = authored
-            .or_else(|| gs_field::skins::default_creature_anchor(part))
+            .or_else(|| creature_field::skins::default_creature_anchor(part))
             .or(match part.as_str() {
                 "head" => Some(art.head),
                 _ => None,
             })
-            .or_else(|| gs_field::skins::default_doll_anchor(part))
+            .or_else(|| creature_field::skins::default_doll_anchor(part))
             .unwrap_or([0.5, 0.5]);
         let pt = egui::pos2(
             dest.left() + frac[0] * dest.width(),
@@ -1338,7 +1338,7 @@ fn paint_wound_marker(painter: &egui::Painter, pt: egui::Pos2, card_w: f32, rank
 fn blank_texture(ctx: &egui::Context) -> egui::TextureHandle {
     ctx.data_mut(|d| {
         d.get_temp_mut_or_insert_with::<egui::TextureHandle>(
-            egui::Id::new("gs_field_egui::puppet_blank"),
+            egui::Id::new("creature_field_egui::puppet_blank"),
             || {
                 ctx.load_texture(
                     "puppet:blank",
@@ -1352,7 +1352,7 @@ fn blank_texture(ctx: &egui::Context) -> egui::TextureHandle {
 }
 
 /// The creature PUPPET for a card with no sprite art (ADDITION, not in
-/// VellumFE): resolve the family (`gs_field::puppets`, the doll cascade with
+/// VellumFE): resolve the family (`creature_field::puppets`, the doll cascade with
 /// "has a baked puppet" as the test), pose the baked 3D figure for this
 /// creature's state, and draw it. Returns the screen rect the figure fills —
 /// the caller's `body` — or None when no puppet resolves or the bake does
@@ -1368,11 +1368,11 @@ fn paint_creature_puppet(
     painter: &egui::Painter,
     card: egui::Rect,
     unit: &Unit,
-    creature: &gs_field::Creature,
+    creature: &creature_field::Creature,
     now_ms: f64,
     view: &CreatureFieldView<'_>,
     art_cache: Option<&crate::creature_art::CreatureArtCache>,
-    resolved: Option<&gs_field::cards::ResolvedCard<'_>>,
+    resolved: Option<&creature_field::cards::ResolvedCard<'_>>,
     animated: &mut bool,
 ) -> Option<egui::Rect> {
     use crate::creature_puppet::{PoseChoice, PuppetCache, PuppetKey, PuppetPlacement};
@@ -1571,7 +1571,7 @@ fn paint_creature_puppet(
 }
 
 /// The creature doll for a card with no sprite art (ADDITION, not in
-/// VellumFE): resolve the rig (`gs_field::dolls` cascade, cached), fetch the
+/// VellumFE): resolve the rig (`creature_field::dolls` cascade, cached), fetch the
 /// composed texture for this creature's look (built only when the look
 /// changes), and draw it posed. Returns the screen rect the doll fills — the
 /// caller's `body` — or None when no rig resolves / decodes, in which case
@@ -1585,11 +1585,11 @@ fn paint_creature_doll(
     painter: &egui::Painter,
     card: egui::Rect,
     unit: &Unit,
-    creature: &gs_field::Creature,
+    creature: &creature_field::Creature,
     now_ms: f64,
     view: &CreatureFieldView<'_>,
     art_cache: Option<&crate::creature_art::CreatureArtCache>,
-    resolved: Option<&gs_field::cards::ResolvedCard<'_>>,
+    resolved: Option<&creature_field::cards::ResolvedCard<'_>>,
     animated: &mut bool,
 ) -> Option<egui::Rect> {
     use crate::creature_doll::{DollCache, DollLayout, DollLook, DollPose};
@@ -1705,8 +1705,8 @@ fn paint_placeholder_wounds(
         // wounds fall through to the humanoid doll anchors so limbs,
         // eyes, neck, chest, and abdomen each get their own spot on the
         // standee instead of stacking on one centre dot.
-        let frac = gs_field::skins::default_creature_anchor(part)
-            .or_else(|| gs_field::skins::default_doll_anchor(part))
+        let frac = creature_field::skins::default_creature_anchor(part)
+            .or_else(|| creature_field::skins::default_doll_anchor(part))
             .unwrap_or([0.5, 0.5]);
         let pt = egui::pos2(
             body.left() + frac[0] * body.width(),
@@ -1719,7 +1719,7 @@ fn paint_placeholder_wounds(
 fn paint_target_order(
     painter: &egui::Painter,
     map: &StageMap,
-    field: &gs_field::solver::CreatureField,
+    field: &creature_field::solver::CreatureField,
     current_target: &str,
 ) {
     let order = field.target_order();

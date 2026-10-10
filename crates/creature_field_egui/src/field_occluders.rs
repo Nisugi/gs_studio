@@ -174,13 +174,13 @@ pub fn label_painter(painter: &egui::Painter) -> egui::Painter {
         return painter.clone();
     }
     let parent = painter.layer_id();
-    let layer = egui::LayerId::new(parent.order, parent.id.with("gs_field_egui::card_labels"));
+    let layer = egui::LayerId::new(parent.order, parent.id.with("creature_field_egui::card_labels"));
     painter.ctx().set_sublayer(parent, layer);
     painter.clone().with_layer_id(layer)
 }
 
 fn show_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::show_occluders")
+    egui::Id::new("creature_field_egui::show_occluders")
 }
 
 /// Tint the occluders so an artist can see what the mask made (a host
@@ -195,10 +195,10 @@ impl Prepared {
     /// `(x0, y0, x1, y1)`.
     pub fn new(
         ctx: &egui::Context,
-        scene: Option<&gs_field::scenes::StageScene>,
+        scene: Option<&creature_field::scenes::StageScene>,
         art_cache: Option<&crate::creature_art::CreatureArtCache>,
         backdrop: &dyn Fn(f32, f32) -> Option<(f32, f32, f32, f32)>,
-        field: &gs_field::solver::CreatureField,
+        field: &creature_field::solver::CreatureField,
     ) -> Option<Prepared> {
         DRAWN.with(|d| d.borrow_mut().clear());
         ANY.with(|a| *a.borrow_mut() = false);
@@ -274,8 +274,8 @@ pub fn paint_behind(
     to_screen: &dyn Fn(f32, f32) -> Pos2,
     scale: f32,
     prepared: Option<&Prepared>,
-    field: &gs_field::solver::CreatureField,
-    scene: Option<&gs_field::scenes::StageScene>,
+    field: &creature_field::solver::CreatureField,
+    scene: Option<&creature_field::scenes::StageScene>,
     z: f32,
     ctx: &egui::Context,
 ) {
@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn an_occluder_slots_between_the_cards_by_its_foot() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let (z_near, z_far) = field.depth_range();
         let mid = (z_near + z_far) * 0.5;
         // A blob whose foot sits on the floor at depth `mid`.

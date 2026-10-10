@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use injury_doll::state::{DollState, Status, Statuses};
-use gs_field::lighting::Sky;
-use gs_field_egui::creature_puppet::{PuppetCache, PuppetKey};
+use creature_field::lighting::Sky;
+use creature_field_egui::creature_puppet::{PuppetCache, PuppetKey};
 
 /// The compass points a player walks (`GameSky::walked`), and none.
 const FACINGS: [(&str, Option<f32>); 9] = [
@@ -115,8 +115,8 @@ impl Default for DollWindow {
             open: false,
             family: String::new(),
             hold: String::new(),
-            ranks: vec![0; gs_field::skins::DOLL_PARTS.len()],
-            scars: vec![0; gs_field::skins::DOLL_PARTS.len()],
+            ranks: vec![0; creature_field::skins::DOLL_PARTS.len()],
+            scars: vec![0; creature_field::skins::DOLL_PARTS.len()],
             statuses: Statuses::NONE,
             turn: 20.0,
             breathe: true,
@@ -143,9 +143,9 @@ impl Default for DollWindow {
             coat: None,
             coat_progress: 1.0,
             coat_over: false,
-            causes: vec![Default::default(); gs_field::skins::DOLL_PARTS.len()],
+            causes: vec![Default::default(); creature_field::skins::DOLL_PARTS.len()],
             hit_kind: Default::default(),
-            crits: vec![0; gs_field::skins::DOLL_PARTS.len()],
+            crits: vec![0; creature_field::skins::DOLL_PARTS.len()],
             hit_crit: 5,
         }
     }
@@ -224,7 +224,7 @@ impl DollWindow {
                 match item.split_once(':') {
                     Some((part, rest)) => {
                         let (cause, crit) = rest.split_once(':').map_or((rest, None), |(c, n)| (c, n.trim().parse::<u8>().ok()));
-                        if let (Some(label), Some(cause)) = (gs_field::dolls::part_label(part.trim()), gs_puppet::layers::Cause::from_name(cause)) {
+                        if let (Some(label), Some(cause)) = (creature_field::dolls::part_label(part.trim()), gs_puppet::layers::Cause::from_name(cause)) {
                             w.causes[label as usize - 1] = cause;
                             w.crits[label as usize - 1] = crit.unwrap_or(0).min(9);
                         }
@@ -256,7 +256,7 @@ impl DollWindow {
         if let Ok(v) = std::env::var("GS_STUDIO_DOLL_HIT") {
             let parsed = v.split_once('@').and_then(|(wound, frame)| {
                 let (part, rank) = wound.split_once(':')?;
-                Some((gs_field::dolls::part_label(part.trim())? as usize - 1, rank.trim().parse().ok()?, frame.trim().parse().ok()?))
+                Some((creature_field::dolls::part_label(part.trim())? as usize - 1, rank.trim().parse().ok()?, frame.trim().parse().ok()?))
             });
             w.hit = parsed;
         }
@@ -264,7 +264,7 @@ impl DollWindow {
             let Ok(v) = std::env::var(var) else { continue };
             for item in v.split(',') {
                 if let Some((part, rank)) = item.split_once(':') {
-                    if let (Some(label), Ok(rank)) = (gs_field::dolls::part_label(part.trim()), rank.trim().parse::<u8>()) {
+                    if let (Some(label), Ok(rank)) = (creature_field::dolls::part_label(part.trim()), rank.trim().parse::<u8>()) {
                         ranks[label as usize - 1] = rank.min(3);
                     }
                 }
@@ -277,7 +277,7 @@ impl DollWindow {
         if self.display {
             return injury_doll::sky::display();
         }
-        if let Some(sky) = self.follow_field.then(|| gs_field_egui::creature_light::field_sky_now(ctx)).flatten().map(|f| injury_doll::sky::doll_sky(f.game_hour, &f.sky, f.outdoor)) {
+        if let Some(sky) = self.follow_field.then(|| creature_field_egui::creature_light::field_sky_now(ctx)).flatten().map(|f| injury_doll::sky::doll_sky(f.game_hour, &f.sky, f.outdoor)) {
             return sky;
         }
         self.own_sky()
@@ -291,7 +291,7 @@ impl DollWindow {
     /// What a game client would hand the doll.
     fn state(&self) -> DollState {
         let listed = |ranks: &[u8]| -> Vec<(String, u8)> {
-            gs_field::skins::DOLL_PARTS
+            creature_field::skins::DOLL_PARTS
                 .iter()
                 .zip(ranks)
                 .filter(|(_, r)| **r > 0)
@@ -374,7 +374,7 @@ impl DollWindow {
         }
         // finer than the stage's cloud: one figure, seen close
         let params = gs_puppet::splat::SplatParams { spacing: injury_doll::view::LAYERS_SPACING_FT, ..Default::default() };
-        let causes: Vec<(String, gs_puppet::layers::Cause)> = gs_field::skins::DOLL_PARTS.iter().zip(&self.causes).map(|((part, _, _), c)| (part.to_string(), *c)).collect();
+        let causes: Vec<(String, gs_puppet::layers::Cause)> = creature_field::skins::DOLL_PARTS.iter().zip(&self.causes).map(|((part, _, _), c)| (part.to_string(), *c)).collect();
         let mut key = key.with_layers(true, params.into(), self.coat.map(|m| gs_puppet::layers::Coating::new(m, self.coat_progress).over_wounds(self.coat_over))).with_causes(&causes);
         key.crits.iter_mut().zip(&self.crits).for_each(|(k, c)| *k = *c);
         key
@@ -540,7 +540,7 @@ impl DollWindow {
             ui.weak("wound");
             ui.weak("scar");
             ui.end_row();
-            for (i, (_, name, _)) in gs_field::skins::DOLL_PARTS.iter().enumerate() {
+            for (i, (_, name, _)) in creature_field::skins::DOLL_PARTS.iter().enumerate() {
                 ui.label(*name);
                 let before = self.ranks[i];
                 ui.add(egui::Slider::new(&mut self.ranks[i], 0..=3));
@@ -574,7 +574,7 @@ impl DollWindow {
         if self.display {
             return;
         }
-        let field = gs_field_egui::creature_light::field_sky_now(ui.ctx()).is_some();
+        let field = creature_field_egui::creature_light::field_sky_now(ui.ctx()).is_some();
         ui.checkbox(&mut self.follow_field, "The field's sky")
             .on_hover_text(if field {
                 "Stand under the stage's own sky: its scene, hour, weather and the way it faces"

@@ -1,11 +1,11 @@
 //! Modelled bodies in the data root: `<data>/meshes/<form>/[<size>/]`,
-//! each a folder `PuppetCache::set_body_dir` (`gs_field_egui::puppet_cache`) reads
+//! each a folder `PuppetCache::set_body_dir` (`creature_field_egui::puppet_cache`) reads
 //! (`body.obj`, `color.png`, `weights.txt`, `splat.spz`...). A form with a
 //! body may bring its own puppet -- its rings measured from the mesh
 //! (`gs_puppet::mesh::BoundMesh::measured`) -- as `<data>/meshes/<form>/
 //! puppet.toml`, which is installed into the pool's puppets as that form.
 //! The body itself (its largest size) is installed into the pool's
-//! `global/bodies/<form>/` ([`install_bodies`]), where `gs_field_egui`
+//! `global/bodies/<form>/` ([`install_bodies`]), where `creature_field_egui`
 //! finds it by itself, so a game client draws the form as its body with no
 //! studio code.
 //!
@@ -169,11 +169,11 @@ fn install_bodies_of(data: &Path, bodies_dir: &Path, keep: &dyn Fn(&str) -> bool
 }
 
 /// [`install_puppets`] and [`install_bodies`] into the pool's own folders
-/// (`gs_field::puppets::{puppets_dir, bodies_dir}`): the forms touched.
+/// (`creature_field::puppets::{puppets_dir, bodies_dir}`): the forms touched.
 pub fn install_all(data: &Path) -> std::io::Result<Vec<String>> {
     let err = |e| std::io::Error::other(format!("{e}"));
-    let mut forms = install_puppets(data, &gs_field::puppets::puppets_dir().map_err(err)?)?;
-    forms.extend(install_bodies(data, &gs_field::data_dirs::bodies_dir().map_err(err)?)?);
+    let mut forms = install_puppets(data, &creature_field::puppets::puppets_dir().map_err(err)?)?;
+    forms.extend(install_bodies(data, &creature_field::data_dirs::bodies_dir().map_err(err)?)?);
     forms.sort();
     forms.dedup();
     Ok(forms)

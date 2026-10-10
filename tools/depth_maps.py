@@ -3,7 +3,7 @@
 For every creature sprite in the pool -- `global/images/creatures/<name>/
 <name>.png` and its `<name>_prone.png` -- writes `<art>_depth.png` and
 `<art>_normal.png` beside it, the pair the stage's v2 lighting pass reads
-(`gs_field_egui::field_gpu_stage`): depth 16 bit in R and G over -0.5..2 m
+(`creature_field_egui::field_gpu_stage`): depth 16 bit in R and G over -0.5..2 m
 from the feet (B, the glow mask, 0), for a figure 1.8 m tall -- the stage
 scales it to the creature's own height -- and a camera-space normal map
 (RGB = xyz * 0.5 + 0.5, z < 0 toward the viewer).

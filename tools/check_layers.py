@@ -18,12 +18,14 @@ RULES = {
     # Hydra's dependency: the doll, its base and nothing of the field or of
     # authoring. (Not toml_edit: toml 0.8 parses through it. The field's
     # sidecar writer that used it is kept out with the field itself.)
-    "injury_doll": AUTHORING + ["include_dir", "regex", "serde_json", "gs_field", "gs_field_egui", "creature_field", "creature_field_egui", "eframe"],
+    "injury_doll": AUTHORING + ["include_dir", "regex", "serde_json", "creature_field", "creature_field_egui", "eframe"],
     # Hydra's calls: what Hydra's doll pulls in, through injury_doll
-    "hydra_contract": AUTHORING + ["include_dir", "gs_field", "gs_field_egui"],
-    "creature_field_egui": AUTHORING + ["injury_doll"],
-    "creature_field": AUTHORING + ["injury_doll", "egui", "wgpu"],
-    "gs_render": AUTHORING + ["include_dir", "gs_field", "creature_field"],
+    "hydra_contract": AUTHORING + ["include_dir", "creature_field", "creature_field_egui"],
+    # the field: no doll, and (S8) no art compiled in
+    "creature_field_egui": AUTHORING + ["injury_doll", "include_dir"],
+    "creature_field": AUTHORING + ["injury_doll", "egui", "wgpu", "include_dir"],
+    # what both draw with: neither of them
+    "gs_render": AUTHORING + ["include_dir", "creature_field", "creature_field_egui", "injury_doll"],
     "gs_base": AUTHORING + ["egui", "wgpu", "egui-wgpu", "include_dir"],
     "gs_puppet": ["rig", "rig_bake", "gs_puppet_author", "egui", "wgpu", "egui-wgpu", "include_dir"],
 }

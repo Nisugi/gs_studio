@@ -2,9 +2,9 @@
 //! layer. Ported from VellumFE `src/frontend/gui/studio.rs`
 //! (`load_default_scene`, `sparse_camera`, `sparse_solver`) at 60c84a79.
 
-use gs_field::scenes::{self, StageScene};
-use gs_field::skins::{CreatureFieldCamera, CreatureFieldSolver};
-use gs_field::solver::{FieldParams, SeparationBasis};
+use creature_field::scenes::{self, StageScene};
+use creature_field::skins::{CreatureFieldCamera, CreatureFieldSolver};
+use creature_field::solver::{FieldParams, SeparationBasis};
 
 /// The "default" scene for layering under a room/location scene, unless
 /// `excluding` IS the default (saving/loading the default itself).
@@ -79,7 +79,7 @@ pub fn sparse_solver(params: &FieldParams, base: &FieldParams) -> CreatureFieldS
         }),
         relax_steps: (s.relax_steps != b.relax_steps).then_some(s.relax_steps),
         shuffle_ties: (s.shuffle_ties != b.shuffle_ties).then_some(s.shuffle_ties),
-        grow: (s.grow != b.grow).then(|| gs_field::solver::growth_name(s.grow).to_string()),
+        grow: (s.grow != b.grow).then(|| creature_field::solver::growth_name(s.grow).to_string()),
         max_depth: diff(s.max_depth, b.max_depth),
     }
 }
@@ -88,8 +88,8 @@ pub fn sparse_solver(params: &FieldParams, base: &FieldParams) -> CreatureFieldS
 mod tests {
     use super::*;
     use crate::stage::test_support::TempBase;
-    use gs_field::cards::resolve_field_params;
-    use gs_field::field_config::FieldOverrides;
+    use creature_field::cards::resolve_field_params;
+    use creature_field::field_config::FieldOverrides;
 
     // Ported as written; the lint is about the original's style.
     #[allow(clippy::field_reassign_with_default)]

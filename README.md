@@ -9,7 +9,7 @@ creatures and props are placed and given wounds, statuses and class flags --
 drawn by the same renderer the clients use; and the calibrators for frames,
 injury dolls, creature art and scenery.
 
-Licence: `gs_field`, `gs_field_egui`, `gs_calibrators` and `studio` are
+Licence: `creature_field`, `creature_field_egui`, `gs_calibrators` and `studio` are
 GPL-3.0-or-later (ported from VellumFE).
 
 ## What is here today
@@ -18,8 +18,8 @@ GPL-3.0-or-later (ported from VellumFE).
 |---|---|
 | `crates/rig_bake/` | Library, no dependencies, no UI. Silhouette + bones -> per-pixel body-part label map AND which bone owns each pixel: `rasterize` -> `label` -> `metrics` |
 | `crates/rig/` | Library, no UI. The rig file format (joints, bones, the bone hierarchy), body-type templates (as data), the `outlines.json` loader, eye discs, and bake-to-files (`<family>.png` + `<family>.toml`) |
-| `crates/gs_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
-| `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
+| `crates/creature_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
+| `crates/creature_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_calibrators/` | Library. The art calibrators (frames, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
 | `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with six tabs: **Rigs**, **Scenes**, **Frames**, **Creatures**, **Scenery**, **Preview**, and the injury doll's window (**Doll**) |
 | `crates/rig/src/chart.rs` | `scale-chart.html` -> `outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped); the app's *Import* runs it. `tools/extract_outlines.py` is the original it was ported from |
@@ -43,7 +43,7 @@ silhouette pair, its rig `<form>.rig.toml`, its puppet and texture; what
 the code and file names still call a *family*), and a **creature** (a
 bestiary entry, with its own skin and outfit). A creature finds its form by
 the `form` its bestiary entry names, else by the family cascade
-(`gs_field::dolls::resolve_puppet`). Forms are being split finer than the
+(`creature_field::dolls::resolve_puppet`). Forms are being split finer than the
 game's families (each elemental its own form), so `family` in the code
 means form, and the game's family is only a hint.
 
@@ -75,7 +75,7 @@ without remembering them, for screenshots (ids such as `stage_light`,
 to read leaves the old file alone) and reopens the editor. With no
 `outlines.json` yet, the Rigs tab says so and points at that box.
 
-Setting the pool calls `gs_field::data_dirs::set_base_dir`, drops the pool
+Setting the pool calls `creature_field::data_dirs::set_base_dir`, drops the pool
 scan and calibration caches, resets the art store, re-scans the cast and
 drops every open calibrator (each re-opens against the new pool when its tab
 is next shown -- unsaved calibration edits do not survive a pool change).
@@ -111,7 +111,7 @@ It **never** reads or writes `~/.vellum-fe` unless you say so -- `--pool`,
 names the directory in use and whether anything asked for it
 (`pool: <dir> (gs-studio home, the default)` vs `(--pool)`).
 
-`gs_field::data_dirs`' own default is still VellumFE's -- `VELLUM_FE_DIR`,
+`creature_field::data_dirs`' own default is still VellumFE's -- `VELLUM_FE_DIR`,
 else `~/.vellum-fe` -- from the port. gs-studio is a *host*: it installs its
 default through the `set_base_dir` override the crate provides (`crates/studio/src/data_home.rs`,
 `pool_dir.rs`). Setting `VELLUM_FE_DIR` steers VellumFE, not this app.
@@ -546,7 +546,7 @@ progress, 512 px on release. (humanoid, release build: ~3 ms at 256, ~13 ms at
 `<family>.puppet.toml` beside them (a rig that cannot make one yet -- no bone
 with two placed joints -- says so, and loses any old puppet file). It then
 INSTALLS the bake and the puppet into the pool (`global/rigs/`,
-`global/puppets/`) and reloads gs_field's doll and puppet sets, so the stage
+`global/puppets/`) and reloads creature_field's doll and puppet sets, so the stage
 draws the new puppet at once; *Show on stage* opens Preview with it spawned.
 A pool copy replaces the built-in puppet of that family (the Preview
 *Puppets* list marks it "pool"). Opening a family that has a
@@ -589,7 +589,7 @@ input.
 ### Scenes and Preview (the stage)
 
 VellumFE's Studio "Stage", ported: a sandbox room drawn by the production
-renderer (`gs_field_egui::render_creature_field_content`). The two tabs are
+renderer (`creature_field_egui::render_creature_field_content`). The two tabs are
 ONE tool sharing one stage -- roster, scene, camera and selection all carry
 across -- and differ only in the right-hand panel. Scenes holds what the
 scene file keeps; Preview the moment it is seen in and who is there. The
@@ -627,7 +627,7 @@ an *x* to put it back:
   window open.
 - **Light** (Scenes, after Masks): *Light this scene* adds the
   scene file's `[light]` table (Niffy's creature-field lighting,
-  `gs_field::lighting` + `vellum_light`); *Outdoor* beside it (time of day
+  `creature_field::lighting` + `vellum_light`); *Outdoor* beside it (time of day
   and the sky apply). *Colour*: Key, Ambient and Ground swatches and
   Saturation show the values read from the backdrop ("auto") and can each be
   overridden or reset. *Levels*: Intensity; Darkness
@@ -662,7 +662,7 @@ an *x* to put it back:
   evenly (`[moon]` in `global/lighting.toml`: colour, strength, and that
   lift, under *Every scene*). *The game's moons* (on by
   default) replaces the Moon slider with Elanthia's own at the hour shown, today
-  (`gs_field::sky`, and a line in the game's own words: how lit each is,
+  (`creature_field::sky`, and a line in the game's own words: how lit each is,
   its phase, and where it stands -- "Liabo 96% waning gibbous, almost
   arrives at her azimuth"). They are the game's sky math, as Simutronics'
   Saga client carries it for its Almanac ("the same calculation behind
@@ -692,7 +692,7 @@ an *x* to put it back:
   round you, and the light it throws, are true. The stars come out too
   (the GPU pass; with the Moon slider they keep today's date): the 25 constellations of the
   official *Constellations of the Northern Sky*, their stars traced from
-  its drawings (`gs_field::stars`, `data/constellations.toml`) -- Krrska's
+  its drawings (`creature_field::stars`, `data/constellations.toml`) -- Krrska's
   eight points, Arachne's red hourglass, the Dragonfly's twin nebulae.
   Each is highest at midnight in the middle of its own two weeks of the
   year and two hours earlier a month on, and keeps the moons' arc: up in
@@ -711,7 +711,7 @@ an *x* to put it back:
   above, rays shimmering along them, behind the cloud.
   Creatures,
   props, puppets and the backdrop are re-lit on a worker thread and swapped
-  in when ready (`gs_field_egui::creature_light`).
+  in when ready (`creature_field_egui::creature_light`).
 - **Notes** (Scenes and Preview alike, after Time and weather): notes
   pinned to the scene, as the Rigs tab pins them to a puppet
   (`stage::scene_notes`). With *Pin notes* on, a click on the stage pins a
@@ -752,7 +752,7 @@ an *x* to put it back:
   day, warmed, fading out -- and the creatures and props within reach, and
   its flame stands in depth order among them with a glow in the air round
   it; best seen at night (`[[lights]]` in the scene file,
-  `gs_field_egui::field_lights`). Art is lit most on the side facing it. A
+  `creature_field_egui::field_lights`). Art is lit most on the side facing it. A
   puppet is lit as a body: the flame is a point beside it, so what faces the
   flame and is near it is brightest and what turns away gets none
   (`gs_puppet::SkinSurface::lamp_light`), and it casts a shadow on the ground
@@ -804,7 +804,7 @@ an *x* to put it back:
   its feet for a figure 1.8 m tall, scaled to the creature's height on the
   stage, a glow mask in B; a camera-space normal map, z < 0 toward the
   viewer) is lit by them, one without is rounded from its outline; a
-  puppet brings its own surface (`gs_field_egui::field_gpu`,
+  puppet brings its own surface (`creature_field_egui::field_gpu`,
   `field_gpu_stage`). `tools/depth_maps.py` makes both kinds for every
   creature and backdrop in the pool with Depth Anything V2 (on the ComfyUI
   venv's GPU torch; `--model large` for finer faces, a non-commercial
@@ -830,19 +830,19 @@ an *x* to put it back:
   where its lowest pixel meets the floor: creatures behind that depth are
   hidden by it (their names and bars stay on top), nearer ones stand in
   front, lamps too. *Reload mask* after
-  painting; *Show* tints them red (`gs_field_egui::field_occluders`).
+  painting; *Show* tints them red (`creature_field_egui::field_occluders`).
   *Walkable*: where a creature may stand. Paint black over the walls, the
   river and the roofs in `scenes/<backdrop name>.walk.png` (*Create mask*
   writes a white one, all walkable, the backdrop's size; any size works,
   read in the backdrop's frame); white is ground. The solver refuses a
-  spot whose foot falls on the dark (`gs_field::walk`,
+  spot whose foot falls on the dark (`creature_field::walk`,
   `CreatureField::set_walk`), at every relaxation notch, like a prop's
   exclusion; props and lamps are not held to it (a boat on the river, a
   torch on a wall). Creatures arriving after *Reload mask* keep to it;
   *Show* tints the dark red over the stage. No mask: anywhere on the floor.
 - **Weather** (the *Weather* group of Time and weather): Clear, Rain, Storm, Snow,
   Sleet, Blood rain, Fog or Sand, with Amount and Wind -- a preview of what
-  the game sets from the room (`gs_field_egui::field_weather`), which also
+  the game sets from the room (`creature_field_egui::field_weather`), which also
   brings its cloud over the moon. Painted over the stage, or, where the
   GPU pass draws, Niffy's weather at depth (`field_gpu_stage::field_weather`,
   the prototype's model, within a mean OKLab dE of 0.003 of it for storm,
@@ -888,7 +888,7 @@ an *x* to put it back:
   it shows by the blood it runs (down the sides and the backs of the legs,
   heavier from rank 2) and by the `[guard.back]` stoop. *GPU skins* (under
   **Display**, on by default; `GS_STUDIO_GPU_SKINS=0` turns it off) draws the stage's puppet skins on the
-  GPU too (`gs_field_egui::skin_gpu`), relit there by the scene and the time
+  GPU too (`creature_field_egui::skin_gpu`), relit there by the scene and the time
   of day as the CPU relights them (`relight_gpu`: vellum_light's kernel,
   frame and cross-fade, held to its golden cases by
   `examples/relight_golden`) -- with *Light on the GPU (v2)* and a lit
@@ -943,7 +943,7 @@ an *x* to put it back:
   short carries how wet it is, `field_gpu::wet_normal`). It stands in a
   soft contact shadow, and the sky behind rims its edges.
   Drag across it to turn it by hand. *GPU skin* draws its skin on the GPU
-  (`gs_field_egui::skin_gpu`): the mesh `gs_puppet::Posed::skin_mesh` hands
+  (`creature_field_egui::skin_gpu`): the mesh `gs_puppet::Posed::skin_mesh` hands
   over, rasterised, resolved, smoothed and shaded pass by pass as the CPU
   skin is, straight into the v2 pass's atlas -- a turning doll's frame
   2-3 ms of CPU instead of 20-26, eyes, web and frost included. On by
@@ -1146,7 +1146,7 @@ skin: its sprite beats an unpainted puppet.
 
 **Spawn by name** is the other way in. Type any creature name: it spawns with that
 name and its last word as the noun, art or no art. Suggestions come from the
-bestiary (`gs_field::bestiary`) so the names are real creatures, each tagged
+bestiary (`creature_field::bestiary`) so the names are real creatures, each tagged
 `[art]` (it draws as its sprite) or `[puppet]` (it draws as its puppet), and
 hovering shows its noun and family. The line under the box says what the
 typed name would get by the renderer's own rule (`stage::cast::has_art`:
@@ -1177,7 +1177,7 @@ scope. Of the leaves that read the player, some are therefore TRUE:
 `effect_inactive`, `hand_empty` (every slot), `indicator` with
 `active = false`, `injury` / percent `vital` when the comparison holds for a
 healthy player with full (100%) bars, and `time_of_day` by the wall clock
-(US Eastern, `gs_field::elanthian_time`). The rest are false. One known
+(US Eastern, `creature_field::elanthian_time`). The rest are false. One known
 difference: `spell_affordable` is always false, because the spell table is
 not part of this workspace (VellumFE answers true for a known spell with no
 static cost). The table of answers, each with the line of VellumFE's
@@ -1221,14 +1221,14 @@ embeds the metadata in the PNG).
   never blank.
 - The status line shows the calibrators' messages (hover for the log, capped
   at 50 lines like the stage's).
-- After a save the stage reloads its art and gs_field's calibration store is
+- After a save the stage reloads its art and creature_field's calibration store is
   re-seeded; after a SCENERY save the stage's solver obstacles are rebuilt
   too (prop exclusion spans come from the sidecar). Placed creatures do not
   move.
 - If the doll being anchored loses its image file, that calibrator closes
   itself and the tab shows why; Rescan pool brings it back.
 
-`gs_field::pool::read_sidecar` is unchanged pool behaviour: opening a
+`creature_field::pool::read_sidecar` is unchanged pool behaviour: opening a
 calibrator on a PNG that has embedded metadata but no `.toml` beside it
 EXTRACTS that sidecar. That is not a calibrator save.
 
@@ -1544,7 +1544,7 @@ bestiary name token); the stage dresses it on its family's puppet:
 
 `turnaround` shows an outfit with `TURNAROUND_WEAR=robe,hood`. Save and
 *Reload poses* install both files into the pool's `global/outfits/` (only
-when they parse); Publish ships them to `outfits/`, which `gs_field` embeds.
+when they parse); Publish ships them to `outfits/`, which `creature_field` embeds.
 Both are always written as the editor sees them: with no `kit.toml` in the
 data root the shipped kit goes out, with no `outfits.toml` a file saying
 nobody wears anything -- so a removed file cannot leave its old copy

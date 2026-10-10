@@ -1,6 +1,6 @@
 //! stage_demo: the ported creature-field renderer in a bare eframe window.
 //!
-//!   cargo run -p gs_field_egui --example stage_demo
+//!   cargo run -p creature_field_egui --example stage_demo
 //!
 //! Fabricates a small room (kobold, troll, wolf, a boss, one prone, one
 //! dead, two wounded), and every frame runs the same order VellumFE's Studio
@@ -8,10 +8,10 @@
 //! -> prepare scene art -> render. Clicking a creature makes it the target.
 //!
 //! No art is needed: with nothing in `<data>/global/images/creatures` every
-//! creature draws as its family's baked 3D PUPPET (`gs_field::puppets` ->
+//! creature draws as its family's baked 3D PUPPET (`creature_field::puppets` ->
 //! `gs_puppet`) -- humanoid and canine are published, so the wolf is a real
 //! quadruped. A family with no puppet falls back to the flat doll
-//! (`gs_field::dolls`), and a family with neither to the placeholder
+//! (`creature_field::dolls`), and a family with neither to the placeholder
 //! standee. If pool art exists it is used instead of all three.
 //!
 //! The second bar edits the TARGETED creature: wound rank 0-3 per body part
@@ -43,9 +43,9 @@
 //! `STAGE_DEMO_FLAT=1` draws puppets as the flat shape list instead of the
 //! smooth skin.
 
-use gs_field::solver::CreatureField;
-use gs_field::{Condition, Creature, CreatureFlags};
-use gs_field_egui::{
+use creature_field::solver::CreatureField;
+use creature_field::{Condition, Creature, CreatureFlags};
+use creature_field_egui::{
     creature_field_stage_pos, render_creature_field_content, CreatureArtStore,
     CreatureFieldView, WantedCreature,
 };
@@ -210,7 +210,7 @@ fn status_roster() -> Vec<Creature> {
 }
 
 /// The host owns condition evaluation. The demo has no game state, so only
-/// creature-side leaves can hold (same shape as gs_field's test evaluator).
+/// creature-side leaves can hold (same shape as creature_field's test evaluator).
 fn eval(cond: &Condition, flags: &CreatureFlags) -> bool {
     match cond {
         Condition::All { conditions } => conditions.iter().all(|c| eval(c, flags)),
@@ -238,7 +238,7 @@ struct Demo {
     shot: Option<std::path::PathBuf>,
     shot_requested: bool,
     /// `STAGE_DEMO_LIGHT`: a lit scene in front of that backdrop.
-    scene: Option<gs_field::scenes::StageScene>,
+    scene: Option<creature_field::scenes::StageScene>,
     /// Frames since the lighting bake settled.
     light_settled: u64,
 }
@@ -258,8 +258,8 @@ impl Demo {
             let empty = std::env::temp_dir().join("stage_demo_no_art");
             let _ = std::fs::create_dir_all(empty.join("global").join("images"));
             std::env::set_var("VELLUM_FE_DIR", &empty);
-            gs_field::data_dirs::clear_base_dir();
-            gs_field::pool::invalidate_cache();
+            creature_field::data_dirs::clear_base_dir();
+            creature_field::pool::invalidate_cache();
             art.reset_with_root(&empty.join("global").join("images"));
             eprintln!("stage_demo: art forced empty ({})", empty.display());
         }
@@ -270,8 +270,8 @@ impl Demo {
             roster()
         };
         for c in &creatures {
-            let puppet = gs_field::puppets::puppet_for(&c.name, c.noun.as_deref());
-            let doll = gs_field::dolls::doll_for(&c.name, c.noun.as_deref());
+            let puppet = creature_field::puppets::puppet_for(&c.name, c.noun.as_deref());
+            let doll = creature_field::dolls::doll_for(&c.name, c.noun.as_deref());
             eprintln!(
                 "stage_demo: {} -> puppet {:?}, doll {:?}",
                 c.name, puppet, doll
@@ -297,15 +297,15 @@ impl Demo {
             shot,
             shot_requested: false,
             scene: light_bg.map(|bg| {
-                use gs_field::lighting::{LampKind, PointLight};
+                use creature_field::lighting::{LampKind, PointLight};
                 let lights = if std::env::var_os("STAGE_DEMO_FIRE").is_some() {
                     vec![PointLight::new(LampKind::Campfire, 470.0, 3.6), PointLight::new(LampKind::Torch, 250.0, 3.0)]
                 } else {
                     Vec::new()
                 };
-                gs_field::scenes::StageScene {
+                creature_field::scenes::StageScene {
                     background: Some(bg),
-                    light: Some(gs_field::lighting::SceneLight::default()),
+                    light: Some(creature_field::lighting::SceneLight::default()),
                     lights,
                     ..Default::default()
                 }
@@ -351,7 +351,7 @@ impl Demo {
             .num_columns(7)
             .spacing([10.0, 2.0])
             .show(ui, |ui| {
-                for (i, (part, _, _)) in gs_field::skins::DOLL_PARTS.iter().enumerate() {
+                for (i, (part, _, _)) in creature_field::skins::DOLL_PARTS.iter().enumerate() {
                     let mut rank = flags
                         .injuries
                         .iter()
@@ -425,7 +425,7 @@ impl Demo {
             .map(|c| WantedCreature {
                 name: c.name.clone(),
                 noun: c.noun.clone(),
-                family: c.noun.as_deref().and_then(gs_field::cards::family_for_noun),
+                family: c.noun.as_deref().and_then(creature_field::cards::family_for_noun),
                 injuries: c
                     .flags
                     .as_ref()
@@ -440,10 +440,10 @@ impl eframe::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if std::env::var_os("STAGE_DEMO_FLAT").is_some() {
-            gs_field_egui::creature_puppet::set_puppet_skin(&ctx, false);
+            creature_field_egui::creature_puppet::set_puppet_skin(&ctx, false);
         }
         if let Ok(w) = std::env::var("STAGE_DEMO_WEATHER") {
-            use gs_field_egui::field_weather::{set_weather, Weather, WeatherKind};
+            use creature_field_egui::field_weather::{set_weather, Weather, WeatherKind};
             let kind = match w.as_str() {
                 "storm" => WeatherKind::Storm,
                 "snow" => WeatherKind::Snow,
@@ -461,7 +461,7 @@ impl eframe::App for Demo {
         }
         if let Some(scene) = &self.scene {
             let env = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
-            self.art.set_light_clock(gs_field_egui::creature_light::LightClock {
+            self.art.set_light_clock(creature_field_egui::creature_light::LightClock {
                 game_hour: Some(env("STAGE_DEMO_HOUR", 12.0)),
                 strength: env("STAGE_DEMO_STRENGTH", 1.0),
                 outdoor_guess: None,
@@ -475,7 +475,7 @@ impl eframe::App for Demo {
                 self.light_settled += 1;
             }
         }
-        gs_field::cards::sync_field(
+        creature_field::cards::sync_field(
             &mut self.field,
             &mut self.synced_gen,
             &mut self.synced_cal,
@@ -525,7 +525,7 @@ impl eframe::App for Demo {
                 ui.separator();
                 ui.label(format!("target: {}", self.current_target));
                 ui.separator();
-                let puppets = gs_field::puppets::puppets();
+                let puppets = creature_field::puppets::puppets();
                 ui.label(format!(
                     "puppets: {}",
                     puppets.families().collect::<Vec<_>>().join(", ")
@@ -572,7 +572,7 @@ impl eframe::App for Demo {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("gs_field_egui stage demo")
+            .with_title("creature_field_egui stage demo")
             .with_inner_size([1100.0, 700.0]),
         ..Default::default()
     };

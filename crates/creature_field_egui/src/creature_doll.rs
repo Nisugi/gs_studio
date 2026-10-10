@@ -1,5 +1,5 @@
 //! The creature doll: what a creature with NO sprite art is drawn as — its
-//! family's baked label map (`gs_field::dolls`), filled with the creature's
+//! family's baked label map (`creature_field::dolls`), filled with the creature's
 //! placeholder body colour and tinted per body part by wound rank.
 //!
 //! NOT a port — nothing here exists in VellumFE @60c84a79 (see PORTING.md,
@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use gs_field::dolls::{DollMeta, DollRigs};
+use creature_field::dolls::{DollMeta, DollRigs};
 
 /// Number of doll parts (labels are 1..=PARTS).
 pub const PARTS: usize = 14;
@@ -86,7 +86,7 @@ impl DollMap {
 
     /// Does this rig have labelled pixels for `part`?
     pub fn has_part(&self, part: &str) -> bool {
-        gs_field::dolls::part_label(part).is_some_and(|l| self.present[l as usize])
+        creature_field::dolls::part_label(part).is_some_and(|l| self.present[l as usize])
     }
 }
 
@@ -106,7 +106,7 @@ impl DollLook {
     pub fn new(body: [u8; 3], injuries: &[(String, u8)], dead: bool, boss: bool) -> Self {
         let mut ranks = [0u8; PARTS];
         for (part, rank) in injuries {
-            if let Some(label) = gs_field::dolls::part_label(part) {
+            if let Some(label) = creature_field::dolls::part_label(part) {
                 let slot = &mut ranks[label as usize - 1];
                 *slot = (*slot).max((*rank).min(3));
             }
@@ -124,11 +124,11 @@ impl DollLook {
     pub fn removed(&self) -> [bool; PARTS + 1] {
         let mut removed = [false; PARTS + 1];
         for (i, &rank) in self.ranks.iter().enumerate() {
-            let Some(part) = gs_field::dolls::label_part(i as u8 + 1) else {
+            let Some(part) = creature_field::dolls::label_part(i as u8 + 1) else {
                 continue;
             };
-            for gone in gs_field::dolls::severed_parts(part, rank) {
-                if let Some(l) = gs_field::dolls::part_label(gone) {
+            for gone in creature_field::dolls::severed_parts(part, rank) {
+                if let Some(l) = creature_field::dolls::part_label(gone) {
                     removed[l as usize] = true;
                 }
             }
@@ -221,7 +221,7 @@ fn stump_texels(map_h: usize, boss: bool) -> u8 {
 ///
 /// * inside pixels take the body colour; a wounded part blends
 ///   [`TINT_STRENGTH`] of the way to its rank colour (the player injury
-///   doll's palette, `gs_field::dolls::DEFAULT_INJURY_PALETTE` 1-3);
+///   doll's palette, `creature_field::dolls::DEFAULT_INJURY_PALETTE` 1-3);
 /// * a severed limb's pixels (and an arm's hand) become transparent, and the
 ///   band of the adjoining part that touches them — chest for an arm,
 ///   abdomen for a leg, else whatever is there — takes the rank-3 colour;
@@ -238,7 +238,7 @@ pub fn compose_rgba(map: &DollMap, look: &DollLook) -> Vec<u8> {
         if rank > 0 {
             colors[i + 1] = blend(
                 look.body,
-                gs_field::dolls::injury_rank_rgb(rank),
+                creature_field::dolls::injury_rank_rgb(rank),
                 TINT_STRENGTH,
             );
         }
@@ -247,7 +247,7 @@ pub fn compose_rgba(map: &DollMap, look: &DollLook) -> Vec<u8> {
     // Stumps: only when something is actually severed (the common case
     // skips this pass entirely).
     let stump = if removed.iter().any(|r| *r) {
-        let label_of = |part: &str| gs_field::dolls::part_label(part).unwrap_or(0) as usize;
+        let label_of = |part: &str| creature_field::dolls::part_label(part).unwrap_or(0) as usize;
         // Which labels may carry a stump: the anatomical neighbour when the
         // rig has it (so a hanging arm does not bloody the hip it brushes).
         let mut hosts = [false; PARTS + 1];
@@ -277,7 +277,7 @@ pub fn compose_rgba(map: &DollMap, look: &DollLook) -> Vec<u8> {
     } else {
         None
     };
-    let stump_color = gs_field::dolls::injury_rank_rgb(3);
+    let stump_color = creature_field::dolls::injury_rank_rgb(3);
 
     let edge = distances(w, h, &|i| !visible(i), &visible, outline_texels(h, look.boss), true);
 
@@ -433,7 +433,7 @@ pub struct DollTexture {
 
 /// Per-context doll state: decoded maps, the creature -> rig resolutions,
 /// and the LRU of composed textures. Everything is dropped when the
-/// published rig set changes generation (`gs_field::dolls::invalidate_cache`
+/// published rig set changes generation (`creature_field::dolls::invalidate_cache`
 /// or a moved base dir).
 #[derive(Default)]
 pub struct DollCache {
@@ -454,7 +454,7 @@ impl DollCache {
     /// The cache that lives in this egui context (created on first use).
     pub fn shared(ctx: &egui::Context) -> SharedDollCache {
         ctx.data_mut(|d| {
-            d.get_temp_mut_or_default::<SharedDollCache>(egui::Id::new("gs_field_egui::dolls"))
+            d.get_temp_mut_or_default::<SharedDollCache>(egui::Id::new("creature_field_egui::dolls"))
                 .clone()
         })
     }
@@ -467,7 +467,7 @@ impl DollCache {
             return;
         }
         self.frame = Some(frame);
-        let rigs = gs_field::dolls::rigs();
+        let rigs = creature_field::dolls::rigs();
         if self.rigs.is_none() || self.generation != rigs.generation() {
             self.generation = rigs.generation();
             self.maps.clear();
@@ -486,7 +486,7 @@ impl DollCache {
         if let Some(hit) = self.resolved.get(&key) {
             return hit.clone();
         }
-        let rigs = self.rigs.clone().unwrap_or_else(gs_field::dolls::rigs);
+        let rigs = self.rigs.clone().unwrap_or_else(creature_field::dolls::rigs);
         let family = rigs
             .doll_for(name, noun)
             .map(|d| Arc::<str>::from(d.family.as_str()));
@@ -499,7 +499,7 @@ impl DollCache {
         if let Some(hit) = self.maps.get(family) {
             return hit.clone();
         }
-        let rigs = self.rigs.clone().unwrap_or_else(gs_field::dolls::rigs);
+        let rigs = self.rigs.clone().unwrap_or_else(creature_field::dolls::rigs);
         let map = rigs.get(family).and_then(|rig| {
             let map = DollMap::decode(&rig.png, rig.meta.clone());
             if map.is_none() {
@@ -566,7 +566,7 @@ mod tests {
     use super::*;
 
     fn humanoid() -> DollMap {
-        let rigs = DollRigs::from_rigs(gs_field::dolls::test_forms_rigs());
+        let rigs = DollRigs::from_rigs(creature_field::dolls::test_forms_rigs());
         let rig = rigs.get("humanoid").expect("humanoid in the forms pack");
         DollMap::decode(&rig.png, rig.meta.clone()).expect("decodes")
     }
@@ -583,7 +583,7 @@ mod tests {
 
     /// Interior pixels (not outline, not stump) of one label.
     fn interior(map: &DollMap, rgba: &[u8], part: &str, body_or_tint: [u8; 3]) -> usize {
-        let label = gs_field::dolls::part_label(part).unwrap();
+        let label = creature_field::dolls::part_label(part).unwrap();
         (0..map.labels.len())
             .filter(|&i| map.labels[i] == label && px(rgba, i) == [body_or_tint[0], body_or_tint[1], body_or_tint[2], 255])
             .count()
@@ -666,7 +666,7 @@ mod tests {
         let map = humanoid();
         let l = look(&[("rightArm", 3)]);
         let rgba = compose_rgba(&map, &l);
-        let label = |p| gs_field::dolls::part_label(p).unwrap();
+        let label = |p| creature_field::dolls::part_label(p).unwrap();
         let (arm, hand, chest, other_arm) =
             (label("rightArm"), label("rightHand"), label("chest"), label("leftArm"));
         let mut stump = 0;
@@ -773,7 +773,7 @@ mod tests {
     #[test]
     fn texture_cache_builds_once_per_key_and_is_capped() {
         // Other tests re-point VELLUM_FE_DIR, which reloads the rig set.
-        let _guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+        let _guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let ctx = egui::Context::default();
@@ -813,8 +813,10 @@ mod tests {
     /// markers (the extra `else if` arm before the placeholder standee, and
     /// `paint_creature_doll`). With the marked regions removed the file must
     /// be byte-identical (line endings aside) to the ported file as of
-    /// gs_studio 129091f — so the sprite branch, the placeholder standee and
-    /// everything they call are provably untouched.
+    /// gs_studio 129091f, with the crate's paths renamed (`gs_field` ->
+    /// `creature_field`, 2026-10-09; nothing else) — so the sprite branch,
+    /// the placeholder standee and everything they call are provably
+    /// untouched.
     #[test]
     fn creature_field_is_the_port_plus_marked_additions_only() {
         let src = include_str!("creature_field.rs").replace("\r\n", "\n");
@@ -862,12 +864,12 @@ mod tests {
             h ^= b as u64;
             h = h.wrapping_mul(0x100000001b3);
         }
-        assert_eq!(stripped.len(), 53919, "ported text length");
-        assert_eq!(h, 0x90b9f65f4e317a19, "ported text (FNV-1a 64) changed outside the doll markers");
+        assert_eq!(stripped.len(), 54057, "ported text length");
+        assert_eq!(h, 0xd1e28f04850f4990, "ported text (FNV-1a 64) changed outside the doll markers");
     }
 
     /// Cost of one texture build (compose only; the GPU upload is egui's).
-    /// `cargo test -p gs_field_egui --release compose_cost -- --nocapture`.
+    /// `cargo test -p creature_field_egui --release compose_cost -- --nocapture`.
     #[test]
     fn compose_cost() {
         let map = humanoid();
@@ -887,7 +889,7 @@ mod tests {
             );
         }
         let t = std::time::Instant::now();
-        let rig_png: Vec<u8> = gs_field::dolls::test_forms_rigs()[0].png.to_vec();
+        let rig_png: Vec<u8> = creature_field::dolls::test_forms_rigs()[0].png.to_vec();
         std::hint::black_box(DollMap::decode(&rig_png, map.meta.clone()));
         println!("decode label png: {:.2} ms", t.elapsed().as_secs_f64() * 1000.0);
     }

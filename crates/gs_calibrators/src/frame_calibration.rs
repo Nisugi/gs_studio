@@ -5,8 +5,8 @@
 //! PNG in the pool" to "assignable everywhere" without touching TOML.
 
 use crate::CalibrationOutcome;
-use gs_field::pool;
-use gs_field_egui::image_store;
+use creature_field::pool;
+use creature_field_egui::image_store;
 use crate::skin_paint::{self as gui_skin, ResolvedBorder, SkinTexture};
 
 

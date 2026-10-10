@@ -147,7 +147,7 @@ fn simple_tab<S: Hosted>(
     ui.horizontal_wrapped(|ui| rescan = slot.rescan_controls(ui));
     ui.separator();
     if rescan {
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         slot.reopen(log, open);
     }
     slot.body(ui, log)
@@ -158,7 +158,7 @@ impl CalibratorsTool {
         CalibratorsTool::default()
     }
 
-    /// The pool directory changed (gs_field already points at the new one):
+    /// The pool directory changed (creature_field already points at the new one):
     /// drop every state; each tab re-opens against the new pool when shown.
     pub fn pool_changed(&mut self) {
         self.frames.forget();

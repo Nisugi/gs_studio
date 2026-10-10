@@ -55,7 +55,7 @@ pub enum FigureDraw {
 }
 
 impl FigureDraw {
-    /// As `gs_field_egui::creature_puppet::PuppetKey::body_cloud` counts:
+    /// As `creature_field_egui::creature_puppet::PuppetKey::body_cloud` counts:
     /// 0 its mesh, 1 its trained splats, 2 splats made from the mesh.
     pub fn body_cloud(self) -> u8 {
         match self {

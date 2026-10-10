@@ -4,7 +4,7 @@
 //!
 //! A family paints in `<data>/textures/<family>/`; a creature with its own
 //! skin in `<data>/textures/<family>/<creature>/` (its bestiary name token,
-//! `gs_field::naming::name_token`); a creature wearing an outfit
+//! `creature_field::naming::name_token`); a creature wearing an outfit
 //! (`<data>/outfits/outfits.toml`, `gs_puppet::outfit`) paints over its
 //! outfit's templates, `<data>/textures/<family>/outfits/<outfit>/`:
 //!
@@ -87,7 +87,7 @@ pub fn outfits(data_root: &Path) -> Result<(Kit, Outfits), String> {
 
 /// Who wears nothing, as a file: what [`ship_outfits`] writes when the data
 /// root has no `outfits.toml`, so the runtime does not fall back to the
-/// assignments compiled into gs_field.
+/// assignments compiled into creature_field.
 const NO_OUTFITS: &str = "# No creature wears an outfit: the data root has no outfits.toml\n# (written by gs-studio's texture tool, ship_outfits).\n";
 
 /// The kit's and the assignments' text as [`outfits`] reads them: the data
@@ -203,13 +203,13 @@ pub fn write_png(path: &Path, w: usize, h: usize, rgba: &[u8]) -> Result<(), Str
 /// sheet the same size but laid out for another rig is then told apart.
 fn stamp_layout(path: &Path, layout: &UvLayout) -> Result<(), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let stamped = gs_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &layout.signature()).ok_or_else(|| format!("{}: not a PNG", path.display()))?;
+    let stamped = creature_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &layout.signature()).ok_or_else(|| format!("{}: not a PNG", path.display()))?;
     std::fs::write(path, stamped).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The layout a sheet at `path` was stamped with, if any.
 pub fn layout_stamp(path: &Path) -> Option<String> {
-    gs_field::png_meta::read_text_bytes(&std::fs::read(path).ok()?, LAYOUT_KEYWORD)
+    creature_field::png_meta::read_text_bytes(&std::fs::read(path).ok()?, LAYOUT_KEYWORD)
 }
 
 /// Why the sheet (or normal sheet, or skin) at `path` cannot be worn by a
@@ -227,7 +227,7 @@ pub fn stale_sheet(path: &Path, layout: &UvLayout) -> Option<String> {
             return Some(format!("{name} is {w}x{h}, the pattern {}x{}", layout.w, layout.h));
         }
     }
-    match gs_field::png_meta::read_text_bytes(&bytes, LAYOUT_KEYWORD) {
+    match creature_field::png_meta::read_text_bytes(&bytes, LAYOUT_KEYWORD) {
         Some(sig) if !layout.matches(&sig) => Some(format!("{name} was built for another layout of this rig")),
         _ => None,
     }
@@ -434,10 +434,10 @@ pub fn family_creatures(data_root: &Path, family: &str) -> Vec<String> {
             .flatten()
             .filter_map(|e| e.file_name().to_str().and_then(|n| n.strip_suffix(".rig.toml")).map(str::to_owned))
             .collect();
-        for e in gs_field::bestiary::shared().entries() {
-            let key = gs_field::naming::name_token(&e.name);
+        for e in creature_field::bestiary::shared().entries() {
+            let key = creature_field::naming::name_token(&e.name);
             if outfits.get(&key).is_some()
-                && gs_field::dolls::resolve_puppet(&gs_field::dolls::DollFacts::of_entry(e), &|f| saved.contains(f)).is_some_and(|d| d.family == family)
+                && creature_field::dolls::resolve_puppet(&creature_field::dolls::DollFacts::of_entry(e), &|f| saved.contains(f)).is_some_and(|d| d.family == family)
             {
                 out.insert(key);
             }
@@ -466,7 +466,7 @@ pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)>
 
 /// Put `family`'s creature skins into a puppets folder (the pool's
 /// `global/puppets/`, or the publish dir's `puppets/`) as
-/// `skins/<family>/<creature>.png` (`gs_field::puppets::skin_file_name`),
+/// `skins/<family>/<creature>.png` (`creature_field::puppets::skin_file_name`),
 /// each with its normal sheet as `<creature>.normal.png` when it has one,
 /// and drop any there whose creature has no sheet (or normal sheet) any
 /// more. With the family's saved `puppet`, a skin (or normal sheet) built
@@ -476,7 +476,7 @@ pub fn creature_sheets(data_root: &Path, family: &str) -> Vec<(String, PathBuf)>
 pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outlines: &Outlines, puppets: &Path) -> Result<(usize, Vec<String>), String> {
     let sheets = creature_sheets(data_root, family);
     let has_normal = |c: &str| sheets.iter().any(|(s, sheet)| s == c && sheet.with_file_name(NORMAL_SHEET).is_file());
-    let into = puppets.join(gs_field::puppets::SKINS_DIR).join(family);
+    let into = puppets.join(creature_field::puppets::SKINS_DIR).join(family);
     for stale in std::fs::read_dir(&into).into_iter().flatten().flatten() {
         let name = stale.file_name().to_string_lossy().into_owned();
         let keep = match (name.strip_suffix(".normal.png"), name.strip_suffix(".png")) {
@@ -495,9 +495,9 @@ pub fn ship_skins(data_root: &Path, family: &str, puppet: Option<&Puppet>, outli
     std::fs::create_dir_all(&into).map_err(|e| format!("{}: {e}", into.display()))?;
     let (mut shipped, mut refused) = (0, Vec::new());
     for (creature, sheet) in &sheets {
-        let to = puppets.join(gs_field::puppets::skin_file_name(family, creature));
+        let to = puppets.join(creature_field::puppets::skin_file_name(family, creature));
         let normal = sheet.with_file_name(NORMAL_SHEET);
-        let normal_to = puppets.join(gs_field::puppets::skin_normal_file_name(family, creature));
+        let normal_to = puppets.join(creature_field::puppets::skin_normal_file_name(family, creature));
         // laid out for the creature's own figure: the family's, in its outfit
         let figure = match puppet {
             Some(p) => Some(Dressed::creature(data_root, p, outlines, family, creature)?.puppet),
@@ -722,12 +722,12 @@ pub fn export_jobs(data_root: &Path, outlines: &Outlines) -> Result<JobsExport, 
     let mut exported: std::collections::BTreeSet<(String, Option<String>)> = std::collections::BTreeSet::new();
     let mut seen = std::collections::BTreeSet::new();
     let mut jobs = Vec::new();
-    for e in gs_field::bestiary::shared().entries() {
-        let key = gs_field::naming::name_token(&e.name);
+    for e in creature_field::bestiary::shared().entries() {
+        let key = creature_field::naming::name_token(&e.name);
         if key.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
-        let Some(doll) = gs_field::dolls::resolve_puppet(&gs_field::dolls::DollFacts::of_entry(e), &|f| puppets.contains_key(f)) else {
+        let Some(doll) = creature_field::dolls::resolve_puppet(&creature_field::dolls::DollFacts::of_entry(e), &|f| puppets.contains_key(f)) else {
             continue;
         };
         let family = doll.family;
@@ -893,7 +893,7 @@ mod tests {
 
     /// Shipping writes what the editor sees: a removed `outfits.toml` goes
     /// out as "nobody" (not left as the old copy, nor left for the runtime to
-    /// fill from the assignments compiled into gs_field), a removed kit as
+    /// fill from the assignments compiled into creature_field), a removed kit as
     /// the shipped one; a file that cannot be read is an error, not "none".
     #[test]
     fn shipped_outfits_follow_the_data_root_removals_too() {
@@ -974,7 +974,7 @@ mod tests {
         let other = UvLayout::fit(&changed, SHEET_SIDE);
         let (w, h, px) = read_png(&sheet).unwrap();
         let bytes = std::fs::read(&sheet).unwrap();
-        std::fs::write(&sheet, gs_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &other.signature()).unwrap()).unwrap();
+        std::fs::write(&sheet, creature_field::png_meta::write_text_bytes(&bytes, LAYOUT_KEYWORD, &other.signature()).unwrap()).unwrap();
         if (other.w, other.h) == (w, h) {
             assert!(load_sheet(&data, "humanoid", &puppet).unwrap_err().contains("another layout"));
         }

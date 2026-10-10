@@ -1,9 +1,9 @@
-//! torchlight: the v2 lighting pass ([`gs_field_egui::field_gpu`]) on Niffy's
+//! torchlight: the v2 lighting pass ([`creature_field_egui::field_gpu`]) on Niffy's
 //! "Swamp Torchlight" prototype scene -- the swamp (or desert) backdrop, the
 //! sidewinder and the lurk, a torch and a mote of light -- to compare the
 //! port with the prototype itself.
 //!
-//!   cargo run --release -p gs_field_egui --example torchlight [-- <dir>]
+//!   cargo run --release -p creature_field_egui --example torchlight [-- <dir>]
 //!
 //! `<dir>` holds the prototype's files (unzip "Swamp Torchlight.zip";
 //! default `target/torchlight`). The night look is v1's own
@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui;
-use gs_field_egui::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage};
+use creature_field_egui::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, LayerDraw, LitImage};
 
 // ---- the prototype's scene (its `P` block)
 const SIZE: [f32; 2] = [1264.0, 848.0];

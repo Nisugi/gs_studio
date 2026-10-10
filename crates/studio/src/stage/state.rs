@@ -4,16 +4,16 @@
 //! (`StageState`) at commit 60c84a79.
 //!
 //! VellumFE held a whole `GameState` because its `sync_field` took one;
-//! gs_field's takes the roster slice and its generation, so they are held
+//! creature_field's takes the roster slice and its generation, so they are held
 //! directly here with the current target. The simulator's edits, which the
 //! original made straight from its checkbox closures, are methods here so
 //! they can be tested without a window.
 
 use std::sync::Arc;
 
-use gs_field::scenes::{SceneProp, StageScene};
-use gs_field::solver::{CreatureField, FieldParams, STAGE_W};
-use gs_field::{Creature, CreatureFlags};
+use creature_field::scenes::{SceneProp, StageScene};
+use creature_field::solver::{CreatureField, FieldParams, STAGE_W};
+use creature_field::{Creature, CreatureFlags};
 
 use super::cast::{self, build_cast, CastEntry};
 use super::naming::{NewSceneState, StudioRoomContext};
@@ -35,7 +35,7 @@ pub enum SceneAction {
 impl SceneAction {
     pub fn describe(&self) -> String {
         match self {
-            SceneAction::Load(name) => format!("load '{}'", gs_field::scenes::display_name(name)),
+            SceneAction::Load(name) => format!("load '{}'", creature_field::scenes::display_name(name)),
             SceneAction::Clear => "clear the stage scene".to_owned(),
             SceneAction::Quit => "quit".to_owned(),
         }
@@ -149,7 +149,7 @@ pub struct StageState {
     /// much cloud covers the sky (0..1; weather adds its own).
     pub light_moon: f32,
     pub light_clouds: f32,
-    /// The moons from the game's own calendar (`gs_field::sky`) in place of
+    /// The moons from the game's own calendar (`creature_field::sky`) in place of
     /// the Moon slider: taken at `sky_at` (unix seconds) when pinned, else
     /// today at the hour shown; `lornons_eve` shows them on Eorgaen 31.
     pub game_sky: bool,
@@ -176,7 +176,7 @@ pub struct StageState {
     /// Puppet skins shaded by the scene's sun and sky instead of their own
     /// cel light (the flat hull; `creature_light::LightClock::sun_lit`).
     pub sun_lit_skins: bool,
-    /// Puppet skins drawn on the GPU (`gs_field_egui::skin_gpu`) when the
+    /// Puppet skins drawn on the GPU (`creature_field_egui::skin_gpu`) when the
     /// v2 pass draws the stage.
     pub gpu_skins: bool,
     /// Puppets drawn as Gaussian splat clouds instead of the smooth skin.
@@ -309,9 +309,9 @@ impl StageState {
         self.creatures_generation += 1;
     }
 
-    /// `gs_field::cards::sync_field` against the roster.
+    /// `creature_field::cards::sync_field` against the roster.
     pub fn sync_field(&mut self) {
-        gs_field::cards::sync_field(
+        creature_field::cards::sync_field(
             &mut self.field,
             &mut self.field_synced_gen,
             &mut self.field_synced_cal,
@@ -477,7 +477,7 @@ impl StageState {
                     .creatures
                     .iter()
                     .find(|c| c.id == old_rider)
-                    .map(gs_field::cards::card_boxes_for)
+                    .map(creature_field::cards::card_boxes_for)
                     .unwrap_or_default();
                 self.field.dismount(&old_rider, standing, prone);
             }
@@ -651,7 +651,7 @@ impl StageState {
     pub fn refresh_obstacles(&mut self) -> bool {
         let scene_changed = self.obstacle_scene.as_ref().is_none_or(|prev| !Arc::ptr_eq(prev, &self.scene));
         if scene_changed {
-            let obstacles = gs_field::cards::scene_obstacles(Some(&self.scene));
+            let obstacles = creature_field::cards::scene_obstacles(Some(&self.scene));
             self.field.set_obstacles(obstacles);
             // and where on the painting creatures may stand
             let walk = match self.scene.background.as_deref().map(crate::stage::walk::load) {
@@ -861,9 +861,9 @@ impl StageState {
         pin
     }
 
-    pub fn add_light(&mut self, kind: gs_field::lighting::LampKind) {
+    pub fn add_light(&mut self, kind: creature_field::lighting::LampKind) {
         let (z_near, z_far) = self.field.depth_range();
-        let light = gs_field::lighting::PointLight::new(kind, 440.0, (z_near + z_far) * 0.5);
+        let light = creature_field::lighting::PointLight::new(kind, 440.0, (z_near + z_far) * 0.5);
         let lights = &mut Arc::make_mut(&mut self.scene).lights;
         lights.push(light);
         self.selected_light = Some(lights.len() - 1);
@@ -971,7 +971,7 @@ impl StageState {
                 // Calibration sidecars may have changed along with the
                 // scene files; re-seed geometry (same call the game's
                 // `reload_creature_field_files` makes).
-                gs_field::geometry::invalidate_calibrations();
+                creature_field::geometry::invalidate_calibrations();
                 self.mark_scene_saved();
                 true
             }
@@ -990,11 +990,11 @@ impl StageState {
             Ok(scene) => {
                 let default_scene =
                     if sparse::is_default_scene(name) { None } else { sparse::load_default_scene(Some(name)) };
-                let params = gs_field::cards::resolve_field_params(
+                let params = creature_field::cards::resolve_field_params(
                     default_scene.as_ref(),
                     Some(&scene),
                     None,
-                    &gs_field::field_config::FieldOverrides::default(),
+                    &creature_field::field_config::FieldOverrides::default(),
                 );
                 let field = &mut self.field;
                 if field.params != params {
@@ -1083,7 +1083,7 @@ mod tests {
     #[test]
     fn a_note_pin_names_what_it_was_clicked_on() {
         let mut s = stage();
-        s.add_light(gs_field::lighting::LampKind::Torch);
+        s.add_light(creature_field::lighting::LampKind::Torch);
         let (lx, lz) = (s.scene().lights[0].x, s.scene().lights[0].z);
         s.add_prop("scenery/ojandhaart_bench.png".into());
         let prop = s.scene().props.len() - 1;
@@ -1109,8 +1109,8 @@ mod tests {
         assert_eq!(s.outline(23.0), "unlit, 0 on stage");
         s.scene_mut().light = Some(Default::default());
         s.light_hour = Some(23.5);
-        s.add_light(gs_field::lighting::LampKind::Torch);
-        s.add_light(gs_field::lighting::LampKind::Glow);
+        s.add_light(creature_field::lighting::LampKind::Torch);
+        s.add_light(creature_field::lighting::LampKind::Glow);
         s.spawn("kobold", Some("kobold".into()));
         assert_eq!(s.outline(23.5), "23:30 night (held), 2 lamps (1 shadowed), 1 on stage");
         s.light_hour = None;
@@ -1154,7 +1154,7 @@ mod tests {
         let default = base.path().join("global/images/creatures/default");
         std::fs::create_dir_all(&default).unwrap();
         std::fs::write(default.join("default.png"), b"not really a png").unwrap();
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         let mut s = stage();
         assert!(!cast::has_art("timber wolf", Some("wolf")), "the default stand-in yields to the puppet");
 
@@ -1194,10 +1194,10 @@ mod tests {
         assert!(s.status_lines().last().unwrap().contains("humanoid puppet"));
 
         // With art in the pool the sprite wins, and the line says so.
-        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = creature_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(&creatures).unwrap();
         std::fs::write(creatures.join("kobold.png"), b"x").unwrap();
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         assert!(s.spawn_named("kobold", None));
         assert!(s.status_lines().last().unwrap().contains("sprite art"), "{:?}", s.status_lines().last());
     }
@@ -1379,12 +1379,12 @@ mod tests {
     #[test]
     fn a_new_prop_or_a_cleared_scene_leaves_no_light_selected() {
         let mut s = stage();
-        s.add_light(gs_field::lighting::LampKind::Torch);
+        s.add_light(creature_field::lighting::LampKind::Torch);
         assert_eq!(s.selected_light, Some(0));
         s.add_prop("scenery/a.png".into());
         assert_eq!((s.selected_prop, s.selected_light), (Some(0), None), "the new prop is what a drag moves");
 
-        s.add_light(gs_field::lighting::LampKind::Campfire);
+        s.add_light(creature_field::lighting::LampKind::Campfire);
         assert_eq!((s.selected_prop, s.selected_light), (None, Some(1)));
         s.clear_scene();
         assert_eq!((s.selected_prop, s.selected_light), (None, None));
@@ -1425,7 +1425,7 @@ mod tests {
         s.request_scene(SceneAction::Load("no_such_scene".into()));
         s.save_scene_then_confirm();
         assert!(!s.scene_dirty(), "saved (the load after it failed, and said so)");
-        assert_eq!(gs_field::scenes::list_scenes(), ["Barley_Field"]);
+        assert_eq!(creature_field::scenes::list_scenes(), ["Barley_Field"]);
 
         s.scene_mut().background = Some("scenes/desert.png".into());
         s.request_scene(SceneAction::Load("Barley_Field".into()));
@@ -1442,7 +1442,7 @@ mod tests {
         assert!(s.approve_quit(), "nothing unsaved: agreed at once");
 
         let mut s = stage();
-        s.add_light(gs_field::lighting::LampKind::Torch);
+        s.add_light(creature_field::lighting::LampKind::Torch);
         assert!(!s.approve_quit());
         assert!(s.quit_asking() && !s.quit_approved());
         s.cancel_quit();
@@ -1470,7 +1470,7 @@ mod tests {
         let ((sx, sy), _) = s.field.project_ground(300.0, z_far + 5.0);
         s.drag_selected_prop_to(sx, sy);
         assert!((s.scene().props[0].z - (z_far + 5.0)).abs() < 0.05, "{:?}", s.scene().props[0]);
-        s.add_light(gs_field::lighting::LampKind::Campfire);
+        s.add_light(creature_field::lighting::LampKind::Campfire);
         s.drag_selected_light_to(sx, sy);
         let lamp = &s.scene().lights[0];
         assert!((lamp.z - (z_far + 5.0)).abs() < 0.05, "the lamp was held to the floor: {lamp:?}");
@@ -1517,7 +1517,7 @@ mod tests {
 
         // Nameless: Save is a no-op.
         s.save_current_scene();
-        assert!(gs_field::scenes::list_scenes().is_empty());
+        assert!(creature_field::scenes::list_scenes().is_empty());
 
         // The default scene pins what differs from the built-ins.
         s.field.params.horizon = 160.0;

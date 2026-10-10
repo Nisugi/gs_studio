@@ -1,5 +1,5 @@
 //! The structured condition-tree builder (dropdowns, no expression syntax):
-//! edits a `gs_field::Condition` in place. Ported from VellumFE
+//! edits a `creature_field::Condition` in place. Ported from VellumFE
 //! `src/frontend/gui/app/editors/hotbars.rs` @60c84a79 (GPL-3.0-or-later),
 //! lines 17-152 (leaf tables + `default_leaf`) and 1076-1567
 //! (`render_condition_group`, `render_leaf_condition` and the combos). The
@@ -10,7 +10,7 @@
 //! from an optional process-wide hook, [`set_spell_lookup`]; with no hook
 //! installed the hint is simply not drawn. See PORTING.md.
 
-use gs_field::condition::{Cmp, Condition, EffectCategory, NameMatch, VitalKind, VitalUnit};
+use creature_field::condition::{Cmp, Condition, EffectCategory, NameMatch, VitalKind, VitalUnit};
 use std::sync::RwLock;
 
 /// What the "Spell affordable" row shows next to the spell number. The
@@ -158,10 +158,10 @@ fn default_leaf(kind: usize) -> Condition {
         },
         8 => Condition::SpellAffordable { number: 101 },
         9 => Condition::HandEmpty {
-            hand: gs_field::condition::HandSlot::Right,
+            hand: creature_field::condition::HandSlot::Right,
         },
         10 => Condition::HandHolds {
-            hand: gs_field::condition::HandSlot::Right,
+            hand: creature_field::condition::HandSlot::Right,
             item_type: Some("weapon".to_string()),
             name: None,
             name_match: NameMatch::Contains,
@@ -171,7 +171,7 @@ fn default_leaf(kind: usize) -> Condition {
             name_match: NameMatch::Contains,
         },
         _ => Condition::TimeOfDay {
-            phase: gs_field::condition::DayPhase::Night,
+            phase: creature_field::condition::DayPhase::Night,
         },
     }
 }
@@ -408,7 +408,7 @@ fn render_leaf_condition(
             egui::ComboBox::from_id_salt(format!("{}_area", id))
                 .selected_text(area.as_str())
                 .show_ui(ui, |ui| {
-                    for candidate in gs_field::condition::INJURY_AREAS {
+                    for candidate in creature_field::condition::INJURY_AREAS {
                         if ui.selectable_label(area == candidate, *candidate).clicked() {
                             *area = candidate.to_string();
                             changed = true;
@@ -423,7 +423,7 @@ fn render_leaf_condition(
                 .changed();
         }
         Condition::TimeOfDay { phase } => {
-            use gs_field::condition::DayPhase;
+            use creature_field::condition::DayPhase;
             ui.label("phase:");
             egui::ComboBox::from_id_salt(format!("{id}_phase"))
                 .selected_text(phase.as_str())
@@ -556,13 +556,13 @@ fn render_leaf_condition(
     changed
 }
 
-fn hand_slot_combo(ui: &mut egui::Ui, id: &str, hand: &mut gs_field::condition::HandSlot) -> bool {
+fn hand_slot_combo(ui: &mut egui::Ui, id: &str, hand: &mut creature_field::condition::HandSlot) -> bool {
     let mut changed = false;
     egui::ComboBox::from_id_salt(id.to_string())
         .selected_text(hand.label())
         .width(110.0)
         .show_ui(ui, |ui| {
-            for candidate in gs_field::condition::HandSlot::ALL {
+            for candidate in creature_field::condition::HandSlot::ALL {
                 if ui
                     .selectable_label(*hand == candidate, candidate.label())
                     .clicked()

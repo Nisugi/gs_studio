@@ -23,7 +23,7 @@
 //!
 //! This crate never PARSES either: as with the doll's label-map PNG, it
 //! hands the text to the frontend, which owns `gs_puppet`. That keeps
-//! `gs_field` free of the puppet/rig/egui dependency chain and Android-safe.
+//! `creature_field` free of the puppet/rig/egui dependency chain and Android-safe.
 //!
 //! Layers, as the dolls have them: whatever the pool holds in
 //! `<base dir>/global/puppets/` ([`puppets_dir`]) -- the forms pack a host

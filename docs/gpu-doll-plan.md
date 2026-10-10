@@ -31,7 +31,7 @@ silhouette.
    `<data>/meshes/<form>/` (the largest size: `body.obj`, `color.png`,
    `normal.png`, `weights.txt`, `splat.spz` or `.ply`) into
    `<pool>/global/bodies/<form>/`, and the form's own `puppet.toml` into
-   `global/puppets/` as before. `gs_field_egui` finds a form's body there
+   `global/puppets/` as before. `creature_field_egui` finds a form's body there
    by itself (`creature_puppet::body_dir`), so Hydra needs no studio code:
    `set_body_dir` stays as an override.
 3. **The doll decides for itself.** `injury_doll::view::key_for` turns `modelled`

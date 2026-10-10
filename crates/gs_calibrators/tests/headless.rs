@@ -14,18 +14,18 @@ struct TestEnv {
 
 impl Drop for TestEnv {
     fn drop(&mut self) {
-        gs_field::data_dirs::clear_base_dir();
-        gs_field::pool::invalidate_cache();
+        creature_field::data_dirs::clear_base_dir();
+        creature_field::pool::invalidate_cache();
     }
 }
 
 fn test_env() -> TestEnv {
-    let guard = gs_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
+    let guard = creature_field::data_dirs::VELLUM_FE_DIR_TEST_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    gs_field::data_dirs::set_base_dir(dir.path().to_path_buf());
-    gs_field::pool::invalidate_cache();
+    creature_field::data_dirs::set_base_dir(dir.path().to_path_buf());
+    creature_field::pool::invalidate_cache();
     TestEnv {
         _guard: guard,
         dir,
@@ -42,7 +42,7 @@ fn write_png(path: &Path, px: u32) {
 }
 
 fn pool_dir() -> PathBuf {
-    gs_field::pool_dirs::global_images_dir().unwrap()
+    creature_field::pool_dirs::global_images_dir().unwrap()
 }
 
 /// Three frames: textures upload on the first, layout settles after.
@@ -96,7 +96,7 @@ fn every_calibrator_renders_as_window_and_as_tab_and_writes_nothing() {
     write_png(&pool_dir().join("creatures/kobold/kobold.png"), 8);
     write_png(&pool_dir().join("scenery/boulder.png"), 8);
     write_png(&pool_dir().join("frames/iron.png"), 32);
-    gs_field::pool::invalidate_cache();
+    creature_field::pool::invalidate_cache();
     let before = snapshot(env.dir.path());
 
     let (state, _) = CreatureCalibrationState::open();

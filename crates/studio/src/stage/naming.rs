@@ -1,7 +1,7 @@
 //! New-scene naming. Ported from VellumFE `src/frontend/gui/studio.rs`
 //! (`StudioRoomContext`, `NewSceneState`) at commit 60c84a79.
 
-use gs_field::scenes::{self, SceneBinding};
+use creature_field::scenes::{self, SceneBinding};
 
 /// Room facts handed over on the command line (`--room-uid`, `--room-title`,
 /// `--room-location`) -- prefill for the new-scene inputs, never applied to

@@ -7,8 +7,8 @@
 //! calibrator IS the exclusion data.
 
 use crate::CalibrationOutcome;
-use gs_field::pool::{self, CreatureFootprint, CreatureSidecar};
-use gs_field_egui::image_store;
+use creature_field::pool::{self, CreatureFootprint, CreatureSidecar};
+use creature_field_egui::image_store;
 
 
 struct SceneryChoice {

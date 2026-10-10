@@ -14,7 +14,7 @@
 //! both draw with (`gs_render`: the puppet cache, the GPU pass, the GPU
 //! skins); it reaches nothing of the field's.
 
-// The allowances the view had in gs_field_egui.
+// The allowances the view had in creature_field_egui.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 pub mod roster;

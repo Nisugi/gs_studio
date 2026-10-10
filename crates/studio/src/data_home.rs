@@ -1,7 +1,7 @@
 //! gs-studio's OWN data home: the directory the pool falls back to when
 //! nothing points it anywhere else.
 //!
-//! **Why this exists.** `gs_field::data_dirs` resolves its base directory to
+//! **Why this exists.** `creature_field::data_dirs` resolves its base directory to
 //! `VELLUM_FE_DIR`, else `~/.vellum-fe`. That is VellumFE's default and it
 //! MUST stay that way -- VellumFE is adopting the crate and depends on it.
 //! But gs-studio is a standalone app, not part of VellumFE, and inheriting
@@ -26,7 +26,7 @@ pub const APP_DIR: &str = "gs-studio";
 
 /// The pool subtree gs-studio creates on first run: every category the pool
 /// listing and the calibrators read, plus the scene, rig and puppet stores.
-/// `creatures` is NOT in `gs_field::pool_dirs::IMAGE_CATEGORIES` (that list
+/// `creatures` is NOT in `creature_field::pool_dirs::IMAGE_CATEGORIES` (that list
 /// predates the creature field) but every creature tab needs it, so it is
 /// named explicitly here rather than inferred.
 pub const POOL_SUBDIRS: &[&str] = &[
@@ -88,7 +88,7 @@ pub fn is_empty_pool(home: &Path) -> bool {
 // ------------------------------------------------------- VellumFE import
 
 /// Where a VellumFE data directory would be, WITHOUT consulting
-/// `gs_field::data_dirs` (whose override this app has already moved). Same
+/// `creature_field::data_dirs` (whose override this app has already moved). Same
 /// rule VellumFE itself uses: `VELLUM_FE_DIR`, else `~/.vellum-fe`.
 pub fn vellum_fe_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("VELLUM_FE_DIR").filter(|v| !v.is_empty()) {

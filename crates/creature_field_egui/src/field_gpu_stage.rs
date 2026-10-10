@@ -40,11 +40,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::figure_image::{ground_geo, skin_image, with_glow};
 
-use gs_field::lighting::{LampKind, LightTarget, PointLight};
+use creature_field::lighting::{LampKind, LightTarget, PointLight};
 
 use crate::field_gpu::{self, FieldCamera, FieldFrame, FieldLight, FieldView, FieldWeather, LayerDraw, LitImage, Piece, Placement, SharedFrame};
 
-/// Metres in a card (world) unit: `gs_field::cards::UNITS_PER_FOOT` is 0.2.
+/// Metres in a card (world) unit: `creature_field::cards::UNITS_PER_FOOT` is 0.2.
 pub const METRES_PER_CARD_UNIT: f32 = 1.524;
 /// A dead sprite's grey (the old path tints dead art sRGB 110/255), linear.
 /// A puppet's skin is a corpse's colour already (`gs_puppet`), so it takes
@@ -95,7 +95,7 @@ const SIZE_STEP: f32 = 64.0;
 const LAYER_MAX: f32 = 1024.0;
 
 fn enabled_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::field_gpu_stage::enabled")
+    egui::Id::new("creature_field_egui::field_gpu_stage::enabled")
 }
 
 /// Turn the v2 pass on the stage on or off (a host setting; off by
@@ -635,7 +635,7 @@ fn hex_lin(hex: &str) -> [f32; 3] {
 }
 
 /// One scene lamp as the pass's light, now (`t` seconds).
-fn scene_light(field: &gs_field::solver::CreatureField, cam: &FieldCamera, k: f32, light: &PointLight, index: usize, t: f32) -> Option<FieldLight> {
+fn scene_light(field: &creature_field::solver::CreatureField, cam: &FieldCamera, k: f32, light: &PointLight, index: usize, t: f32) -> Option<FieldLight> {
     if light.intensity <= 0.0 {
         return None;
     }
@@ -808,7 +808,7 @@ fn moon_light(cam: &FieldCamera, moon: &crate::creature_light::MoonNow, wind: f3
     // the sky the frame shows -- the camera looks level, and a moon at its
     // true height would leave the frame an hour after rising.
     let top_deg = (cam.cy / cam.f.max(1e-3)).atan().to_degrees();
-    let disc_el = (moon.elevation / gs_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * top_deg * DISC_SKY_SHARE;
+    let disc_el = (moon.elevation / creature_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * top_deg * DISC_SKY_SHARE;
     let (sd, cd) = disc_el.to_radians().sin_cos();
     let disc = [0, 1, 2].map(|i| cd * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + sd * up[i]);
     let mut light = FieldLight::moon(toward, hex_lin(&moon.colour), MOON_POWER * moon.brightness, moon.clouds, [drift, 0.2 * drift.abs()]).with_disc(
@@ -856,13 +856,13 @@ fn star_field(cam: &FieldCamera, now: &crate::creature_light::StarsNow, wind: f3
     // scene pixels per unit of a drawing (-1..1 across)
     let span = (CONSTELLATION_DEG).min(top_deg * CONSTELLATION_SKY_SHARE);
     let unit = cam.f * (span / 2.0).to_radians().tan();
-    let all = gs_field::stars::constellations();
+    let all = creature_field::stars::constellations();
     let (mut stars, mut nebulae) = (Vec::new(), Vec::new());
     let on_stage = |p: [f32; 2], m: f32| p[0] > -m && p[0] < cam.size[0] + m && p[1] > -m && p[1] < cam.size[1] + m;
     for placed in &now.up {
         let Some(c) = all.get(placed.index) else { continue };
         let (sa, ca) = placed.azimuth.to_radians().sin_cos();
-        let el = (placed.elevation / gs_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * (top_deg - span / 2.0).max(0.0);
+        let el = (placed.elevation / creature_field::lighting::MOON_PEAK_DEG).clamp(0.0, 1.0) * (top_deg - span / 2.0).max(0.0);
         let (se, ce) = el.to_radians().sin_cos();
         let dir = [0, 1, 2].map(|i| ce * (sa * [1.0, 0.0, 0.0][i] - ca * deeper[i]) + se * up[i]);
         if dir[2] < 0.2 {
@@ -1050,8 +1050,8 @@ impl StageGpu {
     #[allow(clippy::too_many_arguments)]
     pub fn begin(
         ctx: &egui::Context,
-        field: &gs_field::solver::CreatureField,
-        scene: Option<&gs_field::scenes::StageScene>,
+        field: &creature_field::solver::CreatureField,
+        scene: Option<&creature_field::scenes::StageScene>,
         cache: Option<&crate::creature_art::CreatureArtCache>,
         backdrop: Option<&egui::TextureHandle>,
         backdrop_rect: Option<[f32; 4]>,
@@ -1066,14 +1066,14 @@ impl StageGpu {
         // the camera, from the solver's own projection
         let p = &field.params;
         let z = 5.0;
-        let ((_, sy), ppu) = field.project_ground(gs_field::solver::STAGE_W * 0.5, z);
+        let ((_, sy), ppu) = field.project_ground(creature_field::solver::STAGE_W * 0.5, z);
         let f = ((sy - p.horizon) * z / p.cam_h.max(1e-3)).max(1.0);
         let mscale = (ppu * z / f).max(1e-3);
         let k = METRES_PER_CARD_UNIT / mscale;
         let camera = FieldCamera {
-            size: [gs_field::solver::STAGE_W, gs_field::solver::STAGE_H],
+            size: [creature_field::solver::STAGE_W, creature_field::solver::STAGE_H],
             f,
-            cx: gs_field::solver::STAGE_W * 0.5,
+            cx: creature_field::solver::STAGE_W * 0.5,
             cy: p.horizon,
             pitch: 0.0,
             height: p.cam_h * k,
@@ -1141,7 +1141,7 @@ impl StageGpu {
     pub fn snapshot(&self) -> Option<PassSnapshot> {
         let frame = self.frame.lock().ok()?.clone();
         let px = self.place.scale * self.ppp;
-        let size = [(gs_field::solver::STAGE_W * px).round().max(1.0) as u32, (gs_field::solver::STAGE_H * px).round().max(1.0) as u32];
+        let size = [(creature_field::solver::STAGE_W * px).round().max(1.0) as u32, (creature_field::solver::STAGE_H * px).round().max(1.0) as u32];
         Some(PassSnapshot { frame, size, k: self.k, f: self.f, in_pass: self.in_pass.clone() })
     }
 
@@ -1320,7 +1320,7 @@ mod tests {
     /// file names.
     #[test]
     fn a_lamps_shadows_and_targets_reach_the_pass() {
-        let field = gs_field::solver::CreatureField::default();
+        let field = creature_field::solver::CreatureField::default();
         let cam = FieldCamera { size: [880.0, 470.0], f: 600.0, cx: 440.0, cy: 200.0, pitch: 0.0, height: 1.7 };
         let light = |l: &PointLight| scene_light(&field, &cam, 1.0, l, 0, 0.0).expect("gives light");
         let glow = light(&PointLight::new(LampKind::Glow, 440.0, 3.0));
@@ -1588,13 +1588,13 @@ mod tests {
     #[test]
     fn the_stars_stand_in_the_frames_sky() {
         let cam = FieldCamera { size: [880.0, 470.0], f: 420.0, cx: 440.0, cy: 96.0, pitch: 0.0, height: 2.4 };
-        let all = gs_field::stars::constellations();
+        let all = creature_field::stars::constellations();
         let huntress = all.iter().position(|c| c.name == "The Huntress").unwrap();
         let hammer = all.iter().position(|c| c.name == "The Hammer").unwrap();
         let now = |index: usize, azimuth: f32, elevation: f32, tilt: f32| crate::creature_light::StarsNow {
             light: 1.0,
             clouds: 0.2,
-            up: vec![gs_field::stars::Placed { index, azimuth, elevation, tilt }],
+            up: vec![creature_field::stars::Placed { index, azimuth, elevation, tilt }],
             turn: 0.0,
         };
         let f = star_field(&cam, &now(huntress, 180.0, 55.0, 0.0), 0.0);

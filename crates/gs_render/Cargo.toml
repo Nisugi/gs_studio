@@ -9,7 +9,7 @@ description = "What the injury doll and the creature field both draw with: the p
 doctest = false
 
 # docs/crate-split-plan.md, S7: the doll (`injury_doll`) and the field
-# (`gs_field_egui`) each depend on this; it depends on neither
+# (`creature_field_egui`) each depend on this; it depends on neither
 # (`tests/layering.rs` holds it to these).
 [dependencies]
 gs_base = { path = "../gs_base" }
@@ -27,7 +27,7 @@ tracing = "0.1"
 [dev-dependencies]
 # The cache's tests pose the creature field's published forms (the
 # committed forms pack, read from disk).
-gs_field = { path = "../gs_field", features = ["test-forms"] }
+creature_field = { path = "../creature_field", features = ["test-forms"] }
 gs_puppet = { path = "../gs_puppet", features = ["fixtures"] }
 # Validates the WGSL offline (tests): the same naga wgpu builds on.
 naga = { version = "29.0.4", features = ["wgsl-in"] }

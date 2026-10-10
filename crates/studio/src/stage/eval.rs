@@ -42,8 +42,8 @@
 //! The match has no wildcard arm: a new `Condition` variant does not compile
 //! until it is given an answer here.
 
-use gs_field::condition::{HandSlot, VitalUnit};
-use gs_field::{Condition, CreatureFlags};
+use creature_field::condition::{HandSlot, VitalUnit};
+use creature_field::{Condition, CreatureFlags};
 
 use super::elanthian_time::{phase_at, PhaseBoundaries};
 
@@ -96,7 +96,7 @@ pub fn eval_condition_at(cond: &Condition, flags: &CreatureFlags, now_unix: i64)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gs_field::condition::{Cmp, DayPhase, EffectCategory, NameMatch, VitalKind};
+    use creature_field::condition::{Cmp, DayPhase, EffectCategory, NameMatch, VitalKind};
 
     /// 2026-08-10 20:44 UTC = 16:44 Eastern: Day.
     const A_DAY_INSTANT: i64 = 1_786_394_661;

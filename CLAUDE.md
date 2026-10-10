@@ -41,11 +41,11 @@ calendar (*The game's moons*), `=<unix seconds>` at that instant, and
 faces the view that way (the moons keep to the compass round it); `GS_STUDIO_WEATHER=<kind>[:<amount>]` (Rain, Storm, Snow,
 Sleet, Blood rain, Fog, Sand) sets the weather; `GS_STUDIO_SPLATS=1` draws the puppets as splat clouds, the Preview tab's
 *Splats* checkbox; `GS_STUDIO_FRAME_TIMES=1` prints every frame's UI-thread time; their skins are drawn on the GPU (*GPU skins*, on by default, `GS_STUDIO_GPU_SKINS=0` for the CPU's;
-`gs_field_egui::skin_gpu` + `relight_gpu`, needs the v2 pass and a lit scene;
-`cargo run --release -p gs_field_egui --example relight_golden` holds the GPU relight to vellum_light's goldens); `GS_STUDIO_DOLL=[<hour>][,<n|ne|..>][,indoor][,new][,sky][,field]` opens the
+`creature_field_egui::skin_gpu` + `relight_gpu`, needs the v2 pass and a lit scene;
+`cargo run --release -p creature_field_egui --example relight_golden` holds the GPU relight to vellum_light's goldens); `GS_STUDIO_DOLL=[<hour>][,<n|ne|..>][,indoor][,new][,sky][,field]` opens the
 *Doll* window (the injury doll, `tools/doll.rs` over `injury_doll::view`),
 lit as a display (`injury_doll::sky::display`, the default: a steady key and fill on a dark backdrop) unless `sky`
-(then at that hour and facing) or `field` (under the stage's sky), `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, its skin is drawn on the GPU (`gs_field_egui::skin_gpu`, the window's *GPU skin*), `GS_STUDIO_DOLL_GPU=0` draws the CPU one, `GS_STUDIO_DOLL_LAYERS=1` draws it as layered splats (`gs_puppet::layers`: flesh and bone under opened wounds, a coating built on it, `GS_STUDIO_DOLL_COAT=ice:0.6` or `stone`; `GS_STUDIO_DOLL_CAUSE=fire` or `chest:fire,leftArm:puncture` says what made the wounds: slash, puncture, crush, fire, cold, lightning; with `GS_STUDIO_DOLL_HIT` the wound arrives -- flash, glow, loose dots -- so shoot a few frames after it), `GS_STUDIO_DOLL_BODY=<size|folder>` draws its form's modelled body (`gs_puppet::mesh`, `<data>/meshes/<form>/[<size>/]`: a mesh and, unless `GS_STUDIO_DOLL_BODY_AS=mesh`, its splat cloud, posed on the GPU), `GS_STUDIO_DOLL_FIGURE=<form>` / `GS_STUDIO_DOLL_FX=webbed,poisoned,Major Bleed,...` (any status or effect name the game uses: `injury_doll::state::Status::from_name`) set its figure; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
+(then at that hour and facing) or `field` (under the stage's sky), `GS_STUDIO_DOLL_WOUNDS=chest:2,leftArm:3` wounds it and `GS_STUDIO_DOLL_SCARS=` (the same) scars it, `GS_STUDIO_DOLL_HIT=back:2@60` raises that wound at frame 60 (a hit, for a shot), `GS_STUDIO_DOLL_TIMES=1` prints each frame's doll cost, its skin is drawn on the GPU (`creature_field_egui::skin_gpu`, the window's *GPU skin*), `GS_STUDIO_DOLL_GPU=0` draws the CPU one, `GS_STUDIO_DOLL_LAYERS=1` draws it as layered splats (`gs_puppet::layers`: flesh and bone under opened wounds, a coating built on it, `GS_STUDIO_DOLL_COAT=ice:0.6` or `stone`; `GS_STUDIO_DOLL_CAUSE=fire` or `chest:fire,leftArm:puncture` says what made the wounds: slash, puncture, crush, fire, cold, lightning; with `GS_STUDIO_DOLL_HIT` the wound arrives -- flash, glow, loose dots -- so shoot a few frames after it), `GS_STUDIO_DOLL_BODY=<size|folder>` draws its form's modelled body (`gs_puppet::mesh`, `<data>/meshes/<form>/[<size>/]`: a mesh and, unless `GS_STUDIO_DOLL_BODY_AS=mesh`, its splat cloud, posed on the GPU), `GS_STUDIO_DOLL_FIGURE=<form>` / `GS_STUDIO_DOLL_FX=webbed,poisoned,Major Bleed,...` (any status or effect name the game uses: `injury_doll::state::Status::from_name`) set its figure; `GS_STUDIO_SMOKE_LIGHTS=1` lights the scene and adds a
 torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turns on the v2 GPU
 lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
@@ -111,7 +111,7 @@ to the puppet),
 `rig_check` (one rig's editor warnings, build result and rest IoU, plus
 overlay PNGs, without the app -- what `canine/` holds), `publish_all` (Save +
 Publish for every rig headlessly; `PUBLISH_ONLY=<family,...>` narrows it),
-`gs_field_egui` `stage_demo` /
+`creature_field_egui` `stage_demo` /
 `puppet_tune` / `torchlight` (the v2 lighting pass on Niffy's "Swamp
 Torchlight" prototype scene, unzipped to `target/torchlight`, to compare
 with the prototype; `TORCHLIGHT_SHOT` + `TORCHLIGHT_T` save a frame,
@@ -180,15 +180,15 @@ is the plan and its stages; a runtime crate never depends on an authoring one
   axis convention in `gs_puppet/src/lib.rs` is the only one; follow it.
 - `vellum_light` -- zero-dependency, Android-safe port of Niffy's
   `relight.py`: scene light + time-of-day phase light applied per pixel to
-  straight RGBA8 slices. `gs_field::lighting` holds the data side
-  (`[light]` in scene files, `global/lighting.toml`); `gs_field_egui::creature_light`
+  straight RGBA8 slices. `creature_field::lighting` holds the data side
+  (`[light]` in scene files, `global/lighting.toml`); `creature_field_egui::creature_light`
   and `field_lights` do the drawing. Built at `opt-level = 3` in dev too.
 - `gs_base` -- what the doll and the field both stand on: the data folder
   (`data_dirs`), the game's clock and sky (`elanthian_time`, `sky`, `stars`,
   `sky_light`), the body's parts (`body`), the statuses (`status`), PNG
   metadata (`png_meta`). Reaches neither, no egui (`tests/layering.rs`);
-  `gs_field` re-exports it under the old paths.
-- `gs_field` -- the creature field without drawing (solver, cards, scenes,
+  `creature_field` re-exports it under the old paths.
+- `creature_field` -- the creature field without drawing (solver, cards, scenes,
   skins, image pool, bestiary). Does NOT depend on gs_puppet/rig/egui (must
   stay free of them, a layering rule: Android is no longer a target -- the
   field and the doll are for a desktop with a GPU, decided 2026-10-07): it embeds baked artefacts via `include_dir!` and hands
@@ -197,9 +197,9 @@ is the plan and its stages; a runtime crate never depends on an authoring one
   cache (`puppet_cache`, over a `PuppetSource` each host gives it), the v2
   GPU pass (`field_gpu`), the GPU skins and their relight (`skin_gpu`,
   `relight_gpu`), a figure as a pass layer (`figure_image`). Reaches
-  neither (`tests/layering.rs`); `gs_field_egui` re-exports it under the
+  neither (`tests/layering.rs`); `creature_field_egui` re-exports it under the
   old paths.
-- `gs_field_egui` -- the renderer game clients use (art cache, stage,
+- `creature_field_egui` -- the renderer game clients use (art cache, stage,
   puppet/doll fallback draw); the field's puppet source and what only the
   field asks of the cache are `field_puppets` (`FieldSource`, `FieldCache`).
 - `injury_doll` -- the doll a game client draws (Hydra's only gs_studio
@@ -219,13 +219,13 @@ is the plan and its stages; a runtime crate never depends on an authoring one
 `data_home.rs`, `pool_dir.rs`. `tools/*.rs` only draw and forward input; put
 logic and its tests in the egui-free module.
 
-**Ported code.** `gs_field`, `gs_field_egui`, `gs_calibrators` were copied
+**Ported code.** `creature_field`, `creature_field_egui`, `gs_calibrators` were copied
 from VellumFE at a pinned commit; each crate's `PORTING.md` records that
 port and everything added since. VellumFE is retiring: the client these
 crates feed is **Hydra** (working name Cena, `G:\dev\Cena`), which takes
 whatever they need, so change public names and behaviour where the design
 wants it -- no VellumFE compatibility to keep. Log additions and changes in
-`PORTING.md` as the running record. `gs_field::data_dirs` still defaults to
+`PORTING.md` as the running record. `creature_field::data_dirs` still defaults to
 `~/.vellum-fe` (a host sets its own via `set_base_dir`, as gs-studio does);
 gs-studio must never read or write `~/.vellum-fe` unless the user
 explicitly points the pool there.
@@ -258,14 +258,14 @@ Data (`data_root.rs`), Pool (`pool_dir.rs`), Publish (`editor::resolve_publish_d
   any crate: a pool installs it (`gs-studio --install-pack`,
   `gs_base::packs`, which keeps a ledger and never replaces a file the
   user changed), and gs-studio installs it into its own pool as it starts
-  (`packs::seed_pool`). Tests read it from disk through gs_field's
+  (`packs::seed_pool`). Tests read it from disk through creature_field's
   dev-only `test-forms` feature. Those files are never hand-edited; the
   puppet contract is `gs_puppet::BAKED_VERSION`. The pose sets, held props
   and clothing kit are engine data gs_puppet compiles in from `<data>/`
   itself: never published. `gs-studio --pack forms|figures` zips a pack
   into `packs/<id>.zip` (`figures`, the doll's races, is built from
   `<data>/meshes` first; `packs/*` but `forms` is gitignored).
-- Anything that writes into the pool behind gs_field's back must call
+- Anything that writes into the pool behind creature_field's back must call
   `pool_dir::invalidate_caches()` (doll and puppet sets only reload on it or
   on a base-dir change).
 

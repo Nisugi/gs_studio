@@ -25,7 +25,7 @@ in `E:\Gemstone\dev\image-gen\`.
   from the ascension art, for review. The stage dresses each creature in its
   outfit and its own skin (a dressed creature with no skin of its own wears
   no texture). The squamous reptilian mutant is re-pointed to the humanoid
-  (`gs_field::bestiary::FILLS`: the bestiary gave it no body type).
+  (`creature_field::bestiary::FILLS`: the bestiary gave it no body type).
 - **Not done:** coats (an open-front hem), hats, cape, sleeves_wide, a
   mantle or sash.
 

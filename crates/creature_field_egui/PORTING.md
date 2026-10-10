@@ -1719,3 +1719,17 @@ harmonics are skipped as before. A packed cloud is ~10x smaller (8.3 MB ->
   when the pool has none (nothing of either is compiled into gs_field any
   more). The cache's tests read the committed forms pack (`packs/forms`)
   through gs_field's `test-forms` feature.
+
+## The split's map (frozen, 2026-10-09)
+
+The crate split (docs/crate-split-plan.md) is done, and this log closes
+with it: what changes from here is in git's history. Where this crate's
+items went:
+
+| Was (`gs_field_egui`) | Is |
+|---|---|
+| the crate `gs_field_egui` | `creature_field_egui` (S9) |
+| `creature_puppet` | `gs_render::puppet_cache` (S5, S7), re-exported as `puppet_cache` and `creature_puppet` |
+| `field_gpu`, `skin_gpu`, `relight_gpu`, `figure_image` and the shaders | `gs_render` (S7), re-exported |
+| `doll_view` | `injury_doll::view` (S6) |
+| the field's puppet source and what only the field asks of the cache | `field_puppets` (`FieldSource`, `FieldCache`, S5) |

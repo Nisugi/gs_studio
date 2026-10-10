@@ -673,3 +673,25 @@ itself. Egui-free.
   The pool's 2D doll layers and doll sidecars (`doll_layers`,
   `DollSidecar`, `write_doll_sidecar`, `write_doll_variant`...) went with
   them. Hydra calibrates its own doll pictures.
+
+## The split's map (frozen, 2026-10-09)
+
+The crate split (docs/crate-split-plan.md) is done, and this log closes
+with it: what changes from here is in git's history. Where this crate's
+items went:
+
+| Was (`gs_field`) | Is |
+|---|---|
+| the crate `gs_field` | `creature_field` (S9) |
+| `data_dirs`, `elanthian_time`, `sky`, `stars`, `sky_light`, `body`, `status`, `png_meta` | `gs_base` (S7), re-exported here under the same paths |
+| `puppets::bodies_dir` | `gs_base::data_dirs::bodies_dir` (S6), re-exported |
+| `doll_roster`, `doll_sky`, `doll_state` | `injury_doll::roster`, `::sky`, `::state` (S6) |
+| `data/sky.toml`, `data/constellations.toml` | `gs_base/data/` (S7) |
+| `data/puppets`, `data/rigs`, `data/bestiary.json`, `data/outfits/outfits.toml` | the forms pack, `packs/forms/global/` (S8): a pool installs it, nothing is compiled in |
+| `data/poses`, `data/props`, `data/outfits/kit.toml` | gone: gs_puppet compiles the workspace's `data/` copies in (S8) |
+| `skins`' VellumFE GUI skin, the pool's 2D doll layers and sidecars | deleted (S9) |
+
+Still here and still to move when a game client takes the field (S10):
+the writers -- the sidecar writers (`write_creature_sidecar`,
+`write_frame_sidecar`, `write_background_sidecar`, `toml_edit`), the
+scene, lighting and field-config `save`s, `pool_dirs::write_atomic`.

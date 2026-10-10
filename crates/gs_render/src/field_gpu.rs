@@ -217,7 +217,7 @@ pub struct FieldLight {
     pub affects: LightTargets,
 }
 
-/// What a light lights ([`FieldLight::affects`]; gs_field's `LightTarget`,
+/// What a light lights ([`FieldLight::affects`]; creature_field's `LightTarget`,
 /// less scenery: the pass does not draw scenery props).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LightTargets {
@@ -239,7 +239,7 @@ pub const ALL_ROUND: [f32; 4] = [0.0, 0.0, 0.0, 180.0];
 /// the whole sky adds round it, as a share of its direct light.
 pub const MOON_SOFT: f32 = 0.02;
 pub const MOON_FILL: f32 = 0.22;
-/// Degrees over which a beam's edge fades out (gs_field's `BEAM_SOFT_DEG`;
+/// Degrees over which a beam's edge fades out (creature_field's `BEAM_SOFT_DEG`;
 /// the shader's `BEAM_SOFT_DEG`).
 pub const BEAM_SOFT_DEG: f32 = 14.0;
 
@@ -350,7 +350,7 @@ impl FieldLight {
 
     /// This light shining only within a beam `spread` degrees wide, aimed
     /// `aim` degrees across the floor (0 = screen-right, 90 = away from the
-    /// viewer, as gs_field's `PointLight`); 360 or more = all round.
+    /// viewer, as creature_field's `PointLight`); 360 or more = all round.
     pub fn aimed(mut self, camera: &FieldCamera, aim: f32, spread: f32) -> FieldLight {
         if spread >= 360.0 {
             self.beam = ALL_ROUND;
@@ -640,7 +640,7 @@ pub struct FieldFrame {
 }
 
 /// The night sky's stars, placed on the stage (scene pixels): the
-/// constellations up now (`gs_field::stars`), their nebulae, and the faint
+/// constellations up now (`gs_base::stars`), their nebulae, and the faint
 /// stars between them, all under the drifting cloud.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FieldStars {
@@ -1479,7 +1479,7 @@ impl Gpu {
 }
 
 fn available_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::field_gpu")
+    egui::Id::new("creature_field_egui::field_gpu")
 }
 
 /// Whether [`init`] ran for this context: the pass can be drawn.

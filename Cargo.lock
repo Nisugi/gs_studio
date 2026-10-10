@@ -433,6 +433,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "creature_field"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gs_base",
+ "png 0.17.16",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "toml_edit 0.22.27",
+ "tracing",
+ "vellum_light",
+]
+
+[[package]]
+name = "creature_field_egui"
+version = "0.1.0"
+dependencies = [
+ "creature_field",
+ "eframe",
+ "egui",
+ "egui-wgpu",
+ "gs_puppet",
+ "gs_render",
+ "image",
+ "tempfile",
+ "tracing",
+ "vellum_light",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1074,46 +1107,13 @@ name = "gs_calibrators"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "creature_field",
+ "creature_field_egui",
  "eframe",
  "egui",
- "gs_field",
- "gs_field_egui",
  "image",
  "tempfile",
  "tracing",
-]
-
-[[package]]
-name = "gs_field"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gs_base",
- "png 0.17.16",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "toml",
- "toml_edit 0.22.27",
- "tracing",
- "vellum_light",
-]
-
-[[package]]
-name = "gs_field_egui"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui-wgpu",
- "gs_field",
- "gs_puppet",
- "gs_render",
- "image",
- "tempfile",
- "tracing",
- "vellum_light",
 ]
 
 [[package]]
@@ -1143,10 +1143,10 @@ name = "gs_render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "creature_field",
  "egui",
  "egui-wgpu",
  "gs_base",
- "gs_field",
  "gs_puppet",
  "image",
  "naga",
@@ -2760,13 +2760,13 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "studio"
 version = "0.1.0"
 dependencies = [
+ "creature_field",
+ "creature_field_egui",
  "dirs",
  "eframe",
  "egui",
  "gs_base",
  "gs_calibrators",
- "gs_field",
- "gs_field_egui",
  "gs_puppet",
  "gs_puppet_author",
  "injury_doll",

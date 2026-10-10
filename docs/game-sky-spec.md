@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-09-27. Audience: whoever builds sky and weather
 tracking into Hydra's model (human or LLM agent). gs-studio's
-`gs_field::sky` is the working reference; this says what it tracks, from
+`creature_field::sky` is the working reference; this says what it tracks, from
 what evidence, and what the renderer needs back, so Hydra can track it
 itself.
 
@@ -13,11 +13,11 @@ three things from its host:
 
 | Input | Type | What it holds |
 | --- | --- | --- |
-| `LightClock.sky` | `gs_field::lighting::Sky` | Liabo's fullness and the hour it is highest; Lornon's the same, plus how crimson; cloud cover; the way the view faces; how far through the year it is (which constellations are up) |
-| `set_weather(ctx, ..)` | `gs_field_egui::field_weather::Weather` | what falls, how hard (0..1), the wind (-1..1) |
+| `LightClock.sky` | `creature_field::lighting::Sky` | Liabo's fullness and the hour it is highest; Lornon's the same, plus how crimson; cloud cover; the way the view faces; how far through the year it is (which constellations are up) |
+| `set_weather(ctx, ..)` | `creature_field_egui::field_weather::Weather` | what falls, how hard (0..1), the wind (-1..1) |
 | `LightClock.outdoor_guess` | `Option<bool>` | outdoors or in (indoors is dark without a lamp: darkness 0.88) |
 
-Until a host tracks the sky itself, `gs_field::sky::GameSky` stands in: fed
+Until a host tracks the sky itself, `creature_field::sky::GameSky` stands in: fed
 each game line (`read_line`) and each `<roommeta>` (`set_room`), it answers
 those three (`sky`, `weather`, `outdoor`, `gust`). Hydra tracks the same
 things in its model and fills the three from there; `GameSky`'s text
@@ -27,11 +27,11 @@ What stays single-sourced, whichever side tracks:
 
 - **The words**: look phrases and weather lines, in
   `crates/gs_base/data/sky.toml`. Add new ones there.
-- **The arithmetic**, pure functions in `gs_field::sky`: `moon_age`,
+- **The arithmetic**, pure functions in `creature_field::sky`: `moon_age`,
   `elongation`, `phase_name`, `moon_place`, `place_words`, `sun_hours`,
   `MoonAge` (`lit`, `waxing`, `highest`), `lornon_blood`, `moons_sky`,
   `read_moon_look`, `read_weather_line`, `RoomMeta::parse` and its names,
-  `Precip::of_climate`; `WeatherKind::from(Precip)` in `gs_field_egui`.
+  `Precip::of_climate`; `WeatherKind::from(Precip)` in `creature_field_egui`.
 
 ## 2. The room: `<roommeta>`
 
@@ -180,7 +180,7 @@ at night) is **not decided**; the default is no.
 
 Keep: the room's `RoomMeta` and when it came; the last weather line (kind,
 gust, time); the way the player last
-walked (`gs_field::sky::bearing_of` of each movement command -- n, ne, ...,
+walked (`creature_field::sky::bearing_of` of each movement command -- n, ne, ...,
 `go north`; up, down, out and portals like `go door` keep it), which faces
 the view: `Sky.facing`, a compass bearing. Liabo's looks only as a
 check.

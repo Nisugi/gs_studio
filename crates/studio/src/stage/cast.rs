@@ -56,11 +56,11 @@ pub fn entry_for(token: &str, areas_for: impl Fn(&str) -> Vec<String>) -> CastEn
     CastEntry { display, noun, areas }
 }
 
-/// Scan the creature pool (under gs_field's base dir) into the cast list.
+/// Scan the creature pool (under creature_field's base dir) into the cast list.
 pub fn build_cast() -> Vec<CastEntry> {
-    let images = gs_field::pool::list_creature_images();
+    let images = creature_field::pool::list_creature_images();
     let tokens = castable_tokens(images.iter().map(|i| (i.stem(), i.set.as_deref())));
-    let db = gs_field::bestiary::shared();
+    let db = creature_field::bestiary::shared();
     tokens.iter().map(|token| entry_for(token, |name| db.areas_for_name(name))).collect()
 }
 
@@ -81,12 +81,12 @@ pub struct BestiaryPick {
 /// Bestiary entries whose name or noun contains `query` (case-insensitive),
 /// nearest first: exact name, then name prefix, then the rest, capped at
 /// `limit`. An empty query offers nothing (the list is thousands long).
-pub fn bestiary_matches(db: &gs_field::bestiary::BestiaryDb, query: &str, limit: usize) -> Vec<BestiaryPick> {
+pub fn bestiary_matches(db: &creature_field::bestiary::BestiaryDb, query: &str, limit: usize) -> Vec<BestiaryPick> {
     let q = query.trim().to_ascii_lowercase();
     if q.is_empty() {
         return Vec::new();
     }
-    let mut ranked: Vec<(u8, &gs_field::bestiary::CreatureEntry)> = db
+    let mut ranked: Vec<(u8, &creature_field::bestiary::CreatureEntry)> = db
         .entries
         .iter()
         .filter_map(|e| {
@@ -118,7 +118,7 @@ pub fn bestiary_matches(db: &gs_field::bestiary::BestiaryDb, query: &str, limit:
 
 /// [`bestiary_matches`] against the shared database.
 pub fn suggest(query: &str, limit: usize) -> Vec<BestiaryPick> {
-    bestiary_matches(&gs_field::bestiary::shared(), query, limit)
+    bestiary_matches(&creature_field::bestiary::shared(), query, limit)
 }
 
 /// The noun a free-typed name spawns with: its last word.
@@ -137,37 +137,37 @@ pub fn last_word(name: &str) -> String {
 /// skin not laid out for its figure, and draws the sprite; this does not
 /// decode skins to know.)
 pub fn has_art(name: &str, noun: Option<&str>) -> bool {
-    let Ok(root) = gs_field::pool_dirs::global_images_dir() else {
+    let Ok(root) = creature_field::pool_dirs::global_images_dir() else {
         return false;
     };
-    let family = noun.and_then(gs_field::cards::family_for_noun);
-    let skin = gs_field::skins::CreatureCardSkin::default();
-    let Some(tier) = gs_field::cards::resolve_tier_art(&root, &skin, Some(name), noun, family.as_deref()) else {
+    let family = noun.and_then(creature_field::cards::family_for_noun);
+    let skin = creature_field::skins::CreatureCardSkin::default();
+    let Some(tier) = creature_field::cards::resolve_tier_art(&root, &skin, Some(name), noun, family.as_deref()) else {
         return false;
     };
-    let set = gs_field::puppets::puppets();
+    let set = creature_field::puppets::puppets();
     let Some(puppet) = set.puppet_for(name, noun) else {
         return true;
     };
     let own_skin = set.skin(&puppet.family, &creature_token(name)).is_some();
-    let named_form = puppet.tier == gs_field::dolls::DollTier::Form && set.get(&puppet.family).is_some_and(|rig| rig.texture.is_some());
+    let named_form = puppet.tier == creature_field::dolls::DollTier::Form && set.get(&puppet.family).is_some_and(|rig| rig.texture.is_some());
     tier.token != "default" && !own_skin && !named_form
 }
 
 /// A creature's bestiary name token, the key skins are filed under: its
 /// bestiary entry's (exact name, else a lone noun), else its own -- as the
-/// renderer keys them (`gs_field_egui::field_puppets::creature_key`).
+/// renderer keys them (`creature_field_egui::field_puppets::creature_key`).
 fn creature_token(name: &str) -> String {
-    let canonical = gs_field::naming::canonical_name(name);
-    match gs_field::bestiary::shared().entry_for_name(&canonical) {
-        Some(entry) => gs_field::naming::name_token(&entry.name),
-        None => gs_field::naming::name_token(&canonical),
+    let canonical = creature_field::naming::canonical_name(name);
+    match creature_field::bestiary::shared().entry_for_name(&canonical) {
+        Some(entry) => creature_field::naming::name_token(&entry.name),
+        None => creature_field::naming::name_token(&canonical),
     }
 }
 
 /// The family puppet a creature with no art falls back to, if any.
 pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
-    gs_field::puppets::puppet_for(name, noun).map(|d| d.family)
+    creature_field::puppets::puppet_for(name, noun).map(|d| d.family)
 }
 
 /// A creature to show `family`'s puppet with: any bestiary creature whose
@@ -180,7 +180,7 @@ pub fn puppet_family(name: &str, noun: Option<&str>) -> Option<String> {
 /// pick is stable. Err says why none will do.
 #[cfg(test)]
 pub fn puppet_showcase_in(
-    db: &gs_field::bestiary::BestiaryDb,
+    db: &creature_field::bestiary::BestiaryDb,
     family: &str,
     has_art: impl Fn(&str, &str) -> bool,
     puppet_of: impl Fn(&str, &str) -> Option<String>,
@@ -193,7 +193,7 @@ pub fn puppet_showcase_in(
 /// sheet: the Puppets list's per-texture rows spawn the skinned creatures
 /// by name, and this is the row for the sheet itself.
 pub fn puppet_showcase_bare_in(
-    db: &gs_field::bestiary::BestiaryDb,
+    db: &creature_field::bestiary::BestiaryDb,
     family: &str,
     has_art: impl Fn(&str, &str) -> bool,
     has_skin: impl Fn(&str, &str) -> bool,
@@ -202,7 +202,7 @@ pub fn puppet_showcase_bare_in(
     let names_rig = |f: &str| {
         let f = f.trim();
         f.eq_ignore_ascii_case(family)
-            || gs_field::dolls::rig_family_for(&f.to_ascii_lowercase()).is_some_and(|r| r.eq_ignore_ascii_case(family))
+            || creature_field::dolls::rig_family_for(&f.to_ascii_lowercase()).is_some_and(|r| r.eq_ignore_ascii_case(family))
     };
     let mut picks: Vec<(bool, bool, bool, BestiaryPick)> = db
         .entries
@@ -226,12 +226,12 @@ pub fn puppet_showcase_bare_in(
 /// [`puppet_showcase_in`] against the shared bestiary, the pool and the
 /// published puppets.
 pub fn puppet_showcase(family: &str) -> Result<BestiaryPick, String> {
-    let set = gs_field::puppets::puppets();
+    let set = creature_field::puppets::puppets();
     puppet_showcase_bare_in(
-        &gs_field::bestiary::shared(),
+        &creature_field::bestiary::shared(),
         family,
         |n, noun| has_art(n, Some(noun)),
-        |n, _| set.skin(family, &gs_field::naming::name_token(n)).is_some(),
+        |n, _| set.skin(family, &creature_field::naming::name_token(n)).is_some(),
         |n, noun| puppet_family(n, Some(noun)),
     )
 }
@@ -272,7 +272,7 @@ pub struct PuppetFamily {
 /// creature skin as (form, creature token); `puppet_of` resolves a bestiary
 /// creature (name, noun) to its form.
 pub fn puppet_tree_in(
-    db: &gs_field::bestiary::BestiaryDb,
+    db: &creature_field::bestiary::BestiaryDb,
     forms: &[(String, String, bool, bool)],
     skins: &[(String, String)],
     puppet_of: impl Fn(&str, &str) -> Option<String>,
@@ -282,7 +282,7 @@ pub fn puppet_tree_in(
     let mut by_token: BTreeMap<String, (String, String)> = BTreeMap::new();
     for e in &db.entries {
         let noun = if e.noun.trim().is_empty() { last_word(&e.name) } else { e.noun.clone() };
-        by_token.entry(gs_field::naming::name_token(&e.name)).or_insert_with(|| (e.name.clone(), noun.clone()));
+        by_token.entry(creature_field::naming::name_token(&e.name)).or_insert_with(|| (e.name.clone(), noun.clone()));
         if let Some(form) = puppet_of(&e.name, &noun) {
             let family = e.family.as_deref().map(str::trim).filter(|f| !f.is_empty()).unwrap_or("Other");
             *families.entry(form.to_ascii_lowercase()).or_default().entry(family.to_string()).or_default() += 1;
@@ -322,16 +322,16 @@ pub fn puppet_tree_in(
 
 /// [`puppet_tree_in`] against the shared bestiary and the published puppets.
 pub fn puppet_tree() -> Vec<PuppetFamily> {
-    let set = gs_field::puppets::puppets();
+    let set = creature_field::puppets::puppets();
     let forms: Vec<(String, String, bool, bool)> = set
         .families()
         .filter_map(|f| {
             let rig = set.get(f)?;
-            Some((f.to_string(), rig.body_type.clone(), matches!(rig.source, gs_field::puppets::PuppetSource::Override), rig.texture.is_some()))
+            Some((f.to_string(), rig.body_type.clone(), matches!(rig.source, creature_field::puppets::PuppetSource::Override), rig.texture.is_some()))
         })
         .collect();
     let skins: Vec<(String, String)> = set.skins().map(|(f, c)| (f.to_string(), c.to_string())).collect();
-    puppet_tree_in(&gs_field::bestiary::shared(), &forms, &skins, |n, noun| puppet_family(n, Some(noun)))
+    puppet_tree_in(&creature_field::bestiary::shared(), &forms, &skins, |n, noun| puppet_family(n, Some(noun)))
 }
 
 /// Everything the spawn-by-name box shows for what is typed: whether the
@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn suggestions_rank_exact_then_prefix_then_substring() {
-        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        use creature_field::bestiary::{BestiaryDb, CreatureEntry};
         let e = |name: &str, noun: &str, family: &str| CreatureEntry {
             name: name.into(),
             noun: noun.into(),
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn a_puppet_showcase_is_an_artless_creature_whose_puppet_is_that_family() {
-        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        use creature_field::bestiary::{BestiaryDb, CreatureEntry};
         let e = |name: &str, family: &str| CreatureEntry {
             name: name.into(),
             noun: last_word(name),
@@ -532,10 +532,10 @@ mod tests {
     #[test]
     fn art_in_the_pool_is_found_by_the_same_resolver_the_renderer_uses() {
         let _base = crate::stage::test_support::TempBase::new();
-        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = creature_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(&creatures).unwrap();
         std::fs::write(creatures.join("timber_wolf.png"), b"not really a png").unwrap();
-        gs_field::pool::invalidate_cache();
+        creature_field::pool::invalidate_cache();
         assert!(has_art("timber wolf", Some("wolf")));
         assert!(!has_art("cave troll", Some("troll")));
     }
@@ -546,20 +546,20 @@ mod tests {
     #[test]
     fn a_puppet_in_its_own_skin_or_over_the_default_art_is_not_sprite_art() {
         let _base = crate::stage::test_support::TempBase::new();
-        let creatures = gs_field::pool_dirs::global_image_category_dir("creatures").unwrap();
+        let creatures = creature_field::pool_dirs::global_image_category_dir("creatures").unwrap();
         std::fs::create_dir_all(creatures.join("default")).unwrap();
         std::fs::write(creatures.join("default/default.png"), b"not really a png").unwrap();
         std::fs::write(creatures.join("hill_troll.png"), b"not really a png").unwrap();
         std::fs::write(creatures.join("cave_troll.png"), b"not really a png").unwrap();
-        let skins = gs_field::puppets::puppets_dir().unwrap().join("skins/troll");
+        let skins = creature_field::puppets::puppets_dir().unwrap().join("skins/troll");
         std::fs::create_dir_all(&skins).unwrap();
         std::fs::write(skins.join(format!("{}.png", creature_token("cave troll"))), b"not really a png").unwrap();
-        gs_field::pool::invalidate_cache();
-        gs_field::puppets::invalidate_cache();
+        creature_field::pool::invalidate_cache();
+        creature_field::puppets::invalidate_cache();
         assert!(has_art("hill troll", Some("troll")), "its own sprite, no skin of its own");
         assert!(!has_art("cave troll", Some("troll")), "a skin of its own beats its sprite");
         assert!(!has_art("forest troll", Some("troll")), "only the default stand-in: the puppet draws");
-        gs_field::puppets::invalidate_cache();
+        creature_field::puppets::invalidate_cache();
     }
 
     /// The Puppets tree: forms under the family most of their creatures
@@ -568,7 +568,7 @@ mod tests {
     /// "Other" last.
     #[test]
     fn the_puppet_tree_groups_forms_by_family_and_lists_their_textures() {
-        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        use creature_field::bestiary::{BestiaryDb, CreatureEntry};
         let e = |name: &str, family: &str| CreatureEntry {
             name: name.into(),
             noun: last_word(name),
@@ -604,7 +604,7 @@ mod tests {
     /// The bare-sheet showcase passes over creatures with a skin of their own.
     #[test]
     fn the_bare_showcase_avoids_skinned_creatures() {
-        use gs_field::bestiary::{BestiaryDb, CreatureEntry};
+        use creature_field::bestiary::{BestiaryDb, CreatureEntry};
         let e = |name: &str| CreatureEntry { name: name.into(), noun: last_word(name), family: Some("Canine".into()), ..Default::default() };
         let db = BestiaryDb::from_entries(vec![e("coyote"), e("timber wolf")]);
         let canine = |_: &str, _: &str| Some("canine".to_string());

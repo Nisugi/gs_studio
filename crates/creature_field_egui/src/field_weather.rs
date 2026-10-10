@@ -54,11 +54,11 @@ impl WeatherKind {
     }
 }
 
-/// What falls, as the game's sky has it ([`gs_field::sky::GameSky::weather`],
+/// What falls, as the game's sky has it ([`creature_field::sky::GameSky::weather`],
 /// or a host that tracks it itself), as the stage draws it.
-impl From<gs_field::sky::Precip> for WeatherKind {
-    fn from(p: gs_field::sky::Precip) -> Self {
-        use gs_field::sky::Precip;
+impl From<creature_field::sky::Precip> for WeatherKind {
+    fn from(p: creature_field::sky::Precip) -> Self {
+        use creature_field::sky::Precip;
         match p {
             Precip::Rain => WeatherKind::Rain,
             Precip::Storm => WeatherKind::Storm,
@@ -104,7 +104,7 @@ impl Weather {
 }
 
 fn weather_id() -> egui::Id {
-    egui::Id::new("gs_field_egui::weather")
+    egui::Id::new("creature_field_egui::weather")
 }
 
 /// The weather over the field from now on (None = clear).
@@ -298,7 +298,7 @@ mod tests {
     /// Every kind the game's sky can report is one the stage draws.
     #[test]
     fn the_games_weather_is_drawn() {
-        use gs_field::sky::Precip;
+        use creature_field::sky::Precip;
         let all = [Precip::Rain, Precip::Storm, Precip::Snow, Precip::Sleet, Precip::BloodRain, Precip::Fog, Precip::Sand];
         let kinds: Vec<WeatherKind> = all.into_iter().map(WeatherKind::from).collect();
         assert_eq!(kinds, WeatherKind::ALL.to_vec());
