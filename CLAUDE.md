@@ -50,7 +50,7 @@ torch and a wisp, in memory, `=all` every lamp kind; `GS_STUDIO_V2_LIGHT=1` turn
 lighting pass for the run (`=0` turns it off), the stage panel's *Light on the GPU (v2)*, remembered in
 `settings.toml` when ticked there). A lit night shot needs `GS_STUDIO_SHOT_FRAMES`
 in the thousands: the night relight bakes on a worker thread first. Other env: `GS_STUDIO_DATA`,
-`GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`, `GS_STUDIO_DOLL_VIEW=sets`.
+`GS_STUDIO_POOL`, `GS_STUDIO_TAB`, `GS_STUDIO_PUBLISH`.
 Headless texture-generator commands: `--project <family>[/<creature>]:front|side|back`
 (projection-first renders, in the family's order: `projection_order` in
 `<data>/generator.toml`, quadrupeds side-first) `--build-sheet <family>[/<creature>]` (sheet.png + normal.png from a folder's paintings),
@@ -208,7 +208,8 @@ is the plan and its stages; a runtime crate never depends on an authoring one
   the view, over `gs_base` and `gs_render` and nothing of the field's
   (`tools/check_layers.py --enforce`). `hydra_contract` holds Hydra's calls
   to it.
-- `gs_calibrators` -- the five art calibrators as embeddable egui bodies.
+- `gs_calibrators` -- the art calibrators (frames, creatures, scenery) as
+  embeddable egui bodies.
 - `studio` -- the app shell. A tool = a `ToolId` + entry in `TOOLS`
   (`src/app.rs`) + a module in `src/tools/`.
 

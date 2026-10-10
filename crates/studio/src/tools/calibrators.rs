@@ -1,19 +1,16 @@
-//! The calibrator tabs: Frames, Dolls, Creatures, Scenery. Each hosts a
+//! The calibrator tabs: Frames, Creatures, Scenery. Each hosts a
 //! `gs_calibrators` state through its `ui_contents(ui)` body, so the
 //! calibrator fills the tab. The floating `ui(ctx)` form is never used here.
 //!
 //! A state is opened lazily the first time its tab is shown and then KEPT:
 //! switching tabs never drops it (unsaved calibration work survives). It is
-//! re-opened only by "Rescan pool", by re-targeting the doll picker, and
-//! when the pool directory changes. The rules (what an outcome asks of the
-//! app, the doll pick, the rescan confirmation) are in `crate::calib`.
+//! re-opened only by "Rescan pool" and when the pool directory changes. The
+//! rules (what an outcome asks of the app, the rescan confirmation) are in
+//! `crate::calib`.
 
-use gs_calibrators::{
-    doll_calibration, CalibrationOutcome, CreatureCalibrationState, DollCalibrationState, DollCalibrationTarget,
-    DollSetsEditorState, FrameCalibrationState, SceneryCalibrationState,
-};
+use gs_calibrators::{CalibrationOutcome, CreatureCalibrationState, FrameCalibrationState, SceneryCalibrationState};
 
-use crate::calib::{CalibKind, DollPicker, DollView, HostEffects, RescanGate};
+use crate::calib::{CalibKind, HostEffects, RescanGate};
 use crate::status_log::StatusLog;
 
 /// What the host needs from a calibrator state.
@@ -40,21 +37,6 @@ impl Hosted for CreatureCalibrationState {
 impl Hosted for SceneryCalibrationState {
     fn body(&mut self, ui: &mut egui::Ui) -> CalibrationOutcome {
         self.ui_contents(ui)
-    }
-}
-
-impl Hosted for DollCalibrationState {
-    fn body(&mut self, ui: &mut egui::Ui) -> CalibrationOutcome {
-        self.ui_contents(ui)
-    }
-}
-
-impl Hosted for DollSetsEditorState {
-    fn body(&mut self, ui: &mut egui::Ui) -> CalibrationOutcome {
-        self.ui_contents(ui)
-    }
-    fn unsaved(&self) -> Option<bool> {
-        Some(self.has_unsaved_changes())
     }
 }
 
@@ -132,7 +114,7 @@ impl<S: Hosted> Slot<S> {
         };
         let outcome = state.body(ui);
         if outcome.closed {
-            // Tab form: only the doll calibrator's "base image gone" path.
+            // a calibrator that closed itself in the tab
             self.note = outcome.messages.last().cloned();
             self.state = None;
             self.gate.reset();
@@ -149,10 +131,6 @@ pub struct CalibratorsTool {
     frames: Slot<FrameCalibrationState>,
     creatures: Slot<CreatureCalibrationState>,
     scenery: Slot<SceneryCalibrationState>,
-    doll_anchors: Slot<DollCalibrationState>,
-    doll_sets: Slot<DollSetsEditorState>,
-    doll_view: DollView,
-    doll_picker: DollPicker,
     log: StatusLog,
 }
 
@@ -175,27 +153,9 @@ fn simple_tab<S: Hosted>(
     slot.body(ui, log)
 }
 
-const NO_DOLLS: &str = "No doll images in the pool (global/images/dolls/). Drop PNGs there, then press Rescan pool.";
-
-/// Open the anchors calibrator on the picked doll. With no dolls at all the
-/// calibrator's own `open(None)` message points at a VellumFE menu that does
-/// not exist here, so say what is true instead.
-fn open_doll_anchors(picker: &DollPicker) -> (Option<DollCalibrationState>, CalibrationOutcome) {
-    match picker.current() {
-        Some(path) => DollCalibrationState::open(Some(DollCalibrationTarget::from_pool_path(path))),
-        None => (None, CalibrationOutcome { messages: vec![NO_DOLLS.to_string()], ..Default::default() }),
-    }
-}
-
 impl CalibratorsTool {
-    /// Smoke runs (no human at the window): `GS_STUDIO_DOLL_VIEW=sets`
-    /// starts the Dolls tab on its Sets view, so that calibrator opens too.
     pub fn new() -> CalibratorsTool {
-        let mut tool = CalibratorsTool::default();
-        if std::env::var("GS_STUDIO_DOLL_VIEW").is_ok_and(|v| v.eq_ignore_ascii_case("sets")) {
-            tool.doll_view = DollView::Sets;
-        }
-        tool
+        CalibratorsTool::default()
     }
 
     /// The pool directory changed (gs_field already points at the new one):
@@ -204,20 +164,14 @@ impl CalibratorsTool {
         self.frames.forget();
         self.creatures.forget();
         self.scenery.forget();
-        self.doll_anchors.forget();
-        self.doll_sets.forget();
-        self.doll_picker = DollPicker::default();
         self.log.push("Pool changed: calibrators re-open against the new pool");
     }
 
     /// One line for the smoke-run log.
     pub fn summary(&self) -> String {
         format!(
-            "frames={} dolls(anchors={} of {}, sets={}) creatures={} scenery={}, {} status lines (last: {:?})",
+            "frames={} creatures={} scenery={}, {} status lines (last: {:?})",
             self.frames.state.is_some(),
-            self.doll_anchors.state.is_some(),
-            self.doll_picker.choices().len(),
-            self.doll_sets.state.is_some(),
             self.creatures.state.is_some(),
             self.scenery.state.is_some(),
             self.log.lines().len(),
@@ -238,8 +192,7 @@ impl CalibratorsTool {
         });
     }
 
-    /// Draw one calibrator tab. `tab` is never a doll kind: the Dolls tab is
-    /// [`Self::dolls_ui`].
+    /// Draw one calibrator tab.
     pub fn ui(&mut self, ui: &mut egui::Ui, tab: CalibKind) -> HostEffects {
         let mut effects = HostEffects::default();
         egui::CentralPanel::default().show(ui, |ui| {
@@ -257,87 +210,8 @@ impl CalibratorsTool {
                     let reload = simple_tab(&mut self.scenery, ui, log, SceneryCalibrationState::open);
                     effects.absorb(tab, reload);
                 }
-                CalibKind::DollAnchors | CalibKind::DollSets => self.dolls_body(ui, &mut effects),
             }
         });
         effects
-    }
-
-    /// The Dolls tab: a view selector over the two doll calibrators.
-    pub fn dolls_ui(&mut self, ui: &mut egui::Ui) -> HostEffects {
-        self.ui(ui, self.doll_view.kind())
-    }
-
-    fn dolls_body(&mut self, ui: &mut egui::Ui, effects: &mut HostEffects) {
-        let CalibratorsTool { doll_anchors, doll_sets, doll_view, doll_picker, log, .. } = self;
-        // Before the strip draws, so the picker is never empty on frame 1.
-        if *doll_view == DollView::Anchors && !doll_anchors.opened {
-            doll_picker.refresh(doll_calibration::pool_dolls());
-            doll_anchors.reopen(log, || open_doll_anchors(doll_picker));
-        }
-        if *doll_view == DollView::Sets {
-            // No game session: no effect-name suggestions, as in VellumFE's Studio.
-            doll_sets.ensure_open(log, || DollSetsEditorState::open(Default::default()));
-        }
-
-        let mut rescan = false;
-        let mut retarget = false;
-        ui.horizontal_wrapped(|ui| {
-            for (view, label, hint) in DollView::ALL {
-                if ui.selectable_label(*doll_view == view, label).on_hover_text(hint).clicked() {
-                    *doll_view = view;
-                }
-            }
-            ui.separator();
-            match *doll_view {
-                DollView::Anchors => {
-                    ui.label("Doll:");
-                    let current = doll_picker.current().unwrap_or("(no pool dolls)").to_string();
-                    let mut picked = None;
-                    egui::ComboBox::from_id_salt("doll_anchor_pick").selected_text(current).width(220.0).show_ui(
-                        ui,
-                        |ui| {
-                            for (index, path) in doll_picker.choices().iter().enumerate() {
-                                if ui.selectable_label(doll_picker.pick() == index, path).clicked() {
-                                    picked = Some(index);
-                                }
-                            }
-                        },
-                    );
-                    if let Some(index) = picked {
-                        retarget = doll_picker.select(index);
-                    }
-                    rescan = doll_anchors.rescan_controls(ui);
-                }
-                DollView::Sets => rescan = doll_sets.rescan_controls(ui),
-            }
-        });
-        ui.separator();
-
-        // The selector may have flipped the view this frame; the new view's
-        // state opens at the top of the next one.
-        match *doll_view {
-            DollView::Anchors if doll_anchors.opened => {
-                if rescan {
-                    gs_field::pool::invalidate_cache();
-                    doll_picker.refresh(doll_calibration::pool_dolls());
-                }
-                if rescan || retarget {
-                    // Re-target = drop the state and open again.
-                    doll_anchors.reopen(log, || open_doll_anchors(doll_picker));
-                }
-                let reload = doll_anchors.body(ui, log);
-                effects.absorb(CalibKind::DollAnchors, reload);
-            }
-            DollView::Sets if doll_sets.opened => {
-                if rescan {
-                    gs_field::pool::invalidate_cache();
-                    doll_sets.reopen(log, || DollSetsEditorState::open(Default::default()));
-                }
-                let reload = doll_sets.body(ui, log);
-                effects.absorb(CalibKind::DollSets, reload);
-            }
-            DollView::Anchors | DollView::Sets => {}
-        }
     }
 }

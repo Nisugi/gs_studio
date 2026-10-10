@@ -666,3 +666,10 @@ itself. Egui-free.
   `test-forms` feature for a dependent's tests). The `include_dir`
   dependency is gone. `PuppetRigs::props` / `kit` / `pose_file` are the
   pool's alone (empty, None: gs_puppet's own).
+- S9: VellumFE's GUI skin is deleted from `skins` (window backgrounds and
+  borders, edges, icons, sheets, frames, the compass, the 2D injury doll
+  and its variants and sets, the palette, the controls, the scaffold and
+  manifest loaders); `SkinManifest` is the creature field's two sections.
+  The pool's 2D doll layers and doll sidecars (`doll_layers`,
+  `DollSidecar`, `write_doll_sidecar`, `write_doll_variant`...) went with
+  them. Hydra calibrates its own doll pictures.

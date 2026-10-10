@@ -11,25 +11,17 @@
 //! `CalibrationOutcome.messages` line plus reload/close events.
 //!
 //! Smoke-run knobs (the demo itself never clicks or saves anything):
-//!   `CALIB_DEMO_OPEN=creatures|scenery|frames|dollsets|doll|all`  open at start
+//!   `CALIB_DEMO_OPEN=creatures|scenery|frames|all`  open at start
 //!   `CALIB_DEMO_POP_OUT=1|half`     pop out from the start / halfway to the exit
 //!   `CALIB_DEMO_EXIT_AFTER_SECS=<n>`                              close by itself
 
-use gs_calibrators::{
-    doll_calibration, CalibrationOutcome, CreatureCalibrationState, DollCalibrationState,
-    DollCalibrationTarget, DollSetsEditorState, FrameCalibrationState, SceneryCalibrationState,
-};
+use gs_calibrators::{CalibrationOutcome, CreatureCalibrationState, FrameCalibrationState, SceneryCalibrationState};
 
 #[derive(Default)]
 struct Demo {
     creatures: Option<CreatureCalibrationState>,
     scenery: Option<SceneryCalibrationState>,
     frames_cal: Option<FrameCalibrationState>,
-    doll_sets: Option<DollSetsEditorState>,
-    doll: Option<DollCalibrationState>,
-    /// Pool doll the "Doll anchors" button targets.
-    doll_choices: Vec<String>,
-    doll_pick: usize,
     /// Selected tab key (see TABS).
     tab: String,
     /// Host through the `ui(ctx)` window wrapper instead of `ui_contents`.
@@ -54,14 +46,13 @@ impl Demo {
             .unwrap_or_else(|e| format!("<unresolved: {e}>"));
         eprintln!("calibrators_demo: pool = {base}");
         let auto_open = match std::env::var("CALIB_DEMO_OPEN").ok().as_deref() {
-            Some("all") => ["creatures", "scenery", "frames", "dollsets", "doll"]
+            Some("all") => ["creatures", "scenery", "frames"]
                 .map(str::to_owned)
                 .to_vec(),
             Some(list) => list.split(',').map(|s| s.trim().to_owned()).collect(),
             None => Vec::new(),
         };
         Self {
-            doll_choices: doll_calibration::pool_dolls(),
             log: vec![format!("pool: {base}")],
             auto_open,
             started: Some(std::time::Instant::now()),
@@ -109,30 +100,13 @@ impl Demo {
                 self.frames_cal = state;
                 self.absorb("frames", outcome);
             }
-            "dollsets" if self.doll_sets.is_none() => {
-                // No live game here: no effect-name suggestions.
-                let (state, outcome) = DollSetsEditorState::open(Default::default());
-                self.doll_sets = state;
-                self.absorb("dollsets", outcome);
-            }
-            "doll" if self.doll.is_none() => {
-                let target = self
-                    .doll_choices
-                    .get(self.doll_pick)
-                    .map(|path| DollCalibrationTarget::from_pool_path(path));
-                let (state, outcome) = DollCalibrationState::open(target);
-                self.doll = state;
-                self.absorb("doll", outcome);
-            }
             other => eprintln!("calibrators_demo: '{other}' already open or unknown"),
         }
         eprintln!(
-            "calibrators_demo: open '{which}' -> creatures={} scenery={} frames={} dollsets={} doll={}",
+            "calibrators_demo: open '{which}' -> creatures={} scenery={} frames={}",
             self.creatures.is_some(),
             self.scenery.is_some(),
-            self.frames_cal.is_some(),
-            self.doll_sets.is_some(),
-            self.doll.is_some()
+            self.frames_cal.is_some()
         );
     }
 }
@@ -153,13 +127,7 @@ macro_rules! host {
     };
 }
 
-const TABS: [(&str, &str); 5] = [
-    ("Creatures", "creatures"),
-    ("Scenery", "scenery"),
-    ("Frames", "frames"),
-    ("Doll sets", "dollsets"),
-    ("Doll anchors", "doll"),
-];
+const TABS: [(&str, &str); 3] = [("Creatures", "creatures"), ("Scenery", "scenery"), ("Frames", "frames")];
 
 impl eframe::App for Demo {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -192,22 +160,6 @@ impl eframe::App for Demo {
                 ui.checkbox(&mut self.pop_out, "pop out")
                     .on_hover_text("Host every open calibrator through ui(ctx), the floating-window wrapper, instead of ui_contents(ui) in the tab");
                 ui.separator();
-                let current = self
-                    .doll_choices
-                    .get(self.doll_pick)
-                    .cloned()
-                    .unwrap_or_else(|| "(no pool dolls)".to_owned());
-                ui.label("doll:");
-                egui::ComboBox::from_id_salt("demo_doll_pick")
-                    .selected_text(current)
-                    .show_ui(ui, |ui| {
-                        for (index, path) in self.doll_choices.iter().enumerate() {
-                            if ui.selectable_value(&mut self.doll_pick, index, path).changed() {
-                                // Re-target: drop the state, the tab reopens it.
-                                self.doll = None;
-                            }
-                        }
-                    });
                 if ui.button("Clear log").clicked() {
                     self.log.clear();
                 }
@@ -243,8 +195,6 @@ impl eframe::App for Demo {
                 "creatures" => host!(self, creatures, "creatures", &ctx, Some(&mut *ui)),
                 "scenery" => host!(self, scenery, "scenery", &ctx, Some(&mut *ui)),
                 "frames" => host!(self, frames_cal, "frames", &ctx, Some(&mut *ui)),
-                "dollsets" => host!(self, doll_sets, "dollsets", &ctx, Some(&mut *ui)),
-                "doll" => host!(self, doll, "doll", &ctx, Some(&mut *ui)),
                 _ => {
                     ui.weak("Pick a tab.");
                 }
@@ -255,8 +205,6 @@ impl eframe::App for Demo {
             host!(self, creatures, "creatures", &ctx, None::<&mut egui::Ui>);
             host!(self, scenery, "scenery", &ctx, None::<&mut egui::Ui>);
             host!(self, frames_cal, "frames", &ctx, None::<&mut egui::Ui>);
-            host!(self, doll_sets, "dollsets", &ctx, None::<&mut egui::Ui>);
-            host!(self, doll, "doll", &ctx, None::<&mut egui::Ui>);
         }
 
         if let (Some(secs), Some(started)) = (self.exit_after, self.started) {

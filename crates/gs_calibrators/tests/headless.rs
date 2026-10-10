@@ -4,10 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gs_calibrators::{
-    CreatureCalibrationState, DollCalibrationState, DollCalibrationTarget, DollSetsEditorState,
-    FrameCalibrationState, SceneryCalibrationState,
-};
+use gs_calibrators::{CreatureCalibrationState, FrameCalibrationState, SceneryCalibrationState};
 
 struct TestEnv {
     _guard: std::sync::MutexGuard<'static, ()>,
@@ -91,11 +88,6 @@ fn empty_pool_reports_a_message_and_no_state() {
     assert!(state.is_none() && !outcome.messages.is_empty());
     let (state, outcome) = FrameCalibrationState::open(None);
     assert!(state.is_none() && !outcome.messages.is_empty());
-    let (state, outcome) = DollSetsEditorState::open(Default::default());
-    assert!(state.is_none() && !outcome.messages.is_empty());
-    let (state, outcome) = DollCalibrationState::open(None);
-    assert!(state.is_none());
-    assert!(outcome.messages[0].starts_with("No doll image selected."));
 }
 
 #[test]
@@ -104,7 +96,6 @@ fn every_calibrator_renders_as_window_and_as_tab_and_writes_nothing() {
     write_png(&pool_dir().join("creatures/kobold/kobold.png"), 8);
     write_png(&pool_dir().join("scenery/boulder.png"), 8);
     write_png(&pool_dir().join("frames/iron.png"), 32);
-    write_png(&pool_dir().join("dolls/human.png"), 16);
     gs_field::pool::invalidate_cache();
     let before = snapshot(env.dir.path());
 
@@ -123,65 +114,5 @@ fn every_calibrator_renders_as_window_and_as_tab_and_writes_nothing() {
     frames(&env.ctx, |ctx| assert!(!state.ui(ctx).closed));
     tab_frames(&env.ctx, |ui| assert!(!state.ui_contents(ui).closed));
 
-    let (state, _) = DollSetsEditorState::open(Default::default());
-    let mut state = state.expect("doll sets opens");
-    frames(&env.ctx, |ctx| assert!(!state.ui(ctx).closed));
-    tab_frames(&env.ctx, |ui| assert!(!state.ui_contents(ui).closed));
-
-    let target = DollCalibrationTarget::from_pool_path("dolls/human.png");
-    assert!(target.image_abs.is_file());
-    let (state, outcome) = DollCalibrationState::open(Some(target));
-    assert!(outcome.messages.is_empty());
-    let mut state = state.expect("doll calibrator opens");
-    frames(&env.ctx, |ctx| {
-        let outcome = state.ui(ctx);
-        assert!(!outcome.closed && !outcome.reload_art);
-    });
-    tab_frames(&env.ctx, |ui| {
-        let outcome = state.ui_contents(ui);
-        assert!(!outcome.closed && !outcome.reload_art);
-    });
-
     assert_eq!(before, snapshot(env.dir.path()), "rendering must not write");
-}
-
-#[test]
-fn doll_calibration_closes_when_the_host_base_vanishes() {
-    let env = test_env();
-    write_png(&pool_dir().join("dolls/human.png"), 16);
-    let target = DollCalibrationTarget::from_pool_path("dolls/human.png");
-    let (state, _) = DollCalibrationState::open(Some(target));
-    let mut state = state.unwrap();
-    let mut outcome = None;
-    let _ = env.ctx.run_ui(egui::RawInput::default(), |root| {
-        let ctx = root.ctx();
-        outcome = Some(state.ui_with_base(ctx, None));
-    });
-    // The tab body reports the same thing.
-    let mut tab_outcome = None;
-    tab_frames(&env.ctx, |ui| tab_outcome = Some(state.ui_contents_with_base(ui, None)));
-    assert!(tab_outcome.unwrap().closed);
-    let outcome = outcome.unwrap();
-    assert!(outcome.closed);
-    assert_eq!(
-        outcome.messages,
-        ["Injury doll calibration closed: the selected doll set has no base image loaded."]
-    );
-}
-
-#[test]
-fn doll_calibration_reads_the_sidecar_beside_the_image() {
-    let _env = test_env();
-    let image = pool_dir().join("dolls/human.png");
-    write_png(&image, 16);
-    let mut anchors = std::collections::HashMap::new();
-    anchors.insert("head".to_owned(), [0.25f32, 0.75f32]);
-    gs_field::pool::write_doll_sidecar(&image, &anchors, &Default::default()).unwrap();
-    // Opening after an external write sees it (no click needed to prove the
-    // read path): a second write through the same API round-trips.
-    let sidecar: gs_field::pool::DollSidecar = gs_field::pool::read_sidecar(&image).unwrap();
-    assert_eq!(sidecar.anchors.get("head"), Some(&[0.25, 0.75]));
-    let (state, outcome) =
-        DollCalibrationState::open(Some(DollCalibrationTarget::from_pool_path("dolls/human.png")));
-    assert!(state.is_some() && outcome.messages.is_empty());
 }

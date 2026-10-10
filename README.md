@@ -20,8 +20,8 @@ GPL-3.0-or-later (ported from VellumFE).
 | `crates/rig/` | Library, no UI. The rig file format (joints, bones, the bone hierarchy), body-type templates (as data), the `outlines.json` loader, eye discs, and bake-to-files (`<family>.png` + `<family>.toml`) |
 | `crates/gs_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
 | `crates/gs_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
-| `crates/gs_calibrators/` | Library. The five art calibrators (frames, doll anchors, doll sets, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
-| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with seven tabs: **Rigs**, **Scenes**, **Frames**, **Dolls**, **Creatures**, **Scenery**, **Preview** |
+| `crates/gs_calibrators/` | Library. The art calibrators (frames, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
+| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with six tabs: **Rigs**, **Scenes**, **Frames**, **Creatures**, **Scenery**, **Preview**, and the injury doll's window (**Doll**) |
 | `crates/rig/src/chart.rs` | `scale-chart.html` -> `outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped); the app's *Import* runs it. `tools/extract_outlines.py` is the original it was ported from |
 | `data/outlines.json` | Generated. `{key: {ref_ft, subpaths}}`; x centred, y up, ground at 0. Keys are `<family>` (side view) and `<family>-front` |
 | `data/rigs/` | Saved rigs and their baked output. `humanoid.*` is the test fixture |
@@ -132,9 +132,8 @@ from, the button is disabled and says where it looked.
 case. The three `--room-*` options only PREFILL the new-scene naming inputs
 (what a client passes when it launches the studio from a room). For smoke
 runs, `GS_STUDIO_EXIT_AFTER_SECS=<n>` closes the window by itself (and prints
-what the stage and the calibrators hold), `GS_STUDIO_SMOKE=1` pre-populates
-the stage and `GS_STUDIO_DOLL_VIEW=sets` starts the Dolls tab on its Sets
-view.
+what the stage and the calibrators hold) and `GS_STUDIO_SMOKE=1`
+pre-populates the stage.
 
 Two headless commands, for a texture generator to call; each does its job
 and exits without opening a window (exit code 2 and a message on error):
@@ -164,8 +163,8 @@ name*, which signs notes and replies; and where `settings.toml` is. It opens by 
 the status bar names the folder in use either way. While the pool holds no
 creature art a banner sits under the tabs: which directory is in use, why it is
 empty, and the ways to fill it (Import, drop PNGs in, or point Settings'
-Pool box elsewhere). Three tools sit behind the seven tabs: the rig
-editor, the stage (Scenes + Preview) and the calibrators (Frames, Dolls,
+Pool box elsewhere). Three tools sit behind the six tabs: the rig
+editor, the stage (Scenes + Preview) and the calibrators (Frames,
 Creatures, Scenery). Each is built lazily and kept while the app runs;
 switching tabs never loses work. A new tool is a new `ToolId` + entry in
 `TOOLS` (`crates/studio/src/app.rs`) and a module under
@@ -1198,7 +1197,7 @@ Directory resolution is the same way: `data_root.rs`, `data_home.rs` and
 (`--pool` > `GS_STUDIO_POOL` > the gs-studio home) and that the default is
 never `~/.vellum-fe`.
 
-### Frames, Dolls, Creatures, Scenery (the calibrators)
+### Frames, Creatures, Scenery (the calibrators)
 
 VellumFE's art calibrators (`crates/gs_calibrators`), each hosted as a full
 tab through its `ui_contents(ui)` body -- never as a floating window. They
@@ -1208,18 +1207,16 @@ embeds the metadata in the PNG).
 | Tab | Calibrator | Pool category |
 |---|---|---|
 | **Frames** | `FrameCalibrationState` -- nine-slice geometry | `global/images/frames/` |
-| **Dolls** > Anchors | `DollCalibrationState` -- wound-dot anchors and dot style for ONE doll, chosen in the *Doll* picker (non-layer files of the dolls category) | `global/images/dolls/` |
-| **Dolls** > Sets | `DollSetsEditorState` -- every doll: layers, dots, variants and the condition that selects each | `global/images/dolls/` |
 | **Creatures** | `CreatureCalibrationState` -- feet, size, anchors | `global/images/creatures/` |
 | **Scenery** | `SceneryCalibrationState` -- feet anchor, world size, exclusion edges | `global/images/scenery/` |
 
-- A calibrator opens the first time its tab (or Dolls view) is shown and is
-  then kept: switching tabs or Dolls views does not lose unsaved work.
+- A calibrator opens the first time its tab is shown and is then kept:
+  switching tabs does not lose unsaved work. (VellumFE's 2D injury-doll
+  calibrators -- wound-dot anchors, doll sets -- were deleted in the crate
+  split; Hydra calibrates its own doll pictures.)
 - **Rescan pool** (every tab) flushes the pool listing and re-opens that
-  calibrator, picking up added or removed images. Only Doll Sets can tell
-  the host it has unsaved edits, so only there does Rescan ask first
-  (*Discard and rescan* / *Cancel*); in the others, save before rescanning.
-  Picking another doll in the Anchors picker re-opens that calibrator on it.
+  calibrator, picking up added or removed images; save before rescanning
+  (a calibrator that can say it has unsaved edits is asked first).
 - With nothing in a category the tab says so and what to do; the tab is
   never blank.
 - The status line shows the calibrators' messages (hover for the log, capped

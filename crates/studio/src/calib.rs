@@ -1,38 +1,14 @@
 //! The calibrator tabs' rules, without egui: which calibrator a tab hosts,
-//! what a calibrator's outcome asks of the rest of the app, the doll
-//! picker's selection, and the "Rescan pool" confirmation. The calibrators
+//! what a calibrator's outcome asks of the rest of the app, and the
+//! "Rescan pool" confirmation. The calibrators
 //! themselves live in `gs_calibrators`; `tools/calibrators.rs` hosts them.
 
 /// One hosted calibrator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalibKind {
     Frames,
-    DollAnchors,
-    DollSets,
     Creatures,
     Scenery,
-}
-
-/// The two views inside the Dolls tab.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DollView {
-    #[default]
-    Anchors,
-    Sets,
-}
-
-impl DollView {
-    pub const ALL: [(DollView, &'static str, &'static str); 2] = [
-        (DollView::Anchors, "Anchors", "Where each body part's wound dot sits on one doll image"),
-        (DollView::Sets, "Sets", "Every pool doll: layers, dot style, and the game state that selects it"),
-    ];
-
-    pub fn kind(self) -> CalibKind {
-        match self {
-            DollView::Anchors => CalibKind::DollAnchors,
-            DollView::Sets => CalibKind::DollSets,
-        }
-    }
 }
 
 /// What this frame's calibrator outcomes ask of the rest of the app.
@@ -57,46 +33,6 @@ impl HostEffects {
                 self.invalidate_obstacles = true;
             }
         }
-    }
-}
-
-/// The doll the Anchors view targets: a pick out of the pool's doll list
-/// that survives a rescan by PATH, not by index.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct DollPicker {
-    choices: Vec<String>,
-    pick: usize,
-}
-
-impl DollPicker {
-    pub fn choices(&self) -> &[String] {
-        &self.choices
-    }
-
-    pub fn pick(&self) -> usize {
-        self.pick
-    }
-
-    /// The picked pool path; None when the pool has no dolls.
-    pub fn current(&self) -> Option<&str> {
-        self.choices.get(self.pick).map(String::as_str)
-    }
-
-    /// Pick by index. True when that changed the target.
-    pub fn select(&mut self, index: usize) -> bool {
-        if index >= self.choices.len() || index == self.pick {
-            return false;
-        }
-        self.pick = index;
-        true
-    }
-
-    /// A fresh pool listing: keep the picked doll if it is still there,
-    /// else fall back to the first.
-    pub fn refresh(&mut self, choices: Vec<String>) {
-        let kept = self.current().and_then(|path| choices.iter().position(|c| c == path));
-        self.choices = choices;
-        self.pick = kept.unwrap_or(0);
     }
 }
 
@@ -146,38 +82,9 @@ mod tests {
         assert_eq!(fx, HostEffects { reload_art: true, invalidate_obstacles: false });
         fx.absorb(CalibKind::Scenery, true);
         assert_eq!(fx, HostEffects { reload_art: true, invalidate_obstacles: true });
-        for kind in [CalibKind::Frames, CalibKind::DollAnchors, CalibKind::DollSets] {
-            let mut fx = HostEffects::default();
-            fx.absorb(kind, true);
-            assert_eq!(fx, HostEffects { reload_art: true, invalidate_obstacles: false });
-        }
-    }
-
-    #[test]
-    fn doll_views_map_to_their_calibrators() {
-        assert_eq!(DollView::default(), DollView::Anchors);
-        assert_eq!(DollView::Anchors.kind(), CalibKind::DollAnchors);
-        assert_eq!(DollView::Sets.kind(), CalibKind::DollSets);
-    }
-
-    #[test]
-    fn the_doll_pick_survives_a_rescan_by_path() {
-        let mut picker = DollPicker::default();
-        assert_eq!(picker.current(), None);
-        assert!(!picker.select(0), "nothing to select in an empty list");
-        picker.refresh(vec!["dolls/a.png".into(), "dolls/b.png".into(), "dolls/c.png".into()]);
-        assert_eq!(picker.current(), Some("dolls/a.png"));
-        assert!(picker.select(2));
-        assert!(!picker.select(2), "same pick is not a re-target");
-        assert!(!picker.select(9));
-        // A new doll sorts in ahead of it: the pick follows the path.
-        picker.refresh(vec!["dolls/0.png".into(), "dolls/a.png".into(), "dolls/c.png".into()]);
-        assert_eq!((picker.pick(), picker.current()), (2, Some("dolls/c.png")));
-        // It is gone: first doll.
-        picker.refresh(vec!["dolls/a.png".into()]);
-        assert_eq!((picker.pick(), picker.current()), (0, Some("dolls/a.png")));
-        picker.refresh(vec![]);
-        assert_eq!(picker.current(), None);
+        let mut fx = HostEffects::default();
+        fx.absorb(CalibKind::Frames, true);
+        assert_eq!(fx, HostEffects { reload_art: true, invalidate_obstacles: false });
     }
 
     #[test]

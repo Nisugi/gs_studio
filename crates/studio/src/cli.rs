@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::stage::StudioRoomContext;
 
 pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publish <dir>]\n\
-    \x20                [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]\n\
+    \x20                [--tab rigs|scenes|frames|creatures|scenery|preview]\n\
     \x20                [--room-uid <n>] [--room-title <text>] [--room-location <text>]\n\
     \x20      gs-studio [--data <dir>] --project <family>[/<creature>]:front|side|back [--grazing <facing>]\n\
     \x20                (headless: projection-first renders for a texture generator, then exit)\n\

@@ -28,15 +28,11 @@
 pub mod color;
 pub mod condition_ui;
 pub mod creature_calibration;
-pub mod doll_calibration;
-pub mod doll_sets;
 pub mod frame_calibration;
 pub mod scenery_calibration;
 pub mod skin_paint;
 
 pub use creature_calibration::CreatureCalibrationState;
-pub use doll_calibration::{DollCalibrationState, DollCalibrationTarget};
-pub use doll_sets::DollSetsEditorState;
 pub use frame_calibration::FrameCalibrationState;
 pub use scenery_calibration::SceneryCalibrationState;
 

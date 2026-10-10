@@ -1,7 +1,7 @@
 //! gs-studio: art-authoring app for GemStone IV clients.
 //!
 //!   gs-studio [--data <dir>] [--pool <dir>]
-//!             [--tab rigs|scenes|frames|dolls|creatures|scenery|preview]
+//!             [--tab rigs|scenes|frames|creatures|scenery|preview]
 //!             [--room-uid <n>] [--room-title <text>] [--room-location <text>]
 //!   gs-studio [--data <dir>] --project <family>[/<creature>]:side|back [--grazing <facing>]
 //!   gs-studio [--data <dir>] --build-sheet <family>[/<creature>]

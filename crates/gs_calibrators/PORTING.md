@@ -304,3 +304,10 @@ NO `<stem>.toml` but carries embedded PNG metadata, the first read EXTRACTS a
 sidecar next to it. So merely opening the Doll Sets / doll / creature /
 scenery / frame calibrator on such an image creates its `.toml`. That is
 VellumFE's behaviour too; it is a pool feature, not a calibrator save.
+
+## The crate split, S9 (2026-10-09)
+
+- `doll_calibration` and `doll_sets` (VellumFE's 2D injury-doll
+  calibrators) are deleted, with `skin_paint`'s injury-dot painting and
+  gs-studio's Dolls tab. Hydra calibrates its own doll pictures
+  (`play/calibrator.rs`), in the same `vellum-meta` format.

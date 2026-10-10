@@ -1,45 +1,15 @@
 //! The slice of VellumFE's GUI skin system the calibrators paint with:
-//! sprite/nine-slice/injury-dot painting and the three small types they
-//! take. Ported from VellumFE `src/frontend/gui/skin.rs` @60c84a79
+//! sprite and nine-slice painting and the small types they take (the
+//! injury-dot painting went with the 2D doll calibrators, 2026-10-09). Ported from VellumFE `src/frontend/gui/skin.rs` @60c84a79
 //! (GPL-3.0-or-later); every item is a verbatim copy, in source order.
 //! `SkinState` and the rest of that 3200-line file stay in VellumFE.
 
-use gs_field::skins::DollDotSpec;
 
 /// One loaded skin texture: id plus native size.
 #[derive(Debug, Clone, Copy)]
 pub struct SkinTexture {
     pub texture: egui::TextureId,
     pub size: egui::Vec2,
-}
-
-/// Dot styling with colors parsed, ready for the painter.
-#[derive(Debug, Clone, Copy)]
-pub struct ResolvedDotStyle {
-    pub wound: egui::Color32,
-    pub scar: egui::Color32,
-    pub opacity: f32,
-    /// Diameter as a fraction of the drawn doll height.
-    pub diameter: f32,
-}
-
-impl Default for ResolvedDotStyle {
-    fn default() -> Self {
-        Self::from_spec(&DollDotSpec::default())
-    }
-}
-
-impl ResolvedDotStyle {
-    pub fn from_spec(spec: &DollDotSpec) -> Self {
-        Self {
-            wound: parse_hex_rgb(&spec.wound_color)
-                .unwrap_or(egui::Color32::from_rgb(0xe0, 0x20, 0x20)),
-            scar: parse_hex_rgb(&spec.scar_color)
-                .unwrap_or(egui::Color32::from_rgb(0xb8, 0xb8, 0xb8)),
-            opacity: spec.opacity.clamp(0.0, 1.0),
-            diameter: spec.diameter.clamp(0.01, 0.5),
-        }
-    }
 }
 
 /// Everything needed to paint one window's nine-slice border.
@@ -69,63 +39,6 @@ pub fn paint_sprite(
 ) {
     let full_uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     painter.image(sprite.texture, dest, full_uv, tint);
-}
-
-/// Paint one generated injury dot: wounds (levels 1-3) are a solid circle
-/// with the severity numeral inside, scars (levels 4-6) a ring with the
-/// numeral in the ring color. The numeral is skipped when the dot is too
-/// small to render it legibly (the doll tooltip still carries the detail).
-pub fn paint_severity_dot(
-    painter: &egui::Painter,
-    center: egui::Pos2,
-    radius: f32,
-    level: u8,
-    style: &ResolvedDotStyle,
-) {
-    if level == 0 || level > 6 {
-        return;
-    }
-    let radius = radius.max(3.0);
-    let numeral_font = egui::FontId::proportional((radius * 1.3).max(9.0));
-    let show_numeral = radius >= 5.5;
-    if level <= 3 {
-        let fill = style.wound.gamma_multiply(style.opacity);
-        painter.circle_filled(center, radius, fill);
-        if show_numeral {
-            let numeral_color = contrast_color(style.wound).gamma_multiply(style.opacity);
-            painter.text(
-                center,
-                egui::Align2::CENTER_CENTER,
-                level.to_string(),
-                numeral_font,
-                numeral_color,
-            );
-        }
-    } else {
-        let color = style.scar.gamma_multiply(style.opacity);
-        let stroke_width = (radius * 0.28).max(1.5);
-        painter.circle_stroke(center, radius, egui::Stroke::new(stroke_width, color));
-        if show_numeral {
-            painter.text(
-                center,
-                egui::Align2::CENTER_CENTER,
-                (level - 3).to_string(),
-                numeral_font,
-                color,
-            );
-        }
-    }
-}
-
-/// Black or white, whichever contrasts more against `fill` (for the wound
-/// numeral painted on the solid dot).
-fn contrast_color(fill: egui::Color32) -> egui::Color32 {
-    let luminance = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
-    if luminance > 140.0 {
-        egui::Color32::BLACK
-    } else {
-        egui::Color32::WHITE
-    }
 }
 
 /// Paint a nine-slice border into `rect`: corners at fixed size, edges
