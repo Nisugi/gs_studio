@@ -315,3 +315,29 @@ VellumFE's behaviour too; it is a pool feature, not a calibrator save.
 The split's map: this crate is authoring-only (gs-studio's); it reads the
 creature field as `creature_field` (renamed from `gs_field`, S9). This log
 closes with the split.
+
+## The doll calibrator, rebuilt (2026-10-10)
+
+- `doll_calibration` is back, rebuilt rather than restored: the same window
+  body, but it reads and writes a picture's `vellum-meta` PNG chunk
+  directly (`creature_field::png_meta`), in the TOML Hydra's
+  `calibration.rs` reads (`kind`, `[anchors]` by the game's part ids,
+  `[dots]` opacity / diameter, plus the preview's `wound_color` /
+  `scar_color`, which Hydra carries over unread). No sidecar is written or
+  extracted; a `.toml` beside a chunkless picture is read in its place.
+  `pool_dolls()` lists `global/images/dolls/*.png` less Hydra's overlay
+  files. `DollDotSpec` lives here now (gs_field's went with the 2D doll).
+  `skin_paint`'s `ResolvedDotStyle` and `paint_severity_dot` are back for
+  its preview. Doll sets stay deleted.
+
+## The Frames tab, rebuilt for Hydra's frame templates (2026-10-11)
+
+- `frame_calibration` is no longer VellumFE's nine-slice calibrator: it is
+  the frame template tool (README, *Frames*). `frame_template` (NEW,
+  egui-free) holds the `frame.toml` type, the folder reader and writer,
+  the validator, the slicer and the layout (where each piece goes round a
+  window, a row and a grid, with the turn's UV mapping). The nine-slice
+  painting in `skin_paint` stays (the demo and the field's own art use
+  it); `creature_field::pool::FrameSidecar` is no longer written by
+  anything here. `FrameCalibrationState::open(Option<String>)`, `ui`,
+  `ui_contents` keep their shapes, so the hosts did not change.

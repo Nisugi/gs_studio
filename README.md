@@ -20,8 +20,8 @@ GPL-3.0-or-later (ported from VellumFE).
 | `crates/rig/` | Library, no UI. The rig file format (joints, bones, the bone hierarchy), body-type templates (as data), the `outlines.json` loader, eye discs, and bake-to-files (`<family>.png` + `<family>.toml`) |
 | `crates/creature_field/` | Library, no UI. The creature field without the drawing: solver, card resolution, scenes, skins, the image pool, bestiary. Ported from VellumFE (`PORTING.md`) |
 | `crates/creature_field_egui/` | Library. Draws the creature field with egui: art cache + stage renderer. Ported from VellumFE (`PORTING.md`) |
-| `crates/gs_calibrators/` | Library. The art calibrators (frames, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
-| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with six tabs: **Rigs**, **Scenes**, **Frames**, **Creatures**, **Scenery**, **Preview**, and the injury doll's window (**Doll**) |
+| `crates/gs_calibrators/` | Library. The art calibrators (frames, doll pictures, creatures, scenery) as egui bodies + pop-out windows. Ported from VellumFE (`PORTING.md`) |
+| `crates/studio/` | The app, binary `gs-studio` (eframe/egui). A tool-tab shell with seven tabs: **Rigs**, **Scenes**, **Frames**, **Dolls**, **Creatures**, **Scenery**, **Preview**, and the 3D injury doll's window (**Doll**) |
 | `crates/rig/src/chart.rs` | `scale-chart.html` -> `outlines.json` (44 family silhouettes, in feet, tracing crumbs dropped); the app's *Import* runs it. `tools/extract_outlines.py` is the original it was ported from |
 | `data/outlines.json` | Generated. `{key: {ref_ft, subpaths}}`; x centred, y up, ground at 0. Keys are `<family>` (side view) and `<family>-front` |
 | `data/rigs/` | Saved rigs and their baked output. `humanoid.*` is the test fixture |
@@ -163,8 +163,8 @@ name*, which signs notes and replies; and where `settings.toml` is. It opens by 
 the status bar names the folder in use either way. While the pool holds no
 creature art a banner sits under the tabs: which directory is in use, why it is
 empty, and the ways to fill it (Import, drop PNGs in, or point Settings'
-Pool box elsewhere). Three tools sit behind the six tabs: the rig
-editor, the stage (Scenes + Preview) and the calibrators (Frames,
+Pool box elsewhere). Three tools sit behind the seven tabs: the rig
+editor, the stage (Scenes + Preview) and the calibrators (Frames, Dolls,
 Creatures, Scenery). Each is built lazily and kept while the app runs;
 switching tabs never loses work. A new tool is a new `ToolId` + entry in
 `TOOLS` (`crates/studio/src/app.rs`) and a module under
@@ -1197,23 +1197,93 @@ Directory resolution is the same way: `data_root.rs`, `data_home.rs` and
 (`--pool` > `GS_STUDIO_POOL` > the gs-studio home) and that the default is
 never `~/.vellum-fe`.
 
-### Frames, Creatures, Scenery (the calibrators)
+### Frames, Dolls, Creatures, Scenery (the calibrators)
 
-VellumFE's art calibrators (`crates/gs_calibrators`), each hosted as a full
+The art calibrators (`crates/gs_calibrators`), each hosted as a full
 tab through its `ui_contents(ui)` body -- never as a floating window. They
 read and write the POOL: a save writes the image's sidecar `.toml` (and
-embeds the metadata in the PNG).
+embeds the metadata in the PNG); the doll calibrator writes the PNG alone.
 
 | Tab | Calibrator | Pool category |
 |---|---|---|
-| **Frames** | `FrameCalibrationState` -- nine-slice geometry | `global/images/frames/` |
+| **Frames** | `FrameCalibrationState` -- the frame COMPOSER: a recipe TOML naming parts from the library, previewed assembled | `global/images/frames/` |
+| **Dolls** | `DollCalibrationState` -- where each body part's wound dot sits on ONE doll picture, chosen in the *Doll* picker, and the dots' style | `global/images/dolls/` |
 | **Creatures** | `CreatureCalibrationState` -- feet, size, anchors | `global/images/creatures/` |
 | **Scenery** | `SceneryCalibrationState` -- feet anchor, world size, exclusion edges | `global/images/scenery/` |
 
+- **Frames** composes Hydra's frames (`gs_calibrators::frame_recipe` is
+  the egui-free side; the design agreed with Hydra's side on
+  2026-10-11). A frame is a RECIPE, `frames/<name>.toml`, naming parts
+  from one shared library under `frames/parts/`: `edges/` (a plain
+  seamless rail, drawn `thickness` points tall), `stickers/` (decoration
+  with no rail in it, drawn in the `size` square over a junction) and
+  `ornaments/` (a centrepiece, drawn `height` points tall). The recipe:
+  `thickness`, `turn` (rotate or mirror, for stickers and ornaments
+  alike; the corner sticker is authored top-left, the tee top), `[edge]`
+  `image`, `inset` (points the rails sit in from the window's edge, so a
+  sticker centred on its joint clears the edge: *centre on rail* sets it)
+  and `run` (tile, fit, mirror -- every other tile reflected so each join meets its own image, no seam on any edge -- or stretch), `[stickers]` `size`, `inset` (points each sticker slides from its joint
+  toward the inside: corners diagonally, tees along the stem; *flush* sets
+  the inset that puts the square against the window's outer edge) and a
+  `corner`, `tee` and `cross` each (any left out is a bare seam), `orient`
+  (how stickers turn: `follow` the frame's turn, or `upright`, never
+  turned) with `corners` (TL, TR, BR, BL) and `tees` (top, right, bottom,
+  left) per-junction overrides, each `follow`, `upright`, `90`, `180`,
+  `270`, `h`, `v` or `hv` -- a flame stays upright on every corner, a
+  compass follows, and
+  `[[ornament]]` rules: `image`, `sides`, `place` (middle, ends, or every
+  with `spacing`), `height`, `outer`. Effects on `[edge]`, `[stickers]`
+  (all three) or an ornament rule, each optional: `tint`
+  (the part multiplied by it), `emissive = { color, tolerance, radius,
+  strength, pulse, cast }` (a bloom from inside the art: the part's own
+  pixels within `tolerance` of the colour, weighted by closeness, blurred
+  and ADDED over the part, `cast` points of reach inward over the
+  content; the composer offers a few radii, since Hydra keeps one bloom
+  texture per part and setting).
+  `tools/frames_ingest.py --painted ... --recipes` also writes a starter
+  recipe per style of `image-gen/frame_styles.toml` that has none yet
+  (first edge, first sticker on every junction, first ornament on top,
+  mirror run; an emissive style's glow on), to open in the composer. Parts are named,
+  never pathed, so a pack is recipes plus the parts they name. The tab: pick a slot, click a
+  part in the library browser (thumbnails by kind, a filter), set the
+  numbers, the ornament rules and the effects rows (shown in the
+  preview, an emissive breathing), see Window, Row, Grid and Seam at 1x to 10x (the
+  frame keeps its point size past the panel; drag to pan, *centre* to
+  return), Save. *Trim <part>* on the chosen slot's part opens its raw
+  keyed picture (`parts/raw/`) with a cut box to drag and size (zoom 1x to 6x, drag
+  outside the box to pan); Apply
+  rewrites the part in the library and keeps the cut beside it
+  (`parts/<kind>/<name>.toml`), for an edge whose ends the model spoiled
+  or a sticker to square up. The validator wants the parts to exist, the sticker square at
+  least thickness + 1, alpha on stickers and ornaments; an ornament
+  taller than the sticker square is a warning. Rails run the window's
+  full length through every joint (dividers under the outer rails),
+  stickers over the joints, ornaments by rule.
+  The parts come from the pod: `image-gen/flux2_frames.py` paints each
+  style of `image-gen/frame_styles.toml` (a plain edge, two stickers, two
+  ornaments, several seeds) on flat magenta, and `tools/frames_ingest.py
+  --painted <its output>` keys them (by distance from the background
+  colour read off the corners), trims them (an edge to its rail's rows, a
+  sticker squared up) and puts them in the library at native size, with
+  the keyed raw under `parts/raw/`. (`frame_template` keeps the older
+  five-piece template folder: its reader, validator, slicer and layout,
+  and the turning and keying the composer shares; the tab no longer
+  edits those folders.)
+- **Dolls** calibrates the 2D doll pictures Hydra's Injuries widget shows
+  (not the 3D doll of the *Doll* window). Click the picture to place the
+  highlighted part; parts are in the game's order and auto-advance. Save
+  writes the anchors (fractions of the picture) and dot style into the
+  PNG's `vellum-meta` text chunk, the one file Hydra reads
+  (`hydra-gui/src/calibration.rs` reads the same chunk; a `<picture>.toml`
+  beside it is read only when the picture has none). Pixels pass through
+  byte for byte. Overlay files, `<picture>_<part>_<level>.png`, are not
+  listed as dolls. The doll pictures in `doll pictures/` at the repo root
+  are the generic set: copy them into the pool's `global/images/dolls/` to
+  calibrate them.
 - A calibrator opens the first time its tab is shown and is then kept:
-  switching tabs does not lose unsaved work. (VellumFE's 2D injury-doll
-  calibrators -- wound-dot anchors, doll sets -- were deleted in the crate
-  split; Hydra calibrates its own doll pictures.)
+  switching tabs does not lose unsaved work. (VellumFE's doll *sets*
+  calibrator stays deleted since the crate split; its doll anchors
+  calibrator was rebuilt on 2026-10-10 against Hydra's format.)
 - **Rescan pool** (every tab) flushes the pool listing and re-opens that
   calibrator, picking up added or removed images; save before rescanning
   (a calibrator that can say it has unsaved edits is asked first).

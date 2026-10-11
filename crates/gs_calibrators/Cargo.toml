@@ -3,7 +3,7 @@ name = "gs_calibrators"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "The GemStone IV art calibrators as embeddable egui windows: creature sprites, scenery, window frames, injury-doll sets and injury-doll anchors. They write the sidecar TOML + PNG metadata game clients read. Ported from VellumFE; shared by VellumFE and gs-studio."
+description = "The GemStone IV art calibrators as embeddable egui windows: creature sprites, scenery, Hydra's frame templates and injury-doll pictures. They write the sidecar TOML, PNG metadata and template folders game clients read. Ported from VellumFE; gs-studio's."
 
 [lib]
 doctest = false
@@ -17,8 +17,10 @@ egui = { workspace = true }
 # The creature calibrator's alpha bounding box (content bbox of a sprite).
 # Same version and codec set as VellumFE / creature_field_egui.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "gif"] }
-# DollEntry::save -> anyhow::Result.
+# The doll calibrator's save -> anyhow::Result.
 anyhow = "1"
+# The doll calibrator reads and writes a picture's vellum-meta TOML.
+toml = "0.8"
 # warn! call sites kept from the originals.
 tracing = "0.1"
 

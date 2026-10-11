@@ -2,9 +2,10 @@
 //! the active tool in the middle, a status line at the bottom. Tools are
 //! added by extending [`TOOLS`] and the `match` in [`StudioApp::ui`].
 //!
-//! Three tools live behind the six tabs: the rig editor (Rigs), the stage
-//! (Scenes + Preview) and the calibrators (Frames, Creatures, Scenery).
-//! (The injury doll is the top bar's Doll window.) Each is built lazily and then kept for the life of the app, so
+//! Three tools live behind the seven tabs: the rig editor (Rigs), the stage
+//! (Scenes + Preview) and the calibrators (Frames, Dolls, Creatures, Scenery).
+//! (The 3D injury doll is the top bar's Doll window; the Dolls tab calibrates
+//! Hydra's 2D doll pictures.) Each is built lazily and then kept for the life of the app, so
 //! switching tabs never loses work.
 
 use std::path::{Path, PathBuf};
@@ -25,6 +26,7 @@ pub enum ToolId {
     Rigs,
     Scenes,
     Frames,
+    Dolls,
     Creatures,
     Scenery,
     Preview,
@@ -36,10 +38,11 @@ struct ToolTab {
     hint: &'static str,
 }
 
-const TOOLS: [ToolTab; 6] = [
+const TOOLS: [ToolTab; 7] = [
     ToolTab { id: ToolId::Rigs, label: "Rigs", hint: "Creature-doll rig editor (data root)" },
     ToolTab { id: ToolId::Scenes, label: "Scenes", hint: "Scene builder: backdrop, props, camera (pool)" },
-    ToolTab { id: ToolId::Frames, label: "Frames", hint: "Frame calibrator: nine-slice geometry per frame image (pool)" },
+    ToolTab { id: ToolId::Frames, label: "Frames", hint: "Frame templates for Hydra: slice a frame picture into edge, corner and ornament, preview it assembled, export the folder (pool)" },
+    ToolTab { id: ToolId::Dolls, label: "Dolls", hint: "Injury-doll picture calibrator: where each part's wound dot sits, saved into the PNG (pool)" },
     ToolTab { id: ToolId::Creatures, label: "Creatures", hint: "Creature-art calibrator: feet, size, anchors (pool)" },
     ToolTab { id: ToolId::Scenery, label: "Scenery", hint: "Scenery and prop calibrator: feet, size, exclusion edges (pool)" },
     ToolTab { id: ToolId::Preview, label: "Preview", hint: "Preview stage: cast, roster, creature simulator (pool)" },
@@ -525,7 +528,7 @@ impl StudioApp {
                         stage.status(ui);
                     }
                 }
-                ToolId::Frames | ToolId::Creatures | ToolId::Scenery => self.calibrators.status(ui),
+                ToolId::Frames | ToolId::Dolls | ToolId::Creatures | ToolId::Scenery => self.calibrators.status(ui),
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if self.active.uses_pool() {
@@ -675,9 +678,10 @@ impl StudioApp {
                     self.active = ToolId::Scenery;
                 }
             }
-            ToolId::Frames | ToolId::Creatures | ToolId::Scenery => {
+            ToolId::Frames | ToolId::Dolls | ToolId::Creatures | ToolId::Scenery => {
                 let effects = match self.active {
                     ToolId::Frames => self.calibrators.ui(ui, CalibKind::Frames),
+                    ToolId::Dolls => self.calibrators.ui(ui, CalibKind::Dolls),
                     ToolId::Creatures => self.calibrators.ui(ui, CalibKind::Creatures),
                     _ => self.calibrators.ui(ui, CalibKind::Scenery),
                 };
@@ -727,13 +731,14 @@ mod tests {
         assert_eq!(ToolId::from_name(" Scenes "), Ok(ToolId::Scenes));
         assert_eq!(ToolId::from_name("RIGS"), Ok(ToolId::Rigs));
         assert_eq!(ToolId::from_name("frames"), Ok(ToolId::Frames));
+        assert_eq!(ToolId::from_name("Dolls"), Ok(ToolId::Dolls));
         assert_eq!(ToolId::from_name("creatures"), Ok(ToolId::Creatures));
         assert_eq!(ToolId::from_name("scenery"), Ok(ToolId::Scenery));
         for tab in &TOOLS {
             assert_eq!(ToolId::from_name(tab.label), Ok(tab.id));
         }
         let err = ToolId::from_name("stage").unwrap_err();
-        assert!(err.contains("rigs, scenes, frames, creatures, scenery, preview"), "{err}");
+        assert!(err.contains("rigs, scenes, frames, dolls, creatures, scenery, preview"), "{err}");
     }
 
     /// The usage line names exactly the tabs that exist, in order.
