@@ -94,26 +94,24 @@ pub struct Exported {
     pub id: String,
     pub version: String,
     pub built: Built,
-    /// The recipe's parts packed.
-    pub parts: usize,
+    /// The files packed, `pack.toml` aside.
+    pub files: usize,
     /// False when the zip is the one the catalogue already lists.
     pub changed: bool,
 }
 
 impl Exported {
-    /// One line for the status bar and the Frames tab.
+    /// One line for the status bar and the tab.
     pub fn summary(&self) -> String {
         let what = if self.changed { format!("version {}: release it as {}-{} on {ASSET_REPO}", self.version, self.id, self.version) } else { format!("unchanged since version {}", self.version) };
-        format!("{} ({} parts, {} KB), {what}", self.built.zip.display(), self.parts, self.built.bytes.div_ceil(1024))
+        format!("{} ({} files, {} KB), {what}", self.built.zip.display(), self.files, self.built.bytes.div_ceil(1024))
     }
 }
 
 /// The pool's frame recipe `name` as a pack (the Frames tab's *Export
 /// pack*, `--pack frame:<name>`): `<data>/../packs/frame_<name>/` holding
-/// `pack.toml` and the recipe with the parts it names
-/// (`frame_recipe::write_pack_files`), zipped beside it, and its line in
-/// `packs.toml`. The version is a whole number, raised when the zip is not
-/// the one the catalogue lists.
+/// the recipe with the parts it names (`frame_recipe::write_pack_files`),
+/// then [`publish`]ed.
 pub fn export_frame(name: &str, data_root: &Path) -> Result<Exported, String> {
     use gs_calibrators::frame_recipe as fr;
     let path = fr::recipe_path(name).ok_or_else(|| "no pool".to_owned())?;
@@ -126,43 +124,91 @@ pub fn export_frame(name: &str, data_root: &Path) -> Result<Exported, String> {
     let id = fr::pack_id(name);
     let dir = packs_dir(data_root).join(&id);
     let files = fr::write_pack_files(name, &recipe, &dir)?;
+    publish(&dir, &id, name, "frames", &format!("The frame recipe '{name}' and the parts it names"), files.len(), data_root)
+}
+
+/// The pool's doll picture `name` (`global/images/dolls/<name>.png`) as a
+/// pack (the Dolls tab's *Export pack*, `--pack doll:<name>`): id
+/// `doll_<name>`, the picture with its calibration in it and its own
+/// overlays (`<name>_<part>_<level>.png`), where they sit in the pool, so a
+/// client installs them at `global/images/dolls/` (agreed with Hydra's side
+/// 2026-10-11). Refused while the picture carries no calibration.
+pub fn export_doll(name: &str, data_root: &Path) -> Result<Exported, String> {
+    use gs_calibrators::doll_calibration::is_overlay;
+    let name = name.trim().trim_end_matches(".png");
+    let dolls = creature_field::pool_dirs::global_images_dir().map_err(|e| format!("{e:#}"))?.join("dolls");
+    let picture = dolls.join(format!("{name}.png"));
+    if !picture.is_file() {
+        return Err(format!("no doll picture {}", picture.display()));
+    }
+    if gs_base::png_meta::read_embedded(&picture).is_none() {
+        return Err(format!("{name} is not calibrated: place its parts in the Dolls tab and Save first"));
+    }
+    let slug: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '_' }).collect();
+    let id = format!("doll_{slug}");
+    let dir = packs_dir(data_root).join(&id);
+    let global = dir.join("global");
+    if global.is_dir() {
+        std::fs::remove_dir_all(&global).map_err(|e| format!("{}: {e}", global.display()))?;
+    }
+    let into = global.join("images").join("dolls");
+    std::fs::create_dir_all(&into).map_err(|e| format!("{}: {e}", into.display()))?;
+    // its own overlays: `<name>_<part>_<level>`, not another picture's
+    let own = |stem: &str| stem == name || (is_overlay(stem) && stem.rsplitn(3, '_').nth(2) == Some(name));
+    let mut files = 0;
+    for entry in std::fs::read_dir(&dolls).map_err(|e| format!("{}: {e}", dolls.display()))?.flatten() {
+        let path = entry.path();
+        let png = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("png"));
+        if png && path.file_stem().and_then(|s| s.to_str()).is_some_and(own) {
+            let to = into.join(entry.file_name());
+            std::fs::copy(&path, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+            files += 1;
+        }
+    }
+    publish(&dir, &id, name, "dolls", &format!("The injury doll '{name}', its calibration in the picture"), files, data_root)
+}
+
+/// A pack folder whose `global/` is written: its `pack.toml`, the zip
+/// beside it, and its line in `packs.toml`. The version is a whole number,
+/// raised when the zip is not the one the catalogue lists.
+fn publish(dir: &Path, id: &str, title: &str, kind: &str, about: &str, files: usize, data_root: &Path) -> Result<Exported, String> {
     let catalogue_file = catalogue_path(data_root);
     let mut catalogue = match std::fs::read_to_string(&catalogue_file) {
         Ok(text) => packs::Catalogue::from_toml(&text).map_err(|e| format!("{}: {e:#}", catalogue_file.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => packs::Catalogue::default(),
         Err(e) => return Err(format!("{}: {e}", catalogue_file.display())),
     };
-    let listed = catalogue.get(&id).cloned();
+    let listed = catalogue.get(id).cloned();
     let manifest = |version: &str| {
         let text = format!(
-            "# The frame recipe '{name}' and the parts it names, for Hydra: gs-studio's\n# Frames tab, Export pack. Written afresh by every export.\nid = \"{id}\"\ntitle = \"{name}\"\nkind = \"frames\"\nversion = \"{version}\"\nformat = {}\n",
+            "# {about}, for Hydra: gs-studio's Export pack.\n# Written afresh by every export.\nid = \"{id}\"\ntitle = \"{title}\"\nkind = \"{kind}\"\nversion = \"{version}\"\nformat = {}\n",
             packs::FORMAT
         );
         std::fs::write(dir.join("pack.toml"), text).map_err(|e| format!("{}: {e}", dir.join("pack.toml").display()))
     };
     let mut version = listed.as_ref().map_or_else(|| "1".to_owned(), |l| l.version.clone());
     manifest(&version)?;
-    let mut built = zip_pack(&dir, data_root)?;
+    let mut built = zip_pack(dir, data_root)?;
     let changed = listed.as_ref().is_none_or(|l| l.sha256 != built.sha256);
     if changed && listed.is_some() {
         let n: u64 = version.trim().parse().map_err(|_| format!("{}: {id}'s version '{version}' is not a whole number", catalogue_file.display()))?;
         version = (n + 1).to_string();
         manifest(&version)?;
-        built = zip_pack(&dir, data_root)?;
+        built = zip_pack(dir, data_root)?;
     }
     catalogue.put(packs::Listed {
-        id: id.clone(),
-        title: name.to_owned(),
-        kind: "frames".to_owned(),
+        id: id.to_owned(),
+        title: title.to_owned(),
+        kind: kind.to_owned(),
         version: version.clone(),
         size: built.bytes,
         sha256: built.sha256.clone(),
         url: format!("https://github.com/{ASSET_REPO}/releases/download/{id}-{version}/{id}.zip"),
     });
     let text = catalogue.to_toml().map_err(|e| format!("{e:#}"))?;
-    let header = format!("# The packs on github.com/{ASSET_REPO}, read raw by Hydra from the repo's top.\n# gs-studio's exports keep it (packs::export_frame); a pack's zip is its release's asset.\n\n");
+    let header = format!("# The packs on github.com/{ASSET_REPO}, read raw by Hydra from the repo's top.\n# gs-studio's Export pack keeps it (packs::publish); a pack's zip is its release's asset.\n\n");
     std::fs::write(&catalogue_file, header + &text).map_err(|e| format!("{}: {e}", catalogue_file.display()))?;
-    Ok(Exported { id, version, built, parts: files.len().saturating_sub(1), changed })
+    Ok(Exported { id: id.to_owned(), version, built, files, changed })
 }
 
 /// A pack folder zipped the same way every time: `pack.toml` and every file

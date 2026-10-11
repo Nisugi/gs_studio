@@ -1295,7 +1295,13 @@ embeds the metadata in the PNG); the doll calibrator writes the PNG alone.
   byte for byte. Overlay files, `<picture>_<part>_<level>.png`, are not
   listed as dolls. The doll pictures in `doll pictures/` at the repo root
   are the generic set: copy them into the pool's `global/images/dolls/` to
-  calibrate them.
+  calibrate them. *Export pack* (beside Save; headless `gs-studio --pack
+  doll:<picture>`) saves and packs the picture for Hydra as Frames does:
+  id `doll_<picture>`, `kind = "dolls"`, the calibrated picture and its
+  own overlays at `global/images/dolls/`, where the pool keeps them and
+  where Hydra installs them (Hydra's own `dolls/` stays the player's),
+  zipped into `<data>/../packs/` with its line in `packs.toml`. A picture
+  with no calibration in it is refused.
 - A calibrator opens the first time its tab is shown and is then kept:
   switching tabs does not lose unsaved work. (VellumFE's doll *sets*
   calibrator stays deleted since the crate split; its doll anchors

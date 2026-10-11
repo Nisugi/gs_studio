@@ -183,8 +183,8 @@ fn main() -> eframe::Result {
             Err(e) => fail(&format!("gs-studio: --install-doll: {e}")),
         }
     }
-    // a frame pack reads the pool's recipe: below, once the pool is set
-    if let Some(what) = cli.pack.as_deref().filter(|w| !w.starts_with("frame:")) {
+    // a frame or doll pack reads the pool: below, once the pool is set
+    if let Some(what) = cli.pack.as_deref().filter(|w| !w.starts_with("frame:") && !w.starts_with("doll:")) {
         match packs::build(what, &data.path) {
             Ok(built) => {
                 println!("{} ({} bytes)\nsha256 {}", built.zip.display(), built.bytes, built.sha256);
@@ -223,13 +223,18 @@ fn main() -> eframe::Result {
             Err(e) => fail(&format!("gs-studio: --install-pack: {e}")),
         }
     }
-    if let Some(recipe) = cli.pack.as_deref().and_then(|w| w.strip_prefix("frame:")) {
-        match packs::export_frame(recipe.trim(), &data.path) {
+    if let Some(what) = cli.pack.as_deref().filter(|w| w.starts_with("frame:") || w.starts_with("doll:")) {
+        let done = match what.split_once(':') {
+            Some(("frame", recipe)) => packs::export_frame(recipe.trim(), &data.path),
+            Some((_, doll)) => packs::export_doll(doll.trim(), &data.path),
+            None => unreachable!("filtered on the prefix"),
+        };
+        match done {
             Ok(done) => {
                 println!("{}\nsha256 {}", done.summary(), done.built.sha256);
                 std::process::exit(0);
             }
-            Err(e) => fail(&format!("gs-studio: --pack frame:{recipe}: {e}")),
+            Err(e) => fail(&format!("gs-studio: --pack {what}: {e}")),
         }
     }
     seed_from_bundle(&data, &pool);

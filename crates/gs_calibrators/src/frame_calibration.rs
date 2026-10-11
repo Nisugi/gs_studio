@@ -7,7 +7,7 @@
 //! cells and a 2x2 grid at real point sizes (1x or 2x, rotate or mirror),
 //! or tiles the edge three times for the seam. Save validates and writes
 //! `frames/<name>.toml`; Export pack saves, then asks the host to pack the
-//! recipe for Hydra (`export_frame` in the outcome, `frame_recipe::write_pack_files`).
+//! recipe for Hydra (`export_pack` in the outcome, `frame_recipe::write_pack_files`).
 //! The parts come from the pod
 //! (`image-gen/flux2_frames.py`) through `tools/frames_ingest.py --painted`.
 //!
@@ -501,7 +501,7 @@ impl FrameCalibrationState {
             self.load(&name);
         }
         if save && self.save(&mut outcome) && export {
-            outcome.export_frame = Some(self.name.clone());
+            outcome.export_pack = Some(self.name.clone());
         }
         outcome
     }

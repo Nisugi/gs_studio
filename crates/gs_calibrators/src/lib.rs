@@ -49,7 +49,8 @@ pub struct CalibrationOutcome {
     pub messages: Vec<String>,
     pub reload_art: bool,
     pub closed: bool,
-    /// The Frames tab's *Export pack*: the recipe, saved, to pack. The host
-    /// knows where packs go (gs-studio: `packs::export_frame`).
-    pub export_frame: Option<String>,
+    /// *Export pack*: what the tab holds, saved, to pack -- the Frames
+    /// tab's recipe, the Dolls tab's picture (its stem). The host knows
+    /// where packs go (gs-studio: `packs::export_frame`, `export_doll`).
+    pub export_pack: Option<String>,
 }

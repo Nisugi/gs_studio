@@ -354,3 +354,8 @@ closes with the split.
   its parts scaled down to `PACK_PX_PER_PT` (4) at `PACK_MAX_THICKNESS`
   (24), through premultiplied alpha, never up. The format and the
   catalogue are `gs_base::packs`' (agreed with Hydra's side the same day).
+
+- The Dolls tab gains the same *Export pack* (2026-10-11): it saves, then
+  sets the outcome's field -- renamed `export_pack`, the tab's item by
+  name, for both tabs -- and the host packs the picture
+  (`packs::export_doll`). `DollCalibrationState::exported` shows a failure.

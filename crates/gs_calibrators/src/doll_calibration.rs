@@ -273,6 +273,12 @@ impl DollCalibrationState {
         outcome
     }
 
+    /// What the host made of *Export pack*: a failure shown under Save
+    /// (a success is in the status bar).
+    pub fn exported(&mut self, result: Result<String, String>) {
+        self.error = result.err().map(|e| format!("Export failed: {e}"));
+    }
+
     fn base_vanished(&self) -> CalibrationOutcome {
         let mut outcome = CalibrationOutcome::default();
         outcome.messages.push(format!("Injury doll calibration closed: '{}' cannot be read as a picture.", self.target.image_abs.display()));
@@ -287,6 +293,7 @@ impl DollCalibrationState {
         let mut outcome = CalibrationOutcome::default();
         let state = self;
         let mut save_request = false;
+        let mut export_request = false;
 
         ui.label("Click the doll to place the highlighted part's dot. Positions are fractions of the picture, so they hold at any size. Save writes them into the PNG itself.");
         ui.separator();
@@ -371,6 +378,17 @@ impl DollCalibrationState {
             if ui.button("Save").on_hover_text("Writes the anchors and dot style into the picture's PNG (its vellum-meta chunk), the one file Hydra reads").clicked() {
                 save_request = true;
             }
+            if ui
+                .button("Export pack")
+                .on_hover_text(format!(
+                    "Saves, then packs the picture with its own overlays for Hydra: packs/doll_{}.zip and its line in packs/packs.toml, the version raised when the pack changed",
+                    state.label.to_ascii_lowercase()
+                ))
+                .clicked()
+            {
+                save_request = true;
+                export_request = true;
+            }
             if ui.button("Reset all to defaults").clicked() {
                 state.anchors.clear();
                 state.dots = DollDotSpec::default();
@@ -391,6 +409,9 @@ impl DollCalibrationState {
                     state.dirty = false;
                     outcome.reload_art = true;
                     outcome.messages.push(format!("Injury doll calibration saved into '{}'.", state.label));
+                    if export_request {
+                        outcome.export_pack = Some(state.label.clone());
+                    }
                 }
                 Err(err) => state.error = Some(format!("Failed to save: {err}")),
             }

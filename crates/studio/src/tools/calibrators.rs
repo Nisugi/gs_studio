@@ -156,6 +156,16 @@ pub struct CalibratorsTool {
 
 const NO_DOLLS: &str = "No doll pictures in the pool (global/images/dolls/). Drop PNGs there, then press Rescan pool.";
 
+/// An *Export pack*'s result logged, and as one line for its tab.
+fn exported(log: &mut StatusLog, what: &str, name: &str, result: Result<crate::packs::Exported, String>) -> Result<String, String> {
+    let result = result.map(|done| done.summary());
+    log.push(match &result {
+        Ok(summary) => format!("{what} pack exported: {summary}"),
+        Err(e) => format!("{what} pack '{name}' not exported: {e}"),
+    });
+    result
+}
+
 /// Open the doll calibrator on the picked doll.
 fn open_doll(picker: &DollPicker) -> (Option<DollCalibrationState>, CalibrationOutcome) {
     match picker.current() {
@@ -235,12 +245,8 @@ impl CalibratorsTool {
             match tab {
                 CalibKind::Frames => {
                     let outcome = simple_tab(&mut self.frames, ui, log, || FrameCalibrationState::open(None));
-                    if let Some(name) = outcome.export_frame {
-                        let result = crate::packs::export_frame(&name, data_root).map(|done| done.summary());
-                        log.push(match &result {
-                            Ok(summary) => format!("Frame pack exported: {summary}"),
-                            Err(e) => format!("Frame pack '{name}' not exported: {e}"),
-                        });
+                    if let Some(name) = outcome.export_pack {
+                        let result = exported(log, "Frame", &name, crate::packs::export_frame(&name, data_root));
                         if let Some(state) = self.frames.state.as_mut() {
                             state.exported(result);
                         }
@@ -255,7 +261,7 @@ impl CalibratorsTool {
                     let outcome = simple_tab(&mut self.scenery, ui, log, SceneryCalibrationState::open);
                     effects.absorb(tab, outcome.reload_art);
                 }
-                CalibKind::Dolls => self.dolls_body(ui, &mut effects),
+                CalibKind::Dolls => self.dolls_body(ui, &mut effects, data_root),
             }
         });
         effects
@@ -263,7 +269,7 @@ impl CalibratorsTool {
 
     /// The Dolls tab: a picker over the pool's doll pictures, the
     /// calibrator on the picked one.
-    fn dolls_body(&mut self, ui: &mut egui::Ui, effects: &mut HostEffects) {
+    fn dolls_body(&mut self, ui: &mut egui::Ui, effects: &mut HostEffects, data_root: &Path) {
         let CalibratorsTool { dolls, doll_picker, log, .. } = self;
         // Before the strip draws, so the picker is never empty on frame 1.
         if !dolls.opened {
@@ -298,6 +304,12 @@ impl CalibratorsTool {
             dolls.reopen(log, || open_doll(doll_picker));
         }
         let outcome = dolls.body(ui, log);
+        if let Some(name) = outcome.export_pack {
+            let result = exported(log, "Doll", &name, crate::packs::export_doll(&name, data_root));
+            if let Some(state) = dolls.state.as_mut() {
+                state.exported(result);
+            }
+        }
         effects.absorb(CalibKind::Dolls, outcome.reload_art);
     }
 }
