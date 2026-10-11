@@ -2769,6 +2769,7 @@ dependencies = [
  "gs_calibrators",
  "gs_puppet",
  "gs_puppet_author",
+ "gs_render",
  "injury_doll",
  "png 0.17.16",
  "rig",

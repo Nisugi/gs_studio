@@ -729,10 +729,38 @@ const UNIFORM_FLOATS: usize = 20 + MAX_LAYERS * 12 + MAX_LIGHTS * 32 + WEATHER_F
 /// Floats in the shader's `Weather`.
 const WEATHER_FLOATS: usize = 28;
 
+/// A view every frame is drawn as instead of its own (a host's diagnostics:
+/// gs-studio's `GS_STUDIO_FIELD_VIEW`): 0 none, else the view's code + 1.
+static VIEW_OVERRIDE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Draw every frame as `view` from now on (None: each as it asks) -- to see
+/// what a lit picture is made of: its colours alone, its light alone.
+pub fn set_view_override(view: Option<FieldView>) {
+    let code = view.map_or(0, |v| match v {
+        FieldView::Lit => 1,
+        FieldView::LightOnly => 2,
+        FieldView::Normals => 3,
+        FieldView::Depth => 4,
+        FieldView::Albedo => 5,
+    });
+    VIEW_OVERRIDE.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn view_override() -> Option<FieldView> {
+    match VIEW_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Some(FieldView::Lit),
+        2 => Some(FieldView::LightOnly),
+        3 => Some(FieldView::Normals),
+        4 => Some(FieldView::Depth),
+        5 => Some(FieldView::Albedo),
+        _ => None,
+    }
+}
+
 fn uniforms(frame: &FieldFrame, slots: &[[f32; 4]], spans: &[[f32; 2]], srgb_target: bool) -> Vec<f32> {
     let mut u = Vec::with_capacity(UNIFORM_FLOATS);
     let c = &frame.camera;
-    let view = match frame.view {
+    let view = match view_override().unwrap_or(frame.view) {
         FieldView::Lit => 0.0,
         FieldView::LightOnly => 1.0,
         FieldView::Normals => 2.0,

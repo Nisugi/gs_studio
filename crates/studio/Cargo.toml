@@ -30,6 +30,8 @@ injury_doll = { path = "../injury_doll" }
 # Asset packs: one installed into a pool (gs_base::packs), one zipped for
 # release (`--pack`).
 gs_base = { path = "../gs_base" }
+# The GPU pass's diagnostic views (GS_STUDIO_FIELD_VIEW).
+gs_render = { path = "../gs_render" }
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Texture sheets and paint-over templates (editor::texture).
 png = "0.17"

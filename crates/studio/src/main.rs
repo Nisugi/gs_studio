@@ -224,6 +224,17 @@ fn main() -> eframe::Result {
     }
     seed_from_bundle(&data, &pool);
     seed_from_packs(&data, &pool);
+    // GS_STUDIO_FIELD_VIEW=albedo|light|normals|depth: every frame of the
+    // GPU pass (stage and doll) drawn as that -- its colours alone, its
+    // light alone -- to see what a lit picture is made of
+    let field_view = std::env::var("GS_STUDIO_FIELD_VIEW").ok().and_then(|v| match v.trim() {
+        "albedo" => Some(gs_render::field_gpu::FieldView::Albedo),
+        "light" => Some(gs_render::field_gpu::FieldView::LightOnly),
+        "normals" => Some(gs_render::field_gpu::FieldView::Normals),
+        "depth" => Some(gs_render::field_gpu::FieldView::Depth),
+        _ => None,
+    });
+    gs_render::field_gpu::set_view_override(field_view);
     eprintln!("gs-studio: {}", pool.status());
     if let Some(families) = &cli.save {
         // The Rigs tab's Save, headless: bake, puppet, skins and outfits into
