@@ -25,6 +25,9 @@ pub const USAGE: &str = "usage: gs-studio [--data <dir>] [--pool <dir>] [--publi
     \x20                (headless: the playable races' figures -- puppets and bodies -- into a client's pool, then exit)\n\
     \x20      gs-studio [--data <dir>] --pack forms|figures|<pack folder>\n\
     \x20                (headless: the pack zipped into <data>/../packs/<id>.zip, with its SHA-256, then exit)\n\
+    \x20      gs-studio [--data <dir>] [--pool <dir>] --pack frame:<recipe>\n\
+    \x20                (headless: the Frames tab's Export pack -- the pool's recipe and its parts as frame_<recipe>.zip\n\
+    \x20                 and its line in <data>/../packs/packs.toml, then exit)\n\
     \x20      gs-studio [--pool <dir>] --install-pack <pack.zip|pack folder>\n\
     \x20                (headless: the pack into the pool, keeping what the user changed, then exit)";
 
@@ -71,7 +74,8 @@ pub struct Cli {
     /// `--install-doll <pool dir>`: the playable races' figures into a
     /// game client's pool (`bodies::install_doll`) and exit, no window.
     pub install_doll: Option<PathBuf>,
-    /// `--pack forms|figures|<pack folder>`: zip that pack into
+    /// `--pack forms|figures|<pack folder>`, or `frame:<recipe>` (the
+    /// Frames tab's Export pack, `packs::export_frame`): zip that pack into
     /// `<data>/../packs/` (`packs::build`) and exit, no window.
     pub pack: Option<String>,
     /// `--install-pack <pack.zip|pack folder>`: install it into the pool

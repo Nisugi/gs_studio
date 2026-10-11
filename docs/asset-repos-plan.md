@@ -5,6 +5,16 @@ owner, who makes the decisions in section 9, and whoever builds it (a person
 or an LLM agent). Where this plan is unsure of a fact, it says so and names
 the phase that checks it.
 
+**Since, 2026-10-11:** the asset repo exists, public, as
+`github.com/Nisugi/studio_assets` (read `gs_studio_assets` below as that).
+Its catalogue is `packs.toml` at the repo's top, read raw, not a
+`catalogue.json` on a release: `gs_base::packs::Catalogue`, each
+`[[pack]]` with id, title, kind, version, size, sha256 and url, the url a
+release tagged `<id>-<version>` holding `<id>.zip`. The first packs are
+Hydra's frames, one recipe a pack (`kind = "frames"`), written by the
+Frames tab's *Export pack* (`studio::packs::export_frame`; README,
+*Frames*); Hydra installs them with `gs_base::packs::install_zip`.
+
 ## 1. The shape
 
 Two public repositories:

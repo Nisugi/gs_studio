@@ -12,7 +12,8 @@
 //! the pack's own already. A file a new version drops goes, unless changed.
 //!
 //! No HTTP here: a host fetches a pack's zip and hands its bytes (and the
-//! SHA-256 its catalogue gave) to [`install_zip`]. No egui.
+//! SHA-256 its catalogue gave) to [`install_zip`]. The catalogue is
+//! [`Catalogue`], `packs.toml` at the asset repo's top. No egui.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -87,6 +88,54 @@ impl Report {
             s += &format!(", {} kept as the pool has them", self.kept.len());
         }
         s
+    }
+}
+
+/// `packs.toml`: the packs on offer, at the top of the asset repo
+/// (`github.com/Nisugi/studio_assets`), read raw. A client lists them,
+/// fetches one's `url` on a click and hands the bytes and `sha256` to
+/// [`install_zip`]; a `version` other than the ledger's is an update.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Catalogue {
+    #[serde(default)]
+    pub pack: Vec<Listed>,
+}
+
+/// One pack as a catalogue offers it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Listed {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub version: String,
+    /// The zip's bytes, shown before it is fetched.
+    #[serde(default)]
+    pub size: u64,
+    pub sha256: String,
+    pub url: String,
+}
+
+impl Catalogue {
+    pub fn from_toml(text: &str) -> Result<Catalogue> {
+        toml::from_str(text).context("packs.toml")
+    }
+
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string_pretty(self).context("packs.toml")
+    }
+
+    pub fn get(&self, id: &str) -> Option<&Listed> {
+        self.pack.iter().find(|p| p.id == id)
+    }
+
+    /// `listed` in place of the pack of its id; the list kept in id order.
+    pub fn put(&mut self, listed: Listed) {
+        self.pack.retain(|p| p.id != listed.id);
+        self.pack.push(listed);
+        self.pack.sort_by(|a, b| a.id.cmp(&b.id));
     }
 }
 

@@ -63,13 +63,106 @@ pub fn build(what: &str, data_root: &Path) -> Result<Built, String> {
         }
         folder => PathBuf::from(folder),
     };
+    zip_pack(&dir, data_root)
+}
+
+/// The pack folder `dir` zipped into `<data>/../packs/<id>.zip`.
+fn zip_pack(dir: &Path, data_root: &Path) -> Result<Built, String> {
     let text = std::fs::read_to_string(dir.join("pack.toml")).map_err(|e| format!("{}: {e}", dir.join("pack.toml").display()))?;
     let manifest = packs::Manifest::from_toml(&text).map_err(|e| format!("{e:#}"))?;
-    let bytes = zip_dir(&dir)?;
+    let bytes = zip_dir(dir)?;
     let zip = packs_dir(data_root).join(format!("{}.zip", manifest.id));
     std::fs::create_dir_all(packs_dir(data_root)).map_err(|e| e.to_string())?;
     std::fs::write(&zip, &bytes).map_err(|e| format!("{}: {e}", zip.display()))?;
     Ok(Built { zip, bytes: bytes.len() as u64, sha256: packs::sha256_hex(&bytes) })
+}
+
+/// Where gs-studio's packs are released: one GitHub release per pack
+/// version, tagged `<id>-<version>`, holding `<id>.zip`; `packs.toml` at
+/// the repo's top lists them (`gs_base::packs::Catalogue`).
+pub const ASSET_REPO: &str = "Nisugi/studio_assets";
+
+/// The catalogue the exports keep, what goes to the asset repo's top:
+/// `<data>/../packs/packs.toml`.
+pub fn catalogue_path(data_root: &Path) -> PathBuf {
+    packs_dir(data_root).join("packs.toml")
+}
+
+/// What *Export pack* made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Exported {
+    pub id: String,
+    pub version: String,
+    pub built: Built,
+    /// The recipe's parts packed.
+    pub parts: usize,
+    /// False when the zip is the one the catalogue already lists.
+    pub changed: bool,
+}
+
+impl Exported {
+    /// One line for the status bar and the Frames tab.
+    pub fn summary(&self) -> String {
+        let what = if self.changed { format!("version {}: release it as {}-{} on {ASSET_REPO}", self.version, self.id, self.version) } else { format!("unchanged since version {}", self.version) };
+        format!("{} ({} parts, {} KB), {what}", self.built.zip.display(), self.parts, self.built.bytes.div_ceil(1024))
+    }
+}
+
+/// The pool's frame recipe `name` as a pack (the Frames tab's *Export
+/// pack*, `--pack frame:<name>`): `<data>/../packs/frame_<name>/` holding
+/// `pack.toml` and the recipe with the parts it names
+/// (`frame_recipe::write_pack_files`), zipped beside it, and its line in
+/// `packs.toml`. The version is a whole number, raised when the zip is not
+/// the one the catalogue lists.
+pub fn export_frame(name: &str, data_root: &Path) -> Result<Exported, String> {
+    use gs_calibrators::frame_recipe as fr;
+    let path = fr::recipe_path(name).ok_or_else(|| "no pool".to_owned())?;
+    let recipe = fr::Recipe::read(&path)?;
+    let problems = fr::validate(&recipe, |kind, part| fr::load_part(kind, part));
+    if !fr::exportable(&problems) {
+        let errors: Vec<&str> = problems.iter().filter(|p| !p.warning).map(|p| p.text.as_str()).collect();
+        return Err(format!("{name}: {}", errors.join("; ")));
+    }
+    let id = fr::pack_id(name);
+    let dir = packs_dir(data_root).join(&id);
+    let files = fr::write_pack_files(name, &recipe, &dir)?;
+    let catalogue_file = catalogue_path(data_root);
+    let mut catalogue = match std::fs::read_to_string(&catalogue_file) {
+        Ok(text) => packs::Catalogue::from_toml(&text).map_err(|e| format!("{}: {e:#}", catalogue_file.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => packs::Catalogue::default(),
+        Err(e) => return Err(format!("{}: {e}", catalogue_file.display())),
+    };
+    let listed = catalogue.get(&id).cloned();
+    let manifest = |version: &str| {
+        let text = format!(
+            "# The frame recipe '{name}' and the parts it names, for Hydra: gs-studio's\n# Frames tab, Export pack. Written afresh by every export.\nid = \"{id}\"\ntitle = \"{name}\"\nkind = \"frames\"\nversion = \"{version}\"\nformat = {}\n",
+            packs::FORMAT
+        );
+        std::fs::write(dir.join("pack.toml"), text).map_err(|e| format!("{}: {e}", dir.join("pack.toml").display()))
+    };
+    let mut version = listed.as_ref().map_or_else(|| "1".to_owned(), |l| l.version.clone());
+    manifest(&version)?;
+    let mut built = zip_pack(&dir, data_root)?;
+    let changed = listed.as_ref().is_none_or(|l| l.sha256 != built.sha256);
+    if changed && listed.is_some() {
+        let n: u64 = version.trim().parse().map_err(|_| format!("{}: {id}'s version '{version}' is not a whole number", catalogue_file.display()))?;
+        version = (n + 1).to_string();
+        manifest(&version)?;
+        built = zip_pack(&dir, data_root)?;
+    }
+    catalogue.put(packs::Listed {
+        id: id.clone(),
+        title: name.to_owned(),
+        kind: "frames".to_owned(),
+        version: version.clone(),
+        size: built.bytes,
+        sha256: built.sha256.clone(),
+        url: format!("https://github.com/{ASSET_REPO}/releases/download/{id}-{version}/{id}.zip"),
+    });
+    let text = catalogue.to_toml().map_err(|e| format!("{e:#}"))?;
+    let header = format!("# The packs on github.com/{ASSET_REPO}, read raw by Hydra from the repo's top.\n# gs-studio's exports keep it (packs::export_frame); a pack's zip is its release's asset.\n\n");
+    std::fs::write(&catalogue_file, header + &text).map_err(|e| format!("{}: {e}", catalogue_file.display()))?;
+    Ok(Exported { id, version, built, parts: files.len().saturating_sub(1), changed })
 }
 
 /// A pack folder zipped the same way every time: `pack.toml` and every file

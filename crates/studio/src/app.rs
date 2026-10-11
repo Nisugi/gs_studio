@@ -680,10 +680,10 @@ impl StudioApp {
             }
             ToolId::Frames | ToolId::Dolls | ToolId::Creatures | ToolId::Scenery => {
                 let effects = match self.active {
-                    ToolId::Frames => self.calibrators.ui(ui, CalibKind::Frames),
-                    ToolId::Dolls => self.calibrators.ui(ui, CalibKind::Dolls),
-                    ToolId::Creatures => self.calibrators.ui(ui, CalibKind::Creatures),
-                    _ => self.calibrators.ui(ui, CalibKind::Scenery),
+                    ToolId::Frames => self.calibrators.ui(ui, CalibKind::Frames, &self.data.path),
+                    ToolId::Dolls => self.calibrators.ui(ui, CalibKind::Dolls, &self.data.path),
+                    ToolId::Creatures => self.calibrators.ui(ui, CalibKind::Creatures, &self.data.path),
+                    _ => self.calibrators.ui(ui, CalibKind::Scenery, &self.data.path),
                 };
                 self.apply_effects(effects);
             }

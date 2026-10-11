@@ -341,3 +341,16 @@ closes with the split.
   it); `creature_field::pool::FrameSidecar` is no longer written by
   anything here. `FrameCalibrationState::open(Option<String>)`, `ui`,
   `ui_contents` keep their shapes, so the hosts did not change.
+
+## Frame packs for Hydra (2026-10-11)
+
+- The Frames tab gains *Export pack* beside *Save recipe*: it saves, then
+  sets `CalibrationOutcome::export_frame` (NEW field) for the host, which
+  knows where packs go (gs-studio's `packs::export_frame`).
+  `FrameCalibrationState::exported` shows what the host made of it.
+- `frame_recipe` adds the pack's side, egui-free: `pack_id`
+  (`frame_<name>`), `pack_root` (`global/images/frames/packs/<id>`),
+  `pack_part_targets` and `write_pack_files`, which writes the recipe and
+  its parts scaled down to `PACK_PX_PER_PT` (4) at `PACK_MAX_THICKNESS`
+  (24), through premultiplied alpha, never up. The format and the
+  catalogue are `gs_base::packs`' (agreed with Hydra's side the same day).

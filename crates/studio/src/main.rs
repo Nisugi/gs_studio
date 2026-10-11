@@ -183,7 +183,8 @@ fn main() -> eframe::Result {
             Err(e) => fail(&format!("gs-studio: --install-doll: {e}")),
         }
     }
-    if let Some(what) = &cli.pack {
+    // a frame pack reads the pool's recipe: below, once the pool is set
+    if let Some(what) = cli.pack.as_deref().filter(|w| !w.starts_with("frame:")) {
         match packs::build(what, &data.path) {
             Ok(built) => {
                 println!("{} ({} bytes)\nsha256 {}", built.zip.display(), built.bytes, built.sha256);
@@ -220,6 +221,15 @@ fn main() -> eframe::Result {
                 std::process::exit(0);
             }
             Err(e) => fail(&format!("gs-studio: --install-pack: {e}")),
+        }
+    }
+    if let Some(recipe) = cli.pack.as_deref().and_then(|w| w.strip_prefix("frame:")) {
+        match packs::export_frame(recipe.trim(), &data.path) {
+            Ok(done) => {
+                println!("{}\nsha256 {}", done.summary(), done.built.sha256);
+                std::process::exit(0);
+            }
+            Err(e) => fail(&format!("gs-studio: --pack frame:{recipe}: {e}")),
         }
     }
     seed_from_bundle(&data, &pool);

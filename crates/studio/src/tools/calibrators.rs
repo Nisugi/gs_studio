@@ -8,6 +8,8 @@
 //! when the pool directory changes. The rules (what an outcome asks of the
 //! app, the doll pick, the rescan confirmation) are in `crate::calib`.
 
+use std::path::Path;
+
 use gs_calibrators::{
     doll_calibration, CalibrationOutcome, CreatureCalibrationState, DollCalibrationState, DollCalibrationTarget,
     FrameCalibrationState, SceneryCalibrationState,
@@ -118,26 +120,27 @@ impl<S: Hosted> Slot<S> {
         go
     }
 
-    /// Draw the calibrator (or why there is none). Returns its `reload_art`.
-    fn body(&mut self, ui: &mut egui::Ui, log: &mut StatusLog) -> bool {
+    /// Draw the calibrator (or why there is none). Returns its outcome, the
+    /// messages already logged.
+    fn body(&mut self, ui: &mut egui::Ui, log: &mut StatusLog) -> CalibrationOutcome {
         let Some(state) = self.state.as_mut() else {
             if let Some(note) = &self.note {
                 ui.label(note);
             }
             ui.weak("Nothing to calibrate here yet. After adding images to the pool, press Rescan pool.");
-            return false;
+            return CalibrationOutcome::default();
         };
-        let outcome = state.body(ui);
+        let mut outcome = state.body(ui);
         if outcome.closed {
             // a calibrator that closed itself in the tab
             self.note = outcome.messages.last().cloned();
             self.state = None;
             self.gate.reset();
         }
-        for message in outcome.messages {
+        for message in std::mem::take(&mut outcome.messages) {
             log.push(message);
         }
-        outcome.reload_art
+        outcome
     }
 }
 
@@ -168,7 +171,7 @@ fn simple_tab<S: Hosted>(
     ui: &mut egui::Ui,
     log: &mut StatusLog,
     open: fn() -> (Option<S>, CalibrationOutcome),
-) -> bool {
+) -> CalibrationOutcome {
     slot.ensure_open(log, open);
     let mut rescan = false;
     ui.horizontal_wrapped(|ui| rescan = slot.rescan_controls(ui));
@@ -223,23 +226,34 @@ impl CalibratorsTool {
         });
     }
 
-    /// Draw one calibrator tab.
-    pub fn ui(&mut self, ui: &mut egui::Ui, tab: CalibKind) -> HostEffects {
+    /// Draw one calibrator tab. `data_root` places the Frames tab's
+    /// exported packs (`packs::export_frame`).
+    pub fn ui(&mut self, ui: &mut egui::Ui, tab: CalibKind, data_root: &Path) -> HostEffects {
         let mut effects = HostEffects::default();
         egui::CentralPanel::default().show(ui, |ui| {
             let log = &mut self.log;
             match tab {
                 CalibKind::Frames => {
-                    let reload = simple_tab(&mut self.frames, ui, log, || FrameCalibrationState::open(None));
-                    effects.absorb(tab, reload);
+                    let outcome = simple_tab(&mut self.frames, ui, log, || FrameCalibrationState::open(None));
+                    if let Some(name) = outcome.export_frame {
+                        let result = crate::packs::export_frame(&name, data_root).map(|done| done.summary());
+                        log.push(match &result {
+                            Ok(summary) => format!("Frame pack exported: {summary}"),
+                            Err(e) => format!("Frame pack '{name}' not exported: {e}"),
+                        });
+                        if let Some(state) = self.frames.state.as_mut() {
+                            state.exported(result);
+                        }
+                    }
+                    effects.absorb(tab, outcome.reload_art);
                 }
                 CalibKind::Creatures => {
-                    let reload = simple_tab(&mut self.creatures, ui, log, CreatureCalibrationState::open);
-                    effects.absorb(tab, reload);
+                    let outcome = simple_tab(&mut self.creatures, ui, log, CreatureCalibrationState::open);
+                    effects.absorb(tab, outcome.reload_art);
                 }
                 CalibKind::Scenery => {
-                    let reload = simple_tab(&mut self.scenery, ui, log, SceneryCalibrationState::open);
-                    effects.absorb(tab, reload);
+                    let outcome = simple_tab(&mut self.scenery, ui, log, SceneryCalibrationState::open);
+                    effects.absorb(tab, outcome.reload_art);
                 }
                 CalibKind::Dolls => self.dolls_body(ui, &mut effects),
             }
@@ -283,7 +297,7 @@ impl CalibratorsTool {
             // Re-target = drop the state and open again.
             dolls.reopen(log, || open_doll(doll_picker));
         }
-        let reload = dolls.body(ui, log);
-        effects.absorb(CalibKind::Dolls, reload);
+        let outcome = dolls.body(ui, log);
+        effects.absorb(CalibKind::Dolls, outcome.reload_art);
     }
 }

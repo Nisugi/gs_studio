@@ -6,7 +6,9 @@
 //! numbers sit beside, and the preview assembles a window, a row of two
 //! cells and a 2x2 grid at real point sizes (1x or 2x, rotate or mirror),
 //! or tiles the edge three times for the seam. Save validates and writes
-//! `frames/<name>.toml`. The parts come from the pod
+//! `frames/<name>.toml`; Export pack saves, then asks the host to pack the
+//! recipe for Hydra (`export_frame` in the outcome, `frame_recipe::write_pack_files`).
+//! The parts come from the pod
 //! (`image-gen/flux2_frames.py`) through `tools/frames_ingest.py --painted`.
 //!
 //! The earlier per-folder calibrator (five pieces cut by hand) is gone;
@@ -242,6 +244,7 @@ impl FrameCalibrationState {
         let mut outcome = CalibrationOutcome::default();
         let mut load: Option<String> = None;
         let mut save = false;
+        let mut export = false;
         let before = self.recipe.clone();
 
         // The recipe strip.
@@ -262,6 +265,19 @@ impl FrameCalibrationState {
             ui.add(egui::TextEdit::singleline(&mut self.name).desired_width(160.0));
             if ui.add_enabled(fr::exportable(&self.problems), egui::Button::new("Save recipe")).on_hover_text("Writes frames/<name>.toml, which Hydra reads; an error blocks, a warning does not").clicked() {
                 save = true;
+            }
+            if ui
+                .add_enabled(fr::exportable(&self.problems), egui::Button::new("Export pack"))
+                .on_hover_text(format!(
+                    "Saves the recipe, then packs it with the parts it names for Hydra: packs/{}.zip and its line in packs/packs.toml, the version raised when the pack changed. Parts are scaled down to {} px a point at {} pt thick; the library keeps them as painted",
+                    fr::pack_id(&self.name),
+                    fr::PACK_PX_PER_PT,
+                    fr::PACK_MAX_THICKNESS
+                ))
+                .clicked()
+            {
+                save = true;
+                export = true;
             }
             if self.dirty {
                 ui.weak("unsaved");
@@ -484,29 +500,50 @@ impl FrameCalibrationState {
         if let Some(name) = load {
             self.load(&name);
         }
-        if save {
-            let name = self.name.trim().to_owned();
-            if name.is_empty() || name.contains(['/', '\\']) {
-                self.error = Some("Save as: a recipe name is needed".to_owned());
-            } else if let Some(path) = fr::recipe_path(&name) {
-                match std::fs::write(&path, self.recipe.to_toml_string()) {
-                    Ok(()) => {
-                        self.dirty = false;
-                        self.error = None;
-                        self.note = Some(format!("Recipe written to {}", path.display()));
-                        outcome.reload_art = true;
-                        outcome.messages.push(format!("Frame recipe '{name}' saved."));
-                        if !self.recipes.iter().any(|r| *r == name) {
-                            self.recipes.push(name.clone());
-                            self.recipes.sort();
-                        }
-                        self.name = name;
-                    }
-                    Err(e) => self.error = Some(format!("Save failed: {e}")),
-                }
-            }
+        if save && self.save(&mut outcome) && export {
+            outcome.export_frame = Some(self.name.clone());
         }
         outcome
+    }
+
+    /// Write the recipe to `frames/<name>.toml`. True when it was written.
+    fn save(&mut self, outcome: &mut CalibrationOutcome) -> bool {
+        let name = self.name.trim().to_owned();
+        if name.is_empty() || name.contains(['/', '\\']) {
+            self.error = Some("Save as: a recipe name is needed".to_owned());
+            return false;
+        }
+        let Some(path) = fr::recipe_path(&name) else { return false };
+        match std::fs::write(&path, self.recipe.to_toml_string()) {
+            Ok(()) => {
+                self.dirty = false;
+                self.error = None;
+                self.note = Some(format!("Recipe written to {}", path.display()));
+                outcome.reload_art = true;
+                outcome.messages.push(format!("Frame recipe '{name}' saved."));
+                if !self.recipes.iter().any(|r| *r == name) {
+                    self.recipes.push(name.clone());
+                    self.recipes.sort();
+                }
+                self.name = name;
+                true
+            }
+            Err(e) => {
+                self.error = Some(format!("Save failed: {e}"));
+                false
+            }
+        }
+    }
+
+    /// What the host made of *Export pack*, shown under the recipe.
+    pub fn exported(&mut self, result: Result<String, String>) {
+        match result {
+            Ok(note) => {
+                self.note = Some(note);
+                self.error = None;
+            }
+            Err(e) => self.error = Some(format!("Export failed: {e}")),
+        }
     }
 
     /// The trim editor: the part's raw picture with its cut box; drag the

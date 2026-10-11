@@ -63,6 +63,12 @@
 //! rails over dividers), the stickers over the joints, the ornaments
 //! where their rules say. Parts are named, never pathed: a pack carries
 //! the recipes and the parts they name.
+//!
+//! A frame pack (the Frames tab's *Export pack*; agreed with Hydra's side
+//! 2026-10-11) is one recipe, id `frame_<name>`, in `gs_base::packs`'
+//! format, its files in a folder of their own:
+//! `global/images/frames/packs/<id>/<name>.toml` and `.../parts/<kind>/`,
+//! the parts scaled down to what Hydra draws ([`write_pack_files`]).
 
 use std::path::{Path, PathBuf};
 
@@ -655,6 +661,109 @@ pub fn list_recipes() -> Vec<String> {
 
 pub fn recipe_path(name: &str) -> Option<PathBuf> {
     Some(frames_dir()?.join(format!("{}.toml", name.trim())))
+}
+
+/// A frame pack's parts get this many pixels per point (Hydra draws at up
+/// to 4x)...
+pub const PACK_PX_PER_PT: f32 = 4.0;
+/// ...at the thickest Hydra draws a frame: a theme may set a recipe's
+/// thickness up to it, and the parts grow with it.
+pub const PACK_MAX_THICKNESS: f32 = 24.0;
+
+/// The frame pack of recipe `name`: `frame_` and the name in lower snake
+/// case, so no frame pack shares an id with a pack of another kind.
+pub fn pack_id(name: &str) -> String {
+    let slug: String = name.trim().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '_' }).collect();
+    format!("frame_{slug}")
+}
+
+/// Where a frame pack's files sit in a pool: its own folder, so two packs
+/// never share a part's path. A recipe looks for a part in its own pack,
+/// then in the other packs, then in the library (`parts/`).
+pub fn pack_root(id: &str) -> String {
+    format!("global/images/frames/packs/{id}")
+}
+
+/// Every part a recipe names, with the pixels its measured side needs in
+/// a pack: an edge's height (drawn `thickness` tall), a sticker's longer
+/// side (drawn in the `size` square), an ornament's height (drawn `height`
+/// tall), at [`PACK_PX_PER_PT`] when the recipe is drawn at
+/// [`PACK_MAX_THICKNESS`]. A part in two places takes the larger.
+pub fn pack_part_targets(recipe: &Recipe) -> Vec<(&'static str, String, f32)> {
+    let px = (PACK_MAX_THICKNESS / recipe.thickness.max(1.0)).max(1.0) * PACK_PX_PER_PT;
+    let mut out: Vec<(&'static str, String, f32)> = Vec::new();
+    let mut need = |kind: &'static str, name: &str, pt: f32| {
+        let name = name.trim();
+        if name.is_empty() {
+            return;
+        }
+        match out.iter_mut().find(|(k, n, _)| *k == kind && n == name) {
+            Some(part) => part.2 = part.2.max(pt * px),
+            None => out.push((kind, name.to_owned(), pt * px)),
+        }
+    };
+    need("edges", recipe.edge.as_str(), recipe.thickness);
+    for s in [&recipe.corner, &recipe.tee, &recipe.cross].into_iter().flatten() {
+        need("stickers", s.as_str(), recipe.size);
+    }
+    for o in &recipe.ornaments {
+        need("ornaments", o.image.as_str(), o.height);
+    }
+    out
+}
+
+/// Recipe `name`'s pack files under the pack folder `dir`, its `global/`
+/// written afresh: the recipe and every part it names, each scaled down
+/// to [`pack_part_targets`]' size (never up; a part already small enough
+/// is copied as it is). The library keeps its parts at their painted size.
+/// The pool paths written, sorted.
+pub fn write_pack_files(name: &str, recipe: &Recipe, dir: &Path) -> Result<Vec<String>, String> {
+    let root = pack_root(&pack_id(name));
+    let global = dir.join("global");
+    if global.is_dir() {
+        std::fs::remove_dir_all(&global).map_err(|e| format!("{}: {e}", global.display()))?;
+    }
+    let mut written = Vec::new();
+    let recipe_rel = format!("{root}/{}.toml", name.trim());
+    let target = dir.join(&recipe_rel);
+    std::fs::create_dir_all(target.parent().expect("under the pack")).map_err(|e| format!("{}: {e}", target.display()))?;
+    std::fs::write(&target, recipe.to_toml_string()).map_err(|e| format!("{}: {e}", target.display()))?;
+    written.push(recipe_rel);
+    for (kind, part, need) in pack_part_targets(recipe) {
+        let src = part_path(kind, &part).ok_or_else(|| "no pool".to_owned())?;
+        let rel = format!("{root}/parts/{kind}/{part}.png");
+        let dst = dir.join(&rel);
+        std::fs::create_dir_all(dst.parent().expect("under the pack")).map_err(|e| format!("{}: {e}", dst.display()))?;
+        let img = image::open(&src).map_err(|e| format!("{}: {e}", src.display()))?.to_rgba8();
+        let (w, h) = img.dimensions();
+        let side = (if kind == "stickers" { w.max(h) } else { h }) as f32;
+        let scale = need.ceil() / side;
+        if scale < 1.0 {
+            let (nw, nh) = (((w as f32 * scale).round() as u32).max(1), ((h as f32 * scale).round() as u32).max(1));
+            resize_premultiplied(&img, nw, nh).save(&dst).map_err(|e| format!("{}: {e}", dst.display()))?;
+        } else {
+            std::fs::copy(&src, &dst).map_err(|e| format!("{}: {e}", dst.display()))?;
+        }
+        written.push(rel);
+    }
+    written.sort();
+    Ok(written)
+}
+
+/// `img` scaled to `w` x `h` through premultiplied alpha, so a clear
+/// pixel's colour (the keyed background's) never bleeds into the edge.
+fn resize_premultiplied(img: &RgbaImage, w: u32, h: u32) -> RgbaImage {
+    let pre = image::Rgba32FImage::from_fn(img.width(), img.height(), |x, y| {
+        let [r, g, b, a] = img.get_pixel(x, y).0.map(|v| v as f32 / 255.0);
+        image::Rgba([r * a, g * a, b * a, a])
+    });
+    let small = image::imageops::resize(&pre, w, h, image::imageops::FilterType::Lanczos3);
+    RgbaImage::from_fn(w, h, |x, y| {
+        let [r, g, b, a] = small.get_pixel(x, y).0;
+        let a = a.clamp(0.0, 1.0);
+        let straight = |c: f32| if a > 0.0 { (c / a).clamp(0.0, 1.0) } else { 0.0 };
+        image::Rgba([straight(r), straight(g), straight(b), a].map(|v| (v * 255.0).round() as u8))
+    })
 }
 
 /// The pixel sizes of a recipe's parts, as the layout needs them:

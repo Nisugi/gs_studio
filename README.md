@@ -1259,6 +1259,22 @@ embeds the metadata in the PNG); the doll calibrator writes the PNG alone.
   taller than the sticker square is a warning. Rails run the window's
   full length through every joint (dividers under the outer rails),
   stickers over the joints, ornaments by rule.
+  *Export pack* (beside Save; headless `gs-studio --pack frame:<recipe>`)
+  saves the recipe and packs it for Hydra, one recipe a pack, in
+  `gs_base::packs`' format: `<data>/../packs/frame_<name>/` holds
+  `pack.toml` (`kind = "frames"`) and
+  `global/images/frames/packs/frame_<name>/` -- the recipe and
+  `parts/<kind>/` with each part it names scaled down to 4 px a point at
+  24 points thick (Hydra's thickest; never up, through premultiplied
+  alpha; the library keeps them as painted) -- zipped beside it as
+  `frame_<name>.zip`, and its line written in `<data>/../packs/packs.toml`
+  (`gs_base::packs::Catalogue`: id, title, kind, version, size, sha256,
+  url), the list Hydra reads raw from the top of
+  `github.com/Nisugi/studio_assets`. The version is a whole number, raised
+  when the zip is not the one the list has; the url is that repo's release
+  `frame_<name>-<version>`, which is made by hand. Each pack sits in its own
+  folder, so a recipe looks for a part in its own pack, then the other
+  packs, then the library.
   The parts come from the pod: `image-gen/flux2_frames.py` paints each
   style of `image-gen/frame_styles.toml` (a plain edge, two stickers, two
   ornaments, several seeds) on flat magenta, and `tools/frames_ingest.py
