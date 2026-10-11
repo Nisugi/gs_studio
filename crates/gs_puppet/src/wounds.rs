@@ -89,6 +89,23 @@ fn scar_over(c: [f32; 3], rim: f32, core: f32, mid: f32) -> [f32; 3] {
     let c = mix(c, SCAR_CORE_RGB, core * 0.95);
     mix(c, SCAR_RGB, core * smoothstep(0.5, 0.9, mid) * 0.85)
 }
+
+/// A legible scar ([`Marks::legible`]): silvery and cool, never the rose
+/// of a wound, in a dark outline that reads on pale skin and pale cloth.
+const LEGIBLE_SCAR_EDGE_RGB: [f32; 3] = [34.0, 28.0, 46.0];
+const LEGIBLE_SCAR_CORE_RGB: [f32; 3] = [196.0, 192.0, 226.0];
+const LEGIBLE_SCAR_RGB: [f32; 3] = [246.0, 246.0, 255.0];
+/// A legible scar's lines against a plain one's: this much wider and longer.
+const LEGIBLE_SCAR_WIDTH: f32 = 1.6;
+const LEGIBLE_SCAR_LENGTH: f32 = 1.25;
+/// How much a legible scar lights itself (a wound, `layers`, more).
+const LEGIBLE_SCAR_GLOW: f32 = 0.3;
+
+fn legible_scar_over(c: [f32; 3], rim: f32, core: f32, mid: f32) -> [f32; 3] {
+    let c = mix(c, LEGIBLE_SCAR_EDGE_RGB, rim * 0.95);
+    let c = mix(c, LEGIBLE_SCAR_CORE_RGB, core);
+    mix(c, LEGIBLE_SCAR_RGB, core * smoothstep(0.4, 0.85, mid) * 0.9)
+}
 pub(crate) const NERVE_RGB: [f32; 3] = [132.0, 96.0, 255.0];
 const NERVE_CORE_RGB: [f32; 3] = [214.0, 200.0, 255.0];
 pub(crate) const POISON_TINT_RGB: [f32; 3] = [118.0, 168.0, 84.0];
@@ -175,6 +192,10 @@ pub(crate) struct Marks {
     pub status: u16,
     /// Its eyes' wounds and scars (a head's; none elsewhere).
     pub eyes: [EyeMark; 2],
+    /// Drawn to be read at a glance (the injury doll, a small widget):
+    /// its scars wider and longer, in a pale cool colour of their own that
+    /// no wound has, and faintly lit by themselves.
+    pub legible: bool,
 }
 
 /// One eye's wound and scar, and where it is: on its segment's surface
@@ -427,11 +448,12 @@ pub(crate) fn marks_at(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: 
 pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front: f32, up: f32, edge: f32, min_half: f32) -> ([f32; 3], f32, f32) {
     let fore = if m.split { smoothstep(-0.25, 0.25, front) } else { 1.0 };
     // the wounds first; the statuses go over them (below)
-    let (mut c, mut wet) = mark_wet(col, at, seg, m.rank, m.scar, edge * fore, min_half);
+    let (mut c, mut wet, mut glow) = mark_wet(col, at, seg, m.rank, m.scar, edge * fore, min_half, m.legible);
     if m.split && (m.back > 0 || m.back_scar > 0) {
-        let (cb, wb) = mark_wet(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half);
+        let (cb, wb, gb) = mark_wet(c, at, seg ^ 0xBAC, m.back, m.back_scar, edge * (1.0 - fore), min_half, m.legible);
         c = cb;
         wet = wet.max(wb);
+        glow = glow.max(gb);
     }
     if m.run > 0 {
         let side = if m.leg { 1.0 - smoothstep(-0.3, 0.3, front) } else { 1.0 - smoothstep(0.35, 0.75, front) };
@@ -450,12 +472,11 @@ pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front:
         c = ce;
         wet = wet.max(we);
     }
-    let mut glow = 0.0;
     if m.nerve > 0 {
         let (a, mid) = nerve_lines(at, seg, m.nerve, min_half);
         c = mix(c, NERVE_RGB, a);
         c = mix(c, NERVE_CORE_RGB, smoothstep(0.4, 0.9, mid) * a);
-        glow = a * [0.6, 0.9, 1.0][m.nerve.min(3) as usize - 1];
+        glow = glow.max(a * [0.6, 0.9, 1.0][m.nerve.min(3) as usize - 1]);
     }
     // statuses over the wounds: poison's veins, disease, possession, roots
     if m.status != 0 {
@@ -472,28 +493,37 @@ pub(crate) fn marks_wet(col: [f32; 3], at: [f32; 2], seg: u32, m: &Marks, front:
 /// point `at` (feet) drawn on, laid out by `seg`; `edge` fades them.
 #[cfg(test)]
 fn mark(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32) -> [f32; 3] {
-    mark_wet(col, at, seg, rank, scar, edge, min_half).0
+    mark_wet(col, at, seg, rank, scar, edge, min_half, false).0
 }
 
-/// [`mark`], and how wet its blood is there.
-fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32) -> ([f32; 3], f32) {
+/// [`mark`], how wet its blood is there, and how much it lights itself
+/// (a [`legible`](Marks::legible) scar).
+#[allow(clippy::too_many_arguments)]
+fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32, min_half: f32, legible: bool) -> ([f32; 3], f32, f32) {
     let edge = edge.clamp(0.0, 1.0);
     if edge <= 0.0 {
-        return (col, 0.0);
+        return (col, 0.0, 0.0);
     }
     let mut c = col;
+    let mut glow = 0.0f32;
     if scar > 0 {
         let r = scar.min(3) as usize - 1;
         let seed = seg.wrapping_mul(977) ^ 0x5CA2;
-        let half = ([0.03, 0.048, 0.068][r] as f32).max(min_half);
-        let (spacing, keep, length) = ([0.5, 0.42, 0.34][r], [0.65, 0.72, 0.82][r], [0.6, 0.8, 1.05][r]);
+        let (wider, longer) = if legible { (LEGIBLE_SCAR_WIDTH, LEGIBLE_SCAR_LENGTH) } else { (1.0, 1.0) };
+        let half = ([0.03, 0.048, 0.068][r] as f32 * wider).max(min_half);
+        let (spacing, keep, length) = ([0.5, 0.42, 0.34][r], [0.65, 0.72, 0.82][r], [0.6, 0.8, 1.05][r] as f32 * longer);
         let (cover, mid) = lines(at, seed, spacing, keep, half, length);
         // the same lines, wider: a dark outline round each
         let (rim, _) = lines(at, seed, spacing, keep, half * 1.8, length);
-        c = scar_over(c, rim * edge, cover * edge, mid);
+        if legible {
+            c = legible_scar_over(c, rim * edge, cover * edge, mid);
+            glow = cover * edge * LEGIBLE_SCAR_GLOW;
+        } else {
+            c = scar_over(c, rim * edge, cover * edge, mid);
+        }
     }
     if rank == 0 {
-        return (c, 0.0);
+        return (c, 0.0, glow);
     }
     let mut wet = 0.0f32;
     let r = rank.min(3) as usize - 1;
@@ -525,7 +555,7 @@ fn mark_wet(col: [f32; 3], at: [f32; 2], seg: u32, rank: u8, scar: u8, edge: f32
         c = mix(c, CUT_CORE_RGB, torn * 0.85);
         wet = wet.max(torn);
     }
-    (c, wet)
+    (c, wet, glow)
 }
 
 /// A rank's cuts (`r` = rank - 1): a line's half width, the spacing between

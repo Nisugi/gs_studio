@@ -659,7 +659,7 @@ fn build_marked(puppet: &Puppet, body: &Arc<gs_puppet::mesh::BodyMesh>, key: &Pu
         _ => (PoseChoice::Standing, 0),
     };
     let standing = held.is_none().then_some(set).flatten().and_then(|set| shown_as.0.resolve(set, shown_as.1).map(|(_, p)| puppet.pose(&set.clamp(p))));
-    let still = LayerLook { look, effects: key.effects, texture: None, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh: None, fitted: Some(&fitted), held: held.as_ref(), stands: standing.as_ref() };
+    let still = LayerLook { look, effects: key.effects, texture: None, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh: None, fitted: Some(&fitted), held: held.as_ref(), stands: standing.as_ref(), legible: key.legible };
     // as drawn, unposed: every segment only lifted to the ground, which is taken back off
     let rest = puppet.pose_as_drawn(&gs_puppet::Pose::default());
     let lift = rest.xf.first().map_or([0.0; 3], |x| x.t);
@@ -1026,6 +1026,11 @@ pub struct PuppetKey {
     /// how it holds itself, sways, trembles and breathes. What they draw on
     /// the body is in `effects` ([`with_statuses`](Self::with_statuses) sets both).
     pub statuses: Statuses,
+    /// Its layered cloud drawn to be read at a glance (ADDITION, the
+    /// injury doll's: `gs_puppet::layers::LayerLook::legible` -- wounds
+    /// bolder and self-lit, hurt parts washed, scars in their own look;
+    /// [`with_legible`](Self::with_legible)).
+    pub legible: bool,
 }
 
 /// A breathing cycle is drawn in this many steps; at rest the figure moves
@@ -1107,7 +1112,15 @@ impl PuppetKey {
             crits: [0; PARTS],
             fresh: None,
             statuses: Statuses::NONE,
+            legible: false,
         }
+    }
+
+    /// The same key with its layered cloud drawn to be read at a glance
+    /// (ADDITION: [`legible`](Self::legible)).
+    pub fn with_legible(mut self, legible: bool) -> Self {
+        self.legible = legible;
+        self
     }
 
     /// The same key under `statuses` (ADDITION): the posture, sway, tremble
@@ -1797,7 +1810,7 @@ fn pose_puppet_inner(
             let fitted = key.modelled.then(|| bodies.and_then(|bs| body_of(bs, puppet)).and_then(|b| fitted_body(puppet, &body_cloud(&b, key).or_else(|| b.splats.clone())?, &key.splat.params()))).flatten();
             // held (webbed, bound), it is wrapped as it stands
             let held = (key.pose == PoseChoice::Webbed).then_some(&posed);
-            let look = gs_puppet::layers::LayerLook { look, effects: key.effects, texture, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh, fitted: fitted.as_deref(), held, stands: None };
+            let look = gs_puppet::layers::LayerLook { look, effects: key.effects, texture, coat: key.coat.coating(), causes: &causes, crits: &crits, fresh, fitted: fitted.as_deref(), held, stands: None, legible: key.legible };
             layer_cloud(puppet, &key.splat.params()).posed(&posed, &look)
         } else {
             gs_puppet::splat::cloud(&posed, texture, look.body, &key.splat.params())

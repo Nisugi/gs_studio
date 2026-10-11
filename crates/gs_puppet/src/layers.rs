@@ -357,6 +357,8 @@ struct Gash {
     seed: u32,
     /// The surface address it is centred on (station, ring angle).
     from: (f32, f32),
+    /// How much it lights itself, 0..1 (a legible wound's: [`LayerLook::legible`]).
+    lit: f32,
 }
 
 impl Gash {
@@ -428,14 +430,21 @@ impl Gash {
 /// (1..=9, 0 unknown): three to a wound rank, each a little worse. The
 /// first mark is the worst of them; the rest are smaller, shallower and at
 /// their own slants. `behind`: surface addresses the first marks come out
-/// opposite (a wound that went through the body). Fixed by the segment, so
-/// a wound does not move from frame to frame.
+/// opposite (a wound that went through the body). `legible`: drawn to be
+/// read at a glance ([`LayerLook::legible`]). Fixed by the segment, so a
+/// wound does not move from frame to frame.
 #[allow(clippy::too_many_arguments)]
-fn gashes(seg: u32, rank: u8, kind: Cause, salt: u32, places: &[&Anchor], radius: f32, open: f32, crit: u8, behind: &[(f32, f32)]) -> Vec<Gash> {
+fn gashes(seg: u32, rank: u8, kind: Cause, salt: u32, places: &[&Anchor], radius: f32, open: f32, crit: u8, behind: &[(f32, f32)], legible: bool) -> Vec<Gash> {
     if rank == 0 || places.is_empty() {
         return Vec::new();
     }
     let (count, half_len, half_w, depth) = kind.shape(rank);
+    let r = rank.clamp(1, 3) as usize - 1;
+    let (half_len, half_w, least_w, lit) = if legible {
+        (half_len * LEGIBLE_GASH.0, half_w * LEGIBLE_GASH.1, LEGIBLE_GASH_HALF_W[r], LEGIBLE_GASH_GLOW[r])
+    } else {
+        (half_len, half_w, 0.0, 0.0)
+    };
     let within = if crit == 0 { 0.5 } else { ((crit.clamp(1, 9) - 1) % 3) as f32 / 2.0 };
     let k = (radius / GASH_GIRTH_FT).clamp(GASH_SCALE.0, GASH_SCALE.1) * (0.8 + 0.4 * within);
     let depth = (depth * (0.85 + 0.3 * within)).min(radius * GASH_MAX_OF_RADIUS) * open;
@@ -475,12 +484,13 @@ fn gashes(seg: u32, rank: u8, kind: Cause, salt: u32, places: &[&Anchor], radius
                 c: place.feet?,
                 dir: [lean.cos(), lean.sin()],
                 half_len: half_len * k * size * grow_len,
-                half_w: half_w * k * size.min(1.1) * grow_w,
+                half_w: (half_w * k * size.min(1.1)).max(least_w) * grow_w,
                 depth: depth * if lead { 1.0 } else { 0.7 },
                 bone: rank >= 3 && lead,
                 phase: wounds::hash(id, salt ^ 0x54) * std::f32::consts::TAU,
                 seed: (id as u32) ^ salt.wrapping_mul(0x9E37),
                 from: (place.station, place.theta),
+                lit,
             })
         })
         .collect()
@@ -941,7 +951,31 @@ pub struct LayerLook<'a> {
     /// way is down for what runs on it (`blood`). None: as built (or
     /// held).
     pub stands: Option<&'a Posed<'a>>,
+    /// Drawn to be read at a glance (the injury doll, a widget some 200 px
+    /// tall, where a life-size cut is a pixel wide): wounds wider and
+    /// longer ([`LEGIBLE_GASH`]), lit by themselves so they show in any
+    /// light, each hurt part washed by how bad it is (red for a wound, a
+    /// cool pale for a scar: [`WOUND_WASH`], [`SCAR_WASH`]), and the scars
+    /// in a look of their own (`wounds::Marks::legible`).
+    pub legible: bool,
 }
+
+/// A legible wound's marks against a plain one's: this much longer and
+/// wider, and never narrower than its rank's least half width, feet.
+const LEGIBLE_GASH: (f32, f32) = (1.3, 1.4);
+const LEGIBLE_GASH_HALF_W: [f32; 3] = [0.04, 0.055, 0.07];
+/// How much a legible wound lights itself, by rank.
+const LEGIBLE_GASH_GLOW: [f32; 3] = [0.45, 0.55, 0.65];
+/// The least half width a legible painted line has (a scar, a nerve, a
+/// vein), feet: at the doll's ~34 px a foot, about three pixels across.
+const LEGIBLE_LINE_HALF_FT: f32 = 0.04;
+/// A legibly hurt part's wash: toward this colour, this much by rank, and
+/// lit by itself this share of it.
+const WOUND_WASH: [f32; 3] = [214.0, 38.0, 34.0];
+const WOUND_WASH_BY_RANK: [f32; 3] = [0.2, 0.32, 0.44];
+const WOUND_WASH_GLOW: f32 = 0.3;
+const SCAR_WASH: [f32; 3] = [156.0, 150.0, 220.0];
+const SCAR_WASH_BY_RANK: [f32; 3] = [0.12, 0.18, 0.24];
 
 /// A fitted cloud bound to a puppet's anchors: each Gaussian moves with
 /// the body (`splat::BoundCloud`) and has a surface address of its own.
@@ -1319,7 +1353,7 @@ impl LayerCloud {
         let spacing = self.params.spacing.max(0.005);
         let overlap = self.params.overlap.clamp(0.2, 2.0);
         let alpha = self.params.alpha.clamp(0.05, 1.0);
-        let min_half = spacing * 0.5;
+        let min_half = if look.legible { (spacing * 0.5).max(LEGIBLE_LINE_HALF_FT) } else { spacing * 0.5 };
         let unturned = Look { yaw: 0.0, ..look.look };
         let surfs: Vec<Surface> = crate::draw::surfaces(posed, &unturned);
         let (_, stump) = crate::draw::severed(posed, &unturned);
@@ -1330,7 +1364,8 @@ impl LayerCloud {
         let marks = crate::skin::segment_marks(puppet, &surfs, &unturned, painted_fx);
         // the sheet paints everything but the wounds themselves, which are
         // gashes here (a stump keeps its paint)
-        let painted: Vec<wounds::Marks> = marks.iter().enumerate().map(|(i, m)| if stump[i] { *m } else { wounds::Marks { rank: 0, back: 0, ..*m } }).collect();
+        let legible = look.legible;
+        let painted: Vec<wounds::Marks> = marks.iter().enumerate().map(|(i, m)| if stump[i] { wounds::Marks { legible, ..*m } } else { wounds::Marks { rank: 0, back: 0, legible, ..*m } }).collect();
         let sheet = painted.iter().any(|m| m.any()).then(|| crate::skin::marks_sheet(puppet, &self.surface, &surfs, &painted, min_half));
         let body = (if unturned.dead { BODY_DEAD } else { unturned.body }).map(|c| c as f32);
         let thin = spacing * 0.15;
@@ -1392,13 +1427,13 @@ impl LayerCloud {
                     own = places(&|_| true);
                 }
                 let kind = cause_of(part.unwrap_or(""));
-                let mut list = gashes(i as u32, m.rank, kind, 0xA, &own, radius, open, crit_of(part.unwrap_or("")), &[]);
+                let mut list = gashes(i as u32, m.rank, kind, 0xA, &own, radius, open, crit_of(part.unwrap_or("")), &[], look.legible);
                 let front = list.len();
                 if m.split {
                     // the worst of a wound goes through: the back's marks,
                     // made by the same thing, come out behind the front's
                     let through: Vec<(f32, f32)> = if m.rank >= 3 && cause_of("back") == kind { list.iter().map(|g| g.from).collect() } else { Vec::new() };
-                    list.extend(gashes(i as u32, m.back, cause_of("back"), 0xBAC, &places(&|a| a.front < -0.35), radius, open, crit_of("back"), &through));
+                    list.extend(gashes(i as u32, m.back, cause_of("back"), 0xBAC, &places(&|a| a.front < -0.35), radius, open, crit_of("back"), &through, look.legible));
                 }
                 (list, front)
             } else {
@@ -1434,12 +1469,13 @@ impl LayerCloud {
                         // round the ring: across the throat
                         dir: [1.0, 0.0],
                         half_len: (a.radius * 1.25).min(0.24),
-                        half_w: 0.035 * (0.2 + 0.8 * open),
+                        half_w: if look.legible { LEGIBLE_GASH_HALF_W[2] } else { 0.035 } * (0.2 + 0.8 * open),
                         depth: 0.075f32.min(a.radius * GASH_MAX_OF_RADIUS) * open,
                         bone: false,
                         phase: 0.6,
                         seed: THROAT_SEED,
                         from: (a.station, a.theta),
+                        lit: if look.legible { LEGIBLE_GASH_GLOW[2] } else { 0.0 },
                     };
                     gashed.insert(front_gashes, throat);
                     front_gashes += 1;
@@ -1650,12 +1686,28 @@ impl LayerCloud {
                 if look.effects.diseased {
                     rgb = wounds::mix(rgb, wounds::DISEASE_PALE_RGB, 0.25);
                 }
+                // legible: a hurt part washed by how bad it is -- a cool pale
+                // for a scar, red over that for a wound, the red a little lit
+                // by itself -- fading where it meets another part (its rings'
+                // wound tint), a split trunk's front by the front's and its
+                // rear by the back's
+                let mut wash_glow = 0.0f32;
+                if look.legible && s.kind.is_body() && !stump[i] {
+                    let by = |rank: u8, of: &[f32; 3]| if rank == 0 { 0.0 } else { of[rank.min(3) as usize - 1] };
+                    let fore = if m.split { smoothstep(-0.25, 0.25, a.front) } else { 1.0 };
+                    let side = |front: u8, back: u8, of: &[f32; 3]| (by(front, of) * fore + by(back, of) * (1.0 - fore)) * tint.clamp(0.0, 1.0);
+                    let wound = side(m.rank, m.back, &WOUND_WASH_BY_RANK);
+                    rgb = wounds::mix(rgb, SCAR_WASH, side(m.scar, m.back_scar, &SCAR_WASH_BY_RANK));
+                    rgb = wounds::mix(rgb, WOUND_WASH, wound);
+                    wash_glow = wound * WOUND_WASH_GLOW;
+                }
                 // the marks sheet: its colour, and how much it glows (nerve
-                // marks) and how wet it is (fresh blood) there
+                // marks, legible scars) and how wet it is (fresh blood) there
                 let (mut marks_glow, mut wet) = (0.0f32, 0.0f32);
                 if let (Some(sheet), Some(feet), true) = (&sheet, a.feet, painted[i].any()) {
                     (rgb, marks_glow, wet) = sheet.apply(rgb, feet);
                 }
+                let marks_glow = marks_glow.max(wash_glow);
                 // iced over: the surface under the ice shines as wet does
                 // poisoned: a sweat's sheen; overexerted, more of one
                 if look.effects.poisoned {
@@ -1788,6 +1840,8 @@ impl LayerCloud {
                         rgb = wounds::mix(rgb, flash_rgb, lit);
                         glow = glow.max(lit);
                     }
+                    // legible: the wound and its bloodied rim light themselves
+                    glow = glow.max(g.lit * (1.0 - smoothstep(1.0, 1.7, across)));
                 }
                 // how far outside an open wound's rim this is, feet (None: by no open wound)
                 let outside = gash.filter(|g| g.kind.opens() && g.depth > 0.0).map(|g| ((across - 1.0) * g.half_w).max(0.0));

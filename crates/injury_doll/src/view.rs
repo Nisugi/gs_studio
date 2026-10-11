@@ -492,14 +492,20 @@ pub fn body_marked(key: &PuppetKey) -> bool {
 /// ([`PuppetKey::with_modelled`], cloud 1 or 2) and [`body_marked`]: the
 /// LAYERED cloud ([`PuppetKey::with_layers`]), which wears the wounds,
 /// marks and coating; its causes and crits stay as the host set them. Any
-/// other key comes back as it was. The studio's doll and a game client
-/// share this rule, so they draw the same doll.
+/// layered key is drawn LEGIBLE ([`PuppetKey::with_legible`]): a doll some
+/// 200 px tall is read at a glance, so its wounds are bolder and lit by
+/// themselves, its hurt parts washed by how bad they are and its scars in
+/// a look of their own. Any other key comes back as it was. The studio's
+/// doll and a game client share this rule, so they draw the same doll.
 pub fn layered_if_marked(key: PuppetKey) -> PuppetKey {
-    if key.layers || !key.modelled || key.body_cloud == 0 || !body_marked(&key) {
+    if key.layers {
+        return key.with_legible(true);
+    }
+    if !key.modelled || key.body_cloud == 0 || !body_marked(&key) {
         return key;
     }
     let params = gs_puppet::splat::SplatParams { spacing: LAYERS_SPACING_FT, ..Default::default() };
-    key.with_layers(true, params.into(), key.coat.coating())
+    key.with_layers(true, params.into(), key.coat.coating()).with_legible(true)
 }
 
 /// The key a game state draws the doll with (ADDITION): its wounds, scars

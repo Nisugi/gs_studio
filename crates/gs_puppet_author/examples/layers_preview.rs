@@ -26,6 +26,9 @@
 //! made in other axes (each letter negates that axis: `yz` is a half turn
 //! about x) and `LAYERS_CLOUD_YAW=<deg>` turns it about the vertical, so it
 //! stands upright facing +z as the puppet does;
+//! `LAYERS_LEGIBLE=1` draws it as the injury doll does, to be read at a
+//! glance (`LayerLook::legible`: bolder, self-lit wounds, hurt parts
+//! washed, scars in their own look);
 //! `LAYERS_SPACING=<ft>` the dot spacing (default 0.015);
 //! `LAYERS_SHEET=<sheet.png>` wears that sheet (default the family's
 //! `data/textures/<family>/sheet.png`, `none` for the body colour);
@@ -131,6 +134,7 @@ fn main() {
         None => listed.iter().map(|(p, c)| (p.as_str(), *c)).collect(),
     };
     let crit: u8 = env("LAYERS_CRIT").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let legible = env("LAYERS_LEGIBLE").is_some_and(|v| v != "0");
     let fx = env("LAYERS_FX").unwrap_or_default();
     let effects = gs_puppet::Effects {
         webbed: fx.contains("web"),
@@ -217,7 +221,7 @@ fn main() {
     let mut rgba = canvas.to_rgba8();
     for (row, (coat, age)) in rows.iter().enumerate() {
         let hit = fresh.as_ref().zip(*age).map(|((part, _), age)| Fresh { part: part.as_str(), age });
-        let look = LayerLook { look: Look { wounds: &wounds, scars: &scars, ..Look::default() }, texture: texture.as_ref(), coat: *coat, causes: &causes, crits: &crits, fresh: hit, fitted: fitted.as_ref(), effects, ..LayerLook::default() };
+        let look = LayerLook { look: Look { wounds: &wounds, scars: &scars, ..Look::default() }, texture: texture.as_ref(), coat: *coat, causes: &causes, crits: &crits, fresh: hit, fitted: fitted.as_ref(), effects, legible, ..LayerLook::default() };
         let started = std::time::Instant::now();
         let dots = cloud.dots(&posed, &look);
         let of = |layer: Layer| dots.iter().filter(|d| d.layer == layer).count();

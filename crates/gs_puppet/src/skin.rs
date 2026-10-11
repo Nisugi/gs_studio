@@ -313,6 +313,8 @@ pub(crate) fn segment_marks(puppet: &crate::model::Puppet, surfs: &[crate::draw:
             bleed: if effects.bleeding && !look.dead { surf.rank } else { 0 },
             status: bits,
             eyes: eye_marks(puppet, surf.index, look),
+            // the layered cloud's host says (`layers::LayerLook::legible`)
+            legible: false,
         };
     }
     marks
